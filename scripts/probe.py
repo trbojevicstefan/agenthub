@@ -87,7 +87,7 @@ if binary("tmux"):
             parts = line.replace("\\t", "\t").split("\t", 1)
             session_name = parts[0]
             current = parts[1] if len(parts) > 1 else "shell"
-            if session_name in seen or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", session_name):
+            if session_name.startswith("agenthub-") or session_name in seen or not re.fullmatch(r"[a-zA-Z0-9_-]{1,80}", session_name):
                 continue
             seen.add(session_name)
             agents.append({"name": ("Session / " + session_name)[:80], "provider": "custom", "protocol": "terminal", "command": "sh", "args": [], "cwd": str(home), "tmuxSession": session_name, "readiness": "running", "detail": "Attach to existing tmux session (" + current + "). No new agent process is started."})
@@ -95,4 +95,44 @@ if binary("tmux"):
         warnings.append("tmux session inventory was unavailable.")
 else:
     warnings.append("Install tmux on this host to keep remote terminal processes alive across SSH disconnects. Gateway API connections do not need tmux.")
+docker = binary("docker")
+if docker:
+    try:
+        result = subprocess.run([docker, "ps", "--format", "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Command}}"], capture_output=True, text=True, timeout=4)
+        for line in result.stdout[:32768].splitlines()[:128]:
+            parts = line.split("\t")
+            if len(parts) < 5:
+                continue
+            container_id, name, image, ports, command = parts[:5]
+            haystack = " ".join([name, image, command]).lower()
+            if "hermes" not in haystack:
+                continue
+            matches = re.findall(r"(?:127\.0\.0\.1|localhost|\[::1\]):(\d+)->8642/tcp", ports)
+            for port in matches[:8]:
+                endpoint = "http://127.0.0.1:%s/v1" % port
+                hermes_home = ""
+                try:
+                    home_result = subprocess.run([docker, "exec", container_id, "printenv", "HERMES_HOME"], capture_output=True, text=True, timeout=2)
+                    hermes_home = home_result.stdout.strip()[:2048]
+                except (OSError, subprocess.TimeoutExpired):
+                    hermes_home = ""
+                docker_args = ["exec", "-i"]
+                if hermes_home:
+                    docker_args += ["-e", "HOME=" + hermes_home, "-e", "HERMES_HOME=" + hermes_home, "-w", hermes_home]
+                docker_args += [name, "hermes"]
+                agents.append({"name": ("Hermes Docker / " + name)[:80], "provider": "hermes", "protocol": "openai", "command": "docker", "args": docker_args, "cwd": hermes_home or str(home), "hermesHome": hermes_home, "endpoint": endpoint, "model": "hermes-agent", "readiness": "running", "detail": ("Docker container publishes a private Hermes gateway from " + (hermes_home or "its container data directory") + ". Import the gateway token from the container .env, or enter it manually.")[:500]})
+            if not matches and re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", name):
+                hermes_home = ""
+                try:
+                    home_result = subprocess.run([docker, "exec", name, "printenv", "HERMES_HOME"], capture_output=True, text=True, timeout=2)
+                    hermes_home = home_result.stdout.strip()[:2048]
+                except (OSError, subprocess.TimeoutExpired):
+                    hermes_home = ""
+                docker_args = ["exec", "-i"]
+                if hermes_home:
+                    docker_args += ["-e", "HOME=" + hermes_home, "-e", "HERMES_HOME=" + hermes_home, "-w", hermes_home]
+                docker_args += [name, "hermes"]
+                agents.append({"name": ("Hermes Docker / " + name)[:80], "provider": "hermes", "protocol": "acp", "command": "docker", "args": docker_args, "cwd": hermes_home or str(home), "hermesHome": hermes_home, "model": "", "readiness": "running", "detail": ("Docker container has no host gateway port, so AgentHub can connect through Hermes ACP with docker exec. " + (("HERMES_HOME is " + hermes_home + ".") if hermes_home else ""))[:500]})
+    except (OSError, subprocess.TimeoutExpired):
+        warnings.append("Docker inventory was unavailable.")
 print(json.dumps({"machine": {"hostname": socket.gethostname(), "home": str(home)}, "agents": agents, "warnings": warnings}))

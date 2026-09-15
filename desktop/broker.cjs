@@ -4,6 +4,7 @@ const schema=require('./schema.cjs');
 const {scanLocal,scanRemote,fingerprint}=require('./discovery.cjs');
 const {createAdapter}=require('./adapters/index.cjs');
 const {importGatewayToken}=require('./credentials.cjs');
+const {gatewayOperation}=require('./management.cjs');
 function safeError(error,token=''){
   let value=String(error?.message||error||'Operation failed.');
   if(token)value=value.split(token).join('[redacted]');
@@ -93,7 +94,7 @@ class Broker{
     const key=conversationId||agentId;this.data.drafts[key]=text;await this.store.write(this.data);return true;
   }
   async saveView(input){
-    this.data.view={overview:!!input.overview,terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):''};await this.store.write(this.data);return true;
+    this.data.view={overview:!!input.overview,terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark'};await this.store.write(this.data);return true;
   }
   async connect(id){
     const a=this.agent(id),r=this.runtimeFor(id);
@@ -117,6 +118,36 @@ class Broker{
   }
   disconnect(id){
     this.stop(id);const r=this.runtimeFor(id);r.generation=(r.generation||0)+1;const adapter=r.adapter;r.adapter=null;r.status='disconnected';r.error='';adapter?.close();this.changed();
+  }
+  clearError(id){
+    this.agent(id);const r=this.runtimeFor(id);r.error='';if(r.status==='error')r.status='disconnected';this.changed();return true;
+  }
+  async models(id){
+    const a=this.agent(id);if(this.turns.has(id))throw new Error('Wait for the current turn before refreshing models.');
+    await this.connect(id);const r=this.runtimeFor(id);
+    if(r.adapter.listModels)r.models=await r.adapter.listModels();
+    r.models=(r.models||[]).filter(m=>typeof m==='string'&&m.length<=256).slice(0,500);
+    this.changed();return {models:r.models||[],selected:a.model||''};
+  }
+  async selectModel({id,model}){
+    const a=this.agent(id);if(this.turns.has(id)||this.connecting.has(id))throw new Error('Wait for the current operation before changing models.');
+    model=schema.text(model,'model',256).trim();
+    if(a.protocol==='acp'&&model&&!(this.runtimeFor(id).models||[]).includes(model))throw new Error('Refresh models and choose an available ACP model.');
+    if(a.protocol==='terminal')throw new Error('Choose the model in this agent\'s CLI.');
+    a.model=model;await this.persist();return true;
+  }
+  async gateway({id,operation}){
+    const a=this.agent(id);if(this.turns.has(id))throw new Error('Stop this agent\'s current turn first.');
+    if(!['status','restart'].includes(operation))throw new Error('Unsupported gateway operation.');
+    if(operation==='restart'&&!await this.approve(a,'Restart this gateway?',`Restart only ${a.name} on ${a.transport==='ssh'?this.host(a.hostId).name:'this computer'}. Its gateway connections will briefly disconnect.`))throw new Error('Gateway restart cancelled.');
+    const wasConnected=this.runtimeFor(id).status==='connected';
+    if(operation==='restart')this.disconnect(id);
+    const output=await gatewayOperation(a,a.transport==='ssh'?this.host(a.hostId):null,operation);
+    if(operation==='restart'&&wasConnected){
+      let error;for(let attempt=0;attempt<8;attempt++){try{await this.connect(id);error=null;break;}catch(e){error=e;await new Promise(r=>setTimeout(r,1500));}}
+      if(error)throw new Error('Restart command finished, but reconnect failed: '+safeError(error));
+    }
+    return {output:safeError(output||'Command completed.'),operation};
   }
   async send({agentId,conversationId,text}){
     this.agent(agentId);text=schema.prompt(text);
@@ -173,7 +204,7 @@ class Broker{
   stop(id){const turn=this.turns.get(id);if(turn){turn.abort.abort();const r=this.runtimeFor(id);r.adapter?.close();r.adapter=null;r.status='disconnected';this.changed();}}
   async discover({hostId,extraHome}={}){
     if(this.scanBusy)throw new Error('A discovery scan is already running.');this.scanBusy=true;
-    try{return hostId?await scanRemote(this.host(hostId)):await scanLocal({extraHomes:extraHome?[schema.text(extraHome,'folder',2048)]:[]});}
+    try{const result=hostId?await scanRemote(this.host(hostId)):await scanLocal({extraHomes:extraHome?[schema.text(extraHome,'folder',2048)]:[]});for(const candidate of result.agents){const existing=this.data.agents.find(a=>fingerprint(a)===fingerprint(candidate));if(existing)candidate.existingId=existing.id;}return result;}
     finally{this.scanBusy=false;}
   }
   async close(){this.closing=true;for(const a of this.data.agents)this.disconnect(a.id);await Promise.allSettled([...this.turns.values()].map(t=>t.done));await this.store.queue;}

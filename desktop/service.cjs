@@ -41,9 +41,10 @@ async function start({app, safeStorage}, root) {
     setTimeout(()=>app.exit(0),100).unref(); return true;
   }
   const actions = {
+    agentModels:x=>broker.models(schema.id(x.id)),selectModel:x=>broker.selectModel(x),gateway:x=>broker.gateway(x),
     snapshot, saveAgent:x=>broker.saveAgent(x), saveHost:x=>broker.saveHost(x), removeHost:x=>broker.removeHost(x.id),
     removeAgent:async x=>{const a=broker.agent(x.id); if(!await approve(a,'Remove this agent connection?','Deletes its saved connection and local chat transcripts, not the agent installation.'))return false;terminals.closeAgent(a.id);await broker.removeAgent(a.id);return true;},
-    discover:x=>broker.discover(x), connect:x=>broker.connect(x.id), disconnect:x=>broker.disconnect(x.id),
+    discover:x=>broker.discover(x), connect:x=>broker.connect(x.id), disconnect:x=>broker.disconnect(x.id), clearError:x=>broker.clearError(x.id),
     select:x=>broker.select(x.id), newConversation:x=>broker.newConversation(x.agentId), selectConversation:x=>broker.selectConversation(x.id),
     send:x=>broker.send(x), stop:x=>broker.stop(x.id), saveDraft:x=>broker.saveDraft(x), saveView:x=>broker.saveView(x),
     transcript:async x=>{const c=broker.data.conversations.find(c=>c.id===schema.id(x.id));if(!c)throw new Error('Conversation not found.');return {conversation:c,agent:broker.agent(c.agentId),messages:broker.histories.get(c.id)||await broker.store.transcript(c.id)};},
@@ -54,7 +55,9 @@ async function start({app, safeStorage}, root) {
     },
     terminalAttach:x=>terminals.attach(schema.id(x.id)), terminalWrite:x=>terminals.write(schema.id(x.id),x.data),
     terminalResize:x=>terminals.resize(schema.id(x.id),x.cols,x.rows),
-    terminalClose:async x=>{const s=terminals.describe().find(s=>s.id===schema.id(x.id));if(!s)return false;if(!await approve({name:s.title},'Close this terminal connection?',s.remote?'Detaches SSH. The tmux session on the remote host is kept.':'Ends the local terminal process. This cannot be undone.'))return false;terminals.close(x.id);emit();return true;},
+    terminalRename:async x=>{const title=await terminals.rename(schema.id(x.id),x.title);emit();return title;},
+    terminalDetach:async x=>{terminals.detach(schema.id(x.id));emit();return true;},
+    terminalClose:async x=>{const s=terminals.describe().find(s=>s.id===schema.id(x.id));if(!s)return false;const host=s.remote?broker.host(s.agentId.startsWith('host_')?s.agentId.slice(5):broker.agent(s.agentId).hostId):null;await terminals.end(x.id,host);emit();return true;},
     shutdown
   };
   const token = randomBytes(32).toString('hex');

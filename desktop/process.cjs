@@ -20,7 +20,7 @@ function environment(extra = {}) {
 }
 function findExecutable(name, env = environment()) {
   if (path.isAbsolute(name)) return fs.existsSync(name) ? name : null;
-  const extensions = process.platform === 'win32' ? ['', '.exe', '.cmd', '.bat'] : [''];
+  const extensions = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
   for (const dir of (env.PATH || '').split(path.delimiter).filter(Boolean)) {
     for (const extension of extensions) {
       const file = path.join(dir, name + extension);
@@ -35,10 +35,37 @@ function windowsLaunch(executable, args) {
   if (process.platform !== 'win32' || !/\.(cmd|bat)$/i.test(executable)) return {command: executable, args};
   const dir = path.dirname(executable);
   const name = path.basename(executable, path.extname(executable)).toLowerCase();
-  const entry = name === 'codex' ? path.join(dir, 'node_modules/@openai/codex/bin/codex.js') : name === 'claude' ? path.join(dir, 'node_modules/@anthropic-ai/claude-code/cli.js') : null;
+  const entry = name === 'codex' ? path.join(dir, 'node_modules/@openai/codex/bin/codex.js') : name === 'claude' ? path.join(dir, 'node_modules/@anthropic-ai/claude-code/cli.js') : name==='openclaw'?path.join(dir,'node_modules/openclaw/openclaw.mjs'):null;
   const node = findExecutable('node.exe');
   if (entry && fs.existsSync(entry) && node) return {command: node, args: [entry, ...args]};
   throw new Error('This Windows batch launcher is not supported for structured chat. Choose its .exe or a Node entrypoint, or use Terminal.');
+}
+function dockerExecContainerIndex(args = []) {
+  if (args[0] !== 'exec') return -1;
+  const takesValue = new Set(['-e', '--env', '--env-file', '-u', '--user', '-w', '--workdir', '--name']);
+  for (let i = 1; i < args.length; i++) {
+    const arg = args[i];
+    if (takesValue.has(arg)) { i++; continue; }
+    if (/^(--env|--env-file|--user|--workdir|--name)=/.test(arg)) continue;
+    if (arg === '-i' || arg === '-t' || arg === '--interactive' || arg === '--tty' || arg === '--privileged') continue;
+    if (arg.startsWith('-')) continue;
+    return i;
+  }
+  return -1;
+}
+function dockerExecArgs(agent, args = []) {
+  if (agent.command !== 'docker' || args[0] !== 'exec' || !agent.hermesHome) return args;
+  const index = dockerExecContainerIndex(args);
+  if (index < 0) return args;
+  const before = args.slice(0, index), after = args.slice(index);
+  const hasHome = args.some((arg, i) => arg === 'HOME=' + agent.hermesHome || ((args[i - 1] === '-e' || args[i - 1] === '--env') && arg.startsWith('HOME=')) || /^--env=HOME=/.test(arg));
+  const hasHermesHome = args.some((arg, i) => arg === 'HERMES_HOME=' + agent.hermesHome || ((args[i - 1] === '-e' || args[i - 1] === '--env') && arg.startsWith('HERMES_HOME=')) || /^--env=HERMES_HOME=/.test(arg));
+  const hasWorkdir = args.some((arg, i) => arg === '-w' || arg === '--workdir' || args[i - 1] === '-w' || args[i - 1] === '--workdir' || /^--workdir=/.test(arg));
+  const injected = [];
+  if (!hasHome) injected.push('-e', 'HOME=' + agent.hermesHome);
+  if (!hasHermesHome) injected.push('-e', 'HERMES_HOME=' + agent.hermesHome);
+  if (!hasWorkdir) injected.push('-w', agent.hermesHome);
+  return [...before, ...injected, ...after];
 }
 function sshArgs(host, {interactive = false} = {}) {
   const args = ['-o', `BatchMode=${interactive ? 'no' : 'yes'}`, '-o', `StrictHostKeyChecking=${interactive ? 'ask' : 'yes'}`, '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-o', 'ForwardAgent=no', '-o', 'ExitOnForwardFailure=yes'];
@@ -53,12 +80,14 @@ function sshArgs(host, {interactive = false} = {}) {
 function target(host) { return host.alias || host.hostname; }
 function remoteCommand(agent, args, {interactive = false} = {}) {
   const prefix = 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; ';
-  const cwd = agent.cwd ? `cd ${quote(agent.cwd)} && ` : '';
+  const cwd = agent.command === 'docker' ? '' : agent.cwd ? `cd ${quote(agent.cwd)} && ` : '';
+  args = dockerExecArgs(agent, args);
   const home = agent.hermesHome ? `env HERMES_HOME=${quote(agent.hermesHome)} ` : '';
   return prefix + cwd + (interactive ? '' : 'exec ') + home + [agent.command, ...args].map(quote).join(' ');
 }
 function launch(agent, args, host, overrides = {}) {
   const env = environment(agent.hermesHome && agent.transport !== 'ssh' ? {HERMES_HOME: agent.hermesHome} : {});
+  args = dockerExecArgs(agent, args);
   if (agent.transport === 'ssh') {
     if (!host) throw new Error('This agent has no saved SSH host.');
     const ssh = findExecutable('ssh', env);
@@ -68,7 +97,7 @@ function launch(agent, args, host, overrides = {}) {
   const executable = findExecutable(agent.command, env);
   if (!executable) throw new Error(`${agent.command} was not found. Install or sign in to this agent in Terminal, then Discover again.`);
   const resolved = windowsLaunch(executable, args);
-  return spawn(resolved.command, resolved.args, {cwd: agent.cwd || os.homedir(), env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe','pipe','pipe'], ...overrides});
+  return spawn(resolved.command, resolved.args, {cwd: agent.command === 'docker' ? os.homedir() : agent.cwd || os.homedir(), env, windowsHide: true, detached: process.platform !== 'win32', stdio: ['pipe','pipe','pipe'], ...overrides});
 }
 function terminate(child) {
   if (!child || child.exitCode !== null || child.signalCode) return;
@@ -102,4 +131,4 @@ function collect(child, {timeout = 15000, maxBytes = 1024 * 1024, input = '', si
     if (signal?.aborted) abort();
   });
 }
-module.exports = {quote, environment, findExecutable, windowsLaunch, sshArgs, target, remoteCommand, launch, terminate, collect};
+module.exports = {quote, environment, findExecutable, windowsLaunch, dockerExecArgs, dockerExecContainerIndex, sshArgs, target, remoteCommand, launch, terminate, collect};

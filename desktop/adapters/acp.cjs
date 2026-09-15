@@ -1,6 +1,9 @@
 'use strict';
 const {Rpc}=require('../rpc.cjs');
 const {launch}=require('../process.cjs');
+function sessionCwd(agent){
+  return agent.command==='docker'&&agent.provider==='hermes'&&agent.hermesHome?agent.hermesHome:agent.cwd;
+}
 class AcpAdapter {
   constructor({agent,host,approve,spawnAgent=launch}){this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.sessions=new Map();this.active=null;}
   async connect(){
@@ -31,14 +34,15 @@ class AcpAdapter {
   async run(ctx){
     let sessionId=this.sessions.get(ctx.conversation.id);
     if(!sessionId){
-      const cwd=this.agent.cwd;
+      const cwd=sessionCwd(this.agent);
       if(!cwd)throw new Error('ACP requires an absolute working directory. Edit this agent first.');
       if(ctx.conversation.externalSessionId){
         if(!this.capabilities.loadSession)throw new Error('This ACP server cannot resume a previous process session. The local transcript is preserved. Start a new conversation.');
         await this.rpc.request('session/load',{sessionId:ctx.conversation.externalSessionId,cwd,mcpServers:[]});
         sessionId=ctx.conversation.externalSessionId;
       }else{
-        const session=await this.rpc.request('session/new',{cwd,mcpServers:[]},60000);sessionId=session.sessionId;
+        const session=this.preparedSession||await this.rpc.request('session/new',{cwd,mcpServers:[]},60000);this.preparedSession=null;sessionId=session.sessionId;
+        this.modelIds=(session.models?.availableModels||[]).map(m=>m.modelId);
       }
       if(typeof sessionId!=='string')throw new Error('ACP did not return a session ID.');
       this.sessions.set(ctx.conversation.id,sessionId);await ctx.onSession(sessionId);
@@ -48,11 +52,17 @@ class AcpAdapter {
     ctx.signal.addEventListener('abort',cancel,{once:true});
     try{
       if(ctx.signal.aborted)throw new Error('Cancelled.');
+      if(this.agent.model&&(this.agent.model.includes(':')||this.modelIds?.includes(this.agent.model)))await this.rpc.request('session/set_model',{sessionId,modelId:this.agent.model},60000);
       await this.rpc.request('session/prompt',{sessionId,prompt:[{type:'text',text:ctx.text}]},10*60*1000);
       if(ctx.signal.aborted)throw new Error('Cancelled.');
       return {externalSessionId:sessionId};
     }finally{ctx.signal.removeEventListener('abort',cancel);this.active=null;}
   }
+  async listModels(){
+    if(!this.preparedSession)this.preparedSession=await this.rpc.request('session/new',{cwd:sessionCwd(this.agent),mcpServers:[]},60000);
+    this.modelIds=(this.preparedSession.models?.availableModels||[]).map(m=>m.modelId).filter(m=>typeof m==='string');
+    return this.modelIds;
+  }
   close(){this.rpc?.close();}
 }
-module.exports={AcpAdapter};
+module.exports={AcpAdapter,sessionCwd};

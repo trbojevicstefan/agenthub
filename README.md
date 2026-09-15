@@ -22,7 +22,7 @@ A power loss, OS reboot or explicitly stopping the session service cannot keep a
 - **Remote:** Machines -> paste `user@host:22` or import `~/.ssh/config` aliases. Open the machine's terminal to verify its host fingerprint and authenticate; then Discover searches only that selected host. Existing SSH keys remain local. A gateway token may be imported from a specific Hermes profile only after approval.
 - **Four Hermes profiles:** use four gateway connections (separate loopback ports or profile-specific `/p/<name>/v1` routes). The SSH tunnel stays private. The chat adapter sends stable Hermes transcript/memory headers and saved history. Existing tmux sessions can also be discovered and attached without creating another agent writer.
 
-Remote terminal persistence requires `tmux` on the host; AgentHub does not silently install software. Gateway chat does not require tmux. Docker/WSL custom launchers can be added manually; automatic container inventory is not implemented.
+Remote terminal persistence requires `tmux` on the host; AgentHub does not silently install software. Gateway chat does not require tmux. Remote discovery inventories running Hermes Docker containers. Other Docker/WSL launchers can be configured manually. See [the compatibility matrix](docs/COMPATIBILITY.md) for supported operations and remaining validation.
 
 ## Adapters
 

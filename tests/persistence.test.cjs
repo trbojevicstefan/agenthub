@@ -2,7 +2,7 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),path=require('node:path');
 const {temp,secure}=require('./helpers.cjs');
 const {Broker}=require('../desktop/broker.cjs'),{Store,Vault}=require('../desktop/store.cjs');
-const {Terminals,tmuxName,tmuxCommand}=require('../desktop/terminal.cjs');
+const {Terminals,tmuxName,tmuxCommand,dockerShellArgs}=require('../desktop/terminal.cjs');
 const wire=require('../desktop/wire.cjs'),schema=require('../desktop/schema.cjs');
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
 async function broker(root,adapterFactory){const b=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory});await b.init();return b;}
@@ -41,10 +41,33 @@ test('quick SSH address parser handles aliases, users, custom ports and IPv6 wit
 });
 test('tmux session names are deterministic and existing sessions attach rather than duplicate',()=>{
   assert.equal(tmuxName({id:'same-agent'},'shell'),tmuxName({id:'same-agent'},'shell'));assert.notEqual(tmuxName({id:'same-agent'},'shell'),tmuxName({id:'same-agent'},'agent'));
-  const newCommand=tmuxCommand('session-one',"printf '%s' hello");assert(newCommand.includes('new-session -A'));const existing=tmuxCommand('session-one','',{existing:true});assert(existing.includes('attach-session'));assert(!existing.includes('new-session'));
+  const newCommand=tmuxCommand('session-one',"printf '%s' hello");assert(newCommand.includes('new-session -A'));assert(newCommand.includes('TERM="${TERM:-xterm-256color}"'));const existing=tmuxCommand('session-one','',{existing:true});assert(existing.includes('attach-session'));assert(!existing.includes('new-session'));
 });
 test('terminal scrollback survives service restart and is explicitly marked archived, not falsely live',async t=>{
   const root=await temp(t);let data;const terminals=new Terminals(()=>{},{root,ptyFactory:{spawn:()=>({onData(fn){data=fn;},onExit(){},write(){},resize(){},kill(){}})}});
   const item=terminals.open({id:'local-shell',name:'Local',provider:'custom',transport:'local',command:'',args:[],cwd:root},null,'shell',{cols:100,rows:24});data('retained terminal output');await terminals.shutdown();
   const next=new Terminals(()=>{},{root});await next.init();const restored=next.attach(item.id);assert(restored.buffer.includes('retained terminal output'));assert.equal(restored.exited,true);assert.equal(next.describe()[0].restored,true);await next.shutdown();
+});
+test('remote Docker shell opens inside the container with terminal capabilities',()=>{
+  const spawned=[],terminals=new Terminals(()=>{},{ptyFactory:{spawn:(command,args,options)=>{const p={onData(){},onExit(){},write(){},resize(){},kill(){}};spawned.push({command,args,options});return p;}}});
+  const agent={id:'docker-agent',name:'Hermes Docker',provider:'hermes',transport:'ssh',command:'docker',args:['exec','-i','a2a-hermes-leads','hermes'],cwd:'/opt/data',hermesHome:'/opt/data'};
+  assert.deepEqual(dockerShellArgs(agent),['exec','-it','a2a-hermes-leads','sh','-l']);
+  terminals.open(agent,{alias:'hostinger'},'shell');
+  assert.equal(spawned[0].options.env.TERM,'xterm-256color');
+  const remote=spawned[0].args.at(-1);
+  assert(remote.includes('docker'));
+  assert(remote.includes('exec'));
+  assert(remote.includes('-it'));
+  assert(remote.includes('a2a-hermes-leads'));
+  assert(remote.includes('sh'));
+  assert(!remote.includes("cd '/opt/data'"));
+});
+test('remote terminal detach closes only the local PTY and keeps scrollback',()=>{
+  const events=[],spawned=[],terminals=new Terminals(e=>events.push(e),{ptyFactory:{spawn:(command,args,options)=>{const p={onData(){},onExit(fn){p.exit=fn;},write(){},resize(){},kill(){p.killed=true;}};spawned.push(p);return p;}}});
+  const item=terminals.open({id:'remote-agent',name:'Remote',provider:'custom',transport:'ssh',hostId:'h',command:'',args:[],cwd:''},{alias:'hostinger'},'shell');
+  assert.equal(terminals.detach(item.id),true);
+  assert.equal(spawned[0].killed,true);
+  assert.equal(terminals.attach(item.id).exited,true);
+  assert.equal(events.at(-1).exitCode,'detached');
+  assert.throws(()=>terminals.detach(terminals.open({id:'local-agent',name:'Local',provider:'custom',transport:'local',command:'',args:[],cwd:process.cwd()},null,'shell').id),/Only remote/);
 });

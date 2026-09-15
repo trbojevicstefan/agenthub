@@ -35,7 +35,7 @@ class CodexAdapter{
   async run(ctx){
     let threadId=this.threads.get(ctx.conversation.id);
     if(!threadId){
-      const params={cwd:this.agent.cwd||undefined,approvalPolicy:'onRequest',sandbox:'workspaceWrite',...(this.agent.model?{model:this.agent.model}:{})};
+      const params={cwd:this.agent.cwd||undefined,approvalPolicy:'on-request',sandbox:'workspace-write',...(this.agent.model?{model:this.agent.model}:{})};
       const result=ctx.conversation.externalSessionId?await this.rpc.request('thread/resume',{...params,threadId:ctx.conversation.externalSessionId}):await this.rpc.request('thread/start',params);
       threadId=result.thread?.id;if(!threadId)throw new Error('Codex did not return a thread ID.');
       this.threads.set(ctx.conversation.id,threadId);await ctx.onSession(threadId);
@@ -52,9 +52,10 @@ class CodexAdapter{
       this.active={...ctx,threadId,resolve:v=>finish(null,v),reject:e=>finish(e),deltaItems:new Set()};
       ctx.signal.addEventListener('abort',cancel,{once:true});
       if(ctx.signal.aborted){cancel();return;}
-      this.rpc.request('turn/start',{threadId,input:[{type:'text',text:ctx.text}]},60000).then(result=>{if(!done&&this.active?.threadId===threadId)this.active.turnId=result.turn?.id;},e=>finish(e));
+      this.rpc.request('turn/start',{threadId,input:[{type:'text',text:ctx.text}],...(this.agent.model?{model:this.agent.model}:{})},60000).then(result=>{if(!done&&this.active?.threadId===threadId)this.active.turnId=result.turn?.id;},e=>finish(e));
     });
   }
   close(){this.rpc?.close();}
+  async listModels(){const result=await this.rpc.request('model/list',{limit:100});return (result.data||[]).map(m=>m.model||m.id).filter(m=>typeof m==='string');}
 }
 module.exports={CodexAdapter};

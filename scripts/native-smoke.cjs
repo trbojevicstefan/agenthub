@@ -9,6 +9,7 @@ async function run({app,win,client}){
   const checks=await win.webContents.executeJavaScript(`({title:document.title,nodeUnavailable:typeof window.require==='undefined',bridge:typeof window.agenthub?.snapshot==='function',genericIpcAbsent:window.agenthub?.invoke===undefined,overflow:document.documentElement.scrollWidth>innerWidth,sidebar:!!document.querySelector('.sidebar'),terminalUi:typeof window.Terminal==='function'&&typeof window.FitAddon?.FitAddon==='function'})`);
   const prefs=win.webContents.getLastWebPreferences();Object.assign(checks,{sandbox:prefs.sandbox,contextIsolation:prefs.contextIsolation,nodeIntegration:prefs.nodeIntegration});
   assert(checks.nodeUnavailable&&checks.bridge&&checks.genericIpcAbsent&&!checks.overflow&&checks.sidebar&&checks.terminalUi&&checks.sandbox&&checks.contextIsolation&&!checks.nodeIntegration,'Native UI/security smoke failed: '+JSON.stringify(checks));
+  if(phase==='features'){await require('./native-features.cjs').run({win,client,output});console.log('Native terminal feature checks passed.');return;}
   if(phase==='write'){
     const agent=await client.call('saveAgent',{agent:{id:'smoke-agent',name:'Restart verification',provider:'custom',protocol:'openai',transport:'http',endpoint:'http://127.0.0.1:8642/v1',model:'test-only'}});
     const conversation=await client.call('newConversation',{agentId:agent.id});

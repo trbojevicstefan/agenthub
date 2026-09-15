@@ -75,7 +75,7 @@ function agent(input) {
     id: input.id ? id(input.id) : randomUUID(), name, provider, protocol, transport,
     hostId: transport === 'ssh' ? id(input.hostId) : '', command, args: args.map(a => text(a, 'argument', 2048)), cwd, hermesHome,
     endpoint: protocol === 'openai' ? endpoint(input.endpoint, {ssh: transport === 'ssh'}) : '',
-    model: text(input.model, 'model', 256, provider === 'hermes' ? 'hermes-agent' : provider === 'openclaw' ? 'openclaw/default' : ''),
+    model: text(input.model, 'model', 256, provider === 'hermes' && protocol==='openai' ? 'hermes-agent' : provider === 'openclaw' ? 'openclaw/default' : ''),
     tmuxSession: input.tmuxSession ? id(input.tmuxSession) : '',
     note: text(input.note, 'note', 400), pinned: Boolean(input.pinned), createdAt: input.createdAt || new Date().toISOString()
   };

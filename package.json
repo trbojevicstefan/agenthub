@@ -44,7 +44,8 @@
       "scripts/probe.py",
       "package.json",
       "build/icon.png",
-      "scripts/native-smoke.cjs"
+      "scripts/native-smoke.cjs",
+      "scripts/native-features.cjs"
     ],
     "asar": true,
     "asarUnpack": [

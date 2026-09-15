@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('node:fs/promises');
 const path=require('node:path');
-const {launch,collect}=require('./process.cjs');
+const {launch,collect,dockerExecContainerIndex}=require('./process.cjs');
 function parseGatewayToken(raw){
   for(const line of raw.split(/\r?\n/)){
     const m=line.match(/^\s*(?:export\s+)?API_SERVER_KEY\s*=\s*(.*?)\s*$/);
@@ -21,6 +21,16 @@ async function importGatewayToken(agent,host){
     const file=path.join(agent.hermesHome,'.env');const info=await fs.stat(file);
     if(info.size>262144)throw new Error('Profile environment file is too large.');
     return parseGatewayToken(await fs.readFile(file,'utf8'));
+  }
+  const dockerIndex = agent.command === 'docker' ? dockerExecContainerIndex(agent.args || []) : -1;
+  const dockerExec = dockerIndex >= 0 ? agent.args[dockerIndex] : '';
+  if(dockerExec){
+    const child=launch({...agent,command:'docker',args:[],hermesHome:''},['exec',dockerExec,'cat',path.posix.join(agent.hermesHome,'.env')],host);
+    try{return parseGatewayToken(await collect(child,{maxBytes:300000,timeout:15000}));}
+    catch(error){
+      if(/No such file|not found|API_SERVER_KEY was not found/i.test(String(error?.message||error)))throw new Error('API_SERVER_KEY was not found in the Docker Hermes profile. Enter the gateway token manually, or add API_SERVER_KEY to the container profile .env and restart the gateway.');
+      throw error;
+    }
   }
   const code=[
     'import sys,pathlib,re,json',

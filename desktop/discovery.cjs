@@ -4,10 +4,12 @@ const os = require('node:os');
 const path = require('node:path');
 const {createHash} = require('node:crypto');
 const {spawn} = require('node:child_process');
-const {findExecutable, environment, sshArgs, target, quote, collect} = require('./process.cjs');
+const {findExecutable, environment, sshArgs, target, quote, collect, dockerExecContainerIndex} = require('./process.cjs');
 const schema = require('./schema.cjs');
 function fingerprint(a) {
-  return createHash('sha256').update(JSON.stringify([a.provider, a.protocol, a.transport, a.hostId || '', a.command || '', a.args || [], a.hermesHome || '', a.endpoint || '', a.model || '', a.cwd || '', a.tmuxSession || ''])).digest('hex');
+  const dockerIndex=a.command==='docker'?dockerExecContainerIndex(a.args):-1;
+  if(dockerIndex>=0)return createHash('sha256').update(JSON.stringify([a.provider,a.protocol,a.transport,a.hostId||'',a.args[dockerIndex],a.hermesHome||'',a.endpoint||''])).digest('hex');
+  return createHash('sha256').update(JSON.stringify([a.provider, a.protocol, a.transport, a.hostId || '', a.command || '', a.args || [], a.hermesHome || '', a.endpoint || '', a.provider==='openclaw'?a.model||'':'', a.cwd || '', a.tmuxSession || ''])).digest('hex');
 }
 function candidate(a, detail, readiness = 'detected') {
   return {...a, discoveryId: fingerprint(a), detail, readiness};
@@ -28,6 +30,17 @@ async function readSmall(file, max = 256 * 1024) {
 }
 async function directories(root) {
   try { return (await fs.readdir(root, {withFileTypes: true})).filter(x => x.isDirectory()).slice(0, 128).map(x => path.join(root, x.name)); } catch { return []; }
+}
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+function hermesRoots(home = os.homedir(), extraHomes = []) {
+  const roots = [path.join(home, '.hermes')];
+  if (process.platform === 'win32' && path.resolve(home) === path.resolve(os.homedir())) {
+    roots.push(path.join(process.env.LOCALAPPDATA || '', 'hermes'));
+    roots.push(path.join(process.env.APPDATA || '', 'Hermes'));
+  }
+  return unique([...roots, ...extraHomes]);
 }
 function sshTokens(raw) {
   const tokens=[];let token='',quoteChar='';
@@ -83,14 +96,18 @@ async function scanLocal({home = os.homedir(), extraHomes = [], probe = true} = 
   const found = [], warnings = [], env = environment();
   const binary = name => findExecutable(name, env);
   const hermesBinary = binary('hermes') || (await fs.stat(path.join(home, '.hermes/hermes-agent/.venv/bin/hermes')).catch(() => null) ? path.join(home,'.hermes/hermes-agent/.venv/bin/hermes') : 'hermes');
-  const homes = [...new Set([path.join(home, '.hermes'), ...(await directories(path.join(home, '.hermes/profiles'))), ...extraHomes])];
+  const roots = hermesRoots(home, extraHomes);
+  const homes = unique((await Promise.all(roots.map(async root => [root, ...(await directories(path.join(root, 'profiles')))]))).flat());
   for (const root of homes) {
     if (!(await fs.stat(root).catch(() => null))?.isDirectory()) continue;
+    if(!await fs.stat(path.join(root,'.env')).catch(()=>null)&&!await fs.stat(path.join(root,'config.yaml')).catch(()=>null))continue;
+    if(process.platform==='win32'&&path.resolve(home)===path.resolve(os.homedir())&&root.startsWith(path.join(home,'.hermes'))&&!await fs.stat(path.join(root,'.env')).catch(()=>null)&&await fs.stat(path.join(process.env.LOCALAPPDATA||'', 'hermes','.env')).catch(()=>null)){warnings.push(`Skipped legacy Hermes folder without credentials: ${root}`);continue;}
     const meta = envMetadata(await readSmall(path.join(root, '.env')).catch(() => ''));
-    const profile = root === path.join(home, '.hermes') ? 'default' : path.basename(root);
-    let port = 8642; try { port = schema.port(meta.API_SERVER_PORT, 8642); } catch { warnings.push(`Invalid API port in Hermes profile ${profile}.`); }
+    const base = path.basename(path.dirname(root)) === 'profiles' ? path.basename(root) : 'default';
+    const label = base === 'default' && root !== path.join(home, '.hermes') ? `${base} (${path.basename(path.dirname(root)) || path.basename(root)})` : base;
+    let port = 8642; try { port = schema.port(meta.API_SERVER_PORT, 8642); } catch { warnings.push(`Invalid API port in Hermes profile ${label}.`); }
     const enabled = /^(true|1|yes)$/i.test(meta.API_SERVER_ENABLED || '');
-    found.push(candidate({name: `Hermes / ${profile}`, provider: 'hermes', protocol: 'openai', transport: 'http', command: hermesBinary, args: [], cwd: home, hermesHome: root, endpoint: `http://127.0.0.1:${port}/v1`, model: profile === 'default' ? 'hermes-agent' : profile}, enabled ? 'Existing Hermes profile. Add its gateway API token to chat.' : 'Profile found. Enable its gateway API, or explicitly choose ACP in advanced settings.', enabled ? 'configured' : 'setup'));
+    found.push(candidate({name: `Hermes / ${label}`, provider: 'hermes', protocol: enabled?'openai':'acp', transport: enabled?'http':'local', command: hermesBinary, args: [], cwd: home, hermesHome: root, endpoint: enabled?`http://127.0.0.1:${port}/v1`:'', model: enabled?'hermes-agent':''}, enabled ? 'Existing Hermes profile. Add its gateway API token to chat.' : 'Native ACP connection to this profile. Starts a separate chat process using its existing credentials.', enabled ? 'configured' : 'detected'));
   }
   for (const name of ['codex','claude']) {
     const command = binary(name);
