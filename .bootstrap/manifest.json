@@ -1,0 +1,7 @@
+{
+  "sha256": "d706b1d3b497cd9166c4375a7993de8694784e50f93458f890d6ef0b8017e943",
+  "parts": ["source.00.b64", "source.01.b64", "source.02.b64", "source.03.b64", "source.04.b64", "source.05.b64", "source.06.b64", "source.07.b64", "source.08.b64"],
+  "files": 44,
+  "compressedBytes": 65027,
+  "sourceBytes": 261094
+}
