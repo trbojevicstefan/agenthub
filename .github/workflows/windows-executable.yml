@@ -10,10 +10,11 @@ concurrency:
   cancel-in-progress: false
 jobs:
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 30
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      npm_config_msvs_version: '2022'
     defaults:
       run:
         shell: pwsh
@@ -22,23 +23,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Restore integrity-checked source if needed
-        run: |
-          if (Test-Path .bootstrap/restore.cjs) {
-            node .bootstrap/restore.cjs
-            if ($LASTEXITCODE -ne 0) { throw 'Source integrity verification failed' }
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add desktop ui scripts tests docs build/entitlements.mac.plist package.json README.md BUILD_GUIDE.md .gitignore
-            git rm -r .bootstrap
-            git commit -m 'Publish complete AgentHub 0.2.0 persistent desktop source'
-            if ($LASTEXITCODE -ne 0) { throw 'Source commit failed' }
-            git push origin HEAD:main
-            if ($LASTEXITCODE -ne 0) { throw 'Source changed concurrently; reconcile before release' }
-          }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Install desktop dependencies and rebuild native PTY
         run: |
-          if (Test-Path package-lock.json) { npm ci } else { npm install }
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          $env:PYTHON = (Get-Command python).Source
+          "PYTHON=$env:PYTHON" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          if (Test-Path package-lock.json) { npm ci 2>&1 | Tee-Object artifacts/dependency-install.txt } else { npm install 2>&1 | Tee-Object artifacts/dependency-install.txt }
           if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
       - name: Commit reproducible dependency lock and record source
         run: |
@@ -55,7 +48,6 @@ jobs:
           "SOURCE_COMMIT=$(git rev-parse HEAD)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Source checks and unit tests
         run: |
-          New-Item -ItemType Directory -Force artifacts | Out-Null
           npm run check 2>&1 | Tee-Object artifacts/static-check.txt
           if ($LASTEXITCODE -ne 0) { throw 'Static checks failed' }
           npm test 2>&1 | Tee-Object artifacts/unit-tests.txt
