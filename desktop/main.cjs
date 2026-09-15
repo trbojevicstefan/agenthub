@@ -27,7 +27,15 @@ if(hostMode){
   const terminalWindows=new Map();
   const docs={hermes:'https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server',acp:'https://hermes-agent.nousresearch.com/docs/user-guide/features/acp',profiles:'https://hermes-agent.nousresearch.com/docs/user-guide/profiles/',codex:'https://developers.openai.com/codex/app-server/',claude:'https://code.claude.com/docs/en/headless',openclaw:'https://docs.openclaw.ai/gateway/openai-http-api'};
   function show(){if(win&&!win.isDestroyed()){win.show();if(win.isMinimized())win.restore();win.focus();}}
-  function trusted(event){const window=[win,...terminalWindows.values()].find(w=>w&&!w.isDestroyed()&&event.sender===w.webContents);return !!window&&event.senderFrame===window.webContents.mainFrame&&[APP_URL,'agenthub://app/terminal.html'].includes(event.senderFrame.url.split('#')[0]);}
+  function trusted(event){
+    const senderWindow=BrowserWindow.fromWebContents(event.sender);
+    const window=[win,...terminalWindows.values()].find(w=>w&&!w.isDestroyed()&&(event.sender===w.webContents||senderWindow===w));
+    const allowed=[APP_URL.replace(/\/$/,''),'agenthub://app/terminal.html'];
+    const frameUrl=String(event.senderFrame?.url||'').split('#')[0].replace(/\/$/,'');
+    const contentsUrl=String(event.sender.getURL?.()||'').split('#')[0].replace(/\/$/,'');
+    if(allowed.includes(frameUrl)&&allowed.includes(contentsUrl))return true;
+    return !!window&&event.senderFrame===window.webContents.mainFrame&&allowed.includes(frameUrl);
+  }
   async function detach(){if(quitting)return;quitting=true;try{await win?.webContents.executeJavaScript('window.agenthubFlush?.()');}catch{}client?.close();tray?.destroy();app.quit();}
   async function stopService(){
     const result=await dialog.showMessageBox(win,{type:'warning',message:'Stop all sessions and exit?',detail:'This ends local agent processes and local shells. Remote tmux sessions remain on their hosts. Saved conversations and drafts stay on disk. Use Exit window to leave the session service running instead.',buttons:['Keep running','Stop all and exit'],defaultId:0,cancelId:0,noLink:true});
@@ -76,7 +84,7 @@ if(hostMode){
         pendingApprovals.set(request.id,{key,expires:Date.now()+120000});win.webContents.send('hub:approval',request);
       });
       client.on('closed',()=>{if(!quitting&&!smoke&&!win.isDestroyed())win.webContents.send('hub:service-error','Session service disconnected. Reopen AgentHub to reconnect. Saved history has not been deleted.');});
-      const forwards=['snapshot','saveAgent','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
+      const forwards=['snapshot','saveAgent','reorderAgents','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
       const handlers=Object.fromEntries(forwards.map(method=>[method,input=>client.call(method,input)]));
       for(const method of ['agentModels','selectModel','gateway'])handlers[method]=input=>client.call(method,input);
       handlers.terminalRename=async input=>{const title=await client.call('terminalRename',input);terminalWindows.get(input.id)?.setTitle(title);return title;};

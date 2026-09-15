@@ -1,6 +1,6 @@
 'use strict';
 const {contextBridge,ipcRenderer}=require('electron');
-const methods=['snapshot','saveAgent','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalAttach','terminalOpen','terminalWrite','terminalResize','terminalDetach','terminalClose','pick','openDocs','exportConversation'];
+const methods=['snapshot','saveAgent','reorderAgents','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalAttach','terminalOpen','terminalWrite','terminalResize','terminalDetach','terminalClose','pick','openDocs','exportConversation'];
 const api={};
 methods.push('approvalAnswer','terminalPopout','terminalRename');
 methods.push('agentModels','selectModel','gateway');

@@ -42,7 +42,7 @@ async function start({app, safeStorage}, root) {
   }
   const actions = {
     agentModels:x=>broker.models(schema.id(x.id)),selectModel:x=>broker.selectModel(x),gateway:x=>broker.gateway(x),
-    snapshot, saveAgent:x=>broker.saveAgent(x), saveHost:x=>broker.saveHost(x), removeHost:x=>broker.removeHost(x.id),
+    snapshot, saveAgent:x=>broker.saveAgent(x), reorderAgents:x=>broker.reorderAgents(x), saveHost:x=>broker.saveHost(x), removeHost:x=>broker.removeHost(x.id),
     removeAgent:async x=>{const a=broker.agent(x.id); if(!await approve(a,'Remove this agent connection?','Deletes its saved connection and local chat transcripts, not the agent installation.'))return false;terminals.closeAgent(a.id);await broker.removeAgent(a.id);return true;},
     discover:x=>broker.discover(x), connect:x=>broker.connect(x.id), disconnect:x=>broker.disconnect(x.id), clearError:x=>broker.clearError(x.id),
     select:x=>broker.select(x.id), newConversation:x=>broker.newConversation(x.agentId), selectConversation:x=>broker.selectConversation(x.id),

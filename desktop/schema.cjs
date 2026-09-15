@@ -77,7 +77,9 @@ function agent(input) {
     endpoint: protocol === 'openai' ? endpoint(input.endpoint, {ssh: transport === 'ssh'}) : '',
     model: text(input.model, 'model', 256, provider === 'hermes' && protocol==='openai' ? 'hermes-agent' : provider === 'openclaw' ? 'openclaw/default' : ''),
     tmuxSession: input.tmuxSession ? id(input.tmuxSession) : '',
-    note: text(input.note, 'note', 400), pinned: Boolean(input.pinned), createdAt: input.createdAt || new Date().toISOString()
+    note: text(input.note, 'note', 400), displayName: text(input.displayName, 'display name', 80).trim(),
+    description: text(input.description, 'description', 500).trim(), icon: text(input.icon, 'icon', 16).trim(),
+    pinned: Boolean(input.pinned), createdAt: input.createdAt || new Date().toISOString()
   };
 }
 function prompt(value) {

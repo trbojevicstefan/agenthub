@@ -31,7 +31,7 @@ class Broker{
   runtimeFor(id){if(!this.runtime.has(id))this.runtime.set(id,{status:'disconnected',error:'',models:[]});return this.runtime.get(id);}
   snapshot(){
     const {agents,hosts,conversations,activeAgentId,activeConversationId}=this.data;
-    return {version:'0.2.0',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',description:r.description||'',models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id)};}),hosts,conversations,activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId)),secureStorage:this.vault.available(),platform:process.platform};
+    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id)};}),hosts,conversations,activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId)),secureStorage:this.vault.available(),platform:process.platform};
   }
   changed(){if(!this.closing)this.emit(this.snapshot());}
   async persist(){await this.store.write(this.data);this.changed();}
@@ -95,6 +95,12 @@ class Broker{
   }
   async saveView(input){
     this.data.view={overview:!!input.overview,terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark'};await this.store.write(this.data);return true;
+  }
+  async reorderAgents({id,direction}){
+    id=schema.id(id);if(!['up','down'].includes(direction))throw new Error('Unsupported reorder direction.');
+    const index=this.data.agents.findIndex(a=>a.id===id);if(index<0)throw new Error('Agent not found.');
+    const target=direction==='up'?index-1:index+1;if(target<0||target>=this.data.agents.length)return false;
+    const [agent]=this.data.agents.splice(index,1);this.data.agents.splice(target,0,agent);await this.persist();return true;
   }
   async connect(id){
     const a=this.agent(id),r=this.runtimeFor(id);
