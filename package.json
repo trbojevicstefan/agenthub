@@ -1,0 +1,94 @@
+{
+  "name": "agenthub-desktop",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Your agents. Your machines. One local-first desktop.",
+  "author": "Stefan Trbojevic",
+  "main": "desktop/main.cjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "check": "node scripts/check.cjs",
+    "preview": "node scripts/preview.cjs",
+    "postinstall": "node scripts/generate-icons.cjs && electron-builder install-app-deps",
+    "dist": "electron-builder --publish never",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "dist:mac": "electron-builder --mac dmg zip --publish never",
+    "dist:linux": "electron-builder --linux AppImage --publish never",
+    "smoke": "electron . --smoke-test",
+    "smoke:restart": "node scripts/smoke-restart.cjs",
+    "start:safe": "electron . --safe-graphics"
+  },
+  "dependencies": {
+    "@xterm/addon-fit": "0.10.0",
+    "@xterm/xterm": "5.5.0",
+    "node-pty": "1.1.0"
+  },
+  "devDependencies": {
+    "electron": "44.3.0",
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "io.agenthub.desktop",
+    "productName": "AgentHub",
+    "artifactName": "AgentHub-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "desktop/**/*",
+      "ui/**/*",
+      "scripts/probe.py",
+      "package.json",
+      "build/icon.png",
+      "scripts/native-smoke.cjs"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/node-pty/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "AgentHub-${version}-Setup-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "runAfterFinish": false
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "icon": "build/icon.icns"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development",
+      "icon": "build/icon.png"
+    },
+    "npmRebuild": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/trbojevicstefan/agenthub.git"
+  }
+}

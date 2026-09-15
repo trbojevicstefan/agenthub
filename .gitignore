@@ -1,0 +1,9 @@
+node_modules/
+release/
+artifacts/
+*.log
+.env
+.DS_Store
+__pycache__/
+build/icon.png
+build/icon.ico
