@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark light">
-  <title>AgentHub</title>
+  <title>Opaya</title>
+  <meta name="description" content="Opaya. One place. All your agents. opaya.dev">
   <link rel="stylesheet" href="vendor/xterm.css">
   <link rel="stylesheet" href="style.css">
   <script defer src="vendor/xterm.js"></script>
@@ -15,7 +16,7 @@
   <div id="preview-banner" hidden>UI PREVIEW / Example workspace. No agents are connected.</div>
   <div class="app-shell">
     <aside class="sidebar" aria-label="Agent navigation">
-      <div class="brand"><div class="brand-symbol" aria-hidden="true"><i></i><i></i><i></i><i></i></div><span>AgentHub</span><button class="icon-button brand-discover" data-action="discover" title="Discover installed agents and SSH hosts" aria-label="Discover agents"><span class="radar-icon"></span></button></div>
+      <div class="brand"><span class="opaya-mark" aria-hidden="true"><i></i></span><span class="brand-name" title="opaya.dev">Opaya</span><button class="icon-button brand-discover" data-action="discover" title="Discover installed agents and SSH hosts" aria-label="Discover agents"><span class="radar-icon"></span></button></div>
       <button class="search-trigger" data-action="switcher" title="Switch agents (Ctrl or Command + K)"><span class="search-icon"></span><span>Find an agent...</span><kbd>Ctrl K</kbd></button>
       <button class="nav-overview" data-action="overview"><span class="grid-icon" aria-hidden="true"></span> Workspace <span id="agent-count">0</span></button>
       <div id="agent-list" class="agent-list"></div>
@@ -25,7 +26,7 @@
       <header id="topbar" class="topbar"></header>
       <section id="content" class="content" aria-live="off"></section>
       <section id="terminal-panel" class="terminal-panel" hidden aria-label="Integrated terminal"><div class="terminal-toolbar"><strong><span class="terminal-glyph">&gt;_</span> <span id="terminal-title">Terminal</span></strong><span class="terminal-hint">Persistent session / close window safely</span><div><button data-action="terminal-shell" title="Open shell for the selected agent">New shell</button><button data-action="terminal-cli" title="Launch the selected agent's native interactive CLI">Run CLI</button><button data-action="terminal-detach" title="Detach this remote terminal and keep its tmux session">Detach</button><button data-action="terminal-end" title="Terminate this terminal session">End session</button><button data-action="terminal-hide" class="icon-button" aria-label="Hide terminal without ending the session" title="Hide terminal">&#10005;</button></div></div><div id="terminal-tabs" class="terminal-tabs"></div><div id="terminal-views" class="terminal-views"></div></section>
-      <footer class="statusbar"><span id="status-left">Your agents, without the tab switching.</span><span id="status-right">No cloud account required</span></footer>
+      <footer class="statusbar"><span id="status-left">One place. All your agents.</span><span id="status-right">opaya.dev</span></footer>
     </main>
   </div>
   <div id="modal-root"></div>

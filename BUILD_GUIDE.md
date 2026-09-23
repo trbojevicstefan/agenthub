@@ -1,4 +1,4 @@
-# AgentHub development checkpoints
+# Opaya development checkpoints
 
 ## Implemented
 - [x] Standalone application identity and local sandboxed Electron UI.
@@ -12,6 +12,9 @@
 - [x] xterm.js/node-pty terminal replay and scrollback checkpoints.
 - [x] Remote tmux create-or-attach and discovery of existing named sessions.
 - [x] Native Windows restart test and installed-EXE packaging workflow.
+- [x] Opaya rebrand with automatic reuse of existing AgentHub workspaces.
+- [x] macOS arm64/x64 DMG and ZIP workflow with ad-hoc signing and packaged-app restart test.
+- [x] Context menus for agents, terminal tabs and the workspace; first-appearance motion system.
 
 ## Acceptance still requiring the owner's machines
 - [ ] Connect the actual four Hermes profiles and verify authentication/model settings.

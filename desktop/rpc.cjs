@@ -24,7 +24,7 @@ class Rpc extends EventEmitter {
       if (!message || typeof message !== 'object' || Array.isArray(message)) { this.fail(new Error('Invalid agent frame.')); return; }
       if (message.method && Object.hasOwn(message, 'id')) {
         const method = message.method;
-        Promise.resolve().then(() => this.onRequest(method, message.params || {})).then(result => this.write({id: message.id, result}), () => this.write({id: message.id, error:{code:-32601,message:'Request denied or unsupported by AgentHub.'}})).catch(() => {});
+        Promise.resolve().then(() => this.onRequest(method, message.params || {})).then(result => this.write({id: message.id, result}), () => this.write({id: message.id, error:{code:-32601,message:'Request denied or unsupported by Opaya.'}})).catch(() => {});
       } else if (message.method) this.emit('notification', message.method, message.params || {});
       else if (Object.hasOwn(message,'id')) {
         const request = this.pending.get(message.id); if (!request) continue;

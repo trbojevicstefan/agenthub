@@ -132,7 +132,7 @@ if docker:
                 if hermes_home:
                     docker_args += ["-e", "HOME=" + hermes_home, "-e", "HERMES_HOME=" + hermes_home, "-w", hermes_home]
                 docker_args += [name, "hermes"]
-                agents.append({"name": ("Hermes Docker / " + name)[:80], "provider": "hermes", "protocol": "acp", "command": "docker", "args": docker_args, "cwd": hermes_home or str(home), "hermesHome": hermes_home, "model": "", "readiness": "running", "detail": ("Docker container has no host gateway port, so AgentHub can connect through Hermes ACP with docker exec. " + (("HERMES_HOME is " + hermes_home + ".") if hermes_home else ""))[:500]})
+                agents.append({"name": ("Hermes Docker / " + name)[:80], "provider": "hermes", "protocol": "acp", "command": "docker", "args": docker_args, "cwd": hermes_home or str(home), "hermesHome": hermes_home, "model": "", "readiness": "running", "detail": ("Docker container has no host gateway port, so Opaya can connect through Hermes ACP with docker exec. " + (("HERMES_HOME is " + hermes_home + ".") if hermes_home else ""))[:500]})
     except (OSError, subprocess.TimeoutExpired):
         warnings.append("Docker inventory was unavailable.")
 print(json.dumps({"machine": {"hostname": socket.gethostname(), "home": str(home)}, "agents": agents, "warnings": warnings}))

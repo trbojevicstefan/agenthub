@@ -1,0 +1,97 @@
+name: macOS app
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: opaya-macos-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      # No Apple Developer ID yet: electron-builder skips signing and scripts/mac-adhoc-sign.cjs ad-hoc signs instead.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install desktop dependencies and rebuild native PTY
+        run: |
+          mkdir -p artifacts
+          npm ci 2>&1 | tee artifacts/dependency-install.txt
+          test "${PIPESTATUS[0]}" -eq 0
+      - name: Source checks and unit tests
+        run: |
+          npm run check 2>&1 | tee artifacts/static-check.txt
+          test "${PIPESTATUS[0]}" -eq 0
+          npm test 2>&1 | tee artifacts/unit-tests.txt
+          test "${PIPESTATUS[0]}" -eq 0
+      - name: Native Electron restart and live PTY continuity
+        id: smoke_dev
+        continue-on-error: true
+        env:
+          AGENTHUB_SMOKE_OUTPUT: ${{ github.workspace }}/artifacts/native-dev
+        run: |
+          npm run smoke:restart 2>&1 | tee artifacts/native-dev.txt
+          test "${PIPESTATUS[0]}" -eq 0
+      - name: Build macOS DMG and ZIP (Apple Silicon and Intel)
+        run: |
+          npm run dist:mac 2>&1 | tee artifacts/macos-build.txt
+          test "${PIPESTATUS[0]}" -eq 0
+          ls -la release
+      - name: Verify packaged app and session survival across process exit
+        id: smoke_packaged
+        continue-on-error: true
+        env:
+          AGENTHUB_SMOKE_OUTPUT: ${{ github.workspace }}/artifacts/native-packaged
+        run: |
+          app="release/mac-arm64/Opaya.app"
+          test -d "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          AGENTHUB_TEST_EXE="$PWD/$app/Contents/MacOS/Opaya" npm run smoke:restart 2>&1 | tee artifacts/native-packaged.txt
+          test "${PIPESTATUS[0]}" -eq 0
+      - name: Checksums and build provenance
+        env:
+          SMOKE_DEV: ${{ steps.smoke_dev.outcome }}
+          SMOKE_PACKAGED: ${{ steps.smoke_packaged.outcome }}
+        run: |
+          node scripts/checksums.cjs
+          node -e "const fs=require('fs');fs.writeFileSync('release/BUILDINFO-mac.json',JSON.stringify({version:require('./package.json').version,sourceCommit:process.env.GITHUB_SHA,runUrl:'https://github.com/'+process.env.GITHUB_REPOSITORY+'/actions/runs/'+process.env.GITHUB_RUN_ID,electron:require('electron/package.json').version,signed:'ad-hoc',notarized:false,nativeDevelopment:process.env.SMOKE_DEV,nativePackaged:process.env.SMOKE_PACKAGED},null,2))"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Opaya-macOS
+          path: |
+            release/*.dmg
+            release/*.zip
+            release/*SHA256SUMS.txt
+            release/BUILDINFO-mac.json
+          if-no-files-found: error
+      - name: Publish unsigned macOS preview release
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v$version-mac.$GITHUB_RUN_NUMBER"
+          gh release create "$tag" release/*.dmg release/*.zip release/*SHA256SUMS.txt release/BUILDINFO-mac.json --target "$GITHUB_SHA" --prerelease --title "Opaya $version - macOS preview" --notes-file docs/RELEASE_NOTES.md
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Opaya-macOS-verification
+          path: |
+            artifacts/*.txt
+            artifacts/native-dev/*.json
+            artifacts/native-dev/*.png
+            artifacts/native-packaged/*.json
+            artifacts/native-packaged/*.png
+            artifacts/**/startup-error.txt
+            artifacts/**/service-startup-error.txt
+          if-no-files-found: warn
