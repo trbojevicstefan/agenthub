@@ -3,7 +3,7 @@
 **One place. All your agents.** AgentHub is now **Opaya** ([opaya.dev](https://opaya.dev)).
 
 - New name, icon and animated brand mark. Existing AgentHub workspaces are reused automatically; stop all sessions from the tray before upgrading on Windows.
-- macOS build (Apple Silicon and Intel DMG/ZIP), ad-hoc signed, not notarized: right-click > Open on first launch.
+- macOS build (Apple Silicon DMG/ZIP), ad-hoc signed, not notarized: right-click > Open on first launch.
 - Right-click menus for sidebar agents, Workspace cards, terminal tabs and the workspace. Pin and rename no longer drop a live connection.
 - Motion: staggered sidebar and card entrances, view transitions, animated status, dialogs, toasts, terminal panel and new messages. Respects reduce-motion.
 - Native copy/paste menu in text fields and selections.

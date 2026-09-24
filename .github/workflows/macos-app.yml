@@ -42,7 +42,7 @@ jobs:
         run: |
           npm run smoke:restart 2>&1 | tee artifacts/native-dev.txt
           test "${PIPESTATUS[0]}" -eq 0
-      - name: Build macOS DMG and ZIP (Apple Silicon and Intel)
+      - name: Build macOS DMG and ZIP (Apple Silicon)
         run: |
           npm run dist:mac 2>&1 | tee artifacts/macos-build.txt
           test "${PIPESTATUS[0]}" -eq 0
