@@ -186,10 +186,12 @@ class Broker{
       delete this.data.drafts[conversationId||agentId];
       await this.store.writeTranscript(c.id,messages);await this.persist();
       if(abort.signal.aborted)throw new Error('Turn cancelled before it was sent.');
-      timeout=setTimeout(()=>{abort.abort();adapter.close();},10*60*1000);
+      // Inactivity limit, not a hard cap: long agent tasks that keep reporting progress are never cut off.
+      const idle=()=>{clearTimeout(timeout);timeout=setTimeout(()=>{turn.reason='No response from the agent for 15 minutes, so Opaya stopped waiting. The task may still be running on the agent.';abort.abort();},15*60*1000);timeout.unref?.();};idle();
       checkpoint=setInterval(()=>{this.store.writeTranscript(c.id,messages).catch(()=>{assistant.error='Disk checkpoint failed. Keep this window open and export the transcript.';this.changed();});},750);checkpoint.unref?.();
       const onEvent=event=>{
         if(abort.signal.aborted||assistant.status!=='streaming')return;
+        idle();
         if(event.type==='text'){
           if(typeof event.text!=='string')return;
           assistant.content+=event.text;
@@ -201,9 +203,9 @@ class Broker{
         if(abort.signal.aborted)throw new Error('Turn cancelled before it was sent.');
         return adapter.run({text,messages:messages.filter(m=>m!==assistant),conversation:c,signal:abort.signal,onEvent,onSession:async sessionId=>{c.externalSessionId=sessionId;await this.store.write(this.data);}});
       }).then(result=>{
-        if(abort.signal.aborted){assistant.status='cancelled';assistant.error='Stopped locally. Verify remote task status before retrying.';}else assistant.status='done';
+        if(abort.signal.aborted){assistant.status='cancelled';assistant.error=turn.reason||'Stopped. The answer so far is kept and the agent stays connected.';}else assistant.status='done';
         if(result?.externalSessionId)c.externalSessionId=result.externalSessionId;
-      }).catch(error=>{assistant.status=abort.signal.aborted?'cancelled':'error';assistant.error=safeError(error,token);}).finally(async()=>{
+      }).catch(error=>{assistant.status=abort.signal.aborted?'cancelled':'error';assistant.error=abort.signal.aborted?(turn.reason||'Stopped. The answer so far is kept and the agent stays connected.'):safeError(error,token);}).finally(async()=>{
         clearTimeout(timeout);clearTimeout(emitTimer);clearInterval(checkpoint);
         try{await this.store.writeTranscript(c.id,messages);await this.store.write(this.data);}catch{assistant.error='Could not save the final transcript to disk. Export it before closing.';}
         if(this.turns.get(agentId)===turn)this.turns.delete(agentId);
@@ -215,7 +217,13 @@ class Broker{
       this.turns.delete(agentId);finishDone();this.changed();throw error;
     }
   }
-  stop(id){const turn=this.turns.get(id);if(turn){turn.abort.abort();const r=this.runtimeFor(id);r.adapter?.close();r.adapter=null;r.status='disconnected';this.changed();}}
+  // Stop cancels the current answer only. Adapters cancel through the abort signal (HTTP abort, ACP session/cancel,
+  // Codex turn/interrupt, Claude per-turn process), so the connection stays usable. An agent that ignores the cancel
+  // for 15 seconds gets its connection reset so it cannot keep writing into the chat.
+  stop(id){
+    const turn=this.turns.get(id);if(!turn)return;turn.abort.abort();this.changed();
+    const guard=setTimeout(()=>{if(this.turns.get(id)!==turn)return;const r=this.runtimeFor(id);r.adapter?.close();r.adapter=null;r.status='disconnected';r.error='The agent did not stop within 15 seconds, so its connection was reset. Reconnect to continue.';this.changed();},15000);guard.unref?.();
+  }
   async discover({hostId,extraHome}={}){
     if(this.scanBusy)throw new Error('A discovery scan is already running.');this.scanBusy=true;
     try{const result=hostId?await scanRemote(this.host(hostId)):await scanLocal({extraHomes:extraHome?[schema.text(extraHome,'folder',2048)]:[]});for(const candidate of result.agents){const existing=this.data.agents.find(a=>fingerprint(a)===fingerprint(candidate));if(existing)candidate.existingId=existing.id;}return result;}
