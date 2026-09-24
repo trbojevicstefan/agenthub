@@ -1,8 +1,8 @@
 {
   "name": "agenthub-desktop",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
-  "description": "Your agents. Your machines. One local-first desktop.",
+  "description": "Opaya. One place. All your agents.",
   "author": "Stefan Trbojevic",
   "main": "desktop/main.cjs",
   "engines": {
@@ -16,7 +16,7 @@
     "postinstall": "node scripts/generate-icons.cjs && electron-builder install-app-deps",
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win nsis --x64 --publish never",
-    "dist:mac": "electron-builder --mac dmg zip --publish never",
+    "dist:mac": "electron-builder --mac dmg zip --arm64 --x64 --publish never",
     "dist:linux": "electron-builder --linux AppImage --publish never",
     "smoke": "electron . --smoke-test",
     "smoke:restart": "node scripts/smoke-restart.cjs",
@@ -33,8 +33,8 @@
   },
   "build": {
     "appId": "io.agenthub.desktop",
-    "productName": "AgentHub",
-    "artifactName": "AgentHub-${version}-${os}-${arch}.${ext}",
+    "productName": "Opaya",
+    "artifactName": "Opaya-${version}-${os}-${arch}.${ext}",
     "directories": {
       "output": "release"
     },
@@ -61,23 +61,38 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "AgentHub-${version}-Setup-${arch}.${ext}"
+      "artifactName": "Opaya-${version}-Setup-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
-      "runAfterFinish": false
+      "runAfterFinish": false,
+      "shortcutName": "Opaya"
     },
     "mac": {
       "target": [
-        "dmg",
-        "zip"
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
       ],
       "category": "public.app-category.developer-tools",
       "hardenedRuntime": true,
       "entitlements": "build/entitlements.mac.plist",
-      "icon": "build/icon.icns"
+      "icon": "build/icon.png",
+      "darkModeSupport": true,
+      "artifactName": "Opaya-${version}-mac-${arch}.${ext}"
     },
     "linux": {
       "target": [
@@ -86,10 +101,15 @@
       "category": "Development",
       "icon": "build/icon.png"
     },
-    "npmRebuild": true
+    "npmRebuild": true,
+    "afterPack": "scripts/mac-adhoc-sign.cjs",
+    "dmg": {
+      "title": "Opaya ${version}"
+    }
   },
   "repository": {
     "type": "git",
     "url": "https://github.com/trbojevicstefan/agenthub.git"
-  }
+  },
+  "homepage": "https://opaya.dev"
 }

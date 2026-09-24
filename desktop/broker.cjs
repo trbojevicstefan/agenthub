@@ -59,7 +59,7 @@ class Broker{
       if(!ok)throw new Error('Agent executable was not approved.');
     }
     if(importToken){
-      const ok=await this.approve(a,'Import this Hermes gateway token?',`Read only API_SERVER_KEY from ${a.hermesHome}/.env${a.transport==='ssh'?' over verified SSH':''}. Provider API keys are not imported. The token stays in AgentHub\'s native process and OS-encrypted vault.`);
+      const ok=await this.approve(a,'Import this Hermes gateway token?',`Read only API_SERVER_KEY from ${a.hermesHome}/.env${a.transport==='ssh'?' over verified SSH':''}. Provider API keys are not imported. The token stays in Opaya\'s native process and OS-encrypted vault.`);
       if(!ok)throw new Error('Token import cancelled.');
       token=await importGatewayToken(a,a.transport==='ssh'?this.host(a.hostId):null);
     }
@@ -95,6 +95,13 @@ class Broker{
   }
   async saveView(input){
     this.data.view={overview:!!input.overview,terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark'};await this.store.write(this.data);return true;
+  }
+  async updateAgentDisplay({id,displayName,pinned}){
+    const index=this.data.agents.findIndex(a=>a.id===schema.id(id));if(index<0)throw new Error('Agent not found.');
+    const a={...this.data.agents[index]};
+    if(displayName!==undefined)a.displayName=schema.text(displayName,'display name',80).trim();
+    if(pinned!==undefined)a.pinned=Boolean(pinned);
+    this.data.agents[index]=a;await this.persist();return a;
   }
   async reorderAgents({id,direction}){
     id=schema.id(id);if(!['up','down'].includes(direction))throw new Error('Unsupported reorder direction.');
@@ -157,7 +164,7 @@ class Broker{
   }
   async send({agentId,conversationId,text}){
     this.agent(agentId);text=schema.prompt(text);
-    if(this.closing)throw new Error('AgentHub is closing.');
+    if(this.closing)throw new Error('Opaya is closing.');
     if(this.turns.has(agentId))throw new Error('This agent is already working. Stop or wait for the active turn.');
     const r=this.runtimeFor(agentId);
     if(r.status!=='connected'||!r.adapter)throw new Error('Connect this agent before sending a message.');

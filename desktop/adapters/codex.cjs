@@ -15,7 +15,7 @@ class CodexAdapter{
     }});
     this.rpc.on('notification',(method,p)=>this.notification(method,p));
     this.rpc.on('closed',e=>{if(this.active)this.active.reject(e);});
-    await this.rpc.request('initialize',{clientInfo:{name:'agenthub',title:'AgentHub',version:'0.1.0'},capabilities:{experimentalApi:false}});
+    await this.rpc.request('initialize',{clientInfo:{name:'agenthub',title:'Opaya',version:'0.1.0'},capabilities:{experimentalApi:false}});
     this.rpc.notify('initialized',{});
     return {description:'Codex app server connected; existing CLI login retained'};
   }

@@ -45,7 +45,7 @@ class Client extends EventEmitter {
     });
     socket.on('error', () => {});
     socket.on('close', () => {
-      for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error('The session service disconnected. Reopen AgentHub to reconnect; do not resend an active task blindly.')); }
+      for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error('The session service disconnected. Reopen Opaya to reconnect; do not resend an active task blindly.')); }
       this.pending.clear(); this.emit('closed');
     });
   }

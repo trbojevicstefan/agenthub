@@ -12,7 +12,7 @@ async function attach(app, root) {
   const existing = await read();
   if (existing?.protocol === 1) {
     try { return await connect(endpoint(root), existing.token); } catch {
-      if (alive(existing.pid)) throw new Error('The session service is still running but cannot be reached. Restart AgentHub before stopping that process; active sessions may still be working.');
+      if (alive(existing.pid)) throw new Error('The session service is still running but cannot be reached. Restart Opaya before stopping that process; active sessions may still be working.');
     }
   }
   await fs.rm(path.join(root,'service-startup-error.txt'), {force:true});

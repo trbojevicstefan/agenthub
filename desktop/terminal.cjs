@@ -54,7 +54,7 @@ class Terminals{
     if(previous)return this.attach(previous.id);
     if([...this.sessions.values()].filter(s=>!s.exited).length>=12)throw new Error('Close an existing terminal before opening another.');
     let pty=this.ptyFactory;
-    if(!pty){try{pty=require('node-pty');}catch(error){throw new Error('The native terminal could not load. Install the matching AgentHub Windows build; do not copy node_modules between operating systems. '+error.message.slice(0,300));}}
+    if(!pty){try{pty=require('node-pty');}catch(error){throw new Error('The native terminal could not load. Install the matching Opaya Windows build; do not copy node_modules between operating systems. '+error.message.slice(0,300));}}
     const env=environment({...(agent.hermesHome&&agent.transport!=='ssh'?{HERMES_HOME:agent.hermesHome}:{}),TERM:'xterm-256color'});
     let command,args,cwd=agent.cwd||os.homedir(),sessionName='';
     if(agent.transport==='ssh'){
