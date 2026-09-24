@@ -40,12 +40,14 @@ body[data-theme="light"]{--bg:#f7f8f4;--sidebar:#eef1ec;--text:#18211d;--muted:#
 /* Compact navigation for dense agent workspaces. */
 .sidebar{width:228px;padding:13px 8px 8px;font-size:11px}.brand{gap:7px;padding:0 8px 12px;font-size:14px;letter-spacing:-.2px}.brand-symbol{width:17px;height:18px}.brand-symbol i{width:6px;height:6px;border-radius:1px}.search-trigger{min-height:30px;padding:6px 8px;font-size:11px}.search-trigger kbd{display:none}.sidebar-actions{margin:7px 0 8px;justify-content:flex-end}.sidebar-actions .icon-button{height:28px;width:32px}.nav-overview{padding:7px 8px;font-size:11px;gap:8px}.agent-list{padding-bottom:8px}.sidebar-section-label{font-size:8px;letter-spacing:1px;margin:12px 8px 5px}.agent-nav-row{display:grid;grid-template-columns:minmax(0,1fr) 20px;align-items:center;gap:2px;margin:1px 0}.agent-nav{min-width:0;margin:0;padding:6px 6px;gap:7px;border-radius:6px}.agent-nav.selected:before{height:17px;top:10px}.agent-nav .agent-avatar{width:25px;height:25px;border-radius:6px}.agent-nav-text strong{font-size:11px;line-height:1.2}.agent-nav-text small{font-size:9px;margin-top:1px}.agent-row-actions{display:flex;flex-direction:column;gap:1px;opacity:.18}.agent-nav-row:hover .agent-row-actions,.agent-nav-row:focus-within .agent-row-actions{opacity:1}.agent-row-actions button{height:14px;min-width:18px;padding:0;border-radius:4px;font-size:9px;color:#91a39a}.agent-row-actions button:hover{background:#28322d;color:#d7eadc}.sidebar-bottom{padding:6px 2px 0}.sidebar-bottom>button{padding:5px 7px;font-size:11px;gap:7px}.privacy-label,.sidebar-meta,.external-arrow{display:none}.agent-avatar{width:28px;height:28px;border-radius:7px}.agent-avatar.large{width:42px;height:42px;border-radius:10px}.agent-avatar .provider-icon{font-size:11px}.message-avatar .mark,.agent-avatar .mark,.art-node .mark{display:block;position:relative;width:18px;height:18px}.agent-avatar.large .mark{width:24px;height:24px}.message-avatar .mark{width:17px;height:17px}.hermes-mark:before{content:"";position:absolute;inset:3px 2px 2px;border:2px solid currentColor;border-top:0;border-radius:3px 3px 8px 8px;transform:skewX(-7deg)}.hermes-mark i:first-child{position:absolute;left:3px;top:0;width:12px;height:7px;border-top:2px solid currentColor;border-left:2px solid currentColor;transform:rotate(-18deg);border-radius:8px 0 0}.hermes-mark i:last-child{position:absolute;right:2px;top:4px;width:4px;height:4px;background:currentColor;border-radius:50%}.codex-mark{border:2px solid currentColor;border-radius:5px}.codex-mark:before{content:"";position:absolute;left:4px;top:5px;width:6px;height:6px;border-left:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(-45deg)}.codex-mark i{position:absolute;right:3px;bottom:4px;width:6px;height:2px;background:currentColor;border-radius:2px}.claude-mark i:first-child,.claude-mark i:last-child{position:absolute;inset:2px;border:2px solid currentColor;border-radius:50% 50% 50% 8%;transform:rotate(45deg)}.claude-mark i:last-child{inset:6px;border-width:1px;opacity:.75}.openclaw-mark i{position:absolute;bottom:2px;width:5px;height:14px;border:2px solid currentColor;border-bottom:0;border-radius:8px 8px 0 0}.openclaw-mark i:nth-child(1){left:1px;transform:rotate(-18deg)}.openclaw-mark i:nth-child(2){left:7px;height:16px}.openclaw-mark i:nth-child(3){right:1px;transform:rotate(18deg)}.custom-mark{border:2px solid currentColor;border-radius:50%}.custom-mark i{position:absolute;left:5px;top:5px;width:4px;height:4px;background:currentColor;border-radius:50%;box-shadow:6px 0 0 currentColor,3px 5px 0 currentColor}.message-avatar{overflow:hidden}.message-avatar .mark{color:currentColor}.settings-badges .agent-avatar{width:32px;height:32px}.field textarea{width:100%;font-size:12px;background:#161c19;border-color:#3c4b41;min-height:70px}
 .brand .brand-discover{margin-left:auto;width:28px;min-width:28px;height:26px;padding:4px;border:1px solid #34413b;background:#202722;color:#b8c9bf}.brand .brand-discover .radar-icon{width:14px;height:14px}.brand .brand-discover .radar-icon:before{inset:3px}.brand .brand-discover .radar-icon:after{left:6px;height:8px}
-/* Opaya brand mark: a ring with an orbiting signal, "one place, all your agents". */
-.opaya-mark{position:relative;width:20px;height:20px;flex-shrink:0;display:inline-block}
-.opaya-mark:before{content:"";position:absolute;inset:0;border-radius:50%;background:conic-gradient(from 210deg,var(--accent),#8fdcf5,#cdb6ff,var(--accent));-webkit-mask:radial-gradient(circle,transparent 52%,#000 55%);mask:radial-gradient(circle,transparent 52%,#000 55%);animation:op-spin 12s linear infinite}
-.opaya-mark i{position:absolute;inset:-3px;animation:op-spin 4.5s cubic-bezier(.55,.1,.45,.9) infinite}
-.opaya-mark i:after{content:"";position:absolute;top:0;left:50%;width:6px;height:6px;margin-left:-3px;border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent)}
-.opaya-mark.large{width:36px;height:36px}.opaya-mark.large:before{background:#173c28}.opaya-mark.large i{inset:-5px}.opaya-mark.large i:after{width:9px;height:9px;margin-left:-4.5px;background:#173c28;box-shadow:none}
+/* OPAYA brand mark: the green interlock logo with an orbiting signal. */
+.opaya-mark{position:relative;width:22px;height:22px;flex-shrink:0;display:inline-block}
+.opaya-mark img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;animation:op-breathe 6s ease-in-out infinite}
+.opaya-mark i{position:absolute;inset:-4px;animation:op-spin 4.5s cubic-bezier(.55,.1,.45,.9) infinite;pointer-events:none}
+.opaya-mark i:after{content:"";position:absolute;top:0;left:50%;width:5px;height:5px;margin-left:-2.5px;border-radius:50%;background:#4fe39a;box-shadow:0 0 8px #4fe39a}
+.opaya-mark.large{width:64px;height:64px}.opaya-mark.large i{inset:-11px}.opaya-mark.large i:after{width:9px;height:9px;margin-left:-4.5px}
+@keyframes op-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
+.art-center{background:none!important;box-shadow:none!important;transform:translate(-50%,-50%)!important}
 .art-center{letter-spacing:0;padding:0}
 .brand .opaya-mark{margin-left:2px}.brand-name{font-weight:650;letter-spacing:-.4px;background:linear-gradient(90deg,var(--text) 0%,var(--text) 40%,var(--accent) 50%,var(--text) 60%,var(--text) 100%);background-size:250% 100%;background-position:100% 0;-webkit-background-clip:text;background-clip:text;color:transparent;transition:background-position .9s ease}
 .brand:hover .brand-name{background-position:0 0}
@@ -123,5 +125,32 @@ body[data-theme="light"] .context-menu-icon{color:#2f7a52}
 body[data-theme="light"] .context-menu-separator{background:#dde5de}
 body[data-theme="light"] .agent-nav-row.menu-open .agent-nav{border-color:#9fc7ab}
 body[data-theme="light"] .agent-card:hover{box-shadow:0 14px 34px -18px #2f7a5255}
-@media(prefers-reduced-motion:reduce){.opaya-mark:before,.opaya-mark i{animation:none!important}}
+@media(prefers-reduced-motion:reduce){.opaya-mark img,.opaya-mark i{animation:none!important}}
 body[data-theme="light"] .nav-overview.selected{color:#18211d}
+
+/* Official agent logos (from the OPAYA website brand pack) on a neutral tile, as on opaya.dev. */
+.agent-avatar.hermes,.agent-avatar.codex,.agent-avatar.claude,.agent-avatar.openclaw,.message-avatar.hermes,.message-avatar.codex,.message-avatar.claude,.message-avatar.openclaw,.art-node{background:#f6f7f3!important;border-color:#d6ddd5!important}
+.agent-logo{display:block;width:66%;height:66%;object-fit:contain;user-select:none}
+.agent-logo.codex-logo{width:78%;height:78%;border-radius:22%}
+.art-node .agent-logo{width:24px;height:24px}
+.message-avatar .agent-logo{width:18px;height:18px}
+body:not([data-theme="light"]) .agent-avatar.hermes,body:not([data-theme="light"]) .agent-avatar.codex,body:not([data-theme="light"]) .agent-avatar.claude,body:not([data-theme="light"]) .agent-avatar.openclaw,body:not([data-theme="light"]) .message-avatar.hermes,body:not([data-theme="light"]) .message-avatar.codex,body:not([data-theme="light"]) .message-avatar.claude,body:not([data-theme="light"]) .message-avatar.openclaw,body:not([data-theme="light"]) .art-node{background:#eef1ec!important;border-color:#56625b!important}
+/* Light theme accent: a deeper OPAYA green so accent text, links and indicators stay readable on white. */
+body[data-theme="light"]{--accent:#0f8a57;--accent-dark:#d8f3e4;--muted:#56645c;--faint:#6e7b73;--danger:#b3483a}
+body[data-theme="light"] .primary,body[data-theme="light"] .send-button{background:#0f8a57;border-color:#0f8a57;color:#fff}
+body[data-theme="light"] .primary:hover,body[data-theme="light"] .send-button:hover{background:#0b7449;border-color:#0b7449}
+body[data-theme="light"] .send-button:disabled{background:#9dbfae;color:#fff}
+body[data-theme="light"] .text-button:hover{color:#0b5e3b}
+body[data-theme="light"] .dark-swatch{background:#111315;border-color:#2b3033}
+body[data-theme="light"] .light-swatch{background:#fff;border-color:#b9c6bd}
+body[data-theme="light"] .code-block>div{background:#eef2ef;color:#4d5d55;border-color:#d7e0d9}
+body[data-theme="light"] .code-block code,body[data-theme="light"] .message-text .code-block code{background:none;border:0}
+body[data-theme="light"] .status-dot.connected{background:#1f9d62}
+body[data-theme="light"] .status-dot.connecting,body[data-theme="light"] .status-dot.working{background:#c28a12}
+body[data-theme="light"] .status-dot.error{background:#d0503f}
+body[data-theme="light"] .status-dot.disconnected{background:#8a969c}
+body[data-theme="light"] .status-pill{background:#e3f4ea;border-color:#b5dcc3;color:#1d6b43}
+body[data-theme="light"] .status-pill.disconnected{background:#eef1f2;border-color:#d3dadd;color:#56636a}
+body[data-theme="light"] .status-pill.error{background:#fbe9e6;border-color:#efc3bb;color:#a13e30}
+body[data-theme="light"] .status-pill.connecting{background:#fbf2dc;border-color:#ecd49a;color:#86600c}
+body[data-theme="light"] .orbit-signal{background:#0f8a57;box-shadow:0 0 0 5px #e3f4ea}
