@@ -31,7 +31,7 @@ class Broker{
   runtimeFor(id){if(!this.runtime.has(id))this.runtime.set(id,{status:'disconnected',error:'',models:[]});return this.runtime.get(id);}
   snapshot(){
     const {agents,hosts,conversations,activeAgentId,activeConversationId}=this.data;
-    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id)};}),hosts,conversations,activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId)),secureStorage:this.vault.available(),platform:process.platform};
+    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id)};}),hosts,conversations,activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
   }
   changed(){if(!this.closing)this.emit(this.snapshot());}
   async persist(){await this.store.write(this.data);this.changed();}
@@ -78,14 +78,31 @@ class Broker{
     await this.persist();return a;
   }
   async select(id){this.agent(id);this.data.activeAgentId=id;const c=this.data.conversations.find(c=>c.agentId===id&&c.id===this.data.lastConversation[id])||this.data.conversations.filter(c=>c.agentId===id).at(-1);this.data.activeConversationId=c?.id||'';if(c&&!this.histories.has(c.id))this.histories.set(c.id,await this.store.transcript(c.id));await this.persist();}
+  // Playground: ask two agents the same question side by side. Each run gets its own conversations (or continues the
+  // previous playground ones) without switching the agent that is open in the main view.
+  async playground({agentIds,text,keepContext=false}){
+    if(!Array.isArray(agentIds)||agentIds.length!==2||agentIds[0]===agentIds[1])throw new Error('Choose two different agents.');
+    const ids=agentIds.map(id=>this.agent(id).id);text=schema.prompt(text);
+    const previous=this.data.playground,conversations={},errors={};
+    for(const id of ids){
+      try{
+        let c=keepContext&&previous?.conversations?.[id]?this.data.conversations.find(x=>x.id===previous.conversations[id]&&x.agentId===id):null;
+        if(!c)c=await this.createConversation(id,{activate:false,title:`Playground: ${text.slice(0,50).replace(/\s+/g,' ')}`});
+        conversations[id]=c.id;
+      }catch(error){errors[id]=safeError(error);}
+    }
+    this.data.playground={agentIds:ids,prompt:text,keepContext:!!keepContext,conversations,errors,at:new Date().toISOString()};
+    await Promise.all(ids.filter(id=>conversations[id]).map(id=>this.send({agentId:id,conversationId:conversations[id],text}).catch(error=>{errors[id]=safeError(error);})));
+    await this.persist();return this.data.playground;
+  }
   async newConversation(agentId){
     this.agent(agentId);if(this.turns.has(agentId))throw new Error('Wait for or stop this agent\'s current turn first.');
     return this.createConversation(agentId);
   }
-  async createConversation(agentId){
+  async createConversation(agentId,{activate=true,title='New conversation'}={}){
     if(this.data.conversations.length>=2000)throw new Error('Conversation limit reached. Export and remove old agent connections.');
-    const c={id:randomUUID(),agentId,title:'New conversation',createdAt:new Date().toISOString(),externalSessionId:''};
-    this.data.conversations.push(c);this.histories.set(c.id,[]);this.data.activeConversationId=c.id;this.data.activeAgentId=agentId;this.data.lastConversation[agentId]=c.id;await this.persist();return c;
+    const c={id:randomUUID(),agentId,title,createdAt:new Date().toISOString(),externalSessionId:''};
+    this.data.conversations.push(c);this.histories.set(c.id,[]);if(activate){this.data.activeConversationId=c.id;this.data.activeAgentId=agentId;this.data.lastConversation[agentId]=c.id;}await this.persist();return c;
   }
   async selectConversation(id){const c=this.data.conversations.find(c=>c.id===schema.id(id));if(!c)throw new Error('Conversation not found.');this.data.activeAgentId=c.agentId;this.data.activeConversationId=c.id;this.data.lastConversation[c.agentId]=c.id;if(!this.histories.has(c.id))this.histories.set(c.id,await this.store.transcript(c.id));await this.persist();}
   async saveDraft({agentId,conversationId='',text=''}){
@@ -94,15 +111,33 @@ class Broker{
     const key=conversationId||agentId;this.data.drafts[key]=text;await this.store.write(this.data);return true;
   }
   async saveView(input){
-    this.data.view={overview:!!input.overview,opaya:!!input.opaya,terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark'};await this.store.write(this.data);return true;
+    this.data.view={overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark'};await this.store.write(this.data);return true;
   }
-  async updateAgentDisplay({id,displayName,pinned,avatar}){
+  async updateAgentDisplay({id,displayName,pinned,avatar,group,tags}){
     const index=this.data.agents.findIndex(a=>a.id===schema.id(id));if(index<0)throw new Error('Agent not found.');
     const a={...this.data.agents[index]};
     if(displayName!==undefined)a.displayName=schema.text(displayName,'display name',80).trim();
     if(pinned!==undefined)a.pinned=Boolean(pinned);
     if(avatar!==undefined)a.avatar=schema.avatar(avatar);
+    if(group!==undefined)a.group=schema.group(group);
+    if(tags!==undefined)a.tags=schema.tags(tags);
     this.data.agents[index]=a;await this.persist();return a;
+  }
+  // Drag and drop: place an agent before or after another one and optionally move it into a section (group or pinned).
+  async moveAgent({id,targetId,position='before',group,pinned}){
+    id=schema.id(id);const from=this.data.agents.findIndex(a=>a.id===id);if(from<0)throw new Error('Agent not found.');
+    const [agent]=this.data.agents.splice(from,1),moved={...agent};
+    if(group!==undefined)moved.group=schema.group(group);
+    if(pinned!==undefined)moved.pinned=Boolean(pinned);
+    let to=targetId?this.data.agents.findIndex(a=>a.id===schema.id(targetId)):-1;
+    if(to<0)to=this.data.agents.length;else if(position==='after')to+=1;
+    this.data.agents.splice(to,0,moved);await this.persist();return true;
+  }
+  // Connect every saved agent that is not connected yet, in parallel. One failure does not stop the others.
+  async connectAll({ids}={}){
+    const targets=this.data.agents.filter(a=>(!ids||ids.includes(a.id))&&a.protocol!=='terminal'&&!['connected','connecting'].includes(this.runtimeFor(a.id).status));
+    const results=await Promise.all(targets.map(a=>this.connect(a.id).then(()=>({id:a.id,ok:true}),error=>({id:a.id,ok:false,error:safeError(error)}))));
+    return {attempted:results.length,connected:results.filter(r=>r.ok&&this.runtimeFor(r.id).status==='connected').length,failed:results.filter(r=>!r.ok||this.runtimeFor(r.id).status!=='connected').map(r=>({id:r.id,name:this.agent(r.id).name,error:r.error||this.runtimeFor(r.id).error||'Not connected'}))};
   }
   async reorderAgents({id,direction}){
     id=schema.id(id);if(!['up','down'].includes(direction))throw new Error('Unsupported reorder direction.');

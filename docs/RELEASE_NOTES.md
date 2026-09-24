@@ -1,4 +1,11 @@
-# Opaya 0.4.0 - Opaya Agent preview
+# Opaya 0.5.0 - Groups, tags and Playground
+
+- **Groups and tags**: put agents into named groups and give them tags (right-click > Group & tags, or the connection settings). The sidebar shows pinned agents, each group, then local and remote agents; every section collapses and expands and remembers it. Right-click a section to rename, ungroup, collapse or expand all, or connect everything in it. Filter the Workspace by tag; search matches groups and tags.
+- **Drag and drop**: drag agents in the sidebar to reorder them, or drop them on a section header to move them into that group (or Pinned). The up/down arrows and the dots button are gone; right-click has every action.
+- **Connect all**: connect every agent at once from the Workspace, the Playground, the workspace right-click menu or a group's menu. Agents that fail are listed without stopping the others.
+- **Playground**: pick two agents, ask one question and watch both answers side by side, with Swap, Keep context, Stop both and Open in chat. Your open agent does not change.
+
+## Earlier: 0.4.0 - Opaya Agent preview
 
 - **Opaya Agent**: a built-in assistant for installing, connecting, maintaining and troubleshooting agents, machines and SSH keys. It connects to any OpenAI-compatible model API (OpenAI, Anthropic, OpenRouter, Ollama, LM Studio, a Hermes gateway). Changes and commands always need your approval; it never sees API tokens and cannot modify the app.
 - **One-click installs** of Hermes Agent, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider and Ollama, locally or on a saved SSH machine, in a visible terminal.
