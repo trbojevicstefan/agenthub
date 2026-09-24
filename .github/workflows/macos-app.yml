@@ -57,8 +57,14 @@ jobs:
           test "${PIPESTATUS[0]}" -eq 0
       - name: Build macOS DMG and ZIP (${{ matrix.arch }})
         run: |
-          npm run ${{ matrix.script }} 2>&1 | tee artifacts/macos-build.txt
-          test "${PIPESTATUS[0]}" -eq 0
+          # Retry: the Electron download from github.com occasionally times out on hosted runners.
+          for attempt in 1 2 3; do
+            npm run ${{ matrix.script }} 2>&1 | tee -a artifacts/macos-build.txt
+            status=${PIPESTATUS[0]}
+            [ "$status" -eq 0 ] && break
+            echo "Build attempt $attempt failed with $status"; [ "$attempt" -lt 3 ] && sleep $((attempt * 20))
+          done
+          test "$status" -eq 0
           ls -la release
       - name: Verify packaged app and session survival across process exit
         id: smoke_packaged
