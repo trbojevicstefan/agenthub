@@ -1,4 +1,6 @@
-# Verification - AgentHub 0.2.0
+# Verification - AgentHub 0.2.0 (historical)
+
+This is the verification record of the first published build. Current builds are verified by the Windows and macOS CI workflows on every release (packaged-app restart test, SHA-256 checksums); see the README.
 
 ## Published Windows executable
 

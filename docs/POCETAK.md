@@ -1,6 +1,13 @@
 # Prvo povezivanje
 
-Instaliraj Windows x64 Setup EXE iz Releases i pokreni AgentHub. Node.js nije potreban za instaliranu aplikaciju. Agenti i SSH klijent moraju vec da budu instalirani na svojim masinama.
+Instaliraj Opaya iz Releases (Windows x64 Setup EXE ili macOS DMG za Apple Silicon) i pokreni je. Nove verzije stizu kroz aplikaciju: kada se u status baru pojavi Update, klikni Update now pa Install and restart. Node.js nije potreban za instaliranu aplikaciju. Agenti i SSH klijent moraju vec da budu instalirani na svojim masinama.
+
+## Najbrze
+
+- Najlaksi put: pitaj Opaya Agenta (vrh sidebara) da instalira, poveze ili popravi agenta.
+- Novi VPS: Machines, pa Add a new VPS. Opaya napravi SSH kljuc, ti ga dodas kod provajdera, Opaya proveri konekciju.
+- Istorija chatova: dugme sa satom pored chata ili Ctrl+Shift+H. Tu su Condense, Share i Delete.
+- Projekti: Ctrl+Shift+P. Desni klik na projekat za git i GitHub akcije.
 
 ## Cetiri Hermesa na VPS-u
 
@@ -10,7 +17,7 @@ Instaliraj Windows x64 Setup EXE iz Releases i pokreni AgentHub. Node.js nije po
 4. Odobri uvoz odgovarajuceg gateway tokena ili ga unesi rucno. Connect, pa prva poruka.
 5. Ponovi za ostale profile/masine. Sidebar cuva odvojene razgovore.
 
-Gateway API treba da slusa samo na lokalnom interfejsu VPS-a. AgentHub mu pristupa privatnim SSH tunelom. Javni API port nije potreban. Sacuvani SSH alias automatski koristi njegove User/Port/IdentityFile/ProxyJump opcije.
+Gateway API treba da slusa samo na lokalnom interfejsu VPS-a. Opaya mu pristupa privatnim SSH tunelom. Javni API port nije potreban. Sacuvani SSH alias automatski koristi njegove User/Port/IdentityFile/ProxyJump opcije.
 
 ## Lokalni agenti
 
@@ -20,4 +27,4 @@ Discover pronalazi poznate CLI instalacije/profil foldere i nekoliko standardnih
 
 X zatvara prozor u tray. Exit window odvaja UI, ali odvojeni proces zadrzava sesije i terminale. Ponovno otvaranje se kaci na isti proces. Stop all sessions and exit namerno gasi lokalne procese; istorija i draftovi ostaju. Posle restartovanja Windowsa lokalni proces ne moze magicno da ostane ziv: vidi se sacuvana istorija i nastavlja se podrzana native chat sesija. Remote tmux nastavlja rad kada se SSH klijent prekine, ali ne garantuje opstanak kroz restart samog VPS-a.
 
-U slucaju problema sa prikazom pokreni AgentHub.exe sa `--safe-graphics`. Lokalni log startovanja je u AgentHub userData folderu pod AppData. Nemoj slati fajl vault.json, session-service.json ili privatne SSH kljuceve drugim ljudima.
+U slucaju problema sa prikazom pokreni Opaya.exe sa `--safe-graphics`. Lokalni log startovanja je u Opaya userData folderu pod AppData. Nemoj slati fajl vault.json, session-service.json ili privatne SSH kljuceve drugim ljudima.

@@ -15,6 +15,14 @@
 - [x] Opaya rebrand with automatic reuse of existing AgentHub workspaces.
 - [x] macOS Apple Silicon DMG and ZIP workflow with ad-hoc signing and packaged-app restart test.
 - [x] Context menus for agents, terminal tabs and the workspace; first-appearance motion system.
+- [x] Opaya Agent with approved tools, diagnostics, chat sessions and gentle tips.
+- [x] Install agents and dependencies locally or over SSH; Discover split into installed/available and local/remote.
+- [x] Skills, commands and MCP servers per agent; skill transfer between agents and a global skills library.
+- [x] Projects panel with git and GitHub CLI actions.
+- [x] In-app updater with SHA-256 verification (Windows silent install, macOS bundle swap).
+- [x] iTrust mode (global, per agent, Opaya Agent), Opaya browser with an MCP bridge, rich Markdown messages, customizable dock layout.
+- [x] Hermes clone and redeploy (local, VPS, Docker) with a background progress window; New VPS with SSH key generation.
+- [x] Chat history panel: labels, delete, rename, condense, share.
 
 ## Acceptance still requiring the owner's machines
 - [ ] Connect the actual four Hermes profiles and verify authentication/model settings.
@@ -26,4 +34,6 @@
 - [ ] Import/attach existing Hermes REST sessions with capability/version negotiation.
 - [ ] Automatic container/WSL inventory beyond manual launchers.
 - [ ] Local process survival across reboot through provider-specific recovery (not possible through a retained PID alone).
-- [ ] Code-signing certificate, signed updates and macOS notarization.
+- [ ] Code-signing certificate and macOS notarization.
+
+The forward plan lives in [docs/ROADMAP.md](docs/ROADMAP.md).

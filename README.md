@@ -2,72 +2,164 @@
 
 **One place. All your agents.** [opaya.dev](https://opaya.dev)
 
-Opaya (formerly AgentHub) is a standalone, local-first desktop hub for your own Hermes, Codex, Claude Code, OpenClaw and terminal-based agents. Add a local installation or SSH machine, keep conversations separate, and switch without losing the process behind the window. No hosted account, telemetry, billing or third-party relay is required.
+Opaya is a local-first desktop app for your own AI agents: **Hermes, Claude Code, Codex, OpenClaw**, and any other CLI or OpenAI-compatible API. It works with agents on this computer, on your VPS machines over SSH, and in Docker containers. Chat with them, watch their terminals, give them a browser, and share skills and tools between them, all from one window. Opaya needs no hosted account, collects no telemetry and sends nothing through a third-party relay.
 
-## Windows
+**Current version: 0.11.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
 
-Download the **Opaya-…-Setup-x64.exe** from this repository's Releases. This is an **unsigned preview** for Windows 10/11 x64. Install it and open Opaya.
+## Download
 
-**Upgrading from AgentHub:** first use the tray icon's **Stop all sessions and exit**, then run the Opaya installer. Opaya keeps using your existing AgentHub workspace (agents, conversations, drafts and saved tokens), so nothing needs to be re-added. The installer uses the same application ID and normally replaces AgentHub; if an old AgentHub entry remains in Settings > Apps, uninstall it (your workspace is kept).
+All builds are on this repository's [Releases](https://github.com/trbojevicstefan/agenthub/releases) page.
 
-## macOS
+- **Windows 10/11 x64:** get **Opaya-…-Setup-x64.exe** from the latest `v…-build.*` release. The build is an unsigned preview, so Windows SmartScreen may ask you to confirm: choose *More info* > *Run anyway*.
+- **macOS (Apple Silicon, M1 and later):** get **Opaya-…-mac-arm64.dmg** from the latest `v…-mac.*` release and drag Opaya to Applications. The build is ad-hoc signed but not notarized, so the first launch needs one approval: right-click Opaya, choose **Open**, or use System Settings > Privacy & Security > **Open Anyway**. There are no Intel Mac builds yet.
 
-Download **Opaya-…-mac-arm64.dmg** (Apple Silicon, M1 and later; Intel Macs are not built yet) from the Releases marked *macOS preview*, open it and drag Opaya to Applications. The build is ad-hoc signed but not notarized, so the first launch needs one approval: right-click Opaya in Applications and choose **Open** (or System Settings > Privacy & Security > **Open Anyway**). Terminal alternative: `xattr -dr com.apple.quarantine /Applications/Opaya.app`. The session service runs without a Dock icon; the menu bar icon has **Stop all sessions and exit**. `npm run dist:mac` builds it on a Mac. You do not need Node.js to use the installed app. Agent CLIs, OpenSSH and their own authentication are separate prerequisites, discovered from your computer.
+**Updates are built in (0.10.1 and later).** Opaya checks this repository's releases and shows **Update available** in the status bar. **Update now** downloads the new version and checks it against the release's SHA-256 checksums. **Install and restart** then replaces the app in place and opens it again. On Windows the update installs silently into the same folder; on macOS the app bundle is swapped. You do not need to uninstall first.
 
-For source development: Node.js 22+, `npm install`, `npm test`, `npm start`. `npm run dist:win` builds the NSIS installer on Windows; its native dependencies must be rebuilt for the target Electron runtime, not copied from another operating system. `npm run start:safe` disables GPU acceleration without disabling Electron sandboxing.
+**Coming from AgentHub?** Choose **Stop all sessions and exit** in the tray, then run the Opaya installer. Opaya reuses your AgentHub workspace (agents, chats, drafts, saved tokens).
+
+The installed app does not need Node.js. Agent CLIs, OpenSSH and their own logins are separate. Opaya finds them on your computer, and **Install agents** can set them up for you.
+
+## What you can do
+
+### Chat with every agent
+- Every agent gets its own chats, and each chat keeps its exact provider session.
+- **Rich messages:** Markdown, tables, task lists, code blocks with Copy, and HTML/SVG preview.
+- **Slash commands and skills:** type `/` in the message box to run them.
+- **Models** sets an agent's default model, or overrides it for one chat only.
+- **Playground** asks two agents the same question and shows the answers side by side.
+
+### Chat history (0.11)
+- **History** opens on the right. Use the clock button next to a chat, **Ctrl/Cmd+Shift+H**, or right-click an agent and choose **Chat history**.
+- Chats are grouped by day, with tabs for **All / Chats / Projects / Playground**. You can search them and switch between one agent and all agents.
+- **Labels:** project chats show the project name in blue, and playground chats are marked in purple.
+- **Delete** any chat (regular, project or playground). Its transcript is deleted too, but the agent's own session files are left alone.
+- **Condense:**
+  - Reduces a long chat to its essence: goal, key points, decisions and open items.
+  - Before it starts, Opaya shows a warning with an estimate of the tokens it will use.
+  - If the Opaya Agent has a model API key, that model does the work. Otherwise the chat's own agent condenses it.
+  - From the essence you can copy it, send it to another agent, or start a **new chat from the essence**.
+- **Share:** copy a chat as Markdown, save it as a file, or **send it to another agent**.
+
+### Projects
+- The **Projects** panel (right side, **Ctrl/Cmd+Shift+P**) groups a folder with the agents that work in it. The folder can be on this computer or on an SSH machine.
+- Chats started from a project run in that folder.
+- The panel shows the git branch and uncommitted changes.
+- Right-click a project for **git** and **GitHub CLI** actions: pull, push, commit, branches, merge and pull requests.
+- You can add an existing folder or clone a repository.
+
+### Terminals
+- Integrated xterm.js terminals come with tabs, search, rename and **pop-out windows**.
+- You can open a shell or the agent's native CLI.
+- Terminals keep running when you close the window.
+- Remote terminals use **tmux**, so they survive a dropped SSH connection.
+
+### Opaya browser
+- Links from agents open in a built-in browser pane.
+- **Give Opaya browser** (right-click an agent) lets that agent open pages, read them, click and type while you watch. It works through an MCP bridge, for local ACP agents and Claude Code.
+
+### Custom layout
+- Put the terminal and the browser **side by side** with the chat or **at the bottom**, and resize them.
+- The layout is remembered.
+
+### Skills, tools and MCP servers
+- **Skills** (agent header) lists an agent's skills and commands and installs Hermes skills.
+- **MCP servers:** add stdio or HTTP servers once in Settings, then choose which agents use them. Opaya passes them to Hermes over ACP and to Claude Code.
+- **Transfer to another agent** (right-click an agent):
+  - **Skills:** all of them or only the ones you select. They work across Hermes, Claude Code, Codex and OpenClaw, local or remote.
+  - **Credentials:** all or selected API keys from a Hermes `.env`. The UI shows only key names, never values.
+  - **MCP servers** the agent uses, and optionally its saved gateway token.
+- **Skills library:** global skills kept by Opaya.
+  - Add skills from any agent or from a folder.
+  - Install them to many agents at once.
+
+### Clone and redeploy (Hermes)
+- Right-click a Hermes agent and choose **Clone**. You pick:
+  - **What to copy:** Everything, Skills + personality (SOUL.md, USER.md), Skills, or Memory. You can also include API keys.
+  - **Where:** this computer or any saved VPS.
+  - **How it runs:** as a Hermes profile or a Docker container.
+- A progress window shows the route, a live percentage, speed, time left, each step and a log. You can minimize it to the status bar.
+- **Redeploy** copies the same parts again with one click. Chat history and OAuth logins are never copied.
+
+### Machines and VPS
+- **Machines** lists this computer and your SSH machines, local and remote kept apart.
+- **Add a new VPS:**
+  1. Opaya creates an SSH key in `~/.ssh`.
+  2. You add the public key in your provider's panel. If you only have a password, Opaya can install the key for you.
+  3. Opaya checks the connection and whether Docker and Hermes are installed there.
+- You can also import `~/.ssh/config` aliases.
+
+### Discover and install agents
+- **Discover** separates installed agents from ones you can still add, and local from remote. Agents you have already added are hidden.
+- **Install agents** installs these in one click, on this computer or a VPS:
+  - agents: Hermes Agent, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider or Ollama;
+  - dependencies: Node.js, Python, Git, uv, tmux, OpenSSH, Homebrew, or **All essentials**.
+- You see the exact vendor command first, and it runs in a terminal you can watch.
+
+### iTrust mode
+- Approves an agent's tool requests (commands, file edits and other actions) automatically.
+- Turn it on for **all agents** in Settings, or **per agent** by right-clicking it.
+- It also works for the **Opaya Agent**, where removals still ask.
+- An **iTrust** label marks agents that have it on.
+
+### Opaya Agent
+The **Opaya Agent** at the top of the sidebar is a built-in assistant for Opaya itself:
+- It installs agents, connects and repairs them, manages machines and keys, and runs diagnostics when an agent hangs.
+- It keeps its own chat sessions, and offers a friendly tip now and then when something useful applies.
+
+Connect it to any model in **Model settings**: DeepSeek, OpenAI, Google Gemini, OpenRouter, xAI, Groq, Mistral, a local Ollama or LM Studio model, a Hermes gateway, the Codex CLI, or any OpenAI-compatible `/v1` API. The API key is stored with OS encryption.
+
+It acts only through Opaya's own tools, and every change or command asks for your approval unless iTrust is on. It never sees API tokens or secret files, has no general shell or file access, and cannot modify the app.
+
+### Everyday comforts
+- Right-click menus everywhere: agents, workspace, terminal tabs, projects and chats.
+- Groups and tags, pinning, drag to reorder, **Connect all**.
+- Official agent logos, an icon library or your own icon.
+- Dark and light themes.
+- System notifications when an approval is waiting or a long job finishes.
+- A **Connection log** for every agent.
 
 ## Persistent by design
 
-The renderer is a client of a separate local Electron session process. Closing the window or exiting the UI does **not** kill the session process, running agent turns or terminal PTYs. Reopen Opaya to attach to that same process and replay buffered terminal output. The tray menu exposes **Stop all sessions and exit** as a distinct, confirmed action.
+The window is only a client. A separate local **session service** owns the agents, chats and terminals:
+- Closing the window does not stop running agent turns or terminals. Reopen Opaya and it reconnects to the same process and replays the terminal output.
+- **Stop all sessions and exit** in the tray (Windows) or menu bar (macOS) is the separate, confirmed way to shut everything down.
 
-Conversations, drafts, exact provider session IDs, selected conversations and window view state are persisted locally. Streaming output and terminal scrollback are checkpointed. A damaged workspace preserves the original and can recover its last valid backup. Interrupted work is marked explicitly; it is never silently retried or resumed into the provider's unrelated "latest" session.
+Chats, drafts, provider session IDs and view state are saved locally:
+- Disk writes are atomic, and streaming output is checkpointed.
+- If the workspace file gets damaged, Opaya keeps the original and can recover its last good backup.
+- Interrupted work is marked. It is never silently retried.
 
-A power loss, OS reboot or explicitly stopping the session service cannot keep a **local OS process** alive. Its saved history remains. Codex and Claude structured chat resume stored provider IDs where supported. ACP resume support is negotiated. Remote terminals use **tmux** so they survive an SSH client disconnect; reboot survival requires the remote machine's own service/session setup. Saved terminal history is clearly distinguished from a live process.
+A reboot or power loss cannot keep a local process alive, but its saved history remains. Codex, Claude Code and ACP agents resume their stored sessions where the provider supports it.
 
-## Opaya Agent
+## Connections and adapters
 
-The **Opaya Agent** (top of the sidebar) is a built-in assistant for the app itself: it installs agent frameworks, connects and maintains agents, manages SSH machines and keys, and troubleshoots agents that do not work. Connect it to a model in **Model settings**, like a Hermes gateway: OpenAI, Anthropic, OpenRouter, a local Ollama or LM Studio model, a Hermes gateway, or any OpenAI-compatible `/v1` API. The key is stored with OS encryption.
+| Agent | How Opaya talks to it |
+| --- | --- |
+| Hermes | ACP (local, SSH or Docker), or its OpenAI-compatible gateway with stable `X-Hermes-Session-*` headers |
+| Claude Code | Streaming CLI with an exact session UUID |
+| Codex | app-server JSON-RPC |
+| OpenClaw | OpenAI-compatible gateway with per-conversation routing |
+| Other ACP agents | Negotiated sessions, permission prompts |
+| Any API | OpenAI-compatible chat (DeepSeek, OpenAI, Gemini, OpenRouter, Ollama, LM Studio and others) |
+| Any other CLI | Terminal-only connection |
 
-Safety boundary: it acts only through Opaya's own tools (connections and machines through the same validation as the UI, read-only discovery, fixed diagnostics, and vendor install commands from `desktop/catalog.cjs`). Every change and every command opens a native approval dialog and runs in a visible terminal. It never receives API tokens, has no generic shell or file access, and cannot modify the app. Its config, chat and notes live in `<app data>/opaya-agent`.
+- **Remote agents:** gateways stay private behind a loopback-only SSH tunnel, and existing SSH keys stay on your computer.
+- **Several Hermes profiles on one VPS:** add each one as its own connection.
 
-## Install agents
+See [compatibility](docs/COMPATIBILITY.md), [security](docs/SECURITY.md) and [architecture](docs/ARCHITECTURE.md).
 
-**Install agents** (Workspace, the Add dialog, right-click the sidebar, or ask the Opaya Agent) installs Hermes Agent, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider or Ollama, and the dependencies they need (Node.js, Python, Git, uv, tmux, OpenSSH, Homebrew, or **All essentials** for whatever is missing) with one click, on this computer or on a saved SSH machine. Opaya shows the exact vendor command first and runs it in a terminal you can watch. Then run Discover to add the agent.
+## Development
 
-## Groups, tags and Playground
+- **Requirements:** Node.js 22+.
+- **Commands:** `npm install`, `npm test`, `npm run check`, then `npm start`.
+- **Builds:** `npm run dist:win` builds the Windows installer on Windows, and `npm run dist:mac` builds the macOS app on a Mac. Native dependencies must be rebuilt for the target Electron runtime.
+- **Safe mode:** `npm run start:safe` turns off GPU acceleration but keeps the sandbox.
+- **Light theme:** after changing colors in `ui/style.css`, run `node scripts/generate-light-theme.cjs`.
 
-Right-click an agent > **Group & tags** to organise the sidebar into collapsible groups and label agents with tags; drag agents to reorder them or drop them on a section header to move them. **Connect all** connects every agent at once. **Playground** (sidebar) asks two agents the same question and shows the answers side by side.
+`npm test` runs offline protocol, security, persistence, clone, transfer and history tests. CI runs the following for every build and publishes the result only if they pass:
+- **Windows:** CI installs the packaged app, then starts two separate UI processes against one session service. The second must find the same service, live terminal, chat and draft.
+- **macOS:** CI runs the same restart check on the packaged Apple Silicon app.
 
-## Files and models
+Each release includes `SHA256SUMS`, which the in-app updater verifies.
 
-**Files** (agent header, the Opaya Agent header, Machines, or right-click) opens a read-only side panel for the agent's folder, this computer or a saved SSH machine: folders, file previews up to 256 KB, and project info (git branch, uncommitted changes, recent commits, project files). **Terminal here** opens a shell in that folder, **Mention in message** puts the path into your message. Remote browsing needs `python3` on the machine.
-
-**Models** sets an agent's default model for every chat, or overrides it for the current chat only.
-
-## Icons and window
-
-Agents show their official logos. Right-click an agent and choose **Change icon** to pick one of 33 library icons (LobeHub Icons, MIT) or upload a PNG, JPEG or WebP. Opaya draws its own window controls on Windows, Linux and macOS.
-
-## Everyday use
-
-Right-click any agent in the sidebar or on the Workspace cards (or use its `⋯` button) to open, start a new conversation, connect/disconnect, open a shell or the native CLI, pin, rename, reorder, edit or remove it. Pinning and renaming do not interrupt a live connection. Right-click a terminal tab to rename it, move it to its own window or end it; right-click empty sidebar space for Discover, Add connection, Machines, a local terminal and the theme. Text fields and selections keep the standard copy/paste menu. Animations follow the OS *reduce motion* setting.
-
-## Add agents
-
-- **Local:** Discover scans known executable/config locations and a small set of loopback API ports. Review any result before adding. It does not launch discovered programs or scan a LAN.
-- **Remote:** Machines -> paste `user@host:22` or import `~/.ssh/config` aliases. Open the machine's terminal to verify its host fingerprint and authenticate; then Discover searches only that selected host. Existing SSH keys remain local. A gateway token may be imported from a specific Hermes profile only after approval.
-- **Four Hermes profiles:** use four gateway connections (separate loopback ports or profile-specific `/p/<name>/v1` routes). The SSH tunnel stays private. The chat adapter sends stable Hermes transcript/memory headers and saved history. Existing tmux sessions can also be discovered and attached without creating another agent writer.
-
-Remote terminal persistence requires `tmux` on the host; Opaya does not silently install software. Gateway chat does not require tmux. Remote discovery inventories running Hermes Docker containers. Other Docker/WSL launchers can be configured manually. See [the compatibility matrix](docs/COMPATIBILITY.md) for supported operations and remaining validation.
-
-## Adapters
-
-Hermes/custom: OpenAI-compatible chat with full persisted transcript; Hermes gets stable `X-Hermes-Session-Id` and `X-Hermes-Session-Key` headers. OpenClaw: stable per-conversation `user` routing with only the new turn sent. Codex: app-server JSON RPC. Claude Code: streaming CLI with an exact session UUID. Hermes/other ACP agents: negotiated session persistence, permission prompts, and isolated per-conversation state. Any other CLI: terminal-only connection.
-
-The API compatibility layer does not import all pre-existing Hermes server sessions or guarantee reattachment to an HTTP task after a full service failure. A window-only close does not disconnect that task because the session process remains alive. See `docs/SECURITY.md` and `docs/VERIFICATION.md` for boundaries.
-
-## Verification
-
-`npm test` runs offline protocol, security, persistence and actual loopback-HTTP tests. `npm run smoke:restart` launches two actual Electron UI processes in sequence against one isolated session service and real native PTY. The second must recover the same service PID, live terminal, output, conversation and draft. The Windows workflow repeats this against the **installed executable**, then publishes immutable build-tagged installer assets and SHA-256 checksums. The macOS workflow builds Apple Silicon DMG/ZIP files, ad-hoc signs them, runs the same restart test against the packaged app and publishes a separate macOS preview release.
-
-A successful CI run is evidence of native Windows startup/packaging, not evidence that the owner's private VPS accounts and installed provider versions have been tested. No sample agents or credentials are added to production workspaces.
+CI does not test your private VPS accounts or installed provider versions. No sample agents or credentials are ever added to a real workspace.
