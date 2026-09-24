@@ -35,7 +35,9 @@ class Broker{
     for(const c of this.data.conversations.slice(-100))this.histories.set(c.id,await this.store.transcript(c.id));
     // An app crash may have left streaming placeholders on disk.
     for(const [id,messages] of this.histories){let recovered=false;for(const m of messages)if(m.status==='streaming'){m.status='error';m.error='The session service stopped during this turn. Saved partial output is preserved. Check the agent before retrying.';recovered=true;}if(recovered)await this.store.writeTranscript(id,messages);}
-    return this.snapshot();
+    // No snapshot here: it asks the OS keychain whether encryption is available, and on macOS that can wait on a
+    // keychain prompt. The service must finish starting first; the UI's first snapshot asks instead.
+    return true;
   }
   agent(id){const a=this.data.agents.find(a=>a.id===schema.id(id));if(!a)throw new Error('Agent not found.');return a;}
   host(id){const h=this.data.hosts.find(h=>h.id===schema.id(id));if(!h)throw new Error('Host not found.');return h;}

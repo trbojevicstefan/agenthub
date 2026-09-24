@@ -17,6 +17,9 @@ else{
 }
 if(smoke&&process.env.AGENTHUB_SMOKE_OUTPUT)app.setPath('userData',path.join(process.env.AGENTHUB_SMOKE_OUTPUT,'profile'));
 if(smoke||hostMode||process.argv.includes('--safe-graphics'))app.disableHardwareAcceleration();
+// Automated runs (and the session service they start, which inherits the variable) use Chromium's mock keychain on
+// macOS: an unattended keychain prompt for an ad-hoc signed build would otherwise block the service forever.
+if(process.platform==='darwin'&&(smoke||process.env.AGENTHUB_SMOKE_OUTPUT))app.commandLine.appendSwitch('use-mock-keychain');
 async function startupFailure(error){
   const root=app.getPath('userData'),message=safeError(error);
   await fs.mkdir(root,{recursive:true,mode:0o700}).catch(()=>{});
