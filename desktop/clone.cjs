@@ -75,13 +75,16 @@ async function measure(where,home,paths){
 }
 // Pipe the archive from source to target; both sides must finish cleanly. Reports bytes as they pass.
 async function transfer(from,home,paths,to,dest,{onBytes=()=>{},timeout=2*60*60*1000}={}){
-  const out=producer(from,home,paths),inp=await consumer(to,dest);
-  let errOut='',errIn='',sent=0;out.stderr?.on('data',d=>{errOut=(errOut+d).slice(-2000);});inp.stderr?.on('data',d=>{errIn=(errIn+d).slice(-2000);});
-  out.stdout.on('data',chunk=>{sent+=chunk.length;onBytes(sent);});
-  out.stdout.pipe(inp.stdin);inp.stdin.on('error',()=>{});
+  // Listen for exit as soon as each process exists, so a fast process cannot finish unnoticed.
   const done=child=>new Promise(resolve=>{child.on('error',e=>resolve(e.message));child.on('close',code=>resolve(code));});
+  // The receiving side starts first; the sender starts only when it is ready and is connected in the same tick.
+  const inp=await consumer(to,dest),inDone=done(inp);let errIn='',sent=0;inp.stderr?.on('data',d=>{errIn=(errIn+d).slice(-2000);});inp.stdin.on('error',()=>{});
+  let out;try{out=producer(from,home,paths);}catch(error){inp.kill();throw error;}
+  const outDone=done(out);let errOut='';out.stderr?.on('data',d=>{errOut=(errOut+d).slice(-2000);});
+  out.stdout.on('data',chunk=>{sent+=chunk.length;onBytes(sent);});
+  out.stdout.pipe(inp.stdin);
   const timer=setTimeout(()=>{out.kill();inp.kill();},timeout);
-  const [a,b]=await Promise.all([done(out),done(inp)]);clearTimeout(timer);
+  const [a,b]=await Promise.all([outDone,inDone]);clearTimeout(timer);
   if(a!==0)throw new Error(`Reading the source failed: ${String(errOut||a).trim().slice(0,400)}`);
   if(b!==0)throw new Error(`Writing the clone failed: ${String(errIn||b).trim().slice(0,400)}`);
   return sent;
@@ -156,4 +159,4 @@ async function redeploy({agent,source,sourceHost,host,progress=()=>{}}){
   if(c.container){progress({step:'start',state:'active',message:`Restarting container ${c.container}`});await startContainer(to,c.dir,c.container);progress({step:'start',state:'done',message:`Container ${c.container} restarted`});}
   return {copied:paths};
 }
-module.exports={clone,redeploy,SCOPES,EXCLUDE,slug,selection,transfer,measure};
+module.exports={clone,redeploy,SCOPES,EXCLUDE,slug,selection,transfer,measure,place,shell,run,sourceHome,isLocal};

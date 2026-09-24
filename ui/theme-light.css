@@ -415,3 +415,9 @@
 :where(body[data-theme="light"]) .status-jobs{border:1px solid #aed5be;background:#d5eade;color:#0e2f1b}
 :where(body[data-theme="light"]) .status-jobs b{color:#000000}
 :where(body[data-theme="light"]) .job-chip-ring{background:conic-gradient(#badecc calc(var(--p)*1%),#c1d7ca 0)}
+:where(body[data-theme="light"]) .transfer-part{border:1px solid #cbd7cf;background:#e5ece9}
+:where(body[data-theme="light"]) .transfer-mode label.selected{background:#cfd9d4}
+:where(body[data-theme="light"]) .pick-item{border:1px solid #d3ddd7;background:#e2eae6}
+:where(body[data-theme="light"]) .pick-item:hover{border-color:#aec6b8}
+:where(body[data-theme="light"]) .pick-item:has(input:checked){border-color:#7cc099;background:#d5e5dc}
+:where(body[data-theme="light"]) .library-empty span{color:#4fae78}

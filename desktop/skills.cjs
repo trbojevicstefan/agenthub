@@ -85,4 +85,4 @@ function hermesSkillCommand(agent,{action,skill,remote,windows}){
   if(remote||!windows)return `${home?`HERMES_HOME=${quote(home)} `:''}hermes ${args}`;
   return `${home?`$env:HERMES_HOME='${home.replace(/'/g,"''")}'; `:''}hermes ${args}`;
 }
-module.exports={listSkills,skillDirs,frontMatter,skillId,hermesSkillCommand};
+module.exports={localSkills,listSkills,skillDirs,frontMatter,skillId,hermesSkillCommand};

@@ -16,6 +16,7 @@ const {OpayaAgent} = require('./opaya-agent.cjs');
 const skills = require('./skills.cjs');
 const projects = require('./projects.cjs');
 const vps = require('./vps.cjs');
+const moves = require('./transfer.cjs');
 async function start({app, safeStorage}, root) {
   let broker, terminals, listener, opaya, stopping = false;
   const startedAt = new Date().toISOString(), approvals = new Map();
@@ -56,7 +57,7 @@ async function start({app, safeStorage}, root) {
   await terminals.init();
   // Installs and diagnostics run in visible one-off terminals; the UI is told to show them.
   // Background jobs (clone, redeploy): no IPC timeout, live steps and log sent to every window, kept until dismissed.
-  const jobs=new Map();
+  const jobs=new Map(),library=new moves.SkillLibrary(root);
   function publishJob(job){listener?.broadcast('job',job);}
   function startJob({kind,title,detail,steps,route},work){
     const job={id:randomUUID(),kind,title,detail,route,status:'running',startedAt:Date.now(),steps:steps.map(([key,label])=>({key,label,state:'pending'})),log:[],bytes:0,total:0,result:null,error:''};
@@ -106,7 +107,14 @@ async function start({app, safeStorage}, root) {
     terminalResize:x=>terminals.resize(schema.id(x.id),x.cols,x.rows),
     terminalRename:async x=>{const title=await terminals.rename(schema.id(x.id),x.title);emit();return title;},
     terminalDetach:async x=>{terminals.detach(schema.id(x.id));emit();return true;},
-    terminalClose:async x=>{const s=terminals.describe().find(s=>s.id===schema.id(x.id));if(!s)return false;const host=s.remote?broker.host(s.agentId.startsWith('host_')?s.agentId.slice(5):broker.agent(s.agentId).hostId):null;await terminals.end(x.id,host);emit();return true;},
+    // Closing a tab always works, also when its agent or machine was removed: then only the local record is dropped.
+    terminalClose:async x=>{
+      const s=terminals.describe().find(s=>s.id===schema.id(x.id));if(!s)return false;
+      let host=null;if(s.remote){try{host=broker.host(s.agentId.startsWith('host_')?s.agentId.slice(5):broker.agent(s.agentId).hostId);}catch{host=null;}}
+      if(s.remote&&!host){terminals.close(x.id);emit();return true;}
+      try{await terminals.end(x.id,host);}catch(error){terminals.close(x.id);emit();return {closed:true,warning:safeError(error)};}
+      emit();return true;
+    },
     installFramework:async x=>{const host=x.hostId?broker.host(x.hostId):null;const {framework,command}=catalog.command(String(x.id||''),{remote:!!host});return runInTerminal({label:`Install ${framework.name}`,key:`install_${framework.id}`,host,command});},
     files:async x=>{
       let host=null,folder=typeof x.path==='string'?x.path:'',fallback=false;
@@ -140,6 +148,30 @@ async function start({app, safeStorage}, root) {
       const src=broker.data.agents.find(s=>s.id===a.clone.from);
       return startJob({kind:'redeploy',route:{from:src?.name||'source',fromWhere:src?.transport==='ssh'?broker.host(src.hostId).name:'This computer',to:a.name,toWhere:a.transport==='ssh'?broker.host(a.hostId).name:'This computer',provider:a.provider},title:`Redeploying ${a.name}`,detail:`From ${broker.data.agents.find(s=>s.id===a.clone.from)?.name||'source'}`,steps:[['source','Find the source'],['select','Choose files'],['copy','Copy'],...(a.clone.container?[['start','Restart the container']]:[]),['connect','Reconnect']]},progress=>broker.redeployAgent(a.id,progress));
     },
+    // Transfer between agents: skills (all or chosen), Hermes API keys, Opaya's MCP servers and the Opaya API token.
+    agentEnvKeys:async x=>{const a=broker.agent(x.id);return moves.envKeys(a,a.transport==='ssh'?broker.host(a.hostId):null);},
+    transferStart:async x=>{
+      const src=broker.agent(x.sourceId),dst=broker.agent(x.targetId);if(src.id===dst.id)throw new Error('Choose a different agent to receive them.');
+      const hostOf=a=>a.transport==='ssh'?broker.host(a.hostId):null;
+      const parts=[x.skills&&'skills',x.keys&&'API keys',x.mcp?.length&&'tools',x.token&&'API token'].filter(Boolean);if(!parts.length)throw new Error('Choose what to transfer.');
+      const steps=[...(x.skills?[['source','Read skills'],['target','Find the target'],['copy','Copy skills']]:[]),...(x.keys?[['keys','Copy API keys']]:[]),...(x.mcp?.length?[['mcp','Share MCP servers']]:[]),...(x.token?[['token','Copy API token']]:[])];
+      return startJob({kind:'transfer',route:{from:src.name,fromWhere:src.transport==='ssh'?hostOf(src).name:'This computer',to:dst.name,toWhere:dst.transport==='ssh'?hostOf(dst).name:'This computer',provider:src.provider},title:`Transferring to ${dst.name}`,detail:`${parts.join(', ')} from ${src.name}`,steps},async progress=>{
+        const result={};
+        if(x.skills)result.skills=(await moves.transferSkills({source:src,sourceHost:hostOf(src),target:dst,targetHost:hostOf(dst),names:x.skills==='all'?'all':[].concat(x.skills).map(String),progress})).skills;
+        if(x.keys)result.keys=(await moves.transferEnv({source:src,sourceHost:hostOf(src),target:dst,targetHost:hostOf(dst),keys:x.keys==='all'?'all':[].concat(x.keys).map(String),progress})).keys;
+        if(x.mcp?.length){progress({step:'mcp',state:'active',message:'Sharing MCP servers'});const names=[];for(const id of x.mcp){const sv=await broker.setAgentMcp({agentId:dst.id,serverId:id,enabled:true});names.push(sv.name);}progress({step:'mcp',state:'done',message:`${dst.name} now uses ${names.join(', ')}. New conversations pick them up.`});result.mcp=names;}
+        if(x.token){progress({step:'token',state:'active',message:'Copying the Opaya API token'});const token=broker.vault.get(src.id);if(!token)throw new Error(`${src.name} has no saved API token.`);await broker.vault.set(dst.id,token,true);broker.disconnect(dst.id);progress({step:'token',state:'done',message:`Token copied. Reconnect ${dst.name} to use it.`});result.token=true;}
+        if(result.skills)progress({message:'New conversations with the agent load the new skills.'});
+        return result;
+      });
+    },
+    libraryList:()=>library.list().then(list=>list.map(({name,description,category,folder})=>({name,description,category,folder}))),
+    libraryImport:async x=>{const a=broker.agent(x.agentId);return startJob({kind:'library',route:{from:a.name,fromWhere:a.transport==='ssh'?broker.host(a.hostId).name:'This computer',to:'Skills library',toWhere:'Opaya',provider:a.provider},title:'Adding skills to the library',detail:`From ${a.name}`,steps:[['source','Read skills'],['copy','Copy into the library']]},progress=>library.importFrom({agent:a,host:a.transport==='ssh'?broker.host(a.hostId):null,names:x.names==='all'?'all':[].concat(x.names||[]).map(String),progress}));},
+    libraryInstall:async x=>{
+      const targets=[].concat(x.agentIds||[]).map(id=>broker.agent(id));if(!targets.length)throw new Error('Choose agents to install to.');
+      return startJob({kind:'library',route:{from:'Skills library',fromWhere:'Opaya',to:targets.length===1?targets[0].name:`${targets.length} agents`,toWhere:targets.map(a=>a.name).join(', ').slice(0,60),provider:targets[0].provider},title:'Installing skills',detail:`${x.names==='all'?'All library skills':[].concat(x.names).length+' skill(s)'} to ${targets.map(a=>a.name).join(', ')}`,steps:[['copy','Copy to agents']]},progress=>library.installTo({agents:targets.map(a=>({agent:a,host:a.transport==='ssh'?broker.host(a.hostId):null})),names:x.names==='all'?'all':[].concat(x.names||[]).map(String),progress}));
+    },
+    libraryRemove:x=>library.remove(String(x.name||'')), libraryAddFolder:x=>library.addFolder(String(x.path||'')),
     jobs:async()=>[...jobs.values()], jobDismiss:async x=>jobs.delete(String(x.id||'')),
     browserTool, browserResult:async x=>{const c=browserCalls.get(x.id);if(!c)return false;clearTimeout(c.timer);browserCalls.delete(x.id);x.ok?c.resolve(x.value):c.reject(new Error(String(x.error||'Browser action failed.')));return true;},
     mcpSave:x=>broker.saveMcpServer(x), mcpRemove:x=>broker.removeMcpServer(x.id), agentMcp:x=>broker.setAgentMcp(x), agentSkills:x=>broker.skills(x.id),
