@@ -1,4 +1,45 @@
-# Opaya 0.10.1 - Updates that finish
+# Opaya 0.11.0 - Chat history, skill transfer and a skills library
+
+- **Chat history panel**:
+  - Click the clock button next to a chat, press Ctrl/Cmd+Shift+H, or right-click an agent and choose **Chat history**. The panel opens on the right, in place of Projects.
+  - Chats are grouped by day. Tabs show All, Chats, Projects and Playground. You can search them and switch between one agent and all agents.
+  - Project chats carry a blue label with the project name, also in the chat picker (`[project] title`). Playground chats carry a purple label.
+  - Hover a chat to **Condense**, **Share** or **Delete** it. Right-click it to **Rename** it or **View essence**.
+- **Delete chats**: regular, project and playground chats. Opaya deletes the chat and its transcript; the agent's own session files are not touched.
+- **Condense**:
+  - Reads the whole chat and keeps only its essence: goal, key points, decisions and open items.
+  - A warning shows about how many tokens it will use before you start.
+  - If the Opaya Agent has a model API key (DeepSeek, OpenAI, Gemini, OpenRouter and others) or a local model, that model does the work and the agent's session is not touched. Without a key, the chat's own agent condenses it, and its answer also appears in the chat.
+  - The essence is saved with the chat. From it you can **Copy**, **Send to agent** or start a **New chat from essence**.
+- **Share**: Copy as Markdown, Copy essence, Save as Markdown file, or **Send to another agent**, which opens a new chat with the essence or the whole chat ready to send.
+- **Transfer to another agent** (right-click an agent, or the Skills panel):
+  - **Skills**: all of them or the ones you select. They work across Hermes, Claude Code, Codex and OpenClaw, on this computer or a VPS.
+  - **Credentials**: all or selected API keys from a Hermes `.env`. Keys are merged by name into the other agent's `.env`, which stays private (0600). The UI only ever shows key names, never values.
+  - **Tools & MCP servers** the agent uses, and optionally its saved gateway token.
+  - The transfer runs in the progress window.
+- **Skills library**: global skills kept by Opaya.
+  - Add skills from any agent or from a folder.
+  - Install them to one or many agents in one go, or remove them.
+  - Find it in Settings, the workspace menu and the Skills panel.
+- **Fixes**:
+  - A terminal tab of a removed agent can now always be closed.
+  - Fixed a rare hang in cloning when the copy finished very quickly.
+
+# Opaya 0.10.2 - A clone window worth watching
+
+- **Clone and Redeploy run in their own window**:
+  - A route from the source agent to the target machine, with packets moving while files copy.
+  - A large live percentage and progress bar showing copied size, speed, time left and elapsed time.
+  - A checklist of every step (check target, find source, choose files, copy, start container, add to Opaya, connect), plus a live log of what is happening.
+  - **Minimize** it to a progress ring in the status bar and keep working. Click the ring to bring it back. It shows again after Opaya restarts.
+  - When it finishes: **Open** the new agent, or **Copy log**. If the target is missing Hermes, **Install Hermes there** is one click away.
+- **No more timeouts**:
+  - Clones run in the background with no request timeout, and copying may take up to two hours.
+  - The size is measured first and files are sent uncompressed through tar (SSH compresses on the network), so the percentage is accurate.
+- **No second "Trust this agent?"**: you already confirmed the clone, so Opaya no longer asks again at the end (that prompt could time out).
+- **Approvals wait 10 minutes** (was 2). When Opaya is not in front, a system notification and a flashing taskbar button tell you an approval is waiting, and also when a clone or redeploy finishes or fails.
+
+## Earlier: 0.10.1 - Updates that finish
 
 - **Windows: Restart and update now installs and reopens Opaya.** Before, Opaya closed and started the installer silently. If anything went wrong (for example the session service or a helper still running), nothing happened and Opaya did not come back. Now:
   - Opaya waits until every Opaya process from its install folder has exited, and stops any that hang.

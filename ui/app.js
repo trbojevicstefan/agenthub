@@ -67,7 +67,7 @@
     render();
   }
   function render() {
-    queueMicrotask(()=>{ensureProjectsToggle();renderProjects();});
+    queueMicrotask(()=>{ensureProjectsToggle();renderProjects();const sel=selected()?.id||'';if(historyOpen&&sel!==historyFollow&&historyAgent&&sel)historyAgent=sel;historyFollow=sel;renderHistory();});
     $('#agent-count').textContent=state.agents.length;
     $('#host-count').textContent=state.hosts.length;
     $('.nav-overview').classList.toggle('selected',overview&&!opayaView&&!playgroundView);$('.nav-playground')?.classList.toggle('selected',playgroundView);$('.nav-opaya').classList.toggle('selected',opayaView);renderOpayaNav();
@@ -99,7 +99,7 @@
     contentKind('conversation');
     $('.topbar-actions').insertAdjacentHTML('beforeend',`${a.protocol!=='terminal'?'<button class="secondary" data-action="models" title="Choose agent model">Models</button>':''}${['hermes','openclaw'].includes(a.provider)?'<button class="secondary" data-action="gateway" title="Gateway status and restart">Gateway</button>':''}`);
     if(renderKey!==JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId])) {
-      $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity">${badge(a,true)}<div><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p><div class="identity-meta">${meta(a)}${a.tags?.length?`<span class="heading-tags">${tagChips(a,6)}</span>`:''}</div></div></div><div class="conversation-controls"><select id="conversation-picker" aria-label="Conversation history" title="Switch between this agent's conversations"></select><button class="icon-button" data-action="new-conversation" title="New conversation (Ctrl + N)" aria-label="New conversation">+</button><button class="icon-button" data-action="export" title="Export this conversation as Markdown" aria-label="Export conversation">&#8595;</button><button id="connect-button" class="secondary" data-action="connect"></button></div></div><div id="connection-banner"></div><div id="message-list" class="message-list"></div><div class="compose-area"><form id="message-form"><textarea id="message-input" placeholder="Message ${esc(title(a))}..." aria-label="Message ${esc(title(a))}" rows="2" maxlength="80000"></textarea><div class="compose-bottom"><div><span class="compose-provider">${esc(labels[a.provider])}</span><span id="compose-hint"></span></div><button type="button" id="stop-button" class="stop-button" data-action="stop" title="Stop this turn" hidden><span>&#9632;</span> Stop</button><button id="send-button" type="submit" class="send-button" title="Send message (Enter)" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption">Enter to send <span>&#183;</span> Shift + Enter for a new line <span>&#183;</span> Conversations stay on this computer</p></div>`;
+      $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity">${badge(a,true)}<div><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p><div class="identity-meta">${meta(a)}${a.tags?.length?`<span class="heading-tags">${tagChips(a,6)}</span>`:''}</div></div></div><div class="conversation-controls"><select id="conversation-picker" aria-label="Conversation history" title="Switch between this agent's conversations"></select><button class="icon-button" data-action="new-conversation" title="New conversation (Ctrl + N)" aria-label="New conversation">+</button><button class="icon-button" data-action="export" title="Export this conversation as Markdown" aria-label="Export conversation">&#8595;</button><button class="icon-button history-button" data-action="history-toggle" title="Chat history (${mod()}Shift+H)" aria-label="Chat history"><span class="history-glyph" aria-hidden="true"></span></button><button id="connect-button" class="secondary" data-action="connect"></button></div></div><div id="connection-banner"></div><div id="message-list" class="message-list"></div><div class="compose-area"><form id="message-form"><textarea id="message-input" placeholder="Message ${esc(title(a))}..." aria-label="Message ${esc(title(a))}" rows="2" maxlength="80000"></textarea><div class="compose-bottom"><div><span class="compose-provider">${esc(labels[a.provider])}</span><span id="compose-hint"></span></div><button type="button" id="stop-button" class="stop-button" data-action="stop" title="Stop this turn" hidden><span>&#9632;</span> Stop</button><button id="send-button" type="submit" class="send-button" title="Send message (Enter)" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption">Enter to send <span>&#183;</span> Shift + Enter for a new line <span>&#183;</span> Conversations stay on this computer</p></div>`;
       if(!String(renderKey).startsWith(`["${a.id}"`))enter($('#content'));
       renderKey=JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId]);$('#message-input').value=drafts.get(draftKey())??state.drafts?.[draftKey()]??'';
       $('#message-input').addEventListener('input',event=>{drafts.set(draftKey(),event.target.value);if(api.saveDraft)save(api.saveDraft({agentId:a.id,conversationId:currentConversation()?.id||'',text:event.target.value}));event.target.style.height='auto';event.target.style.height=Math.min(event.target.scrollHeight,190)+'px';updateSlash();});
@@ -109,7 +109,7 @@
       $('#conversation-picker').addEventListener('change',event=>action(()=>api.selectConversation({id:event.target.value})));
     }
     const convs=state.conversations.filter(c=>c.agentId===a.id).slice().reverse();
-    $('#conversation-picker').innerHTML=convs.length?convs.map(c=>`<option value="${esc(c.id)}" ${c.id===state.activeConversationId?'selected':''}>${esc(c.title)}</option>`).join(''):'<option>New conversation</option>';
+    $('#conversation-picker').innerHTML=convs.length?convs.map(c=>`<option value="${esc(c.id)}" ${c.id===state.activeConversationId?'selected':''}>${esc(chatLabel(c))}</option>`).join(''):'<option>New conversation</option>';
     const connect=$('#connect-button');connect.textContent=a.status==='connected'?'Disconnect':a.status==='connecting'?'Connecting...':'Connect';connect.disabled=a.status==='connecting';
     $('#connection-banner').innerHTML=a.error?`<div class="inline-notice error-notice"><span>!</span><div><strong>Connection needs attention</strong><p>${esc(a.error)}</p><button class="text-button" data-action="edit" data-id="${esc(a.id)}">Edit connection</button><button class="text-button" data-action="terminal">Open terminal</button><button class="text-button" data-action="clear-error" data-id="${esc(a.id)}">Clear error</button></div></div>`:a.protocol==='terminal'?'<div class="inline-notice"><span>&gt;_</span><p>This is a terminal-only agent. Use its native CLI in the integrated terminal.</p></div>':a.status==='disconnected'?'<div class="inline-notice"><span class="local-icon"></span><p>This agent is not connected. Your saved conversations are still here.</p><button class="text-button" data-action="connect">Connect now &#8594;</button></div>':'';
     const c=currentConversation(),messages=c?state.histories[c.id]||[]:[],now=performance.now(),conversationKey=`${a.id}/${c?.id||''}`;
@@ -214,7 +214,7 @@
   }
   function openSettings(){
     const localCount=state.agents.filter(a=>a.transport!=='ssh').length,remoteCount=state.agents.filter(a=>a.transport==='ssh').length,dockerCount=state.agents.filter(isDocker).length;
-    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section class="itrust-settings"><h3>iTrust mode</h3><p class="settings-copy">Approve tool requests automatically: commands, file edits and other actions agents ask permission for. Works for Hermes and other ACP agents, Codex and Claude Code. Turn it on only for agents you trust with this computer.</p><label class="switch-row"><input type="checkbox" data-setting="itrustAll" ${state.settings?.itrustAll?'checked':''}><span class="switch" aria-hidden="true"></span><span>All agents</span></label><label class="switch-row"><input type="checkbox" data-setting="itrustOpaya" ${state.settings?.itrustOpaya?'checked':''}><span class="switch" aria-hidden="true"></span><span>Opaya Agent <small>(removals still ask)</small></span></label><p class="field-help">Per agent: right-click an agent &gt; Turn on iTrust.</p></section><section><h3>Updates</h3><p class="settings-copy">Installed: Opaya ${esc(update.current||'')}. ${update.status==='available'?`Version ${esc(update.latest?.version||'')} is ready to download.`:'Opaya checks GitHub for new versions.'}</p><button class="secondary" data-action="updates">${update.status==='available'?'Update now':'Check for updates'}</button></section><section><h3>MCP servers</h3><p class="settings-copy">${(state.mcpServers||[]).length} saved. Tools such as GitHub, a browser or a database that Opaya passes to Hermes (ACP) and Claude Code.</p><button class="secondary" data-action="mcp-manage">Manage MCP servers</button></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
+    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section class="itrust-settings"><h3>iTrust mode</h3><p class="settings-copy">Approve tool requests automatically: commands, file edits and other actions agents ask permission for. Works for Hermes and other ACP agents, Codex and Claude Code. Turn it on only for agents you trust with this computer.</p><label class="switch-row"><input type="checkbox" data-setting="itrustAll" ${state.settings?.itrustAll?'checked':''}><span class="switch" aria-hidden="true"></span><span>All agents</span></label><label class="switch-row"><input type="checkbox" data-setting="itrustOpaya" ${state.settings?.itrustOpaya?'checked':''}><span class="switch" aria-hidden="true"></span><span>Opaya Agent <small>(removals still ask)</small></span></label><p class="field-help">Per agent: right-click an agent &gt; Turn on iTrust.</p></section><section><h3>Updates</h3><p class="settings-copy">Installed: Opaya ${esc(update.current||'')}. ${update.status==='available'?`Version ${esc(update.latest?.version||'')} is ready to download.`:'Opaya checks GitHub for new versions.'}</p><button class="secondary" data-action="updates">${update.status==='available'?'Update now':'Check for updates'}</button></section><section><h3>Skills library</h3><p class="settings-copy">Global skills kept by Opaya. Install them to any agent, local or on a VPS.</p><button class="secondary" data-action="library">Open skills library</button></section><section><h3>MCP servers</h3><p class="settings-copy">${(state.mcpServers||[]).length} saved. Tools such as GitHub, a browser or a database that Opaya passes to Hermes (ACP) and Claude Code.</p><button class="secondary" data-action="mcp-manage">Manage MCP servers</button></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
   }
   function switcher(){
     modal('Jump to an agent.','Search by name, provider or machine.',`<input id="switcher-search" class="switcher-search" placeholder="Search agents..." aria-label="Search agents"><div id="switcher-list"></div>`);
@@ -277,6 +277,7 @@
     if(name==='updates'){openUpdates();return;}
     if(name==='dock-move'){moveDock(button.dataset.pane);return;}
     if(name==='new-vps'){openNewVps();return;}
+    if(name==='job-restore'){const running=[...jobs.values()].filter(j=>j.status==='running');if(!jobs.has(jobShown))jobShown=(running[0]||[...jobs.values()].at(-1))?.id||'';jobMinimized=false;renderJobs();return;}
     if(name==='opaya-new'){action(async()=>{await api.opayaNewSession();opayaCount=-1;$('#message-input')?.focus();});return;}
     if(name==='opaya-delete-session'){const o=opaya();if(!confirm('Delete this chat with the Opaya Agent?'))return;action(async()=>{await api.opayaDeleteSession({id:o.sessionId});opayaCount=-1;});return;}
     if(name==='discover-tab'){discover(id||undefined);return;}
@@ -288,6 +289,9 @@
     if(name==='projects-toggle'){toggleProjects();return;}
     if(name==='project-focus'){projectsExpanded.add(id);toggleProjects(true);return;}
     if(name==='mcp-manage'){openMcpManager();return;}
+    if(name==='library'){openLibrary();return;}
+    if(name==='history-toggle'){toggleHistory();return;}
+    if(name==='transfer'){const a=state.agents.find(x=>x.id===button.dataset.id);if(a)openTransfer(a);return;}
     if(name==='playground'){overview=false;opayaView=false;playgroundView=true;closeModal();render();saveView();$('#message-input')?.focus();return;}
     if(name==='pg-swap'){pgAgents.reverse();render();return;}
     if(name==='tag-filter'){tagFilter=button.dataset.tag===tagFilter?'':button.dataset.tag;renderKey='';render();return;}
@@ -378,7 +382,8 @@
   $('#terminal-search')?.addEventListener('click',event=>{const b=event.target.closest('[data-find]');if(!b)return;if(b.dataset.find==='close')closeTerminalSearch();else findInTerminal(b.dataset.find==='prev');});
   async function closeTerminalTab(id){
     const view=terminalViews.get(id);if(!view||view.closing)return;view.closing=true;
-    try{await api.terminalClose({id});const ids=[...terminalViews.keys()],index=ids.indexOf(id);view.observer.disconnect();view.term.dispose();view.element.remove();terminalViews.delete(id);activateTerminal(currentTerminal===id?(ids[index+1]||ids[index-1]||''):currentTerminal);saveView();}finally{view.closing=false;}
+    // The tab goes away even if the service could not end the session (for example its agent was removed).
+    try{try{const r=await api.terminalClose({id});if(r?.warning)toast(`Tab closed. ${r.warning}`,true);}catch(error){toast(`Tab closed. ${error.message}`,true);}const ids=[...terminalViews.keys()],index=ids.indexOf(id);view.observer.disconnect();view.term.dispose();view.element.remove();terminalViews.delete(id);activateTerminal(currentTerminal===id?(ids[index+1]||ids[index-1]||''):currentTerminal);saveView();}finally{view.closing=false;}
   }
   $('#terminal-tabs').addEventListener('mousedown',event=>{if(event.button===1)event.preventDefault();});
   $('#terminal-tabs').addEventListener('auxclick',event=>{const tab=event.target.closest('[data-action="terminal-tab"]');if(event.button===1&&tab){event.preventDefault();action(()=>closeTerminalTab(tab.dataset.id));}});
@@ -414,8 +419,10 @@
       {icon:'&#9998;',label:'Rename...',run:()=>renameAgent(a)},
       {icon:'&#9680;',label:'Change icon...',run:()=>openIconPicker(a)},
       {icon:'&#9776;',label:'Group & tags...',run:()=>openGroupTags(a)},
+      {icon:'&#9719;',label:'Chat history',hint:`${mod()}Shift+H`,run:()=>toggleHistory(true,id)},
       {icon:'&#10022;',label:'Skills, tools & MCP...',run:()=>openSkills(id)},
       {icon:'&#9635;',label:'Projects...',run:()=>openAgentProjects(a)},
+      {icon:'&#8644;',label:'Transfer to another agent...',disabled:state.agents.length<2,run:()=>openTransfer(a)},
       {icon:'&#10697;',label:'Clone...',disabled:a.provider!=='hermes',hint:a.provider==='hermes'?'':'Hermes',run:()=>openClone(a)},
       a.clone&&{icon:'&#8635;',label:`Redeploy from ${title(state.agents.find(x=>x.id===a.clone.from)||{name:'source'})}`,run:()=>redeploy(a)},
       {icon:'&#9888;',label:a.itrust?'Turn off iTrust':'Turn on iTrust...',run:()=>toggleAgentTrust(a)},
@@ -447,6 +454,7 @@
       {icon:'+',label:'Add connection...',run:()=>openAdd()},
       {icon:'&#9635;',label:'Machines...',run:()=>openHosts()},
       {icon:'&gt;_',label:'Open local terminal',run:()=>openTerminal({local:true})},
+      {icon:'&#10022;',label:'Skills library...',run:()=>openLibrary()},
       {icon:'&#9656;',label:'Browse files on this computer',run:()=>openFiles({label:'This computer'})},
       '-',
       {icon:'&#9681;',label:theme==='light'?'Switch to dark theme':'Switch to light theme',run:()=>{applyTheme(theme==='light'?'dark':'light');saveView();}},
@@ -803,6 +811,7 @@
         ${r.error?`<div class="message-error">${esc(r.error)}</div>`:''}
         ${!r.supported?'<p class="field-help">Opaya does not know where this agent keeps skills.</p>':list.length?`<div class="skill-list">${list.slice(0,200).map(s=>`<div class="skill-row"><div><strong>/${esc(s.name)}</strong>${s.category?`<em>${esc(s.category)}</em>`:''}<p>${esc(s.description||'No description.')}</p></div><button class="secondary small" data-skill-use="${esc(s.name)}">Use</button></div>`).join('')}</div>`:`<p class="field-help">${r.skills.length?'No skills match this filter.':'No skills installed yet.'}</p>`}
         ${r.dirs?.length?`<p class="field-help">Skill folders: ${r.dirs.map(d=>`<code>${esc(d)}</code>`).join(', ')}. Each skill is a folder with a SKILL.md.${a.transport!=='ssh'?' <button class="text-button" id="skills-open-folder">Open folder</button>':''}</p>`:''}
+        <div class="skill-move"><button class="secondary small" data-action="transfer" data-id="${esc(a.id)}">&#8644; Transfer to another agent</button><button class="secondary small" id="skills-to-library" ${r.skills.length?'':'disabled'}>Add to skills library</button><button class="text-button" data-action="library">Skills library</button></div>
         ${a.provider==='hermes'?`<div class="skill-install"><input id="skill-id" placeholder="official/security/1password or https://.../SKILL.md" aria-label="Skill id or link"><button class="primary" id="skill-install">Install</button><button class="secondary" id="skill-browse">Browse Hermes hub</button></div>`:''}
       </section>
       <section class="skills-section"><div class="skills-head"><h3>Commands <small>${commands.length}</small></h3></div>
@@ -815,6 +824,7 @@
       </section>`;
       const search=$('#skills-search');search.addEventListener('input',()=>draw());if(q){search.focus();search.setSelectionRange(q.length,q.length);}
       $('#skills-refresh').onclick=()=>draw(true);
+      $('#skills-to-library')&&($('#skills-to-library').onclick=()=>openLibraryImport(a,r.skills));
       for(const b of body.querySelectorAll('[data-skill-use]'))b.onclick=()=>useCommand(a,b.dataset.skillUse);
       for(const c of body.querySelectorAll('[data-mcp-toggle]'))c.onchange=()=>action(async()=>{await api.agentMcp({agentId:a.id,serverId:c.dataset.mcpToggle,enabled:c.checked});await refresh();toast(a.protocol==='acp'?'Saved. Start a new conversation to use it.':'Saved.');});
       $('#skills-open-folder')&&($('#skills-open-folder').onclick=()=>{closeModal();openFiles({agentId:a.id,path:r.dirs[0],label:`${title(a)} / skills`});});
@@ -888,7 +898,7 @@
   const fitsProject=(a,p)=>a.command!=='docker'&&(p.hostId?a.transport==='ssh'&&a.hostId===p.hostId:a.transport!=='ssh');
   const ago=iso=>{const s=Math.max(0,(Date.now()-new Date(iso).getTime())/1000);return s<60?'now':s<3600?`${Math.floor(s/60)}m`:s<86400?`${Math.floor(s/3600)}h`:s<604800?`${Math.floor(s/86400)}d`:new Date(iso).toLocaleDateString([],{month:'short',day:'numeric'});};
   const saveProjectsView=()=>saveView();
-  function toggleProjects(force){projectsOpen=force??!projectsOpen;renderProjects();saveProjectsView();if(projectsOpen)refreshProjectGit();}
+  function toggleProjects(force){projectsOpen=force??!projectsOpen;if(projectsOpen&&historyOpen){historyOpen=false;renderHistory();}renderProjects();saveProjectsView();if(projectsOpen)refreshProjectGit();}
   async function loadProjectGit(p){
     const entry=projectGit.get(p.id)||{};if(entry.loading)return;entry.loading=true;projectGit.set(p.id,entry);
     try{const info=await api.projectInfo({id:p.id});projectGit.set(p.id,{info,at:Date.now()});}catch(error){projectGit.set(p.id,{error:error.message,at:Date.now()});}
@@ -925,6 +935,129 @@
       <footer class="projects-footer">Right-click a project for git and GitHub</footer>`;
     if(projectsHtml===html)return;projectsHtml=html;box.innerHTML=html;
     const filter=$('#projects-filter');if(filter)filter.oninput=()=>{projectFilter=filter.value.toLowerCase();const at=filter.selectionStart;renderProjects();const f=$('#projects-filter');f?.focus();f?.setSelectionRange(at,at);};
+  }
+  // ---- Chat history: a right-side panel per agent with project, regular and playground chats ---------------------
+  let historyOpen=false,historyFilter='',historyTab='all',historyAgent='',historyHtml='',historyFollow='';
+  const chatKind=c=>c.projectId?'project':c.kind==='playground'||/^Playground: /.test(c.title||'')?'playground':'chat';
+  const chatChip=c=>{const k=chatKind(c),p=projectOf(c);return k==='project'?`<span class="chat-chip project" title="Project chat: ${esc(p?.name||'removed project')}"><span class="project-folder" aria-hidden="true"></span>${esc(p?.name||'Project')}</span>`:k==='playground'?'<span class="chat-chip playground" title="Playground chat">Playground</span>':'';};
+  const chatLabel=c=>{const p=projectOf(c);return p?`[${p.name}] ${c.title}`:chatKind(c)==='playground'?c.title:c.title;};
+  function toggleHistory(force,agentId){
+    historyOpen=force??!historyOpen;
+    if(historyOpen){historyAgent=agentId??selected()?.id??'';historyFollow=selected()?.id||'';if(projectsOpen){projectsOpen=false;renderProjects();saveProjectsView();}}
+    historyHtml='';renderHistory();
+  }
+  function renderHistory(){
+    const box=$('#history-panel');if(!box)return;
+    box.hidden=!historyOpen;document.body.classList.toggle('history-panel-open',historyOpen);
+    for(const b of document.querySelectorAll('[data-action="history-toggle"]'))b.classList.toggle('selected',historyOpen);
+    if(!historyOpen)return;
+    if(historyAgent&&!state.agents.some(a=>a.id===historyAgent))historyAgent='';
+    const all=state.conversations.filter(c=>!historyAgent||c.agentId===historyAgent).slice().sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+    const counts={all:all.length,chat:0,project:0,playground:0};for(const c of all)counts[chatKind(c)]++;
+    const list=all.filter(c=>(historyTab==='all'||chatKind(c)===historyTab)&&(!historyFilter||`${c.title} ${projectOf(c)?.name||''}`.toLowerCase().includes(historyFilter)));
+    const busyIn=c=>state.agents.find(a=>a.id===c.agentId)?.busy&&state.activeConversationId===c.id;
+    const row=c=>{const a=state.agents.find(x=>x.id===c.agentId);return `<div class="history-row ${c.id===state.activeConversationId&&!overview&&!opayaView&&!playgroundView?'current':''}" data-hist="${esc(c.id)}">
+      <button type="button" class="history-open" data-hist-act="open" title="${esc(c.title)}">${!historyAgent&&a?badge(a):''}<span class="history-text"><span class="history-title">${esc(c.title)}</span><span class="history-meta">${chatChip(c)}${c.essence?`<span class="essence-mark" title="Condensed by ${esc(c.essence.by||'')}">&#10022; Essence</span>`:''}<small>${busyIn(c)?'<span class="status-dot working"></span>':esc(ago(c.createdAt))}</small></span></span></button>
+      <div class="history-actions"><button type="button" class="term-icon" data-hist-act="condense" title="Condense to the essence" aria-label="Condense"><span aria-hidden="true">&#8860;</span></button><button type="button" class="term-icon" data-hist-act="share" title="Share" aria-label="Share"><span aria-hidden="true">&#8599;</span></button><button type="button" class="term-icon danger" data-hist-act="delete" title="Delete chat" aria-label="Delete chat"><span aria-hidden="true">&#10005;</span></button></div></div>`;};
+    const group=(label,items)=>items.length?`<div class="history-group"><div class="history-group-label">${esc(label)}<small>${items.length}</small></div>${items.map(row).join('')}</div>`:'';
+    const buckets=[];const today=new Date();today.setHours(0,0,0,0);const day=86400000;
+    for(const c of list){const t=new Date(c.createdAt).getTime(),label=t>=today.getTime()?'Today':t>=today.getTime()-day?'Yesterday':t>=today.getTime()-6*day?'This week':t>=today.getTime()-29*day?'This month':'Older';let b=buckets.find(x=>x[0]===label);if(!b)buckets.push(b=[label,[]]);b[1].push(c);}
+    const tabs=[['all','All'],['chat','Chats'],['project','Projects'],['playground','Playground']];
+    const html=`<header class="projects-header"><strong>History</strong><small>${all.length||''}</small></header>
+      <div class="history-toolbar"><select id="history-agent" aria-label="Agent"><option value="">All agents</option>${state.agents.map(a=>`<option value="${esc(a.id)}" ${a.id===historyAgent?'selected':''}>${esc(title(a))}</option>`).join('')}</select><button class="icon-button" data-action="history-toggle" title="Close history" aria-label="Close history">&#10005;</button></div>
+      <div class="history-tabs" role="tablist">${tabs.map(([k,l])=>`<button type="button" role="tab" class="${historyTab===k?'selected':''}" data-hist-tab="${k}">${l}${counts[k]?` <small>${counts[k]}</small>`:''}</button>`).join('')}</div>
+      <div class="history-search"><input id="history-filter" placeholder="Search chats..." aria-label="Search chats" value="${esc(historyFilter)}"></div>
+      <div class="history-list">${buckets.map(([l,items])=>group(l,items)).join('')||`<div class="history-empty"><span aria-hidden="true">&#9719;</span><p>${all.length?'No chat matches.':'No chats yet.'}</p></div>`}</div>
+      <footer class="projects-footer">Right-click a chat for more</footer>`;
+    if(historyHtml===html)return;historyHtml=html;box.innerHTML=html;
+    const f=$('#history-filter');f.oninput=()=>{historyFilter=f.value.toLowerCase();const at=f.selectionStart;renderHistory();const n=$('#history-filter');n?.focus();n?.setSelectionRange(at,at);};
+    $('#history-agent').onchange=e=>{historyAgent=e.target.value;renderHistory();};
+  }
+  function historyMenu(c){
+    return [
+      {icon:'&#8599;',label:'Open',run:()=>openProjectChat(c.id)},
+      {icon:'&#9998;',label:'Rename...',run:()=>renameChat(c)},
+      '-',
+      {icon:'&#8860;',label:c.essence?'Condense again...':'Condense...',run:()=>condenseChat(c)},
+      c.essence&&{icon:'&#10022;',label:'View essence',run:()=>openEssence(c.id)},
+      '-',
+      ...shareItems(c),
+      '-',
+      {icon:'&#10005;',label:'Delete chat...',danger:true,run:()=>deleteChat(c)}
+    ];
+  }
+  function shareItems(c){
+    return [
+      {icon:'&#10697;',label:'Copy as Markdown',run:async()=>{await api.clipboardWrite({text:await api.conversationMarkdown({id:c.id})});toast('Chat copied as Markdown.');}},
+      c.essence&&{icon:'&#10022;',label:'Copy essence',run:async()=>{await api.clipboardWrite({text:await api.conversationMarkdown({id:c.id,essence:true})});toast('Essence copied.');}},
+      {icon:'&#8595;',label:'Save as Markdown file...',run:async()=>{if(await api.exportConversation({id:c.id}))toast('Chat saved.');}},
+      {icon:'&#8644;',label:'Send to another agent...',disabled:state.agents.length<2&&!c.essence,run:()=>sendChatTo(c)}
+    ];
+  }
+  document.addEventListener('click',event=>{
+    const tab=event.target.closest('[data-hist-tab]');if(tab){historyTab=tab.dataset.histTab;renderHistory();return;}
+    const b=event.target.closest('[data-hist-act]');if(!b)return;const id=b.closest('[data-hist]')?.dataset.hist,c=state.conversations.find(x=>x.id===id);if(!c)return;
+    const act=b.dataset.histAct;
+    if(act==='open')action(()=>openProjectChat(c.id));
+    else if(act==='condense')condenseChat(c);
+    else if(act==='delete')deleteChat(c);
+    else if(act==='share'){const r=b.getBoundingClientRect();openMenu(r.left-180,r.bottom+4,shareItems(c),'Share',b);}
+  });
+  document.addEventListener('contextmenu',event=>{const r=event.target.closest('#history-panel [data-hist]'),pc=event.target.closest('[data-action="project-open-chat"]');if(!r&&!pc)return;const c=state.conversations.find(x=>x.id===(r?r.dataset.hist:pc.dataset.id));if(!c)return;event.preventDefault();event.stopPropagation();openMenu(event.clientX,event.clientY,historyMenu(c),c.title);},true);
+  function renameChat(c){
+    modal('Rename chat','',`<form id="chat-rename-form"><label class="field"><span>Title</span><input name="title" value="${esc(c.title)}" maxlength="120" autocomplete="off" required></label><div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Rename</button></div></div></form>`);
+    const f=$('#chat-rename-form');f.elements.title.select();
+    f.onsubmit=event=>{event.preventDefault();action(async()=>{await api.renameConversation({id:c.id,title:f.elements.title.value});closeModal();await refresh();});};
+  }
+  async function deleteChat(c){
+    const a=state.agents.find(x=>x.id===c.agentId);
+    if(!confirm(`Delete "${c.title}"?\n\nOpaya deletes this ${chatKind(c)==='project'?'project chat':chatKind(c)==='playground'?'playground chat':'chat'} and its transcript${a?` with ${title(a)}`:''}. This cannot be undone.`))return;
+    await action(async()=>{await api.deleteConversation({id:c.id});await refresh();toast('Chat deleted.');});
+  }
+  // Condense: reads the whole chat and keeps only its essence. Uses the Opaya Agent's model API when it has a key,
+  // otherwise the chat's own agent. Either way it costs tokens, so the user confirms first.
+  async function condenseChat(c){
+    const a=state.agents.find(x=>x.id===c.agentId),o=opaya(),local=['ollama','lmstudio'].includes(o.config?.preset);
+    const model=o.configured&&o.config?.preset!=='codex'&&(o.hasKey||local)?`${o.presets?.[o.config.preset]?.label||'Model API'} / ${o.config.model}`:'';
+    let size=0;try{size=(await api.conversationMarkdown({id:c.id})).length;}catch{}
+    const tokens=Math.round(size/4);
+    modal('Condense chat',c.title,`<div class="condense-body">
+      <div class="condense-warning"><span aria-hidden="true">!</span><div><strong>This uses tokens.</strong><p>Opaya sends the whole chat, about <b>${tokens.toLocaleString()}</b> tokens${size>120000?' (very long chats are trimmed to the start and the latest part)':''}, and keeps only the essence: goal, key points, decisions and open items.</p></div></div>
+      <div class="condense-engine ${model?'model':'agent'}"><strong>${model?`With the Opaya model: ${esc(model)}`:`With ${esc(a?title(a):'the agent')} itself`}</strong><p>${model?'Its API key pays for it. The agent\'s own session is not touched.':`No Opaya model API key is set, so ${esc(a?title(a):'the agent')} condenses its own chat. Its answer also appears in this chat. <button type="button" class="text-button" data-action="opaya-config">Set an Opaya model API key</button>`}</p></div>
+      <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="button" class="primary" id="condense-go">Condense</button></div></div></div>`);
+    $('#condense-go').onclick=()=>action(async()=>{await api.condenseConversation({id:c.id});closeModal();});
+  }
+  async function openEssence(id){
+    const c=state.conversations.find(x=>x.id===id);if(!c)return;
+    let text='';try{text=await api.conversationMarkdown({id,essence:true});}catch(error){toast(error.message,true);return;}
+    const body=text.replace(/^# .*\n\n.*\n\n/,'');
+    modal('Essence',`${c.title}${c.essence?.by?` / condensed by ${c.essence.by}`:''}`,`<div class="essence-body message-content">${format(body)}</div>
+      <div class="modal-footer"><div><button type="button" class="text-button" id="essence-again">Condense again</button></div><div><button type="button" class="secondary" id="essence-copy">Copy</button><button type="button" class="secondary" id="essence-send">Send to agent...</button><button type="button" class="primary" id="essence-new">New chat from essence</button></div></div>`,true);
+    $('#essence-copy').onclick=()=>action(async()=>{await api.clipboardWrite({text});toast('Essence copied.');});
+    $('#essence-again').onclick=()=>condenseChat(c);
+    $('#essence-send').onclick=()=>sendChatTo(c,true);
+    $('#essence-new').onclick=()=>action(()=>startChatWith(c.agentId,essencePrompt(c,body),c.projectId));
+  }
+  const essencePrompt=(c,body)=>`Context from an earlier chat ("${c.title}"):\n\n${body.trim()}\n\n---\n\n`;
+  async function startChatWith(agentId,text,projectId=''){
+    const a=state.agents.find(x=>x.id===agentId),p=projectId&&(state.projects||[]).find(x=>x.id===projectId);
+    const fits=p&&(p.hostId||'')===(a?.transport==='ssh'?a.hostId:'');
+    const c=await api.newConversation({agentId,projectId:fits?projectId:''});
+    closeModal();overview=false;opayaView=false;playgroundView=false;drafts.set(c.id,text);await api.saveDraft({agentId,conversationId:c.id,text});await refresh();
+    const input=$('#message-input');if(input&&currentConversation()?.id===c.id){input.value=text;input.focus();input.setSelectionRange(text.length,text.length);input.dispatchEvent(new Event('input'));}
+  }
+  function sendChatTo(c,essenceOnly=false){
+    const others=state.agents;const a=state.agents.find(x=>x.id===c.agentId);
+    modal('Send to another agent',`Start a chat with the context of "${c.title}".`,`<form id="send-chat-form" class="mcp-form"><label>Agent<select name="agentId">${others.map(x=>`<option value="${esc(x.id)}" ${x.id===others.find(y=>y.id!==c.agentId)?.id?'selected':''}>${esc(title(x))} / ${esc(labels[x.provider]||x.provider)} / ${esc(location(x))}</option>`).join('')}</select></label>
+      <fieldset class="clone-choice"><legend>What to send</legend><div class="clone-where">${c.essence?`<label class="choice-card small"><input type="radio" name="what" value="essence" checked><span><strong>Essence</strong><small>Short, saves tokens</small></span></label>`:''}${essenceOnly?'':`<label class="choice-card small"><input type="radio" name="what" value="full" ${c.essence?'':'checked'}><span><strong>Whole chat</strong><small>Everything ${esc(a?title(a):'')} and you said</small></span></label>`}</div></fieldset>
+      ${c.essence?'':'<p class="field-help">Tip: condense the chat first to send only its essence.</p>'}
+      <p class="field-help">Opaya opens a new chat with the context in the message box. Review it, then send.</p>
+      <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Open chat</button></div></div></form>`);
+    const f=$('#send-chat-form');
+    f.onsubmit=event=>{event.preventDefault();action(async()=>{const what=f.querySelector('[name="what"]:checked')?.value||'essence';
+      let text;if(what==='essence'){text=essencePrompt(c,(await api.conversationMarkdown({id:c.id,essence:true})).replace(/^# .*\n\n.*\n\n/,''));}
+      else{const md=await api.conversationMarkdown({id:c.id});text=`Context from an earlier chat ("${c.title}"):\n\n${md.length>60000?md.slice(-60000):md}\n\n---\n\n`;}
+      await startChatWith(f.elements.agentId.value,text,c.projectId);});};
   }
   function ensureProjectsToggle(){
     const bar=$('#topbar');if(!bar||$('#projects-toggle',bar))return;
@@ -1034,6 +1167,7 @@
     openMenu(event.clientX,event.clientY,projectMenu(p),p.name,el);
   });
   document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==='p'&&!$('#app-dialog')){event.preventDefault();toggleProjects();}});
+  document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==='h'&&!$('#app-dialog')){event.preventDefault();toggleHistory();}});
   // ---- A proactive Opaya Agent, gently: one small card at a time, at most every 20 minutes, each tip once ------------
   let nudgeShownAt=0,nudgeId='';
   function nudgeCandidates(){
@@ -1057,6 +1191,150 @@
     document.body.append(card);if(!n.urgent)setTimeout(()=>{if(card.isConnected)close();},30000);
   }
   setInterval(checkNudges,30000);
+  // ---- Job window: live progress for clones and redeploys; minimizes to a chip in the status bar ------------------
+  const jobs=new Map();let jobShown='',jobMinimized=false;const jobRate=new Map();
+  const fmtBytes=n=>!n?'0 B':n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
+  const fmtTime=s=>!Number.isFinite(s)||s<0?'--':s<60?`${Math.round(s)}s`:`${Math.floor(s/60)}m ${String(Math.round(s%60)).padStart(2,'0')}s`;
+  function jobPercent(j){
+    if(j.status==='done')return 100;
+    const steps=j.steps||[],done=steps.filter(s=>['done','skipped','warn'].includes(s.state)).length,copyIndex=steps.findIndex(s=>s.key==='copy');
+    // Copying is most of the work: it spans 15% to 85%; the other steps share the rest.
+    const copy=steps[copyIndex];const copyShare=copy?.state==='done'?1:copy?.state==='active'&&j.total?Math.min(1,j.bytes/j.total):0;
+    const others=steps.length-1||1,otherDone=done-(copy?.state==='done'?1:0);
+    return Math.round(Math.min(99,(otherDone/others)*30+copyShare*70));
+  }
+  function trackRate(j){
+    const now=Date.now(),r=jobRate.get(j.id)||{samples:[]};r.samples.push([now,j.bytes||0]);r.samples=r.samples.filter(([t])=>now-t<5000);jobRate.set(j.id,r);
+    const [t0,b0]=r.samples[0],rate=now>t0?((j.bytes||0)-b0)/((now-t0)/1000):0;return rate;
+  }
+  function onJob(j){
+    const prev=jobs.get(j.id);jobs.set(j.id,j);
+    if(!prev&&j.status==='running'){jobShown=j.id;jobMinimized=false;}
+    if(prev?.status==='running'&&j.status!=='running'){
+      if(j.status==='done'){const r=j.result||{},bits=[r.copied&&`Copied: ${r.copied.join(', ')}`,r.skills&&`${r.skills.length} skill${r.skills.length===1?'':'s'}`,r.keys&&`${r.keys.length} API key${r.keys.length===1?'':'s'}`,r.mcp&&`MCP: ${r.mcp.join(', ')}`,r.token&&'API token'].filter(Boolean);
+        toast(`${j.title.replace(/^Cloning/,'Cloned').replace(/^Redeploying/,'Redeployed').replace(/^Transferring/,'Transferred').replace(/^Installing skills/,'Installed skills').replace(/^Adding skills/,'Added skills')}. ${bits.join(', ')}${bits.length?'.':''}`);if(j.kind!=='library')skillCache.clear();refresh();if(j.kind==='library'&&$('#library-body'))drawLibrary?.();if(j.kind==='condense'&&j.result?.conversationId)refresh().then(()=>openEssence(j.result.conversationId));}
+      else toast(`${j.title} failed: ${j.error}`,true);
+    }
+    renderJobs();
+  }
+  function renderJobs(){
+    const running=[...jobs.values()].filter(j=>j.status==='running');
+    const chip=$('#status-jobs');
+    if(chip){const current=jobs.get(jobShown)||running[0];const show=!!current&&(jobMinimized||!$('#job-window'))&&(running.length||current.status!=='running');chip.hidden=!(current&&(jobMinimized&&current));
+      if(current)chip.innerHTML=`<span class="job-chip-ring" style="--p:${jobPercent(current)}"></span>${esc(current.status==='running'?current.title:current.status==='done'?'Finished: '+current.title.replace(/^Cloning |^Redeploying /,''):'Failed: '+current.title.replace(/^Cloning |^Redeploying /,''))} ${current.status==='running'?`${jobPercent(current)}%`:''}${running.length>1?` <b>+${running.length-1}</b>`:''}`;}
+    const j=jobs.get(jobShown);let win=$('#job-window');
+    document.body.classList.toggle('job-open',!!j&&!jobMinimized);
+    if(!j||jobMinimized){win?.remove();return;}
+    if(!win){win=document.createElement('section');win.id='job-window';win.className='job-window';win.setAttribute('role','dialog');win.setAttribute('aria-label',j.title);document.body.append(win);
+      win.addEventListener('click',event=>{const b=event.target.closest('[data-job]');if(!b)return;const act=b.dataset.job,job=jobs.get(jobShown);
+        if(act==='min'){jobMinimized=true;renderJobs();}
+        else if(act==='close'){if(job?.status==='running'){jobMinimized=true;}else{api.jobDismiss({id:jobShown}).catch(()=>{});jobs.delete(jobShown);jobShown=[...jobs.values()].find(x=>x.status==='running')?.id||'';}renderJobs();}
+        else if(act==='open'&&job?.result?.agent){overview=false;opayaView=false;playgroundView=false;action(async()=>{await api.select({id:job.result.agent.id});await refresh();});jobMinimized=true;renderJobs();}
+        else if(act==='install'){action(async()=>{await api.installFramework({id:'hermes',hostId:job?.route?.toHostId||undefined});toast('Installing Hermes in Terminal. Clone again when it finishes.');});}
+        else if(act==='copy'){action(()=>api.clipboardWrite({text:job.log.map(l=>`${new Date(l.at).toLocaleTimeString()} ${l.text}`).join('\n')}));toast('Log copied.');}
+      });}
+    const pct=jobPercent(j),rate=j.status==='running'?trackRate(j):0,eta=rate>0&&j.total?(j.total-j.bytes)/rate:NaN,elapsed=((j.finishedAt||Date.now())-j.startedAt)/1000;
+    const copying=j.steps.find(s=>s.key==='copy')?.state==='active',r=j.route||{};
+    const icon=s=>({done:'<span class="job-step-icon done">&#10003;</span>',active:'<span class="job-step-icon active"></span>',error:'<span class="job-step-icon error">&#10005;</span>',warn:'<span class="job-step-icon warn">!</span>',skipped:'<span class="job-step-icon skipped">&#8211;</span>'}[s]||'<span class="job-step-icon"></span>');
+    const html=`<header class="job-head"><div class="job-title"><strong>${esc(j.title)}</strong><small>${esc(j.detail||'')}</small></div><button type="button" class="icon-button" data-job="min" title="Minimize" aria-label="Minimize">&#8211;</button><button type="button" class="icon-button" data-job="close" title="${j.status==='running'?'Hide (keeps running)':'Close'}" aria-label="Close">&#10005;</button></header>
+      <div class="job-route ${j.status}"><div class="job-node"><span class="job-node-icon">${badge({provider:r.provider||'hermes'})}</span><strong>${esc(r.from||'')}</strong><small>${esc(r.fromWhere||'')}</small></div><div class="job-wire ${copying?'flowing':''}"><i></i><i></i><i></i><i></i></div><div class="job-node"><span class="job-node-icon target"><span class="machine-icon"></span></span><strong>${esc(r.to||'')}</strong><small>${esc(r.toWhere||'')}</small></div></div>
+      <div class="job-progress"><div class="job-percent"><span>${pct}<small>%</small></span><em>${j.status==='done'?'Complete':j.status==='error'?'Stopped':copying?`${fmtBytes(j.bytes)} of ${fmtBytes(j.total)}`:esc(j.steps.find(s=>s.state==='active')?.label||'Working')}</em></div><div class="job-bar ${j.status}"><span style="width:${pct}%"></span></div>
+        <div class="job-stats"><span>Speed <b>${copying&&rate>0?fmtBytes(rate)+'/s':'--'}</b></span><span>Left <b>${copying?fmtTime(eta):'--'}</b></span><span>Elapsed <b>${fmtTime(elapsed)}</b></span></div></div>
+      <ol class="job-steps">${j.steps.map(s=>`<li class="${s.state}">${icon(s.state)}<span>${esc(s.label)}</span></li>`).join('')}</ol>
+      <div class="job-log" id="job-log">${j.log.slice(-120).map(l=>`<p class="${esc(l.state||'')}"><time>${new Date(l.at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</time>${esc(l.text)}</p>`).join('')}</div>
+      ${j.status!=='running'?`<footer class="job-foot">${j.status==='error'?`<p class="job-error">${esc(j.error)}</p>${/Hermes is not installed/.test(j.error)?'<button type="button" class="secondary" data-job="install">Install Hermes there</button>':''}`:''}<button type="button" class="text-button" data-job="copy">Copy log</button>${j.status==='done'&&j.result?.agent?`<button type="button" class="primary" data-job="open">Open ${esc(j.result.agent.name)}</button>`:''}<button type="button" class="secondary" data-job="close">Close</button></footer>`:''}`;
+    if(win.dataset.html!==html){const log=$('#job-log',win),atBottom=!log||log.scrollHeight-log.scrollTop-log.clientHeight<30;win.innerHTML=html;win.dataset.html=html;win.classList.toggle('finished',j.status!=='running');const nl=$('#job-log',win);if(nl&&atBottom)nl.scrollTop=nl.scrollHeight;}
+  }
+  api.onJob?.(onJob);
+  api.jobs?.().then(list=>{for(const j of list||[]){jobs.set(j.id,j);if(j.status==='running'){jobShown=j.id;jobMinimized=true;}}renderJobs();}).catch(()=>{});
+  setInterval(()=>{if([...jobs.values()].some(j=>j.status==='running'))renderJobs();},1000);
+  // ---- Transfer between agents and the global skills library -----------------------------------------------------
+  const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
+  const pickList=(name,items,checked=false)=>`<div class="pick-list">${items.map(i=>`<label class="pick-item"><input type="checkbox" name="${name}" value="${esc(i.value)}" ${checked?'checked':''}><span><strong>${esc(i.label)}</strong>${i.help?`<small>${esc(i.help)}</small>`:''}</span></label>`).join('')}</div>`;
+  const modeRow=(name,value,extra='')=>`<div class="segmented transfer-mode" role="radiogroup">${[['none','None'],['all','All'],['some','Selected']].map(([v,l])=>`<label class="${value===v?'selected':''}"><input type="radio" name="${name}" value="${v}" ${value===v?'checked':''} ${extra}>${l}</label>`).join('')}</div>`;
+  function openTransfer(a,preset={}){
+    const others=state.agents.filter(x=>x.id!==a.id);if(!others.length){toast('Add another agent first.');return;}
+    const mcps=(state.mcpServers||[]).filter(s=>usesMcp(s,a));
+    modal(`Transfer from ${title(a)}`,'Copy skills, API keys and tools to another agent. Nothing is removed from this one.',`<form id="transfer-form" class="mcp-form">
+      <label>Agent that receives them<select name="targetId">${others.map(x=>`<option value="${esc(x.id)}" ${preset.targetId===x.id?'selected':''}>${esc(title(x))} / ${esc(labels[x.provider]||x.provider)} / ${esc(location(x))}</option>`).join('')}</select></label>
+      <fieldset class="transfer-part"><legend>Skills <small id="transfer-skill-count"></small></legend>${modeRow('skillsMode',preset.skills||'all')}<div id="transfer-skills"><p class="field-help">Loading skills...</p></div></fieldset>
+      <fieldset class="transfer-part" id="transfer-keys-part"><legend>Credentials <small>API keys from .env, names only</small></legend><div id="transfer-keys"></div></fieldset>
+      <fieldset class="transfer-part"><legend>Tools &amp; MCP servers</legend>${mcps.length?pickList('mcp',mcps.map(s=>({value:s.id,label:s.name,help:s.type==='stdio'?s.command:s.url})),true):`<p class="field-help">${esc(title(a))} uses no Opaya MCP servers. <button type="button" class="text-button" data-action="mcp-manage">Manage MCP servers</button></p>`}<p class="field-help" id="transfer-mcp-note"></p></fieldset>
+      ${a.hasToken?`<label class="check-row inline"><input type="checkbox" name="token"> Also copy the saved gateway API token <small>(stays encrypted, never shown)</small></label>`:''}
+      <p class="field-help">Skills are folders with a SKILL.md, so they work across Hermes, Claude Code, Codex and OpenClaw. Existing skills with the same folder name are replaced.</p>
+      <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Transfer</button></div></div></form>`,true);
+    const f=$('#transfer-form'),target=()=>state.agents.find(x=>x.id===f.elements.targetId.value);let skills=[],keys=null;
+    const mode=n=>f.querySelector(`[name="${n}"]:checked`)?.value||'none';
+    const syncMode=()=>{for(const l of f.querySelectorAll('.transfer-mode label'))l.classList.toggle('selected',l.querySelector('input').checked);
+      $('#transfer-skills').classList.toggle('collapsed',mode('skillsMode')!=='some');$('#transfer-keys-list')?.classList.toggle('collapsed',mode('keysMode')!=='some');};
+    const drawKeys=()=>{const t=target(),box=$('#transfer-keys');
+      if(a.provider!=='hermes'||t?.provider!=='hermes'){box.innerHTML=`<p class="field-help">API keys move between Hermes agents. ${a.provider!=='hermes'?`${esc(title(a))} is not Hermes.`:`${esc(title(t))} is not Hermes.`}</p>`;return;}
+      if(!keys){box.innerHTML='<p class="field-help">Reading key names...</p>';return;}
+      box.innerHTML=keys.length?`${modeRow('keysMode',preset.keys||'none')}<div id="transfer-keys-list" class="collapsed">${pickList('key',keys.map(k=>({value:k,label:k})))}</div><p class="field-help">Values are copied by the session service and never shown. Keys with the same name on ${esc(title(t))} are replaced.</p>`:'<p class="field-help">No API keys in this agent\'s .env.</p>';
+      syncMode();};
+    const drawNote=()=>{const t=target();$('#transfer-mcp-note').textContent=t&&!mcpPassed(t)&&mcps.length?`${title(t)}: ${mcpSupport(t)}`:'';};
+    f.addEventListener('change',event=>{if(event.target.name==='targetId'){drawKeys();drawNote();}syncMode();$('#transfer-skill-count').textContent=mode('skillsMode')==='some'?`${f.querySelectorAll('[name="skill"]:checked').length} of ${skills.length} selected`:skills.length?plural(skills.length,'skill'):'';});
+    drawKeys();drawNote();syncMode();
+    loadSkills(a.id).then(r=>{skills=r.skills||[];const box=$('#transfer-skills');if(!box)return;
+      box.innerHTML=skills.length?`<input class="skills-search" id="transfer-filter" placeholder="Filter skills..." aria-label="Filter skills">${pickList('skill',skills.map(s=>({value:s.name,label:'/'+s.name,help:s.description})),false)}`:'<p class="field-help">No skills installed.</p>';
+      $('#transfer-skill-count').textContent=skills.length?plural(skills.length,'skill'):'';
+      if(!skills.length)for(const i of f.querySelectorAll('[name="skillsMode"]'))i.checked=i.value==='none';
+      $('#transfer-filter')?.addEventListener('input',e=>{const q=e.target.value.toLowerCase();for(const l of box.querySelectorAll('.pick-item'))l.hidden=!l.textContent.toLowerCase().includes(q);});
+      for(const n of preset.names||[]){const c=box.querySelector(`[name="skill"][value="${CSS.escape(n)}"]`);if(c)c.checked=true;}syncMode();
+    },error=>{$('#transfer-skills').innerHTML=`<div class="message-error">${esc(error.message)}</div>`;});
+    if(a.provider==='hermes')api.agentEnvKeys({id:a.id}).then(list=>{keys=list||[];drawKeys();},()=>{keys=[];drawKeys();});
+    f.onsubmit=event=>{event.preventDefault();const t=target(),picked=n=>[...f.querySelectorAll(`[name="${n}"]:checked`)].map(i=>i.value);
+      const sm=mode('skillsMode'),km=f.querySelector('[name="keysMode"]')?mode('keysMode'):'none';
+      const x={sourceId:a.id,targetId:t.id,skills:sm==='all'?'all':sm==='some'?picked('skill'):false,keys:km==='all'?'all':km==='some'?picked('key'):false,mcp:picked('mcp'),token:!!f.elements.token?.checked};
+      if(Array.isArray(x.skills)&&!x.skills.length){toast('Select skills, or choose All or None.',true);return;}
+      if(Array.isArray(x.keys)&&!x.keys.length){toast('Select API keys, or choose All or None.',true);return;}
+      if(!x.skills&&!x.keys&&!x.mcp.length&&!x.token){toast('Choose what to transfer.',true);return;}
+      if(x.keys&&!confirm(`Copy ${x.keys==='all'?'all':x.keys.length} API key${x.keys.length===1?'':'s'} from ${title(a)} to ${title(t)}?\n\n${title(t)} will be able to use the same accounts and spend on them.`))return;
+      action(async()=>{await api.transferStart(x);closeModal();});
+    };
+  }
+  let drawLibrary=null;
+  function openLibrary(){
+    modal('Skills library','Global skills kept by Opaya. Install them to any agent on this computer or a VPS.',`<div id="library-body"><p class="field-help">Loading...</p></div>`,true);
+    drawLibrary=async()=>{
+      const body=$('#library-body');if(!body)return;let list=[];try{list=await api.libraryList();}catch(error){body.innerHTML=`<div class="message-error">${esc(error.message)}</div>`;return;}
+      const q=($('#library-search')?.value||'').toLowerCase(),shown=list.filter(s=>`${s.name} ${s.description} ${s.category}`.toLowerCase().includes(q));
+      body.innerHTML=`<div class="skills-head"><h3>Library <small>${list.length}</small></h3><div><input id="library-search" class="skills-search" placeholder="Filter..." aria-label="Filter library" value="${esc(q)}"><button class="secondary small" id="library-from-agent">Add from agent</button><button class="secondary small" id="library-from-folder">Add from folder</button></div></div>
+        ${list.length?`<div class="library-bar"><label class="check-row inline"><input type="checkbox" id="library-all"> Select all</label><span id="library-count"></span><button class="primary small" id="library-install" disabled>Install to agents...</button></div>
+        <div class="skill-list">${shown.map(s=>`<label class="skill-row library-row"><input type="checkbox" data-lib="${esc(s.name)}"><div><strong>/${esc(s.name)}</strong>${s.category?`<em>${esc(s.category)}</em>`:''}<p>${esc(s.description||'No description.')}</p></div><button type="button" class="icon-button" data-lib-remove="${esc(s.name)}" title="Remove from library" aria-label="Remove ${esc(s.name)} from library">&#10005;</button></label>`).join('')||'<p class="field-help">No skills match this filter.</p>'}</div>`:`<div class="library-empty"><span aria-hidden="true">&#10022;</span><p>The library is empty. Add skills from an agent you already set up, or from a folder with SKILL.md files, then install them anywhere.</p></div>`}`;
+      const search=$('#library-search');search.addEventListener('input',()=>drawLibrary());if(q){search.focus();search.setSelectionRange(q.length,q.length);}
+      const boxes=()=>[...body.querySelectorAll('[data-lib]')],count=()=>{const n=boxes().filter(b=>b.checked).length;$('#library-count')&&($('#library-count').textContent=n?`${n} selected`:'');$('#library-install')&&($('#library-install').disabled=!n);};
+      $('#library-all')?.addEventListener('change',e=>{for(const b of boxes())b.checked=e.target.checked;count();});
+      for(const b of boxes())b.addEventListener('change',count);
+      for(const b of body.querySelectorAll('[data-lib-remove]'))b.onclick=event=>{event.preventDefault();const n=b.dataset.libRemove;if(!confirm(`Remove ${n} from the library?\n\nAgents that already have it keep their copy.`))return;action(async()=>{await api.libraryRemove({name:n});await drawLibrary();toast(`${n} removed from the library.`);});};
+      $('#library-install')&&($('#library-install').onclick=()=>openLibraryInstall(boxes().filter(b=>b.checked).map(b=>b.dataset.lib)));
+      $('#library-from-agent').onclick=()=>{const withSkills=state.agents;if(!withSkills.length){toast('Add an agent first.');return;}openLibraryImport();};
+      $('#library-from-folder').onclick=()=>action(async()=>{const dir=await api.pick({kind:'directory'});if(!dir)return;const r=await api.libraryAddFolder({path:dir});await drawLibrary();toast(`Added ${plural(r.skills.length,'skill')} to the library.`);});
+    };
+    drawLibrary();
+  }
+  function openLibraryInstall(names){
+    modal('Install skills',`${plural(names.length,'skill')} from the library: ${names.slice(0,6).join(', ')}${names.length>6?'...':''}`,`<form id="library-install-form" class="mcp-form"><fieldset class="transfer-part"><legend>Agents that receive them</legend>${pickList('agent',state.agents.map(x=>({value:x.id,label:title(x),help:`${labels[x.provider]||x.provider} / ${location(x)}`})))}</fieldset>
+      <p class="field-help">Skills with the same folder name are replaced. New conversations load them.</p>
+      <div class="modal-footer"><div><button type="button" class="text-button" data-action="library">Back to library</button></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Install</button></div></div></form>`,true);
+    const f=$('#library-install-form');
+    f.onsubmit=event=>{event.preventDefault();const agentIds=[...f.querySelectorAll('[name="agent"]:checked')].map(i=>i.value);if(!agentIds.length){toast('Choose at least one agent.',true);return;}action(async()=>{await api.libraryInstall({names,agentIds});closeModal();});};
+  }
+  function openLibraryImport(agent=null,known=null){
+    modal('Add to skills library','Copy skills from an agent into Opaya\'s global library.',`<form id="library-import-form" class="mcp-form"><label>From agent<select name="agentId">${state.agents.map(x=>`<option value="${esc(x.id)}" ${agent?.id===x.id?'selected':''}>${esc(title(x))} / ${esc(location(x))}</option>`).join('')}</select></label>
+      <fieldset class="transfer-part"><legend>Skills <small id="import-count"></small></legend>${modeRow('mode','all')}<div id="import-skills"></div></fieldset>
+      <div class="modal-footer"><div><button type="button" class="text-button" data-action="library">Back to library</button></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Add to library</button></div></div></form>`,true);
+    const f=$('#library-import-form'),mode=()=>f.querySelector('[name="mode"]:checked')?.value;
+    const sync=()=>{for(const l of f.querySelectorAll('.transfer-mode label'))l.classList.toggle('selected',l.querySelector('input').checked);$('#import-skills').classList.toggle('collapsed',mode()!=='some');};
+    for(const i of f.querySelectorAll('[name="mode"]'))if(i.value==='none')i.closest('label').remove();
+    const load=async(list)=>{const box=$('#import-skills');box.innerHTML='<p class="field-help">Loading skills...</p>';
+      try{const skills=list||(await loadSkills(f.elements.agentId.value)).skills||[];box.innerHTML=skills.length?pickList('skill',skills.map(s=>({value:s.name,label:'/'+s.name,help:s.description}))):'<p class="field-help">No skills on this agent.</p>';$('#import-count').textContent=plural(skills.length,'skill');}
+      catch(error){box.innerHTML=`<div class="message-error">${esc(error.message)}</div>`;}sync();};
+    f.addEventListener('change',event=>{if(event.target.name==='agentId')load();sync();});
+    load(agent&&known?known:null);
+    f.onsubmit=event=>{event.preventDefault();const names=mode()==='all'?'all':[...f.querySelectorAll('[name="skill"]:checked')].map(i=>i.value);if(Array.isArray(names)&&!names.length){toast('Select skills or choose All.',true);return;}
+      action(async()=>{await api.libraryImport({agentId:f.elements.agentId.value,names});closeModal();});};
+  }
   // ---- Clone and redeploy (Hermes) --------------------------------------------------------------------------------
   const CLONE_SCOPES=[['everything','Everything','Config, skills, memory, personality, plugins and cron jobs. No chat history.'],['personality','Skills + personality','Skills, SOUL.md and USER.md (who you are), plus config.'],['skills','Skills','Installed skills and config.'],['memory','Memory','MEMORY.md and USER.md, plus config.']];
   function openClone(a,preset={}){
@@ -1073,19 +1351,14 @@
       <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Clone</button></div></div></form>`,true);
     const f=$('#clone-form');
     f.onsubmit=event=>{event.preventDefault();const data=Object.fromEntries(new FormData(f));
-      const where=data.hostId?state.hosts.find(h=>h.id===data.hostId)?.name:'this computer';
-      $('#clone-status').innerHTML=`<div class="clone-progress"><span class="status-dot working"></span> Copying ${esc(title(a))} to ${esc(where)}${data.runtime==='docker'?' and starting its container':''}... This can take a minute.</div>`;
-      for(const el of f.elements)el.disabled=true;modalBusy=true;
-      api.cloneAgent({id:a.id,name:data.name,hostId:data.hostId||'',runtime:data.runtime,scope:data.scope,keys:!!data.keys}).then(async r=>{modalBusy=false;closeModal();await refresh();toast(`${r.agent.name} is ready on ${where}. Copied: ${r.copied.join(', ')}.`);},error=>{modalBusy=false;for(const el of f.elements)el.disabled=false;
-        const install=/not installed/i.test(error.message)&&/Hermes/.test(error.message);
-        $('#clone-status').innerHTML=`<div class="inline-notice error-notice"><p>${esc(error.message)}</p>${install?`<button type="button" class="secondary small" data-action="clone-install" data-host="${esc(data.hostId||'')}">Install Hermes there</button>`:''}</div>`;});
+      // The clone runs as a background job with its own window; this dialog closes right away.
+      action(async()=>{const job=await api.cloneAgent({id:a.id,name:data.name,hostId:data.hostId||'',runtime:data.runtime,scope:data.scope,keys:!!data.keys});closeModal();onJob(job);});
     };
   }
   async function redeploy(a){
     const src=state.agents.find(x=>x.id===a.clone?.from);if(!src){toast('The source agent of this clone was removed.',true);return;}
     if(!confirm(`Redeploy ${title(a)} from ${title(src)}?\n\nCopies ${CLONE_SCOPES.find(s=>s[0]===a.clone.scope)?.[1]||a.clone.scope} again over the clone${a.clone.container?' and restarts its container':''}. Chat history on the clone is kept.`))return;
-    toast(`Redeploying ${title(a)}...`);
-    await action(async()=>{const r=await api.redeployAgent({id:a.id});await refresh();toast(`${title(a)} redeployed. Copied: ${r.copied.join(', ')}.`);});
+    await action(async()=>{const job=await api.redeployAgent({id:a.id});onJob(job);});
   }
   // ---- New VPS: key, public key for the provider, connection test, save ------------------------------------------
   function openNewVps(){

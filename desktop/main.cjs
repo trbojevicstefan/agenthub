@@ -1,6 +1,6 @@
 'use strict';
 const electron=require('electron');
-const {app,BrowserWindow,ipcMain,protocol,session,shell,dialog,Menu,Tray,nativeImage,clipboard}=electron;
+const {app,BrowserWindow,ipcMain,protocol,session,shell,dialog,Menu,Tray,nativeImage,clipboard,Notification}=electron;
 const fs=require('node:fs/promises'),fsSync=require('node:fs'),path=require('node:path');
 const {safeError}=require('./broker.cjs');
 const APP_URL='agenthub://app/index.html';
@@ -113,6 +113,9 @@ if(hostMode){
       for(const event of ['maximize','unmaximize','enter-full-screen','leave-full-screen','focus','blur'])win.on(event,windowState);
       win.webContents.on('did-finish-load',windowState);
       client.on('state',value=>{if(!win.isDestroyed())win.webContents.send('hub:state',value);});
+      // Tell the user through the OS when Opaya is not in front: finished background jobs and pending approvals.
+      const notify=(title,body)=>{if(win.isDestroyed()||win.isFocused()||!Notification.isSupported())return;const n=new Notification({title,body,silent:false});n.on('click',()=>show());n.show();if(process.platform==='win32'){win.flashFrame(true);win.once('focus',()=>win.flashFrame(false));}};
+      client.on('job',job=>{if(!win.isDestroyed())win.webContents.send('hub:job',job);if(job.status==='done')notify(job.kind==='clone'?'Clone finished':'Redeploy finished',job.detail||job.title);else if(job.status==='error')notify(`${job.title} failed`,String(job.error||'').slice(0,180));});
       client.on('terminal',value=>{for(const w of [win,...terminalWindows.values()])if(!w.isDestroyed())w.webContents.send('hub:terminal',value);});
       const pendingApprovals=new Map(),approvalFile=path.join(app.getPath('userData'),'approval-rules.json');
       const approvalRules=new Set(await fs.readFile(approvalFile,'utf8').then(JSON.parse).catch(()=>[]));
@@ -121,10 +124,10 @@ if(hostMode){
         show();
         const key=JSON.stringify([request.agent,request.title,request.detail]);
         if(approvalRules.has(key)){client.answer(request.id,true);return;}
-        pendingApprovals.set(request.id,{key,expires:Date.now()+120000});win.webContents.send('hub:approval',request);
+        pendingApprovals.set(request.id,{key,expires:Date.now()+10*60*1000});win.webContents.send('hub:approval',request);notify('Opaya needs your approval',`${request.agent?.name||'Agent'}: ${request.title}`);
       });
       client.on('closed',()=>{if(!quitting&&!smoke&&!win.isDestroyed())win.webContents.send('hub:service-error','Session service disconnected. Reopen Opaya to reconnect. Saved history has not been deleted.');});
-      const forwards=['sshKeyCreate','hostTest','saveSettings','projectSave','projectRemove','projectInfo','projectBranches','projectGit','projectClone','mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaNewSession','opayaSelectSession','opayaDeleteSession','opayaStop','opayaClear','snapshot','saveAgent','reorderAgents','updateAgentDisplay','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
+      const forwards=['agentEnvKeys','transferStart','renameConversation','deleteConversation','condenseConversation','conversationMarkdown','libraryList','libraryImport','libraryInstall','libraryRemove','libraryAddFolder','jobs','jobDismiss','sshKeyCreate','hostTest','saveSettings','projectSave','projectRemove','projectInfo','projectBranches','projectGit','projectClone','mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaNewSession','opayaSelectSession','opayaDeleteSession','opayaStop','opayaClear','snapshot','saveAgent','reorderAgents','updateAgentDisplay','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
       const handlers=Object.fromEntries(forwards.map(method=>[method,input=>client.call(method,input)]));
       for(const method of ['agentModels','selectModel','gateway'])handlers[method]=input=>client.call(method,input);
       // Copying an agent to a VPS can take minutes.

@@ -217,13 +217,24 @@ class OpayaAgent{
     const message=data.choices?.[0]?.message;if(!message)throw new Error('The model API returned no answer.');
     return message;
   }
+  // A plain, tool-free completion with the Opaya Agent's own model API, for condensing chats. Needs an API key
+  // (or a local model server); the Codex CLI preset is not used for this.
+  summarizer(){if(this.config.preset==='codex'||!this.configured())return null;const local=['ollama','lmstudio'].includes(this.config.preset);return local||this.vault.has(KEY)?`${PRESETS[this.config.preset]?.label||'Model API'} / ${this.config.model}`:null;}
+  async summarize(messages,{signal}={}){
+    const s=AbortSignal.any([signal||new AbortController().signal,AbortSignal.timeout(5*60*1000)]);
+    const response=await this.fetch(`${this.config.baseUrl}/chat/completions`,{method:'POST',headers:this.headers(),signal:s,body:JSON.stringify({model:this.config.model,messages})});
+    const data=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(data?.error?.message?`Model API: ${String(data.error.message).slice(0,300)}`:`The model API answered ${response.status}.`);
+    const text=data.choices?.[0]?.message?.content;if(!text)throw new Error('The model API returned no answer.');
+    return {text:String(text),usage:data.usage||null};
+  }
   dynamicTools(){return TOOLS.map(t=>({type:'function',name:t.function.name,description:t.function.description,inputSchema:t.function.parameters}));}
   async ensureCodex(){
     if(this.codexRpc&&!this.codexRpc.closed)return this.codexRpc;
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.10.1'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.11.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');

@@ -24,12 +24,12 @@ function place({agent,host}){
   const i=agent.command==='docker'?dockerExecContainerIndex(agent.args||[]):-1;
   return {host:agent.transport==='ssh'?host:null,container:i>=0?agent.args[i]:''};
 }
-function shell(where,script,{input}={}){
+function shell(where,script,{compress=false}={}){
   const env=environment();
   if(where.host){
     const ssh=findExecutable('ssh',env);if(!ssh)throw new Error('OpenSSH client is not installed.');
     const remote=where.container?`docker exec -i ${quote(where.container)} sh -c ${quote(script)}`:script;
-    return spawn(ssh,[...sshArgs(where.host),'-T',target(where.host),remote],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});
+    return spawn(ssh,[...sshArgs(where.host),...(compress?['-C']:[]),'-T',target(where.host),remote],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});
   }
   if(where.container){const docker=findExecutable('docker',env);if(!docker)throw new Error('Docker is not installed on this computer.');return spawn(docker,['exec','-i',where.container,'sh','-c',script],{env,windowsHide:true,stdio:['pipe','pipe','pipe']});}
   if(process.platform==='win32')throw new Error('Internal: no POSIX shell on Windows.');
@@ -55,24 +55,39 @@ async function selection(where,home,scope,keys){
   const names=(await run(where,script)).split('\n').map(x=>x.trim()).filter(Boolean);
   return wanted?names:names.filter(n=>!EXCLUDE.has(n)&&(keys||n!=='.env'));
 }
+// Uncompressed tar, so bytes on the wire match file sizes and the percentage is real; ssh -C compresses on the network.
 function producer(where,home,paths){
-  if(isLocal(where)){const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-czf','-','-C',home,...paths],{windowsHide:true,stdio:['ignore','pipe','pipe']});}
-  return shell(where,`cd ${quote(home)} && tar -czf - ${paths.map(quote).join(' ')}`);
+  if(isLocal(where)){const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-cf','-','-C',home,...paths],{windowsHide:true,stdio:['ignore','pipe','pipe']});}
+  return shell(where,`cd ${quote(home)} && tar -cf - ${paths.map(quote).join(' ')}`,{compress:true});
 }
 async function consumer(where,dest){
-  if(isLocal(where)){await fs.mkdir(dest,{recursive:true,mode:0o700});const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-xzf','-','-C',dest],{windowsHide:true,stdio:['pipe','ignore','pipe']});}
-  return shell(where,`mkdir -p ${quote(dest)} && chmod 700 ${quote(dest)} && tar -xzf - -C ${quote(dest)}`);
+  if(isLocal(where)){await fs.mkdir(dest,{recursive:true,mode:0o700});const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-xf','-','-C',dest],{windowsHide:true,stdio:['pipe','ignore','pipe']});}
+  return shell(where,`mkdir -p ${quote(dest)} && chmod 700 ${quote(dest)} && tar -xf - -C ${quote(dest)}`,{compress:true});
 }
-// Pipe the archive from source to target; both sides must finish cleanly.
-async function transfer(from,home,paths,to,dest){
-  const out=producer(from,home,paths),inp=await consumer(to,dest);
-  let errOut='',errIn='';out.stderr?.on('data',d=>{errOut=(errOut+d).slice(-2000);});inp.stderr?.on('data',d=>{errIn=(errIn+d).slice(-2000);});
-  out.stdout.pipe(inp.stdin);inp.stdin.on('error',()=>{});
+// Total size of the selected paths, for the progress bar (an estimate: tar adds small headers).
+async function measure(where,home,paths){
+  if(isLocal(where)){
+    let total=0,files=0;const walk=async p=>{let st;try{st=await fs.lstat(p);}catch{return;}if(st.isDirectory()){for(const n of await fs.readdir(p).catch(()=>[]))await walk(path.join(p,n));}else{total+=st.size;files++;}};
+    for(const p of paths)await walk(path.join(home,p));return {bytes:total,files};
+  }
+  const out=await run(where,`cd ${quote(home)} && du -sk ${paths.map(quote).join(' ')} 2>/dev/null | awk '{s+=$1} END {print s*1024}'; find ${paths.map(quote).join(' ')} -type f 2>/dev/null | wc -l`,120000).catch(()=>'0\n0');
+  const [bytes,files]=out.trim().split(/\s+/).map(Number);return {bytes:bytes||0,files:files||0};
+}
+// Pipe the archive from source to target; both sides must finish cleanly. Reports bytes as they pass.
+async function transfer(from,home,paths,to,dest,{onBytes=()=>{},timeout=2*60*60*1000}={}){
+  // Listen for exit as soon as each process exists, so a fast process cannot finish unnoticed.
   const done=child=>new Promise(resolve=>{child.on('error',e=>resolve(e.message));child.on('close',code=>resolve(code));});
-  const timer=setTimeout(()=>{out.kill();inp.kill();},15*60*1000);
-  const [a,b]=await Promise.all([done(out),done(inp)]);clearTimeout(timer);
+  // The receiving side starts first; the sender starts only when it is ready and is connected in the same tick.
+  const inp=await consumer(to,dest),inDone=done(inp);let errIn='',sent=0;inp.stderr?.on('data',d=>{errIn=(errIn+d).slice(-2000);});inp.stdin.on('error',()=>{});
+  let out;try{out=producer(from,home,paths);}catch(error){inp.kill();throw error;}
+  const outDone=done(out);let errOut='';out.stderr?.on('data',d=>{errOut=(errOut+d).slice(-2000);});
+  out.stdout.on('data',chunk=>{sent+=chunk.length;onBytes(sent);});
+  out.stdout.pipe(inp.stdin);
+  const timer=setTimeout(()=>{out.kill();inp.kill();},timeout);
+  const [a,b]=await Promise.all([outDone,inDone]);clearTimeout(timer);
   if(a!==0)throw new Error(`Reading the source failed: ${String(errOut||a).trim().slice(0,400)}`);
   if(b!==0)throw new Error(`Writing the clone failed: ${String(errIn||b).trim().slice(0,400)}`);
+  return sent;
 }
 async function targetInfo({host,runtime,name}){
   const where={host:host||null,container:''};
@@ -101,15 +116,33 @@ async function startContainer(where,dir,container){
   }
   await run(where,script,10*60*1000);
 }
+// Progress events: {step, state:'active'|'done', message} for stages and {bytes, total} while copying.
+const where=w=>w.host?w.host.name+(w.container?` / container ${w.container}`:''):w.container?`container ${w.container}`:'this computer';
+async function copyParts({agent,sourceHost,scope,keys,to,dest,progress}){
+  const from=place({agent,host:sourceHost});
+  progress({step:'source',state:'active',message:`Finding ${agent.name}'s Hermes home on ${where(from)}`});
+  const home=await sourceHome(agent,from);
+  progress({step:'source',state:'done',message:`Source: ${home}`});
+  progress({step:'select',state:'active',message:`Choosing what to copy (${SCOPES[scope]?.label||scope}${keys?', with API keys':', without API keys'})`});
+  const paths=await selection(from,home,scope,keys);if(!paths.length)throw new Error('Nothing to copy: the source has none of the selected files.');
+  const size=await measure(from,home,paths);
+  progress({step:'select',state:'done',message:`${paths.length} item${paths.length===1?'':'s'}: ${paths.join(', ')} (${size.files} files, ${fmt(size.bytes)})`,total:size.bytes});
+  progress({step:'copy',state:'active',message:`Copying to ${where(to)}: ${dest}`,bytes:0,total:size.bytes});
+  let last=0;
+  const sent=await transfer(from,home,paths,to,dest,{onBytes:n=>{const now=Date.now();if(now-last>200){last=now;progress({step:'copy',bytes:n,total:size.bytes});}}});
+  progress({step:'copy',state:'done',message:`Copied ${fmt(sent)}`,bytes:sent,total:Math.max(size.bytes,sent)});
+  return paths;
+}
+const fmt=n=>n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
 // Clone `agent` (from `sourceHost`) to `host` (null = this computer). Returns the new agent connection to save.
-async function clone({agent,sourceHost,host,runtime='regular',scope='everything',keys=true,name}){
+async function clone({agent,sourceHost,host,runtime='regular',scope='everything',keys=true,name,progress=()=>{}}){
   if(agent.provider!=='hermes')throw new Error('Cloning is available for Hermes agents.');
   const id=slug(name);if(!id)throw new Error('Give the clone a name with letters or numbers.');
-  const from=place({agent,host:sourceHost}),home=await sourceHome(agent,from);
-  const paths=await selection(from,home,scope,keys);if(!paths.length)throw new Error('Nothing to copy: the source has none of the selected files.');
+  progress({step:'target',state:'active',message:`Checking ${host?host.name:'this computer'} for ${runtime==='docker'?'Docker':'Hermes'}`});
   const t=await targetInfo({host,runtime,name:id}),container=runtime==='docker'?`opaya-hermes-${id}`:'';
-  await transfer(from,home,paths,t.where,t.dir);
-  if(container)await startContainer(t.where,t.dir,container);
+  progress({step:'target',state:'done',message:`Target: ${t.dir}${container?` (container ${container})`:''}`});
+  const paths=await copyParts({agent,sourceHost,scope,keys,to:t.where,dest:t.dir,progress});
+  if(container){progress({step:'start',state:'active',message:`Starting container ${container} (the first start downloads ${IMAGE}, which can take a few minutes)`});await startContainer(t.where,t.dir,container);progress({step:'start',state:'done',message:`Container ${container} is running`});}
   return {
     connection:{name:String(name).trim().slice(0,80),provider:'hermes',protocol:'acp',transport:host?'ssh':'local',hostId:host?.id||'',
       command:container?'docker':'hermes',args:container?['exec','-i',container,'hermes']:[],cwd:t.home,hermesHome:container?'/opt/data':t.dir,
@@ -119,13 +152,11 @@ async function clone({agent,sourceHost,host,runtime='regular',scope='everything'
   };
 }
 // Copy the same parts again from the source into an existing clone; containers restart to pick them up.
-async function redeploy({agent,source,sourceHost,host}){
+async function redeploy({agent,source,sourceHost,host,progress=()=>{}}){
   const c=agent.clone;if(!c)throw new Error('This agent is not a clone.');
-  const from=place({agent:source,host:sourceHost}),home=await sourceHome(source,from);
-  const paths=await selection(from,home,c.scope,c.keys);
-  const where={host:host||null,container:''};
-  await transfer(from,home,paths,where,c.dir);
-  if(c.container)await startContainer(where,c.dir,c.container);
+  const to={host:host||null,container:''};
+  const paths=await copyParts({agent:source,sourceHost,scope:c.scope,keys:c.keys,to,dest:c.dir,progress});
+  if(c.container){progress({step:'start',state:'active',message:`Restarting container ${c.container}`});await startContainer(to,c.dir,c.container);progress({step:'start',state:'done',message:`Container ${c.container} restarted`});}
   return {copied:paths};
 }
-module.exports={clone,redeploy,SCOPES,EXCLUDE,slug,selection,transfer};
+module.exports={clone,redeploy,SCOPES,EXCLUDE,slug,selection,transfer,measure,place,shell,run,sourceHome,isLocal};

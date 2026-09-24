@@ -32,7 +32,11 @@ test('broker clones, saves the connection with its recipe, and redeploys from th
   const broker=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory:()=>({connect:async()=>({}),close(){},run:async()=>({})})});
   await broker.init();t.after(()=>broker.close());
   const source=await broker.saveAgent({agent:{name:'tuco',provider:'hermes',protocol:'acp',transport:'local',command:'hermes',cwd:root,hermesHome:src}});
-  const r=await broker.cloneAgent({id:source.id,name:'tuco-2',scope:'skills',keys:false});
+  const events=[],approvals0=[];broker.approve=async(_a,title)=>{approvals0.push(title);return true;};
+  const r=await broker.cloneAgent({id:source.id,name:'tuco-2',scope:'skills',keys:false},e=>events.push(e));
+  assert.deepEqual(approvals0,[],'a confirmed clone does not ask to trust its executable again');
+  assert.deepEqual([...new Set(events.filter(e=>e.state==='done').map(e=>e.step))],['target','source','select','copy','save','connect']);
+  const copy=events.filter(e=>e.step==='copy'&&Number.isFinite(e.bytes));assert(copy.at(-1).bytes>0&&copy.at(-1).total>0,'copy reports bytes and total');
   const c=broker.agent(r.agent.id);assert.equal(c.clone.from,source.id);assert.equal(c.clone.scope,'skills');
   await fs.mkdir(path.join(src,'skills','new-one'),{recursive:true});await fs.writeFile(path.join(src,'skills','new-one','SKILL.md'),'---\nname: new-one\n---');
   const again=await broker.redeployAgent(c.id);assert.deepEqual(again.copied,['config.yaml','skills']);
