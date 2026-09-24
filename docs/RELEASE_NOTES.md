@@ -1,3 +1,21 @@
+# Opaya 0.11.1 - An Opaya Agent that does the install for you, and terminal paste
+
+- **The Opaya Agent installs and updates everything itself**:
+  - It checks what is installed and installs missing dependencies first (Node.js, Python, Git, uv, tmux, GitHub CLI, Homebrew), then installs the agent.
+  - It follows each install to the end and answers installer questions on its own (Enter, y/n, menu numbers).
+  - Afterwards it discovers the new agent, adds it and connects it.
+  - You are only asked for passwords and account sign-ins, which it can never type.
+  - **Updates**: every agent (Hermes, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider, Ollama) and every dependency can be updated to its latest version, or all essentials at once.
+  - It knows every part of the app (history, condense, transfer, skills library, clone, projects, iTrust, browser, updates) and tells you exactly where things are.
+  - It no longer asks you to type commands into a terminal.
+  - Linux package installs run without questions. npm tools install to your user folder when the global folder is not writable, so no sudo is needed.
+- **Clone asks about cron jobs**: a new "Include cron jobs" choice, on by default only for Everything. Cloned jobs run on both agents (for example posting to Slack twice), so it is now your call. Redeploy remembers the choice.
+- **Paste in the terminal works again**: the Edit menu's Ctrl+V (and Cmd+V on macOS) took the key before the terminal saw it. Every paste now arrives exactly once: Ctrl+V, Ctrl+Shift+V, Cmd+V, right-click, and in popped-out terminals.
+- **macOS**:
+  - Intel Macs have their own build (`mac-x64`).
+  - The session service no longer waits on the keychain while starting.
+  - If it cannot start, the error says at which step and why.
+
 # Opaya 0.11.0 - Chat history, skill transfer and a skills library
 
 - **macOS for Intel**: every macOS release now has an Intel build (`mac-x64`) next to Apple Silicon (`mac-arm64`), and in-app updates pick the right one.

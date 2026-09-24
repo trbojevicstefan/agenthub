@@ -76,7 +76,7 @@ function avatar(value) {
 function cloneRecipe(c) {
   if (!c || typeof c !== 'object') return null;
   if (!['skills', 'memory', 'personality', 'everything'].includes(c.scope) || !['regular', 'docker'].includes(c.runtime)) return null;
-  return {from: id(c.from), scope: c.scope, keys: Boolean(c.keys), runtime: c.runtime, dir: text(c.dir, 'clone folder', 2048), container: text(c.container || '', 'container', 120)};
+  return {from: id(c.from), scope: c.scope, keys: Boolean(c.keys), ...(c.cron === undefined ? {} : {cron: Boolean(c.cron)}), runtime: c.runtime, dir: text(c.dir, 'clone folder', 2048), container: text(c.container || '', 'container', 120)};
 }
 function agent(input) {
   if (!input || typeof input !== 'object') throw new Error('Missing agent.');

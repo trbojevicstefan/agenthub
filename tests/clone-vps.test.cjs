@@ -24,6 +24,11 @@ test('clone copies exactly the chosen parts and never history, logs, OAuth login
   assert.deepEqual(await tree(persona.connection.hermesHome),['SOUL.md','config.yaml','memories/USER.md','skills/research/arxiv/SKILL.md']);
   const mem=await clone({agent,host:null,runtime:'regular',scope:'memory',keys:false,name:'mem'});
   assert.deepEqual(await tree(mem.connection.hermesHome),['config.yaml','memories/MEMORY.md','memories/USER.md']);
+  const noCron=await clone({agent,host:null,runtime:'regular',scope:'everything',keys:false,cron:false,name:'no-cron'});
+  assert(!(await tree(noCron.connection.hermesHome)).some(f=>f.startsWith('cron/')),'Everything without cron jobs leaves them out');assert.equal(noCron.connection.clone.cron,false);
+  const skillsCron=await clone({agent,host:null,runtime:'regular',scope:'skills',keys:false,cron:true,name:'skills-cron'});
+  assert.deepEqual(await tree(skillsCron.connection.hermesHome),['config.yaml','cron/jobs.json','skills/research/arxiv/SKILL.md']);
+  assert.equal(all.connection.clone.cron,true,'Everything copies cron jobs by default');
   await assert.rejects(()=>clone({agent:{...agent,provider:'claude'},host:null,scope:'skills',name:'x'}),/Hermes agents/);
   await assert.rejects(()=>clone({agent,host:null,scope:'skills',name:'***'}),/name/);
 });
@@ -41,6 +46,9 @@ test('broker clones, saves the connection with its recipe, and redeploys from th
   await fs.mkdir(path.join(src,'skills','new-one'),{recursive:true});await fs.writeFile(path.join(src,'skills','new-one','SKILL.md'),'---\nname: new-one\n---');
   const again=await broker.redeployAgent(c.id);assert.deepEqual(again.copied,['config.yaml','skills']);
   assert.equal(await fs.readFile(path.join(c.hermesHome,'skills','new-one','SKILL.md'),'utf8'),'---\nname: new-one\n---');
+  const withCron=await broker.cloneAgent({id:source.id,name:'tuco-cron',scope:'skills',keys:false,cron:true});
+  assert.equal(broker.agent(withCron.agent.id).clone.cron,true,'the cron choice is saved with the recipe');
+  assert.deepEqual((await broker.redeployAgent(withCron.agent.id)).copied.sort(),['config.yaml','cron','skills']);
   await assert.rejects(()=>broker.redeployAgent(source.id),/not a clone/);
 });
 test('a new VPS key is created once in ~/.ssh and reused',{skip},async t=>{

@@ -54,7 +54,7 @@ test('declined approvals stop changes and installs; unknown tools and bad input 
 test('approved installs run the fixed catalog command in a visible terminal',async t=>{
   const {agent,commands,approvals}=await fixture(t,[call('install_framework',{framework_id:'codex'}),{content:'Installing.'}]);
   agent.begin('install codex');await settle(agent);
-  assert.equal(commands.length,1);assert.equal(commands[0].command,catalog.command('codex',{remote:false}).command);assert.equal(commands[0].host,null);assert.match(approvals[0].detail,/npm install -g @openai\/codex/);
+  assert.equal(commands.length,1);assert(commands[0].command.startsWith(catalog.command('codex',{remote:false}).command+'; '));assert.match(commands[0].command,/\[opaya\] finished with exit code/);assert.equal(commands[0].host,null);assert.match(approvals[0].detail,/npm install -g @openai\/codex/);
 });
 test('notes stay inside the agent home folder and model endpoints follow the same rules as agents',async t=>{
   const {agent,root}=await fixture(t,[call('write_notes',{content:'Hermes runs on vps.'}),{content:'Saved.'}]);
@@ -80,7 +80,7 @@ test('the Opaya Agent can read project files but never secret files',async t=>{
 test('dependencies and the essentials bundle are installable through the same approved catalog path',async t=>{
   const {agent,commands,approvals}=await fixture(t,[call('install_framework',{framework_id:'essentials'}),call('install_framework',{framework_id:'node'}),{content:'done'}]);
   agent.begin('install everything I need');await settle(agent);
-  assert.equal(commands.length,2);assert.equal(commands[0].command,catalog.command('essentials',{remote:false}).command);assert.match(commands[1].command,/node/);assert.equal(approvals.length,2);
+  assert.equal(commands.length,2);assert(commands[0].command.startsWith(catalog.command('essentials',{remote:false}).command+'; '));assert.match(commands[0].command,/\[opaya\] finished with exit code/);assert.match(commands[1].command,/node/);assert.equal(approvals.length,2);
   const kinds=new Set(catalog.list().map(f=>f.kind));assert.deepEqual([...kinds].sort(),['agent','bundle','dependency']);
 });
 test('iTrust lets the Opaya Agent act without asking, but removals still ask',async t=>{
@@ -92,4 +92,33 @@ test('iTrust lets the Opaya Agent act without asking, but removals still ask',as
   await b2.saveAgent({agent:{...apiAgent('keep',8661),id:'keep-me'}});
   a2.begin('remove it');await settle(a2);
   assert.equal(ap2.length,1);assert.match(ap2[0].title,/Remove connection/);assert.equal(b2.data.agents.length,1,'declined removal keeps the agent');
+});
+test('installer output is read as finished, asking a question or asking for a password',()=>{
+  const {promptState}=require('../desktop/opaya-agent.cjs');
+  assert.deepEqual(promptState('npm install -g x; echo "[opaya] finished with exit code $?"\nadded 3 packages\n[opaya] finished with exit code 0\n$ '),{finished:true,exit_code:0});
+  assert.equal(promptState('...\n[opaya] finished with exit code 1\n').exit_code,1);
+  assert.equal(promptState('Installing Hermes...\nRun the setup wizard now? [Y/n] ').question,true);
+  assert.equal(promptState('Select a provider:\n  1) OpenRouter\n  2) Anthropic\nEnter a number: ').question,true);
+  const pw=promptState('[sudo] password for stefan: ');assert.equal(pw.password,true);assert.equal(pw.question,false);
+  assert.equal(promptState('Downloading 45%').question,false);
+});
+test('Opaya Agent updates, follows the terminal to the end and answers installer prompts itself',async t=>{
+  const root=await temp(t),writes=[],commands=[];let buffer='';
+  const broker=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory:()=>({connect:async()=>({}),close(){}})});await broker.init();t.after(()=>broker.close());
+  const terminals={describe:()=>[],attach:id=>({id,buffer,exited:false}),write:(id,data)=>{writes.push([id,data]);if(data==='\r')buffer+='\nDone.\n[opaya] finished with exit code 0\n';}};
+  const agent=new OpayaAgent({root,vault:broker.vault,broker,terminals,approve:async()=>true,emit:()=>{},runInTerminal:async x=>{commands.push(x);buffer='Updating...\nContinue? [Y/n] ';return {id:'t1'};},platform:'linux'});await agent.init();
+  const r=await agent.tool('update_framework',{framework_id:'codex'});
+  assert.match(commands[0].command,/^npm install -g @openai\/codex@latest/);assert.match(commands[0].command,/\[opaya\] finished with exit code \$\?"$/);
+  const waited=await agent.tool('wait_for_terminal',{terminal_id:r.terminal_id,seconds:10});assert.equal(waited.question,true);
+  await assert.rejects(()=>agent.tool('answer_prompt',{terminal_id:r.terminal_id,answer:'rm -rf /'}),/Unsupported/);
+  await assert.rejects(()=>agent.tool('answer_prompt',{terminal_id:'other',answer:'y'}),/terminals you started/);
+  await agent.tool('answer_prompt',{terminal_id:r.terminal_id,answer:'enter'});assert.deepEqual(writes,[['t1','\r']]);
+  const done=await agent.tool('wait_for_terminal',{terminal_id:r.terminal_id,seconds:10});assert.equal(done.finished,true);assert.equal(done.exit_code,0);
+  buffer='[sudo] password for me: ';await assert.rejects(()=>agent.tool('answer_prompt',{terminal_id:r.terminal_id,answer:'y'}),/password/);
+});
+test('every framework and dependency has an update command, and the essentials update covers them',()=>{
+  for(const f of catalog.FRAMEWORKS)assert(catalog.UPDATES[f.id],`${f.id} has an update entry`);
+  assert.match(catalog.command('hermes',{remote:true,update:true}).command,/^hermes update$/);
+  const all=catalog.command('essentials',{remote:true,update:true}).command;for(const bin of ['node','python3','git','uv self update','tmux'])assert(all.includes(bin),bin);
+  assert.match(catalog.command('node',{remote:true}).command,/sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs/);
 });

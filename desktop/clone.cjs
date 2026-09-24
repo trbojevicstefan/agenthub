@@ -44,16 +44,20 @@ async function sourceHome(agent,where){
   return (await run(where,'printf %s "${HERMES_HOME:-$HOME/.hermes}"')).trim();
 }
 // The paths to copy that exist in the source home.
-async function selection(where,home,scope,keys){
+// Cron jobs (the cron folder) are a separate choice: by default only Everything copies them, since a cloned job also
+// runs on the clone (for example posting to Slack twice).
+const cronDefault=scope=>scope==='everything';
+async function selection(where,home,scope,keys,cron=cronDefault(scope)){
   const def=SCOPES[scope];if(!def)throw new Error('Choose what to clone.');
-  let wanted=def.all?null:[...def.paths,...(keys?['.env']:[])];
+  let wanted=def.all?null:[...def.paths,...(keys?['.env']:[]),...(cron?['cron']:[])];
+  const keep=n=>!EXCLUDE.has(n)&&(keys||n!=='.env')&&(cron||n!=='cron');
   if(isLocal(where)){
-    if(!wanted){const names=await fs.readdir(home);wanted=names.filter(n=>!EXCLUDE.has(n)&&(keys||n!=='.env'));}
+    if(!wanted){const names=await fs.readdir(home);wanted=names.filter(keep);}
     const found=[];for(const p of wanted){try{await fs.access(path.join(home,p));found.push(p);}catch{}}return found;
   }
   const script=wanted?`cd ${quote(home)} && for p in ${wanted.map(quote).join(' ')}; do [ -e "$p" ] && printf '%s\\n' "$p"; done; true`:`cd ${quote(home)} && ls -A`;
   const names=(await run(where,script)).split('\n').map(x=>x.trim()).filter(Boolean);
-  return wanted?names:names.filter(n=>!EXCLUDE.has(n)&&(keys||n!=='.env'));
+  return wanted?names:names.filter(keep);
 }
 // Uncompressed tar, so bytes on the wire match file sizes and the percentage is real; ssh -C compresses on the network.
 function producer(where,home,paths){
@@ -118,13 +122,13 @@ async function startContainer(where,dir,container){
 }
 // Progress events: {step, state:'active'|'done', message} for stages and {bytes, total} while copying.
 const where=w=>w.host?w.host.name+(w.container?` / container ${w.container}`:''):w.container?`container ${w.container}`:'this computer';
-async function copyParts({agent,sourceHost,scope,keys,to,dest,progress}){
+async function copyParts({agent,sourceHost,scope,keys,cron,to,dest,progress}){
   const from=place({agent,host:sourceHost});
   progress({step:'source',state:'active',message:`Finding ${agent.name}'s Hermes home on ${where(from)}`});
   const home=await sourceHome(agent,from);
   progress({step:'source',state:'done',message:`Source: ${home}`});
-  progress({step:'select',state:'active',message:`Choosing what to copy (${SCOPES[scope]?.label||scope}${keys?', with API keys':', without API keys'})`});
-  const paths=await selection(from,home,scope,keys);if(!paths.length)throw new Error('Nothing to copy: the source has none of the selected files.');
+  progress({step:'select',state:'active',message:`Choosing what to copy (${SCOPES[scope]?.label||scope}${keys?', with API keys':', without API keys'}${cron?', with cron jobs':', without cron jobs'})`});
+  const paths=await selection(from,home,scope,keys,cron);if(!paths.length)throw new Error('Nothing to copy: the source has none of the selected files.');
   const size=await measure(from,home,paths);
   progress({step:'select',state:'done',message:`${paths.length} item${paths.length===1?'':'s'}: ${paths.join(', ')} (${size.files} files, ${fmt(size.bytes)})`,total:size.bytes});
   progress({step:'copy',state:'active',message:`Copying to ${where(to)}: ${dest}`,bytes:0,total:size.bytes});
@@ -135,19 +139,20 @@ async function copyParts({agent,sourceHost,scope,keys,to,dest,progress}){
 }
 const fmt=n=>n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
 // Clone `agent` (from `sourceHost`) to `host` (null = this computer). Returns the new agent connection to save.
-async function clone({agent,sourceHost,host,runtime='regular',scope='everything',keys=true,name,progress=()=>{}}){
+async function clone({agent,sourceHost,host,runtime='regular',scope='everything',keys=true,cron=cronDefault(scope),name,progress=()=>{}}){
+  cron=!!cron;
   if(agent.provider!=='hermes')throw new Error('Cloning is available for Hermes agents.');
   const id=slug(name);if(!id)throw new Error('Give the clone a name with letters or numbers.');
   progress({step:'target',state:'active',message:`Checking ${host?host.name:'this computer'} for ${runtime==='docker'?'Docker':'Hermes'}`});
   const t=await targetInfo({host,runtime,name:id}),container=runtime==='docker'?`opaya-hermes-${id}`:'';
   progress({step:'target',state:'done',message:`Target: ${t.dir}${container?` (container ${container})`:''}`});
-  const paths=await copyParts({agent,sourceHost,scope,keys,to:t.where,dest:t.dir,progress});
+  const paths=await copyParts({agent,sourceHost,scope,keys,cron,to:t.where,dest:t.dir,progress});
   if(container){progress({step:'start',state:'active',message:`Starting container ${container} (the first start downloads ${IMAGE}, which can take a few minutes)`});await startContainer(t.where,t.dir,container);progress({step:'start',state:'done',message:`Container ${container} is running`});}
   return {
     connection:{name:String(name).trim().slice(0,80),provider:'hermes',protocol:'acp',transport:host?'ssh':'local',hostId:host?.id||'',
       command:container?'docker':'hermes',args:container?['exec','-i',container,'hermes']:[],cwd:t.home,hermesHome:container?'/opt/data':t.dir,
       group:agent.group||'',tags:[...new Set([...(agent.tags||[]),'clone'])].slice(0,8),
-      clone:{from:agent.id,scope,keys:!!keys,runtime,dir:t.dir,container}},
+      clone:{from:agent.id,scope,keys:!!keys,cron,runtime,dir:t.dir,container}},
     copied:paths
   };
 }
@@ -155,7 +160,7 @@ async function clone({agent,sourceHost,host,runtime='regular',scope='everything'
 async function redeploy({agent,source,sourceHost,host,progress=()=>{}}){
   const c=agent.clone;if(!c)throw new Error('This agent is not a clone.');
   const to={host:host||null,container:''};
-  const paths=await copyParts({agent:source,sourceHost,scope:c.scope,keys:c.keys,to,dest:c.dir,progress});
+  const paths=await copyParts({agent:source,sourceHost,scope:c.scope,keys:c.keys,cron:c.cron??cronDefault(c.scope),to,dest:c.dir,progress});
   if(c.container){progress({step:'start',state:'active',message:`Restarting container ${c.container}`});await startContainer(to,c.dir,c.container);progress({step:'start',state:'done',message:`Container ${c.container} restarted`});}
   return {copied:paths};
 }

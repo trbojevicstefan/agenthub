@@ -40,6 +40,10 @@
       if(mod&&key==='f'&&onSearch){event.preventDefault();onSearch();return false;}
       return true;
     });
+    // Native paste (the Edit menu's Ctrl+V / Cmd+V accelerator, which the keydown handler never sees, or the system
+    // paste command): handled here once, with the text from the event, so the terminal never ignores or doubles it.
+    element.addEventListener('paste',event=>{event.preventDefault();event.stopImmediatePropagation();if(archived)return;
+      const text=event.clipboardData?.getData('text/plain');if(text)term.paste(text.slice(0,1024*1024));else paste();},true);
     // Right click: copy the selection, or paste when nothing is selected (like Windows Terminal).
     element.addEventListener('contextmenu',event=>{event.preventDefault();event.stopPropagation();if(!copy())paste();else term.clearSelection();});
     let last='';
