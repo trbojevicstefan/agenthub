@@ -36,16 +36,6 @@ test('downloads only verified builds and reports progress states',async()=>{
   assert.equal((await current.check()).status,'current');
   assert.equal((await new Updater({app:{getVersion:()=>'0.7.0'},platform:'linux'}).check()).status,'unsupported');
 });
-test('the Windows update script waits for every Opaya process, installs into the same folder and restarts Opaya',()=>{
-  const {windowsScript}=require('../desktop/updater.cjs');
-  const s=windowsScript({pid:4242,exe:"C:\\Users\\O'Brien\\AppData\\Local\\Programs\\Opaya\\Opaya.exe",installer:'C:\\Temp\\u\\Opaya-0.10.1-Setup-x64.exe',log:'C:\\Temp\\u\\update.log'});
-  assert.match(s,/Wait-Process -Id 4242/);
-  assert.match(s,/\$exe = 'C:\\Users\\O''Brien\\AppData\\Local\\Programs\\Opaya\\Opaya\.exe'/,'single quotes are doubled for PowerShell');
-  assert.match(s,/Stop-Process -Force/);
-  assert.match(s,/-ArgumentList \('\/S \/D=' \+ \$dir\.TrimEnd/,'NSIS /D stays last and unquoted');
-  assert.match(s,/if \(\$p\.ExitCode -ne 0\) \{[^}]*Start-Process -FilePath \$installer/,'a failed silent install opens the normal installer');
-  assert.match(s,/Start-Process -FilePath \$exe/,'Opaya starts again after the install');
-});
 test('Intel Macs get the x64 build from a release that carries both architectures',()=>{
   const both=release('v0.11.0-mac.40',['Opaya-0.11.0-mac-arm64.zip','Opaya-0.11.0-mac-x64.zip','Opaya-0.11.0-mac-x64.dmg','darwin-SHA256SUMS.txt']);
   const armOnly=release('v0.12.0-mac.41',['Opaya-0.12.0-mac-arm64.zip','darwin-SHA256SUMS.txt']);
@@ -53,4 +43,23 @@ test('Intel Macs get the x64 build from a release that carries both architecture
   assert.equal(pick([both],{platform:'darwin',arch:'arm64'}).asset.name,'Opaya-0.11.0-mac-arm64.zip');
   assert.equal(pick([armOnly,both],{platform:'darwin',arch:'x64'}).version,'0.11.0','a newer release without an Intel build is skipped');
   assert.equal(checksum(`${'a'.repeat(64)}  Opaya-0.11.0-mac-arm64.zip\n${'b'.repeat(64)}  Opaya-0.11.0-mac-x64.zip\n`,'Opaya-0.11.0-mac-x64.zip'),'b'.repeat(64));
+});
+test('Windows updates start the installer the electron-updater way and a failed update is reported after restart',async t=>{
+  const {temp}=require('./helpers.cjs');const root=await temp(t),path=require('node:path');
+  const installer=path.join(root,'Opaya-0.12.0-Setup-x64.exe');await fs.writeFile(installer,'exe');
+  const spawned=[];const spawnImpl=(file,args,opts)=>{spawned.push({file,args,opts});return {unref(){}};};
+  const markerFile=path.join(root,'pending-update.json');
+  const u=new Updater({app:{getVersion:()=>'0.11.1'},platform:'win32',arch:'x64',markerFile,spawnImpl});
+  u.state={...u.state,status:'ready',file:installer,latest:{version:'0.12.0',url:'https://github.com/x'}};
+  assert.equal(await u.install(),true);
+  assert.deepEqual(spawned[0].args,['--updated','/S','--force-run']);assert.equal(spawned[0].file,installer);assert.equal(spawned[0].opts.detached,true);
+  const marker=JSON.parse(await fs.readFile(markerFile,'utf8'));assert.equal(marker.from,'0.11.1');assert.equal(marker.to,'0.12.0');
+  // Next launch, still on the old version: the update failed and the installer is offered.
+  const again=new Updater({app:{getVersion:()=>'0.11.1'},platform:'win32',arch:'x64',markerFile,spawnImpl});
+  const state=await again.checkPending();assert.equal(state.status,'failed');assert.equal(state.file,installer);assert.match(state.error,/0\.12\.0 did not install/);
+  await assert.rejects(fs.access(markerFile),'the marker is used once');
+  assert.equal(await again.runInstaller(),true);assert.deepEqual(spawned[1].args,[],'the fallback opens the normal, visible installer');
+  // Next launch on the new version: nothing to report.
+  await fs.writeFile(markerFile,JSON.stringify({from:'0.11.1',to:'0.12.0',installer,at:Date.now()}));
+  assert.equal(await new Updater({app:{getVersion:()=>'0.12.0'},platform:'win32',markerFile}).checkPending(),null);
 });

@@ -1399,12 +1399,12 @@
   // ---- Updates: check GitHub releases, download, verify and install in place ------------------------------------
   let update={status:'idle'};
   function renderUpdate(){
-    const chip=$('#status-update');if(chip){const show=['available','downloading','ready'].includes(update.status);chip.hidden=!show;chip.textContent=update.status==='downloading'?`Downloading update ${update.progress||0}%`:update.status==='ready'?'Restart to update':`Update ${update.latest?.version||''} available`;chip.classList.toggle('ready',update.status==='ready');}
+    const chip=$('#status-update');if(chip){const show=['available','downloading','ready','failed'].includes(update.status);chip.hidden=!show;chip.textContent=update.status==='downloading'?`Downloading update ${update.progress||0}%`:update.status==='ready'?'Restart to update':update.status==='failed'?`Update ${update.latest?.version||''} did not install`:`Update ${update.latest?.version||''} available`;chip.classList.toggle('ready',update.status==='ready');chip.classList.toggle('failed',update.status==='failed');}
     const body=$('#update-body');if(!body)return;
     const u=update,l=u.latest,busy=['checking','downloading'].includes(u.status);
     const line={idle:'Not checked yet.',checking:'Checking GitHub releases...',current:`You have the latest version${u.checkedAt?` (checked ${new Date(u.checkedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})})`:''}.`,available:`Opaya ${l?.version} is available.`,downloading:`Downloading Opaya ${l?.version}...`,ready:`Opaya ${l?.version} is downloaded and verified.`,error:u.error||'Update failed.',unsupported:u.error||'Updates are not available on this system.'}[u.status]||'';
     body.innerHTML=`<div class="update-versions"><div><small>Installed</small><strong>${esc(u.current||'')}</strong></div>${l?`<div><small>Latest</small><strong>${esc(l.version)}</strong></div>`:''}</div>
-      <p class="update-line ${u.status==='error'?'error':''}">${esc(line)}</p>
+      <p class="update-line ${['error','failed'].includes(u.status)?'error':''}">${esc(line)}</p>
       ${u.status==='downloading'?`<div class="update-progress" role="progressbar" aria-valuenow="${u.progress||0}" aria-valuemin="0" aria-valuemax="100"><span style="width:${u.progress||0}%"></span></div>`:''}
       ${l&&['available','downloading','ready'].includes(u.status)&&l.notes?`<div class="update-notes">${esc(l.notes)}</div>`:''}
       <p class="field-help">Downloads come from this app's GitHub releases and are checked against the release's SHA-256 list before anything installs.${state.platform==='darwin'?' On macOS, Opaya must be in Applications.':''}</p>
@@ -1412,6 +1412,7 @@
         <button type="button" class="secondary" data-update="check" ${busy?'disabled':''}>Check again</button>
         ${u.status==='available'?'<button type="button" class="primary" data-update="download">Download update</button>':''}
         ${u.status==='ready'?'<button type="button" class="primary" data-update="install">Restart and update</button>':''}
+        ${u.status==='failed'&&u.file&&state.platform==='win32'?'<button type="button" class="primary" data-update="installer">Run installer</button>':''}
       </div></div>`;
   }
   function openUpdates(){
@@ -1420,10 +1421,11 @@
       if(act==='check')action(()=>api.updateCheck());
       else if(act==='download')action(()=>api.updateDownload());
       else if(act==='install')action(async()=>{modalBusy=false;await api.updateInstall();});
+      else if(act==='installer')action(()=>api.updateRunInstaller());
       else if(act==='page'&&update.latest?.url)action(()=>api.openLink({url:update.latest.url}));});
     if(['idle','error','current'].includes(update.status)&&(!update.checkedAt||Date.now()-update.checkedAt>60000))action(()=>api.updateCheck());
   }
-  api.onUpdate?.(value=>{const was=update.status;update=value||{status:'idle'};renderUpdate();if(was!=='available'&&update.status==='available'&&!$('#app-dialog'))toast(`Opaya ${update.latest?.version} is available. Click the notice in the status bar to update.`);});
+  api.onUpdate?.(value=>{const was=update.status;update=value||{status:'idle',failed:u.error};renderUpdate();if(was!=='available'&&update.status==='available'&&!$('#app-dialog'))toast(`Opaya ${update.latest?.version} is available. Click the notice in the status bar to update.`);});
   api.updateState?.().then(value=>{update=value||update;renderUpdate();
     // Confirm a finished update after the restart.
     const confirm=()=>{if(!initialized){setTimeout(confirm,500);return;}const before=lastVersion;if(update.current&&before!==update.current){if(before&&compareVersions(update.current,before)>0)toast(`Opaya updated to ${update.current}.`);lastVersion=update.current;saveView();}};confirm();

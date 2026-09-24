@@ -1,3 +1,12 @@
+# Opaya 0.11.2 - Windows updates that actually install
+
+- **Windows: Restart and update now uses the standard Electron installer update.** Opaya starts the installer with `--updated /S --force-run`, the method electron-updater uses. The installer closes every running Opaya, including the background session service, installs over your installation and starts Opaya again. Opaya no longer relies on its own PowerShell script.
+- **A failed update is no longer silent**:
+  - If Opaya starts again still on the old version, the status bar says "Update did not install".
+  - Settings > Updates explains what happened and offers **Run installer**, which opens the normal installer.
+- The same check covers macOS updates.
+- Versions 0.11.1 and earlier still use their old updater. Install 0.11.2 by hand once. Updates after that use the new method.
+
 # Opaya 0.11.1 - An Opaya Agent that does the install for you, and terminal paste
 
 - **The Opaya Agent installs and updates everything itself**:
