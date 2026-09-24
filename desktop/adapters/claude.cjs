@@ -10,7 +10,10 @@ function mcpFile(servers){
   fs.writeFileSync(file,JSON.stringify(claudeConfig(servers)),{mode:0o600});
   return {file,remove:()=>fs.rmSync(dir,{recursive:true,force:true})};
 }
+// Claude Code has no model list API; its --model flag takes these aliases (always the latest of each family) and full ids.
+const CLAUDE_MODELS=['sonnet','opus','haiku','opusplan','claude-opus-5-5','claude-sonnet-5','claude-fable-5-1','claude-haiku-4-5-20251001'];
 class ClaudeAdapter{
+  async listModels(){return [...new Set([...CLAUDE_MODELS,this.agent.model].filter(Boolean))];}
   constructor({agent,host,spawnAgent=launch,mcpServers=()=>[],trusted=()=>false}){this.trusted=trusted;this.agent=agent;this.host=host;this.spawnAgent=spawnAgent;this.mcpServers=mcpServers;}
   async connect(){
     const version=await collect(this.spawnAgent(this.agent,[...this.agent.args,'--version'],this.host),{timeout:15000,maxBytes:16384});

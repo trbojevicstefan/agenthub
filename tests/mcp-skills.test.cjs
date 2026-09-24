@@ -43,3 +43,14 @@ test('skills are read from SKILL.md folders and Hermes installs use a validated 
   assert.throws(()=>skills.hermesSkillCommand({...agent,provider:'claude'},{action:'install',skill:'a'}),/available for Hermes/);
   assert.equal((await skills.listSkills({provider:'custom',transport:'local'},null)).supported,false);
 });
+test('skills on another machine or in a container are read with sh and find, from the real Hermes home',{skip:process.platform==='win32'?'uses POSIX sh':false},async t=>{
+  const {temp}=require('./helpers.cjs');const fsp=require('node:fs/promises'),path=require('node:path');const {remoteSkills}=require('../desktop/skills.cjs');
+  const home=await temp(t),w=async(f,c)=>{await fsp.mkdir(path.dirname(f),{recursive:true});await fsp.writeFile(f,c);};
+  await w(path.join(home,'skills','research','arxiv','SKILL.md'),'---\nname: arxiv\ndescription: Search papers\n---\n');
+  await w(path.join(home,'skills','ops','deploy','SKILL.md'),'---\ndescription: Ship it\n---\n');
+  await w(path.join(home,'skills','.hub','cache','SKILL.md'),'---\nname: hidden\n---\n');
+  // place() without host or container runs locally, which exercises the same script as SSH and docker exec.
+  const r=await remoteSkills({provider:'hermes',transport:'local',command:'hermes',args:[],hermesHome:home},null,['@hermes/skills']);
+  assert.deepEqual(r.roots,[path.join(home,'skills')]);
+  assert.deepEqual(r.skills.map(s=>[s.name,s.category,s.description]).sort(),[['arxiv','research','Search papers'],['deploy','ops','Ship it']]);
+});

@@ -313,7 +313,9 @@ class Broker{
   async selectModel({id,model,scope='default',conversationId}){
     const a=this.agent(id);if(this.turns.has(id)||this.connecting.has(id))throw new Error('Wait for the current operation before changing models.');
     model=schema.text(model,'model',256).trim();
-    if(a.protocol==='acp'&&model&&!(this.runtimeFor(id).models||[]).includes(model))throw new Error('Refresh models and choose an available ACP model.');
+    // An ACP agent that lists its models must get one of them; one that lists none takes the name the user typed.
+    const known=this.runtimeFor(id).models||[];
+    if(a.protocol==='acp'&&model&&known.length&&!known.includes(model)&&!model.includes(':'))throw new Error('Refresh models and choose an available ACP model.');
     if(a.protocol==='terminal')throw new Error('Choose the model in this agent\'s CLI.');
     if(scope==='conversation'){const c=this.data.conversations.find(c=>c.id===schema.id(conversationId)&&c.agentId===a.id);if(!c)throw new Error('Start a conversation first.');c.model=model;await this.persist();return true;}
     a.model=model;await this.persist();return true;

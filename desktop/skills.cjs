@@ -35,38 +35,31 @@ async function localSkills(dirs){
   for(const dir of dirs)await walk(dir,dir,0);
   return found;
 }
-const REMOTE=String.raw`
-import json,os,sys
-dirs=json.load(sys.stdin);out=[]
-for d in dirs:
-  if d.startswith('@hermes/'):d=os.path.join(os.environ.get('HERMES_HOME') or os.path.expanduser('~/.hermes'),d[8:])
-  root=os.path.expanduser(d)
-  for base,subs,files in os.walk(root):
-    if base[len(root):].count(os.sep)>3:subs[:]=[];continue
-    subs[:]=[s for s in subs if not s.startswith('.') and s!='node_modules']
-    if 'SKILL.md' in files:
-      subs[:]=[]
-      try:
-        with open(os.path.join(base,'SKILL.md'),encoding='utf-8',errors='replace') as f:head=f.read(4096)
-      except OSError:continue
-      out.append({'path':os.path.join(base,'SKILL.md'),'root':root,'head':head})
-    if len(out)>=${MAX}:break
-sys.stdout.write(json.dumps(out))
-`;
-async function remoteSkills(host,dirs){
-  const ssh=findExecutable('ssh',environment());if(!ssh)throw new Error('OpenSSH client is not installed.');
-  // ~ and the Hermes home are resolved on the remote side; the list is passed as JSON on stdin, never on the command line.
-  const child=spawn(ssh,[...sshArgs(host),'-T',target(host),'python3 -c '+quote(REMOTE)],{env:environment(),windowsHide:true,stdio:['pipe','pipe','pipe']});
-  const rows=JSON.parse(await collect(child,{timeout:20000,maxBytes:4*1024*1024,input:JSON.stringify(dirs)}));
-  return rows.map(r=>clean(r.path.replace(/\\/g,'/'),frontMatter(r.head),r.root)).filter(Boolean);
+// Skills on an SSH machine or inside a container (Hermes in Docker keeps them in the container, not on the host).
+// Plain sh and find, so it works without python3; the Hermes home is resolved the same way clone and transfer do.
+const MARK='@@OPAYA-SKILL@@';
+async function remoteSkills(agent,host,dirs){
+  const {place,run,sourceHome}=require('./clone.cjs');
+  const where=place({agent,host});
+  let roots=dirs;
+  if(agent.provider==='hermes')roots=[path.posix.join(await sourceHome(agent,where),'skills')];
+  const arg=d=>d==='~'?'"$HOME"':d.startsWith('~/')?`"$HOME"/${quote(d.slice(2))}`:quote(d);
+  const script=`for d in ${roots.map(arg).join(' ')}; do [ -d "$d" ] || continue; find "$d" -maxdepth 5 \\( \\( -name '.*' -o -name node_modules \\) -type d -prune \\) -o \\( -type f -name SKILL.md -print \\) 2>/dev/null | while IFS= read -r f; do printf '\\n${MARK}%s\\t%s\\n' "$d" "$f"; head -c 2048 "$f"; done; done; true`;
+  const out=await run(where,script,25000);
+  const rows=[];
+  for(const chunk of out.split('\n'+MARK).slice(1)){
+    const nl=chunk.indexOf('\n'),head=nl<0?'':chunk.slice(nl+1),[root,file]=(nl<0?chunk:chunk.slice(0,nl)).split('\t');
+    if(!root||!file)continue;const s=clean(file,frontMatter(head),root);if(s)rows.push(s);if(rows.length>=MAX)break;
+  }
+  return {skills:rows,roots};
 }
 async function listSkills(agent,host){
-  const remote=agent.transport==='ssh';
+  const inContainer=agent.command==='docker',remote=agent.transport==='ssh'||inContainer;
   const dirs=skillDirs(agent,{remote});
   if(!dirs.length)return {skills:[],dirs:[],supported:false};
-  const skills=remote?await remoteSkills(host,dirs):await localSkills(dirs);
-  skills.sort((a,b)=>a.name.localeCompare(b.name));
-  return {skills,dirs,supported:true};
+  if(!remote){const skills=await localSkills(dirs);skills.sort((a,b)=>a.name.localeCompare(b.name));return {skills,dirs,supported:true};}
+  const r=await remoteSkills(agent,host,dirs);r.skills.sort((a,b)=>a.name.localeCompare(b.name));
+  return {skills:r.skills,dirs:r.roots,supported:true};
 }
 // Skill ids accepted by `hermes skills install`: hub ids (official/security/1password, skills-sh/owner/repo/skill) or
 // an https URL to a SKILL.md. Checked strictly because the id becomes a command argument.
@@ -85,4 +78,4 @@ function hermesSkillCommand(agent,{action,skill,remote,windows}){
   if(remote||!windows)return `${home?`HERMES_HOME=${quote(home)} `:''}hermes ${args}`;
   return `${home?`$env:HERMES_HOME='${home.replace(/'/g,"''")}'; `:''}hermes ${args}`;
 }
-module.exports={localSkills,listSkills,skillDirs,frontMatter,skillId,hermesSkillCommand};
+module.exports={localSkills,remoteSkills,listSkills,skillDirs,frontMatter,skillId,hermesSkillCommand};

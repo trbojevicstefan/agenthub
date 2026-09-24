@@ -38,3 +38,32 @@ test('ACP applies a persisted model after loading an existing session',async()=>
   await adapter.connect();await adapter.run(context({conversation:{id:'local',externalSessionId:'saved'}}));
   const methods=child.frames.map(f=>f.method);assert(methods.indexOf('session/set_model')<methods.indexOf('session/prompt'));assert.equal(child.frames.find(f=>f.method==='session/set_model').params.sessionId,'saved');adapter.close();
 });
+test('ACP reads models from session config options and sets them through set_config_option',async()=>{
+  const child=childMock((message,c)=>{
+    if(message.method==='initialize')c.reply(message,{protocolVersion:1,agentCapabilities:{}});
+    if(message.method==='session/new')c.reply(message,{sessionId:'s1',configOptions:[{id:'mode',category:'mode',options:[{value:'ask'}]},{id:'model_choice',category:'model',type:'select',currentValue:'a',options:[{value:'anthropic/claude-sonnet'},{group:'openrouter',name:'OpenRouter',options:[{value:'qwen/qwen3-coder'}]}]}]});
+    if(['session/set_config_option','session/prompt'].includes(message.method))c.reply(message,{});
+  });
+  const adapter=new AcpAdapter({agent:{args:[],cwd:process.cwd(),model:'qwen/qwen3-coder'},spawnAgent:()=>child});
+  await adapter.connect();assert.deepEqual(await adapter.listModels(),['anthropic/claude-sonnet','qwen/qwen3-coder']);
+  await adapter.run(context());
+  const set=child.frames.find(f=>f.method==='session/set_config_option');assert.deepEqual(set.params,{sessionId:'s1',configId:'model_choice',value:'qwen/qwen3-coder'});
+  assert(!child.frames.some(f=>f.method==='session/set_model'));adapter.close();
+});
+test('ACP tries a typed model when the server lists none, and reports a refusal instead of failing',async()=>{
+  const child=childMock((message,c)=>{
+    if(message.method==='initialize')c.reply(message,{protocolVersion:1,agentCapabilities:{}});
+    if(message.method==='session/new')c.reply(message,{sessionId:'s2'});
+    if(message.method==='session/set_model')c.send({id:message.id,error:{code:-32601,message:'Method not found'}});
+    if(message.method==='session/prompt')c.reply(message,{});
+  });
+  const adapter=new AcpAdapter({agent:{args:[],cwd:process.cwd(),model:'my-model'},spawnAgent:()=>child});
+  await adapter.connect();assert.deepEqual(await adapter.listModels(),[]);
+  const events=[];await adapter.run(context({onEvent:e=>events.push(e)}));
+  assert(events.some(e=>/my-model was not applied/.test(e.text||'')));assert(child.frames.some(f=>f.method==='session/prompt'));adapter.close();
+});
+test('Claude Code offers its model aliases',async()=>{
+  const {ClaudeAdapter}=require('../desktop/adapters/claude.cjs');
+  const models=await new ClaudeAdapter({agent:{model:'claude-opus-4-1'}}).listModels();
+  for(const m of ['sonnet','opus','haiku','claude-opus-4-1'])assert(models.includes(m),m);
+});

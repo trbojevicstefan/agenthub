@@ -57,6 +57,16 @@ class CodexAdapter{
     });
   }
   close(){this.rpc?.close();}
-  async listModels(){const result=await this.rpc.request('model/list',{limit:100});return (result.data||[]).map(m=>m.model||m.id).filter(m=>typeof m==='string');}
+  // model/list pages through nextCursor; older app-servers answered with `models` or `items` instead of `data`.
+  async listModels(){
+    const out=[];let cursor;
+    for(let page=0;page<5;page++){
+      const result=await this.rpc.request('model/list',{limit:100,...(cursor?{cursor}:{})});
+      const list=result?.data||result?.models||result?.items||[];
+      for(const m of list){const id=typeof m==='string'?m:m?.model||m?.id||m?.slug;if(typeof id==='string')out.push(id);}
+      cursor=result?.nextCursor;if(!cursor)break;
+    }
+    return [...new Set(out)];
+  }
 }
 module.exports={CodexAdapter};
