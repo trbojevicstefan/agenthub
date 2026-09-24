@@ -25,6 +25,7 @@
 - **Fixes**:
   - A terminal tab of a removed agent can now always be closed.
   - Fixed a rare hang in cloning when the copy finished very quickly.
+  - On a slow first launch (older Intel Macs, Gatekeeper scan), Opaya now waits up to a minute for its session service instead of 15 seconds.
 
 # Opaya 0.10.2 - A clone window worth watching
 
