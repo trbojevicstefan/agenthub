@@ -1,6 +1,7 @@
 'use strict';
 const {Rpc}=require('../rpc.cjs');
 const {launch}=require('../process.cjs');
+const {ConnectionLog}=require('../diagnostics.cjs');
 function sessionCwd(agent){
   return agent.command==='docker'&&agent.provider==='hermes'&&agent.hermesHome?agent.hermesHome:agent.cwd;
 }
@@ -21,24 +22,31 @@ function activityOf(update){
   return [title,status&&status!=='pending'?status:'',location].filter(Boolean).join(' — ');
 }
 class AcpAdapter {
-  constructor({agent,host,approve,spawnAgent=launch}){this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.sessions=new Map();this.active=null;}
+  constructor({agent,host,approve,spawnAgent=launch}){this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.sessions=new Map();this.active=null;this.log=new ConnectionLog();this.tools=new Map();this.permission=null;}
   async connect(){
     const args=[...this.agent.args];
     if(this.agent.provider==='hermes'&&!args.includes('acp'))args.push('acp');
-    this.rpc=new Rpc(this.spawnAgent(this.agent,args,this.host),{onRequest:async(method,params)=>{
+    this.log.add('info',`Starting ${this.agent.command} ${args.join(' ')}`);
+    this.rpc=new Rpc(this.spawnAgent(this.agent,args,this.host),{log:(direction,text)=>this.log.add(direction,text),onRequest:async(method,params)=>{
       if(method!=='session/request_permission')throw new Error('Client filesystem and terminal capabilities are not enabled.');
       if(!this.active||params.sessionId!==this.active.sessionId||this.active.signal.aborted)return {outcome:{outcome:'cancelled'}};
       const options=Array.isArray(params.options)?params.options:[];
-      const allow=options.find(o=>o.kind==='allow_once');
-      if(!allow)return {outcome:{outcome:'cancelled'}};
-      const pending=this.active;
-      const accepted=await this.approve(this.agent, String(params.toolCall?.title||'Agent tool request'), JSON.stringify(params.toolCall?.rawInput||params.toolCall||{},null,2).slice(0,5000));
+      // Prefer a one-time allow; some agents only offer allow_always. Either way the user decides in a native dialog.
+      const allow=options.find(o=>o.kind==='allow_once')||options.find(o=>o.kind==='allow_always');
+      if(!allow){this.log.add('info','Permission request had no allow option; cancelled.');return {outcome:{outcome:'cancelled'}};}
+      const pending=this.active,title=String(params.toolCall?.title||'Agent tool request');
+      this.permission={title,since:Date.now()};pending.onEvent({type:'activity',text:`Waiting for your approval: ${title}`});
+      let accepted;try{accepted=await this.approve(this.agent, title, JSON.stringify(params.toolCall?.rawInput||params.toolCall||{},null,2).slice(0,5000));}finally{this.permission=null;}
+      pending.onEvent({type:'activity',text:`${accepted?'Approved':'Declined'}: ${title}`});
       if(!accepted||this.active!==pending||pending.signal.aborted)return {outcome:{outcome:'cancelled'}};
       return {outcome:{outcome:'selected',optionId:allow.optionId}};
     }});
     this.rpc.on('notification',(method,params)=>{
       if(method!=='session/update'||!this.active||params.sessionId!==this.active.sessionId)return;
       const update=params.update||{};
+      // Track tool calls so diagnostics can say which tool is still running and for how long.
+      if(['tool_call','tool_call_update'].includes(update.sessionUpdate)){const id=update.toolCallId||update.toolCall?.toolCallId||update.title;const status=update.status||update.toolCall?.status||'';const prev=this.tools.get(id);
+        if(['completed','failed'].includes(status))this.tools.delete(id);else this.tools.set(id,{title:update.title||prev?.title||update.kind||'tool',status:status||prev?.status||'pending',since:prev?.since||Date.now()});}
       if(update.sessionUpdate==='agent_message_chunk'&&update.content?.type==='text')this.active.onEvent({type:'text',text:update.content.text});
       else {const text=activityOf(update);if(text)this.active.onEvent({type:'activity',text});}
     });
@@ -70,15 +78,24 @@ class AcpAdapter {
       if(ctx.signal.aborted)throw new Error('Cancelled.');
       const model=ctx.conversation.model||this.agent.model;
       if(model&&(model.includes(':')||this.modelIds?.includes(model)))await this.rpc.request('session/set_model',{sessionId,modelId:model},60000);
-      await this.rpc.request('session/prompt',{sessionId,prompt:[{type:'text',text:ctx.text}]},10*60*1000);
+      // No fixed cap: long tool runs are normal. The broker's inactivity limit and Stop end a stuck turn.
+      this.tools.clear();
+      await this.rpc.request('session/prompt',{sessionId,prompt:[{type:'text',text:ctx.text}]},24*60*60*1000);
       if(ctx.signal.aborted)throw new Error('Cancelled.');
       return {externalSessionId:sessionId};
-    }finally{ctx.signal.removeEventListener('abort',cancel);this.active=null;}
+    }finally{ctx.signal.removeEventListener('abort',cancel);this.active=null;this.tools.clear();}
   }
   async listModels(){
     if(!this.preparedSession)this.preparedSession=await this.rpc.request('session/new',{cwd:sessionCwd(this.agent),mcpServers:[]},60000);
     this.modelIds=(this.preparedSession.models?.availableModels||[]).map(m=>m.modelId).filter(m=>typeof m==='string');
     return this.modelIds;
+  }
+  diagnostics(){
+    const now=Date.now();
+    return {protocol:'acp',pid:this.rpc?.child?.pid||null,closed:!!this.rpc?.closed,stderr:this.rpc?.stderr||'',
+      waitingForApproval:this.permission?{title:this.permission.title,seconds:Math.round((now-this.permission.since)/1000)}:null,
+      runningTools:[...this.tools.values()].map(t=>({title:t.title,status:t.status,seconds:Math.round((now-t.since)/1000)})),
+      ...this.log.toJSON()};
   }
   close(){this.rpc?.close();}
 }
