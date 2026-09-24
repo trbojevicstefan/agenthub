@@ -6,6 +6,8 @@ const {hermesLogs}=require('./diagnostics.cjs');
 const {createAdapter}=require('./adapters/index.cjs');
 const {importGatewayToken}=require('./credentials.cjs');
 const {gatewayOperation}=require('./management.cjs');
+const mcp=require('./mcp.cjs');
+const {listSkills}=require('./skills.cjs');
 function safeError(error,token=''){
   let value=String(error?.message||error||'Operation failed.');
   if(token)value=value.split(token).join('[redacted]');
@@ -18,7 +20,8 @@ class Broker{
   async init(){
     await this.vault.load();this.data=await this.store.load();
     this.data.drafts=this.data.drafts||{};this.data.lastConversation=this.data.lastConversation||{};this.data.view=this.data.view||{};
-    this.data.agents=this.data.agents.map(a=>schema.agent(a));this.data.hosts=this.data.hosts.map(h=>schema.host(h));
+    this.data.agents=this.data.agents.map(a=>schema.agent(a));
+    this.data.mcpServers=(Array.isArray(this.data.mcpServers)?this.data.mcpServers:[]).flatMap(s=>{try{return [mcp.server(s)];}catch{return [];}});this.data.hosts=this.data.hosts.map(h=>schema.host(h));
     this.data.activeAgentId=this.data.agents.some(a=>a.id===this.data.activeAgentId)?this.data.activeAgentId:this.data.agents[0]?.id||'';
     for(const a of this.data.agents)this.runtime.set(a.id,{status:'disconnected',error:'',models:[]});
     for(const c of this.data.conversations){schema.id(c.id);schema.id(c.agentId);}
@@ -32,7 +35,7 @@ class Broker{
   runtimeFor(id){if(!this.runtime.has(id))this.runtime.set(id,{status:'disconnected',error:'',models:[]});return this.runtime.get(id);}
   snapshot(){
     const {agents,hosts,conversations,activeAgentId,activeConversationId}=this.data;
-    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,conversations,activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
+    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',commands:r.adapter?.commands||[],models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations,activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
   }
   changed(){if(!this.closing)this.emit(this.snapshot());}
   async persist(){await this.store.write(this.data);this.changed();}
@@ -145,6 +148,39 @@ class Broker{
       turn:turn?{runningSeconds:Math.round((now-(turn.startedAt||now))/1000),secondsSinceLastEvent:Math.round((now-(turn.lastEventAt||turn.startedAt||now))/1000),lastEvent:turn.lastEvent||''}:null,
       adapter,hermesLogs:a.provider==='hermes'?await hermesLogs(a,a.transport==='ssh'?this.data.hosts.find(h=>h.id===a.hostId):null).catch(()=>[]):[]};
   }
+  // ---- MCP servers and skills ----------------------------------------------------------------------------------
+  mcpSecrets(serverId){try{const raw=this.vault.get(mcp.vaultKey(serverId));return raw?JSON.parse(raw):{env:{},headers:{}};}catch{return {env:{},headers:{}};}}
+  mcpFor(agentId){return mcp.acpServers(this.data.mcpServers||[],agentId,id=>this.mcpSecrets(id));}
+  async saveMcpServer({server:input,env,headers}){
+    const existing=input?.id?this.data.mcpServers.find(s=>s.id===input.id):null;
+    const saved=existing?this.mcpSecrets(existing.id):{env:{},headers:{}};
+    // Empty text keeps the saved values; a line per variable replaces them all.
+    const next=mcp.secrets({env,headers});
+    const secret={env:typeof env==='string'&&env.trim()?next.env:saved.env,headers:typeof headers==='string'&&headers.trim()?next.headers:saved.headers};
+    const s=mcp.server({...(existing||{}),...input,envNames:Object.keys(secret.env),headerNames:Object.keys(secret.headers)});
+    if(this.data.mcpServers.some(x=>x.name===s.name&&x.id!==s.id))throw new Error(`An MCP server named ${s.name} already exists.`);
+    if(!existing&&this.data.mcpServers.length>=64)throw new Error('MCP server limit reached (64).');
+    if(s.type==='stdio'&&(!existing||existing.command!==s.command||JSON.stringify(existing.args)!==JSON.stringify(s.args))){
+      if(!await this.approve({name:s.name},'Trust this MCP server?',`${s.command} ${s.args.join(' ')}\n\nAgents that use it start this program on the machine where they run, with that account's permissions.`))throw new Error('MCP server was not approved.');
+    }
+    const hasSecrets=Object.keys(secret.env).length||Object.keys(secret.headers).length;
+    if(hasSecrets)await this.vault.set(mcp.vaultKey(s.id),JSON.stringify(secret),true);else if(existing)await this.vault.remove(mcp.vaultKey(s.id));
+    this.data.mcpServers=existing?this.data.mcpServers.map(x=>x.id===s.id?s:x):[...this.data.mcpServers,s];
+    await this.persist();return mcp.publicView(s);
+  }
+  async removeMcpServer(id){
+    id=schema.id(id);if(!this.data.mcpServers.some(s=>s.id===id))throw new Error('MCP server not found.');
+    this.data.mcpServers=this.data.mcpServers.filter(s=>s.id!==id);await this.vault.remove(mcp.vaultKey(id));await this.persist();return true;
+  }
+  // Turn one server on or off for one agent. Changes apply to the agent's next new conversation or reconnect.
+  async setAgentMcp({agentId,serverId,enabled}){
+    const a=this.agent(agentId),s=this.data.mcpServers.find(x=>x.id===schema.id(serverId));if(!s)throw new Error('MCP server not found.');
+    let list=s.agents==='all'?this.data.agents.map(x=>x.id):[...s.agents];
+    list=enabled?[...new Set([...list,a.id])]:list.filter(x=>x!==a.id);
+    s.agents=list.length===this.data.agents.length&&this.data.agents.every(x=>list.includes(x.id))?'all':list;if(enabled)s.enabled=true;
+    await this.persist();return mcp.publicView(s);
+  }
+  async skills(id){const a=this.agent(id);return listSkills(a,a.transport==='ssh'?this.host(a.hostId):null);}
   async connectAll({ids}={}){
     const targets=this.data.agents.filter(a=>(!ids||ids.includes(a.id))&&a.protocol!=='terminal'&&!['connected','connecting'].includes(this.runtimeFor(a.id).status));
     const results=await Promise.all(targets.map(a=>this.connect(a.id).then(()=>({id:a.id,ok:true}),error=>({id:a.id,ok:false,error:safeError(error)}))));
@@ -165,7 +201,7 @@ class Broker{
       const generation=(r.generation||0)+1;r.generation=generation;
       let adapter,token='';
       try{
-        token=this.vault.get(id);adapter=this.adapterFactory({agent:a,host:a.transport==='ssh'?this.host(a.hostId):null,token,approve:this.approve});r.adapter=adapter;
+        token=this.vault.get(id);adapter=this.adapterFactory({agent:a,host:a.transport==='ssh'?this.host(a.hostId):null,token,approve:this.approve,mcpServers:()=>this.mcpFor(a.id),onChange:()=>this.changed()});r.adapter=adapter;
         const info=await adapter.connect();
         if(r.generation!==generation){adapter.close();return;}
         Object.assign(r,info,{status:'connected'});

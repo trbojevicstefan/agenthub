@@ -13,6 +13,7 @@ const schema = require('./schema.cjs');
 const catalog = require('./catalog.cjs');
 const files = require('./files.cjs');
 const {OpayaAgent} = require('./opaya-agent.cjs');
+const skills = require('./skills.cjs');
 async function start({app, safeStorage}, root) {
   let broker, terminals, listener, opaya, stopping = false;
   const startedAt = new Date().toISOString(), approvals = new Map();
@@ -81,6 +82,14 @@ async function start({app, safeStorage}, root) {
       catch(error){if(fallback&&x.op!=='read')return files.browse({op:x.op,path:'',host});throw error;}
     },
     agentDiagnostics:x=>broker.diagnostics(x.id),
+    mcpSave:x=>broker.saveMcpServer(x), mcpRemove:x=>broker.removeMcpServer(x.id), agentMcp:x=>broker.setAgentMcp(x), agentSkills:x=>broker.skills(x.id),
+    // Hermes skills: browse the hub or install one with the Hermes CLI in a visible terminal.
+    skillAction:async x=>{
+      const a=broker.agent(x.agentId),host=a.transport==='ssh'?broker.host(a.hostId):null;
+      const command=skills.hermesSkillCommand(a,{action:x.action,skill:x.skill,remote:!!host,windows:process.platform==='win32'});
+      if(x.action==='install'&&!await approve(a,`Install skill ${x.skill}?`,`Runs in a visible terminal ${host?'on '+host.name:'on this computer'}:\n\n${command}\n\nHermes scans hub skills before installing. Start a new conversation to use it.`))throw new Error('Skill install cancelled.');
+      return runInTerminal({label:x.action==='install'?`Skill ${x.skill}`:'Hermes skills',key:`skills_${a.id}`.slice(0,60),host,command});
+    },
     playground:x=>broker.playground(x), moveAgent:x=>broker.moveAgent(x), connectAll:x=>broker.connectAll(x),
     opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}), opayaForgetKey:()=>opaya.forgetKey(),
     opayaSend:x=>opaya.begin(x.text), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),

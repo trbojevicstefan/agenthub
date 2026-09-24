@@ -6,14 +6,17 @@ const fs = require('node:fs');
 function quote(value) { return "'" + String(value).replace(/'/g, "'\\''") + "'"; }
 // Installs made while Opaya runs (winget, installers) only update PATH in the registry. Read it back so new tools are
 // found without restarting the session service. Cached briefly because every process launch builds an environment.
-let registryPath = {value: '', at: 0};
-function windowsRegistryPath() {
-  if (process.platform !== 'win32') return '';
-  if (Date.now() - registryPath.at < 15000) return registryPath.value;
-  const read = key => { try { const out = require('node:child_process').execFileSync('reg', ['query', key, '/v', 'Path'], {encoding: 'utf8', windowsHide: true, timeout: 3000}); return (out.match(/\bPath\s+REG_(?:EXPAND_)?SZ\s+(.*)/i)?.[1] || '').trim(); } catch { return ''; } };
-  const value = [read('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'), read('HKCU\\Environment')].join(';').replace(/%([^%]+)%/g, (m, name) => process.env[name] ?? m);
-  registryPath = {value, at: Date.now()}; return value;
+let registryEnv = {values: {}, at: 0};
+function windowsRegistryEnv() {
+  if (process.platform !== 'win32') return {};
+  if (Date.now() - registryEnv.at < 15000) return registryEnv.values;
+  const read = key => { const values = {}; try { const out = require('node:child_process').execFileSync('reg', ['query', key], {encoding: 'utf8', windowsHide: true, timeout: 3000}); for (const m of out.matchAll(/^\s+(\S+)\s+REG_(?:EXPAND_)?SZ\s+(.*)$/gim)) values[m[1].toUpperCase()] = m[2].trim().replace(/%([^%]+)%/g, (x, name) => process.env[name] ?? x); } catch {} return values; };
+  const machine = read('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'), user = read('HKCU\\Environment');
+  registryEnv = {values: {...machine, ...user, PATH: [machine.PATH, user.PATH].filter(Boolean).join(';')}, at: Date.now()}; return registryEnv.values;
 }
+function windowsRegistryPath() { return windowsRegistryEnv().PATH || ''; }
+// Hermes' Windows installer sets these as user variables. Opaya may have started before the install, so read them back.
+const REGISTRY_VARS = ['HERMES_HOME', 'HERMES_GIT_BASH_PATH'];
 function windowsToolDirs() {
   const local = process.env.LOCALAPPDATA || '', roaming = process.env.APPDATA || '', programs = process.env.ProgramFiles || 'C:\\Program Files';
   const dirs = [path.join(programs, 'nodejs'), path.join(programs, 'Git', 'cmd'), path.join(local, 'Microsoft', 'WinGet', 'Links'), path.join(local, 'Programs', 'Python', 'Launcher')];
@@ -30,6 +33,8 @@ function environment(extra = {}) {
   const dirs = [path.join(os.homedir(), '.local', 'bin'), path.join(os.homedir(), '.cargo', 'bin'), path.join(os.homedir(), '.npm-global', 'bin')];
   if (process.platform === 'win32') {
     dirs.push(path.join(process.env.APPDATA || '', 'npm'), path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH'), ...windowsToolDirs(), ...windowsRegistryPath().split(';'));
+    const registry = windowsRegistryEnv();
+    for (const name of REGISTRY_VARS) if (!env[name] && registry[name]) env[name] = registry[name];
   } else dirs.push('/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin');
   env.PATH = [...new Set([...(env.PATH || '').split(path.delimiter), ...dirs].filter(Boolean))].join(path.delimiter);
   // Never inherit debugging/runtime injection from an embedding Electron launcher.

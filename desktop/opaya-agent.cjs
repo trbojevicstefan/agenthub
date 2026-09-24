@@ -12,6 +12,7 @@ const {randomUUID}=require('node:crypto');
 const schema=require('./schema.cjs');
 const catalog=require('./catalog.cjs');
 const files=require('./files.cjs');
+const skills=require('./skills.cjs');
 const {atomicJson,readJson}=require('./store.cjs');
 const {quote,target,launch}=require('./process.cjs');
 const {Rpc}=require('./rpc.cjs');
@@ -64,6 +65,9 @@ const TOOLS=[
   fn('list_directory','Read-only: list a folder on this computer or a saved machine (default: home folder).',{path:{type:'string'},machine_id:{type:'string'}}),
   fn('read_file','Read-only: read up to 256 KB of a text file on this computer or a saved machine. Secret files such as .env, keys and tokens are refused.',{path:{type:'string'},machine_id:{type:'string'}},['path']),
   fn('project_info','Read-only: project markers, git branch, uncommitted changes and recent commits for a folder.',{path:{type:'string'},machine_id:{type:'string'}},['path']),
+  fn('list_skills','Read-only: the skills installed for an agent (folders with a SKILL.md) and where they live. Users run a skill with /name in the chat.',{agent_id:{type:'string'}},['agent_id']),
+  fn('install_skill','Install a Hermes skill with `hermes skills install` in a visible terminal. The user approves it first. Use hub ids such as official/security/1password or skills-sh/owner/repo/skill, or an https link to a SKILL.md.',{agent_id:{type:'string'},skill:{type:'string'}},['agent_id','skill']),
+  fn('list_mcp_servers','Read-only: MCP servers saved in Opaya and which agents use them. Values of environment variables and headers are never shown. The user adds or edits servers in Settings > MCP servers.'),
   fn('read_notes','Read your notes file in your home folder.'),
   fn('write_notes','Replace your notes file in your home folder (max 20000 characters). Use it to remember setup decisions.',{content:{type:'string'}},['content'])
 ];
@@ -124,6 +128,7 @@ class OpayaAgent{
       'Your job: help install new agents, connect and maintain existing ones, manage SSH machines and keys, and troubleshoot agents that do not work.',
       'Work only through your tools. Check the workspace before changing anything. Prefer the smallest change. Explain briefly what you will do before a change; every change and command is approved by the user in a native dialog, and a declined approval is final.',
       'You cannot edit the app itself, its code or files outside your home folder, and you never see or handle API tokens: ask the user to enter tokens in the connection form.',
+      'Skills: list_skills shows what an agent has; users run one with /name in its chat. Install Hermes skills with install_skill. MCP servers are added by the user in Settings > MCP servers (list_mcp_servers shows them); Opaya passes them to Hermes over ACP and to Claude Code. ',
       'When an agent hangs or does not answer, call agent_diagnostics first and explain what it shows: a pending approval, a tool that is still running, stderr errors or Hermes log errors. A Hermes log full of repeated "slack_bolt ... Session is closed" tracebacks is a known Hermes gateway bug in its Slack reconnect (NousResearch/hermes-agent#83662); it only affects the gateway and Slack, and restarting the Hermes gateway clears it. For agents that fail: read the connection and error, run diagnostics, check that the endpoint/port or executable exists, reconnect, and only then propose an edited connection. Do not remove connections unless asked.',
       'Before installing an agent, check its prerequisites with run_diagnostic versions (on the target machine) and install missing dependencies first, or the essentials bundle when several are missing. On Windows, new tools appear on PATH for terminals opened after the install.',
       'To understand a project or config, use list_directory, read_file and project_info (read-only). After an install finishes, use discover_agents and save_connection to add it. Terminal output may take a while; read it again if it is incomplete.',
@@ -184,7 +189,7 @@ class OpayaAgent{
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.5.3'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.6.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
@@ -290,6 +295,15 @@ class OpayaAgent{
       case 'list_directory':{const r=await files.browse({op:'list',path:String(args.path||''),host:this.host(args.machine_id)});return {...r,entries:r.entries.slice(0,300)};}
       case 'read_file':{const p=String(args.path||'');if(files.isSecret(p))throw new Error('That file may contain secrets, so the Opaya Agent does not read it. Ask the user to check it in the Files panel.');const r=await files.browse({op:'read',path:p,host:this.host(args.machine_id)});if(files.isSecret(r.path))throw new Error('That file may contain secrets.');return {...r,text:r.text.slice(0,24000)};}
       case 'project_info':return files.browse({op:'project',path:String(args.path||''),host:this.host(args.machine_id)});
+      case 'list_skills':{const r=await b.skills(schema.id(args.agent_id));return {...r,skills:r.skills.slice(0,150).map(({name,description,category})=>({name,description,category}))};}
+      case 'install_skill':{
+        const a=b.agent(args.agent_id),host=a.transport==='ssh'?b.host(a.hostId):null;
+        const command=skills.hermesSkillCommand(a,{action:'install',skill:String(args.skill||''),remote:!!host,windows:this.platform==='win32'});
+        await this.ask(`Install skill ${args.skill} for ${a.name}?`,`Runs in a visible terminal ${host?'on '+host.name:'on this computer'}:\n\n${command}`);
+        const view=await this.runInTerminal({label:`Skill ${args.skill}`,key:`skills_${a.id}`.slice(0,60),host,command});
+        return {terminal_id:view.id,output:await this.terminalOutput(view.id,6000),next:'Start a new conversation with the agent to use the skill.'};
+      }
+      case 'list_mcp_servers':return {servers:b.snapshot().mcpServers.map(({name,type,command,args,url,envNames,headerNames,agents,enabled})=>({name,type,command,args,url,envNames,headerNames,enabled,agents:agents==='all'?'all':agents.map(id=>b.data.agents.find(x=>x.id===id)?.name||id)}))};
       case 'read_notes':return {notes:await fs.readFile(path.join(this.home,'notes.md'),'utf8').catch(()=>'')};
       case 'write_notes':{const content=String(args.content??'');if(content.length>20000||content.includes('\0'))throw new Error('Notes must be under 20000 characters.');await fs.writeFile(path.join(this.home,'notes.md'),content,{mode:0o600});return {saved:true};}
       default:throw new Error('Unknown tool.');

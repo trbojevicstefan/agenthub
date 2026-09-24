@@ -271,3 +271,16 @@
 :where(body[data-theme="light"]) .pg-column{border:1px solid #cad5cf;background:#e3e9e6}
 :where(body[data-theme="light"]) .pg-head{border-bottom:1px solid #cfd8d5}
 :where(body[data-theme="light"]) .pg-meta{border-bottom:1px solid #d8e0dd}
+:where(body[data-theme="light"]) .diag-hint{border:1px solid #d3c7a4;background:#eae2d3;color:#58441a}
+:where(body[data-theme="light"]) .skills-head h3 small{color:#546359}
+:where(body[data-theme="light"]) .skill-row{border:1px solid #cbd7cf;background:#e2eae5}
+:where(body[data-theme="light"]) .skill-row strong{color:#121c15}
+:where(body[data-theme="light"]) .skill-row em{color:#37503e}
+:where(body[data-theme="light"]) .skill-row p{color:#44514a}
+:where(body[data-theme="light"]) .mcp-form label small{color:#546359}
+:where(body[data-theme="light"]) .mcp-agents{border:1px solid #cbd7cf}
+:where(body[data-theme="light"]) .slash-menu{border:1px solid #b7c5bb;background:#e3ebe6}
+:where(body[data-theme="light"]) .slash-menu button{color:#18231b}
+:where(body[data-theme="light"]) .slash-menu button.active,:where(body[data-theme="light"]) .slash-menu button:hover{background:#cfddd4}
+:where(body[data-theme="light"]) .slash-menu em{color:#37503e}
+:where(body[data-theme="light"]) .slash-menu span{color:#44514a}

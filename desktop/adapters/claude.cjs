@@ -1,7 +1,17 @@
 'use strict';
+const fs=require('node:fs');
+const os=require('node:os');
+const path=require('node:path');
 const {launch,collect,terminate}=require('../process.cjs');
+const {claudeConfig}=require('../mcp.cjs');
+// MCP servers go to Claude in a private temporary file, so tokens in env or headers stay off the command line.
+function mcpFile(servers){
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'opaya-mcp-'));const file=path.join(dir,'mcp.json');
+  fs.writeFileSync(file,JSON.stringify(claudeConfig(servers)),{mode:0o600});
+  return {file,remove:()=>fs.rmSync(dir,{recursive:true,force:true})};
+}
 class ClaudeAdapter{
-  constructor({agent,host,spawnAgent=launch}){this.agent=agent;this.host=host;this.spawnAgent=spawnAgent;}
+  constructor({agent,host,spawnAgent=launch,mcpServers=()=>[]}){this.agent=agent;this.host=host;this.spawnAgent=spawnAgent;this.mcpServers=mcpServers;}
   async connect(){
     const version=await collect(this.spawnAgent(this.agent,[...this.agent.args,'--version'],this.host),{timeout:15000,maxBytes:16384});
     return {description:`CLI available: ${version.trim().slice(0,100)}. Sign-in is checked when sending.`};
@@ -10,10 +20,13 @@ class ClaudeAdapter{
     const args=[...this.agent.args,'-p','--output-format','stream-json','--verbose','--include-partial-messages','--permission-mode','default'];
     if(ctx.conversation.externalSessionId)args.push('--resume',ctx.conversation.externalSessionId);
     const model=ctx.conversation.model||this.agent.model;if(model)args.push('--model',model);
-    const child=this.spawnAgent(this.agent,args,this.host);this.child=child;
+    const servers=this.mcpServers()||[];let config=null;
+    if(servers.length&&this.agent.transport==='ssh')ctx.onEvent({type:'activity',text:'MCP servers from Opaya are not passed to Claude over SSH. Add them on that machine with `claude mcp add`.'});
+    else if(servers.length){config=mcpFile(servers);args.push('--mcp-config',config.file);}
+    let child;try{child=this.spawnAgent(this.agent,args,this.host);}catch(error){config?.remove();throw error;}this.child=child;
     return new Promise((resolve,reject)=>{
       let buffer='',stderr='',sessionId='',sawText=false,resultSeen=false,done=false,resultError='';
-      const finish=(error)=>{if(done)return;done=true;clearTimeout(timer);ctx.signal.removeEventListener('abort',cancel);this.child=null;error?reject(error):resolve({externalSessionId:sessionId||ctx.conversation.externalSessionId});};
+      const finish=(error)=>{if(done)return;done=true;config?.remove();clearTimeout(timer);ctx.signal.removeEventListener('abort',cancel);this.child=null;error?reject(error):resolve({externalSessionId:sessionId||ctx.conversation.externalSessionId});};
       const cancel=()=>{terminate(child);finish(new Error('Cancelled.'));};
       const timer=setTimeout(()=>{terminate(child);finish(new Error('Claude turn timed out.'));},10*60*1000);
       ctx.signal.addEventListener('abort',cancel,{once:true});
