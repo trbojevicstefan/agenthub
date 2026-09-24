@@ -32,6 +32,31 @@ const safeUrl=u=>typeof u==='string'&&u.startsWith(DOWNLOAD_PREFIX)&&!u.includes
 // The first section of the release notes: this version's headline and bullets.
 function notes(body){const text=String(body||'');const end=text.search(/\n## /);return (end>0?text.slice(0,end):text).trim().slice(0,4000);}
 function checksum(sumsText,name){for(const line of String(sumsText).split(/\r?\n/)){const m=/^([a-f0-9]{64})\s+\*?(.+)$/.exec(line.trim());if(m&&m[2]===name)return m[1];}return '';}
+// Windows: wait until every Opaya process from the install folder has exited (window, session service, helpers), run
+// the installer silently into the same folder, then start Opaya. If the silent install fails, open the normal installer
+// so the user sees why. Everything is logged next to the download.
+function windowsScript({pid,exe,installer,log}){
+  const q=v=>`'${String(v).replace(/'/g,"''")}'`,dir=path.win32.dirname(exe);
+  return [
+    "$ErrorActionPreference = 'Continue'",
+    `$log = ${q(log)}; $exe = ${q(exe)}; $dir = ${q(dir+'\\')}; $installer = ${q(installer)}`,
+    "function Log($m) { Add-Content -LiteralPath $log -Value ((Get-Date -Format s) + ' ' + $m) }",
+    "function Running { Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($dir, [System.StringComparison]::OrdinalIgnoreCase) } }",
+    "Log 'Waiting for Opaya to close'",
+    `Wait-Process -Id ${Number(pid)} -Timeout 60 -ErrorAction SilentlyContinue`,
+    "$deadline = (Get-Date).AddSeconds(30)",
+    "while ((Running) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }",
+    "$left = Running; if ($left) { Log ('Stopping ' + (($left | ForEach-Object { $_.ProcessName + ':' + $_.Id }) -join ', ')); $left | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2 }",
+    "Log 'Installing'",
+    // NSIS wants /D= last and unquoted, so the arguments go as one string.
+    "$p = Start-Process -FilePath $installer -ArgumentList ('/S /D=' + $dir.TrimEnd('\\')) -Wait -PassThru",
+    "Log ('Installer exit code ' + $p.ExitCode)",
+    "if ($p.ExitCode -ne 0) { Log 'Silent install failed; opening the installer'; Start-Process -FilePath $installer; exit 1 }",
+    "Start-Sleep -Seconds 2",
+    "if (-not (Running)) { Log 'Starting Opaya'; Start-Process -FilePath $exe }",
+    "Log 'Done'"
+  ].join('\r\n')+'\r\n';
+}
 class Updater{
   constructor({app,fetchImpl=globalThis.fetch,emit=()=>{},platform=process.platform,arch=process.arch}){Object.assign(this,{app,fetch:fetchImpl,emit,platform,arch});this.state={status:'idle',current:app.getVersion()};}
   set(patch){this.state={...this.state,...patch};this.emit(this.state);return this.state;}
@@ -67,9 +92,9 @@ class Updater{
   async install(){
     const file=this.state.file;if(this.state.status!=='ready'||!file)throw new Error('Download the update first.');
     if(this.platform==='win32'){
-      const dir=path.dirname(process.execPath),q=v=>`'${String(v).replace(/'/g,"''")}'`;
-      const script=`Wait-Process -Id ${process.pid} -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2; Start-Process -FilePath ${q(file)} -ArgumentList @('/S','--force-run',${q('/D='+dir)})`;
-      spawn('powershell.exe',['-NoProfile','-WindowStyle','Hidden','-Command',script],{detached:true,stdio:'ignore',windowsHide:true}).unref();
+      const scriptFile=path.join(path.dirname(file),'install-update.ps1');
+      await fsp.writeFile(scriptFile,'\ufeff'+windowsScript({pid:process.pid,exe:process.execPath,installer:file,log:path.join(path.dirname(file),'update.log')}),'utf8');
+      spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',scriptFile],{detached:true,stdio:'ignore',windowsHide:true}).unref();
       return true;
     }
     const bundle=process.execPath.slice(0,process.execPath.indexOf('.app/')+4);
@@ -87,4 +112,4 @@ class Updater{
     return true;
   }
 }
-module.exports={Updater,pick,compare,checksum,notes};
+module.exports={Updater,pick,compare,checksum,notes,windowsScript};
