@@ -53,3 +53,10 @@ test('ACP accepts an allow_always-only permission after approval, reports runnin
   const d=b.diagnostics();assert.deepEqual(d.runningTools.map(t=>t.title),['search config.yaml']);assert.ok(d.lastIn>0);
   const prompt=slow.frames.find(f=>f.method==='session/prompt');slow.reply(prompt,{stopReason:'end_turn'});await run;assert.deepEqual(b.diagnostics().runningTools,[]);b.close();
 });
+test('diagnostics collapse repeated log tracebacks and redact secrets',()=>{
+  const {collapse,redact}=require('../desktop/diagnostics.cjs');
+  const tb='ERROR slack: Failed to connect; Retrying...\nTraceback (most recent call last):\n  File "x", line 1\nRuntimeError: Session is closed';
+  const text=collapse(`INFO start\n${Array(40).fill(tb).join('\n')}\nINFO prompt received`);
+  assert.equal(text.split('RuntimeError').length,2);assert.match(text,/repeated 39 more times\]\nINFO prompt received$/);
+  assert.equal(redact('api_key: sk-abcdef123456'),'api_key: [redacted]');
+});
