@@ -72,6 +72,12 @@ function avatar(value) {
   if (value.length <= 200000 && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return value;
   throw new Error('Agent icons must be a library icon or a PNG, JPEG or WebP image under 150 KB.');
 }
+// How a cloned agent was made, so it can be redeployed from its source.
+function cloneRecipe(c) {
+  if (!c || typeof c !== 'object') return null;
+  if (!['skills', 'memory', 'personality', 'everything'].includes(c.scope) || !['regular', 'docker'].includes(c.runtime)) return null;
+  return {from: id(c.from), scope: c.scope, keys: Boolean(c.keys), runtime: c.runtime, dir: text(c.dir, 'clone folder', 2048), container: text(c.container || '', 'container', 120)};
+}
 function agent(input) {
   if (!input || typeof input !== 'object') throw new Error('Missing agent.');
   const provider = input.provider || 'custom';
@@ -99,6 +105,7 @@ function agent(input) {
     note: text(input.note, 'note', 400), displayName: text(input.displayName, 'display name', 80).trim(),
     description: text(input.description, 'description', 500).trim(), icon: text(input.icon, 'icon', 16).trim(),
     avatar: avatar(input.avatar), group: group(input.group), tags: tags(input.tags),
+    clone: cloneRecipe(input.clone),
     pinned: Boolean(input.pinned), itrust: Boolean(input.itrust), browser: Boolean(input.browser), createdAt: input.createdAt || new Date().toISOString()
   };
 }

@@ -372,3 +372,19 @@
 :where(body[data-theme="light"]) .md-table th,:where(body[data-theme="light"]) .md-table td{border-bottom:1px solid #d5ddd9}
 :where(body[data-theme="light"]) .md-table th{background:#dee5e2}
 :where(body[data-theme="light"]) .md-image img{border:1px solid #cbd5d1}
+:where(body[data-theme="light"]) .choice-card{border:1px solid #cbd7cf;background:#e2eae6}
+:where(body[data-theme="light"]) .choice-card:hover{border-color:#aec6b8}
+:where(body[data-theme="light"]) .choice-card:has(input:checked){border-color:#7cc099;background:#d5e5dc}
+:where(body[data-theme="light"]) .choice-card.add strong{color:#144526}
+:where(body[data-theme="light"]) .vps-step{border:1px solid #cbd7cf;background:#e2eae6}
+:where(body[data-theme="light"]) .vps-key{background:#ebf0ee;border:1px solid #d3ddd7}
+:where(body[data-theme="light"]) .ok-notice{border:1px solid #aed5be;background:#d5eade;color:#0e2f1b}
+:where(body[data-theme="light"]) .discover-add-vps{color:#144526}
+:where(body[data-theme="light"]) .discover-dot.new{background:#badec9}
+:where(body[data-theme="light"]) .discover-dot.missing{background:#e3c27d}
+:where(body[data-theme="light"]) .discover-dot.added{background:#cacdce}
+:where(body[data-theme="light"]) .missing-card{border:1px dashed #bccbc2}
+:where(body[data-theme="light"]) .opaya-nudge{border:1px solid #bcd5c6;background:#dfe8e3}
+:where(body[data-theme="light"]) .opaya-nudge strong{color:#0e2f1b}
+:where(body[data-theme="light"]) .opaya-nudge p{color:#18201b}
+:where(body[data-theme="light"]) .choice-card input[type="radio"]{accent-color:#badeca}
