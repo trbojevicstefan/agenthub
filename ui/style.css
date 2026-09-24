@@ -314,3 +314,11 @@ body[data-theme="light"] .marker-chip{border-color:#c9d8ce;color:#2d4a3a}
 .model-scope strong{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .model-scope span{font-size:10px;color:var(--muted)}
 body[data-theme="light"] .model-scope>div{border-color:#d3ddd6}
+.install-section{display:flex;align-items:baseline;gap:10px;font-size:12px;font-weight:600;margin:18px 0 9px;letter-spacing:.2px}
+.install-section:first-of-type{margin-top:4px}
+.install-section small{font-size:10px;font-weight:400;color:var(--faint)}
+.dep-glyph{font:700 13px/1 "Cascadia Code","SFMono-Regular",Consolas,monospace;color:#7ff0b4}
+.install-card.bundle .dep-glyph{font-size:22px}
+body[data-theme="light"] .dep-glyph{color:#0f6b43}
+.install-card.bundle{border-color:#4fe39a66;background:radial-gradient(circle at 0 0,#4fe39a1c,transparent 60%),#1a211d}
+body[data-theme="light"] .install-card.bundle{border-color:#0f8a5766;background:radial-gradient(circle at 0 0,#4fe39a2a,transparent 60%),#fff}

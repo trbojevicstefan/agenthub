@@ -15,7 +15,7 @@ test('the remote reader gives the same answers as the local one',{skip:spawnSync
   const run=request=>JSON.parse(spawnSync('python3',['-c',REMOTE],{input:JSON.stringify(request),encoding:'utf8'}).stdout);
   const list=run({op:'list',path:dir});assert.deepEqual(list.entries.map(e=>e.name).sort(),['README.md','blob.bin','package.json','src']);
   assert.equal(run({op:'read',path:path.join(dir,'README.md')}).text,'# Demo\n');assert.equal(run({op:'read',path:path.join(dir,'blob.bin')}).binary,true);
-  assert.deepEqual(run({op:'project',path:dir}).markers.sort(),['README.md','package.json']);assert.match(run({op:'list',path:path.join(dir,'missing')}).error,/No such file/);
+  assert.deepEqual(run({op:'project',path:dir}).markers.sort(),['README.md','package.json']);assert.match(run({op:'list',path:path.join(dir,'missing')}).error,/No such file|cannot find/);
 });
 test('secret files are recognised so the Opaya Agent never reads them',()=>{
   for(const f of ['/home/u/.env','/p/.env.local','C:\\Users\\u\\.ssh\\id_ed25519','/x/server.pem','/h/.hermes/auth.json','/a/api_token.txt','/r/vault.json','/u/.npmrc'])assert.equal(isSecret(f),true,f);

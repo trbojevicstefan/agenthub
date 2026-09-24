@@ -7,3 +7,6 @@ artifacts/
 __pycache__/
 build/icon.png
 build/icon.ico
+build/window.png
+build/tray.png
+build/tray@2x.png

@@ -44,6 +44,10 @@
       "scripts/probe.py",
       "package.json",
       "build/icon.png",
+      "build/icon.ico",
+      "build/window.png",
+      "build/tray.png",
+      "build/tray@2x.png",
       "scripts/native-smoke.cjs",
       "scripts/native-features.cjs"
     ],
