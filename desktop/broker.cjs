@@ -10,6 +10,7 @@ const mcp=require('./mcp.cjs');
 const {listSkills}=require('./skills.cjs');
 const projects=require('./projects.cjs');
 const files=require('./files.cjs');
+const cloner=require('./clone.cjs');
 // The browser bridge runs next to Opaya, so only agents on this computer (not SSH or containers) can use it.
 const browserCapable=a=>a.transport!=='ssh'&&a.command!=='docker'&&['acp','claude'].includes(a.protocol);
 function safeError(error,token=''){
@@ -123,7 +124,7 @@ class Broker{
     const key=conversationId||agentId;this.data.drafts[key]=text;await this.store.write(this.data);return true;
   }
   async saveView(input){
-    this.data.view={overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark',projects:!!input.projects,layout:(l=>({terminal:l?.terminal==='right'?'right':'bottom',browser:l?.browser==='bottom'?'bottom':'right',bottomHeight:Math.max(120,Math.min(3000,Number(l?.bottomHeight)||280)),rightWidth:Math.max(240,Math.min(4000,Number(l?.rightWidth)||520))}))(input.layout),projectsOpen:Array.isArray(input.projectsOpen)?[...new Set(input.projectsOpen.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)))].slice(0,50):[]};await this.store.write(this.data);return true;
+    this.data.view={overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark',projects:!!input.projects,tips:Array.isArray(input.tips)?[...new Set(input.tips.filter(x=>typeof x==='string'&&x.length<=200))].slice(-60):[],greeted:typeof input.greeted==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(input.greeted)?input.greeted:'',layout:(l=>({terminal:l?.terminal==='right'?'right':'bottom',browser:l?.browser==='bottom'?'bottom':'right',bottomHeight:Math.max(120,Math.min(3000,Number(l?.bottomHeight)||280)),rightWidth:Math.max(240,Math.min(4000,Number(l?.rightWidth)||520))}))(input.layout),projectsOpen:Array.isArray(input.projectsOpen)?[...new Set(input.projectsOpen.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)))].slice(0,50):[]};await this.store.write(this.data);return true;
   }
   // iTrust: tool requests from this agent (or every agent) are approved without asking. Read at request time.
   isTrusted(id){const a=this.data.agents.find(x=>x.id===id);return !!a&&(this.data.settings?.itrustAll||a.itrust);}
@@ -187,6 +188,22 @@ class Broker{
   async projectBranches(id){const p=this.project(id);return files.browse({op:'branches',path:p.path,host:this.projectHost(p)});}
   // The folder a conversation's agent should work in: its project's folder when the agent runs on that machine.
   conversationCwd(c,a){const p=c.projectId&&(this.data.projects||[]).find(x=>x.id===c.projectId);return p&&projects.fits(a,p)?p.path:'';}
+  // ---- Clone and redeploy (Hermes) ------------------------------------------------------------------------------
+  async cloneAgent({id,name,hostId='',runtime='regular',scope='everything',keys=true}){
+    const a=this.agent(id),host=hostId?this.host(hostId):null;
+    const result=await cloner.clone({agent:a,sourceHost:a.transport==='ssh'?this.host(a.hostId):null,host,runtime,scope,keys,name:name||`${a.name}-clone`});
+    const saved=await this.saveAgent({agent:result.connection});
+    return {agent:saved,copied:result.copied};
+  }
+  async redeployAgent(id){
+    const a=this.agent(id);if(!a.clone)throw new Error('This agent is not a clone.');
+    if(this.turns.has(id))throw new Error('Stop this agent\'s current turn first.');
+    const source=this.agent(a.clone.from),wasConnected=this.runtimeFor(id).status==='connected';
+    this.disconnect(id);
+    const result=await cloner.redeploy({agent:a,source,sourceHost:source.transport==='ssh'?this.host(source.hostId):null,host:a.transport==='ssh'?this.host(a.hostId):null});
+    if(wasConnected)await this.connect(id).catch(()=>{});
+    return result;
+  }
   // ---- MCP servers and skills ----------------------------------------------------------------------------------
   mcpSecrets(serverId){try{const raw=this.vault.get(mcp.vaultKey(serverId));return raw?JSON.parse(raw):{env:{},headers:{}};}catch{return {env:{},headers:{}};}}
   mcpFor(agentId){

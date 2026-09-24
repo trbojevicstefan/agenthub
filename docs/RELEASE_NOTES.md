@@ -1,4 +1,28 @@
-# Opaya 0.9.0 - iTrust, the Opaya browser, rich messages and a flexible layout
+# Opaya 0.10.0 - Clone agents, new VPS in minutes, clearer Discover, a friendlier Opaya Agent
+
+- **Clone a Hermes agent** (right-click > Clone):
+  - Choose what to copy: **Everything**, **Skills + personality** (skills, SOUL.md, USER.md), **Skills** or **Memory**, with or without API keys.
+  - Choose where: **this computer** or any saved **VPS**.
+  - Choose how it runs: as a **Hermes profile**, or as a **Docker container** (`nousresearch/hermes-agent`, restarts automatically).
+  - Opaya copies the files straight across (this computer to a VPS, a VPS to this computer, or one VPS to another) and adds the clone as a ready connection.
+  - As with Hermes' own `--clone-all`, chat history and OAuth logins are never copied.
+- **Redeploy**: right-click a clone > Redeploy from its source copies the same parts again (and restarts its container). Its chat history stays.
+- **Add a new VPS** (Machines > + New VPS, also in Discover and in the Clone dialog):
+  - Opaya creates an SSH key just for that server in `~/.ssh` and shows the public key to copy into your provider's panel.
+  - If you only have a password, Opaya can install the key for you in a terminal.
+  - Opaya then tests the connection, trusting the server on first connect, and checks for Docker and Hermes.
+- **Discover**:
+  - Tabs for this computer and each machine.
+  - Agents found but not yet in Opaya come first.
+  - Agents that are not installed on that machine get one-click **Install** buttons.
+  - Agents already in Opaya are hidden in a collapsed group.
+- **Machines**: *This computer* has its own row (Terminal, Discover, Files), separate from remote machines.
+- **Opaya Agent**:
+  - **Chat history**: keep several chats, switch between them, start new ones and delete old ones. Older history becomes the first chat.
+  - **Proactive, gently**: a small card now and then. It says hello once a day, checks in when an agent has been working for more than five minutes, and points out useful features for your setup. At most one card at a time, spaced at least 20 minutes apart (check-ins about long-running work show right away), and each one only once.
+  - The Opaya logo now moves only while the Opaya Agent is working.
+
+## Earlier: 0.9.0 - iTrust, the Opaya browser, rich messages and a flexible layout
 
 - **iTrust mode**: tool requests (commands, file edits and other actions an agent asks permission for) are approved automatically.
   - Turn it on for one agent (right-click > Turn on iTrust), for all agents, or for the Opaya Agent (Settings > iTrust mode, or the iTrust switch in the Opaya Agent's top bar).

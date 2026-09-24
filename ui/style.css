@@ -733,3 +733,82 @@ body[data-theme="light"] .switch-row .switch{background:#c3cec7}
 body[data-theme="light"] .switch-row input:checked+.switch{background:#b07d17}
 body[data-theme="light"] .itrust-switch{background:#c3cec7}
 body[data-theme="light"] .itrust-toggle.on .itrust-switch{background:#b07d17}
+/* The orbiting dot moves only while the Opaya Agent is working. */
+.opaya-mark i{animation:none}
+.opaya-mark img{animation:none}
+body.opaya-busy .opaya-mark i{animation:op-spin 1.4s cubic-bezier(.55,.1,.45,.9) infinite}
+body.opaya-busy .opaya-mark img{animation:op-breathe 2.4s ease-in-out infinite}
+/* ---- Clone, New VPS, Discover, Machines, Opaya tips ---- */
+.clone-choice{border:0;padding:0;margin:0;display:grid;gap:6px}
+.clone-choice legend{font-size:12px;font-weight:600;margin-bottom:6px;padding:0}
+.choice-card{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid #2c3a31;border-radius:9px;background:#151d19;cursor:pointer;text-align:left;transition:border-color .15s,background .15s}
+.choice-card:hover{border-color:#3f5a4a}
+.choice-card:has(input:checked){border-color:#4fae78;background:#1a2a21}
+.choice-card input{margin-top:2px}
+.choice-card span{display:grid;gap:2px}
+.choice-card strong{font-size:12px;color:var(--text)}
+.choice-card small{font-size:11px;color:var(--muted);font-weight:400}
+.clone-where{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px}
+.choice-card.small{padding:8px 10px}
+.choice-card.add{border-style:dashed;background:transparent;color:inherit;font:inherit}
+.choice-card.add strong{color:#9fe3b8}
+.clone-progress{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);padding:6px 0}
+.vps-step{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #2c3a31;border-radius:9px;background:#151d19}
+.vps-step.column{flex-direction:column;align-items:stretch}
+.vps-step>div{display:grid;gap:2px;min-width:0}
+.vps-step strong{font-size:12px}
+.vps-step small{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.vps-key{margin:0;padding:8px 10px;border-radius:7px;background:#0f1412;border:1px solid #26312b;font-size:10.5px;white-space:pre-wrap;word-break:break-all;user-select:all}
+.vps-key-actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.vps-key-actions small{margin-left:auto;font-family:ui-monospace,Consolas,monospace}
+.ok-notice{border:1px solid #2f5a41;background:#152a1e;color:#b5f5cf;border-radius:8px;padding:8px 12px}
+.ok-notice p{margin:0;font-size:12px}
+.discover-tabs{display:flex;flex-wrap:wrap;margin-bottom:12px}
+.discover-add-vps{height:30px;padding:0 12px;border:0;background:transparent;color:#9fe3b8;font-size:12px}
+.discover-group{margin:0 0 14px}
+.discover-group h3,.discover-group summary{display:flex;align-items:center;gap:8px;font-size:13px;margin:0 0 8px;cursor:default}
+.discover-group summary{cursor:pointer;list-style:none;color:var(--muted)}
+.discover-group summary::-webkit-details-marker{display:none}
+.discover-group small{color:var(--faint);font-weight:400}
+.discover-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.discover-dot.new{background:#56d68c}
+.discover-dot.missing{background:#e3c27d}
+.discover-dot.added{background:#6d7478}
+.discover-missing{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:6px}
+.missing-card{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px dashed #3a4a40;border-radius:9px}
+.missing-card>div{flex:1;min-width:0;display:grid;gap:2px}
+.missing-card strong{font-size:12px}
+.missing-card small{font-size:10.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.missing-card .agent-avatar{width:26px;height:26px;margin:0;border-radius:7px;font-size:11px}
+.host-section{display:flex;align-items:baseline;gap:6px;margin:14px 0 6px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.host-section small{letter-spacing:0}
+.host-row.local .host-name{font-size:13px}
+.host-spacer{width:33px}
+.opaya-nudge{position:fixed;left:16px;bottom:118px;z-index:40;width:236px;display:flex;align-items:flex-start;gap:10px;padding:12px 10px 12px 12px;border:1px solid #2f4a3a;border-radius:12px;background:#17201b;box-shadow:0 14px 36px #0008;animation:op-nudge .32s cubic-bezier(.2,.8,.2,1)}
+.opaya-nudge.leaving{opacity:0;transform:translateY(6px);transition:opacity .2s,transform .2s}
+@keyframes op-nudge{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
+.opaya-nudge .opaya-mark{margin-top:2px}
+.opaya-nudge>div{flex:1;min-width:0}
+.opaya-nudge strong{font-size:11px;color:#b5f5cf}
+.opaya-nudge p{margin:3px 0 0;font-size:12px;line-height:1.5;color:#d3ddd6}
+.nudge-actions{display:flex;gap:12px;margin-top:6px}
+.nudge-actions .text-button{font-size:11px}
+.opaya-nudge .icon-button{width:22px;min-width:22px;height:22px;font-size:10px;border:0;background:transparent}
+body[data-theme="light"] .choice-card{background:#fff;border-color:#d5e1d7}
+body[data-theme="light"] .choice-card:has(input:checked){background:#e9f5ec;border-color:#4f9e6c}
+body[data-theme="light"] .choice-card.add{background:transparent}
+body[data-theme="light"] .choice-card.add strong,body[data-theme="light"] .discover-add-vps{color:#1f7a45}
+body[data-theme="light"] .vps-step{background:#fff;border-color:#d5e1d7}
+body[data-theme="light"] .vps-key{background:#f2f5f3;border-color:#d8e1db;color:#1d2a23}
+body[data-theme="light"] .ok-notice{background:#e9f5ec;border-color:#a9d3b8;color:#1f6b3d}
+body[data-theme="light"] .missing-card{border-color:#cbd8cf}
+body[data-theme="light"] .opaya-nudge{background:#fff;border-color:#bfe0cb;box-shadow:0 14px 36px #1d3a2a26}
+body[data-theme="light"] .opaya-nudge strong{color:#1f7a45}
+body[data-theme="light"] .opaya-nudge p{color:#26362c}
+.mcp-form .choice-card{display:flex;grid-template-columns:none}
+.choice-card input[type="radio"]{width:auto;height:auto;flex-shrink:0;margin:2px 0 0;accent-color:#4fae78}
+.vps-step>div{display:block}
+.vps-step>div:first-child{display:grid;gap:2px}
+.vps-key-actions .secondary.small{width:auto}
+.vps-step>.vps-key-actions{display:flex}
+.vps-step.column{gap:10px}

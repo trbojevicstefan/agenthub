@@ -82,12 +82,40 @@ class OpayaAgent{
   async init(){
     await fs.mkdir(this.home,{recursive:true,mode:0o700});
     const config=await readJson(path.join(this.home,'config.json'),{});this.config={...this.config,...config};
-    const history=await readJson(path.join(this.home,'history.json'),[]);this.messages=Array.isArray(history)?history.slice(-200):[];
+    // Chat sessions: an index plus one file per session. The single history.json of older versions becomes the first session.
+    await fs.mkdir(path.join(this.home,'sessions'),{recursive:true,mode:0o700});
+    const index=await readJson(path.join(this.home,'sessions.json'),null);
+    if(Array.isArray(index?.sessions)&&index.sessions.length){this.sessions=index.sessions.filter(x=>/^[\w-]{1,80}$/.test(x.id)).slice(-100);this.sessionId=this.sessions.some(x=>x.id===index.current)?index.current:this.sessions.at(-1).id;}
+    else{
+      const history=await readJson(path.join(this.home,'history.json'),[]);const id=randomUUID(),first=Array.isArray(history)?history.find(m=>m.role==='user'):null;
+      this.sessions=[{id,title:first?String(first.content).slice(0,60).replace(/\s+/g,' '):'New chat',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}];this.sessionId=id;
+      await atomicJson(path.join(this.home,'sessions',`${id}.json`),Array.isArray(history)?history.slice(-200):[]);await this.saveIndex();
+    }
+    const messages=await readJson(path.join(this.home,'sessions',`${this.sessionId}.json`),[]);this.messages=Array.isArray(messages)?messages.slice(-200):[];
+  }
+  saveIndex(){return atomicJson(path.join(this.home,'sessions.json'),{current:this.sessionId,sessions:this.sessions});}
+  async newSession(){
+    if(this.busy)throw new Error('Stop the current answer first.');
+    if(!this.messages.length){this.emit();return this.sessionId;}
+    await this.persist();const id=randomUUID();
+    this.sessions.push({id,title:'New chat',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});if(this.sessions.length>100)this.sessions.splice(0,this.sessions.length-100);
+    this.sessionId=id;this.messages=[];this.error='';this.codexThreadId='';await this.persist();this.emit();return id;
+  }
+  async selectSession(id){
+    if(this.busy)throw new Error('Stop the current answer first.');if(!this.sessions.some(x=>x.id===id))throw new Error('Chat not found.');
+    await this.persist();this.sessionId=id;const m=await readJson(path.join(this.home,'sessions',`${id}.json`),[]);this.messages=Array.isArray(m)?m.slice(-200):[];this.error='';this.codexThreadId='';await this.saveIndex();this.emit();return true;
+  }
+  async deleteSession(id){
+    if(this.busy)throw new Error('Stop the current answer first.');if(!this.sessions.some(x=>x.id===id))throw new Error('Chat not found.');
+    this.sessions=this.sessions.filter(x=>x.id!==id);await fs.rm(path.join(this.home,'sessions',`${id}.json`),{force:true});
+    if(!this.sessions.length)this.sessions.push({id:randomUUID(),title:'New chat',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
+    if(id===this.sessionId){this.sessionId=this.sessions.at(-1).id;const m=await readJson(path.join(this.home,'sessions',`${this.sessionId}.json`),[]);this.messages=Array.isArray(m)?m:[];this.codexThreadId='';}
+    await this.saveIndex();this.emit();return true;
   }
   configured(){return this.config.preset==='codex'||!!(this.config.baseUrl&&this.config.model);}
   describe(){
     const shown=this.messages.filter(m=>m.role==='user'||m.summary).slice(-80).map(({id,role,content,activity,createdAt,error})=>({id,role,content:content||'',activity:activity||[],createdAt,error}));
-    return {configured:this.configured(),config:this.config,hasKey:this.config.preset!=='codex'&&this.vault.has(KEY),presets:PRESETS,busy:this.busy,status:this.status,error:this.error,messages:shown,live:this.liveReply?{...this.liveReply}:null,home:this.home};
+    return {configured:this.configured(),config:this.config,hasKey:this.config.preset!=='codex'&&this.vault.has(KEY),presets:PRESETS,busy:this.busy,status:this.status,error:this.error,messages:shown,live:this.liveReply?{...this.liveReply}:null,home:this.home,sessionId:this.sessionId,sessions:(this.sessions||[]).slice().reverse().map(({id,title,updatedAt})=>({id,title,updatedAt}))};
   }
   async saveConfig({preset='custom',baseUrl,model,apiKey,remember=true}){
     if(!Object.hasOwn(PRESETS,preset))throw new Error('Unknown model provider.');
@@ -120,7 +148,11 @@ class OpayaAgent{
     if(active){this.codexRpc=null;this.codexThreadId='';this.codexActive=null;if(rpc&&!rpc.closed)rpc.close();active.reject(new Error('Stopped.'));}
     return true;
   }
-  async persist(){await atomicJson(path.join(this.home,'history.json'),this.messages.slice(-200));}
+  async persist(){
+    const s=this.sessions?.find(x=>x.id===this.sessionId);
+    if(s){const first=this.messages.find(m=>m.role==='user');if(first&&s.title==='New chat')s.title=String(first.content).slice(0,60).replace(/\s+/g,' ');if(this.messages.length)s.updatedAt=new Date().toISOString();}
+    await atomicJson(path.join(this.home,'sessions',`${this.sessionId}.json`),this.messages.slice(-200));await this.saveIndex();
+  }
   system(){
     const s=this.broker.snapshot();
     return [
@@ -191,7 +223,7 @@ class OpayaAgent{
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.9.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.10.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
