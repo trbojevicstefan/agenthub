@@ -53,6 +53,16 @@ function host(input) {
   if (identityFile && !(path.posix.isAbsolute(identityFile) || path.win32.isAbsolute(identityFile))) throw new Error('Choose an absolute path to the SSH identity file.');
   return {id: input.id ? id(input.id) : randomUUID(), name: text(input.name, 'host name', 80, alias || hostname).trim() || alias || hostname, alias, hostname, username, port: port(input.port), identityFile};
 }
+// Sidebar group and free-form labels; only shown in Opaya.
+function group(value) { return text(value ?? '', 'group', 40).replace(/[\x00-\x1f\x7f]/g, '').trim(); }
+function tags(value) {
+  if (value === undefined || value === null || value === '') return [];
+  const list = Array.isArray(value) ? value : String(value).split(',');
+  if (list.length > 12) throw new Error('Use at most 8 tags.');
+  const clean = [...new Set(list.map(t => text(String(t), 'tag', 24).replace(/[\x00-\x1f\x7f,]/g, '').trim()).filter(Boolean))];
+  if (clean.length > 8) throw new Error('Use at most 8 tags.');
+  return clean;
+}
 // Agent picture: '' (provider default), 'lib:<name>' from the bundled icon library, or a small uploaded raster image.
 function avatar(value) {
   if (value === undefined || value === null || value === '') return '';
@@ -87,7 +97,7 @@ function agent(input) {
     tmuxSession: input.tmuxSession ? id(input.tmuxSession) : '',
     note: text(input.note, 'note', 400), displayName: text(input.displayName, 'display name', 80).trim(),
     description: text(input.description, 'description', 500).trim(), icon: text(input.icon, 'icon', 16).trim(),
-    avatar: avatar(input.avatar),
+    avatar: avatar(input.avatar), group: group(input.group), tags: tags(input.tags),
     pinned: Boolean(input.pinned), createdAt: input.createdAt || new Date().toISOString()
   };
 }
@@ -95,4 +105,4 @@ function prompt(value) {
   if (typeof value !== 'string' || !value.trim() || value.length > 80000 || value.includes('\0')) throw new Error('Enter a message shorter than 80,000 characters.');
   return value;
 }
-module.exports = {text, id, port, endpoint, host, agent, avatar, prompt, parseAddress};
+module.exports = {text, id, port, endpoint, host, agent, avatar, group, tags, prompt, parseAddress};

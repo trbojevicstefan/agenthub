@@ -79,6 +79,7 @@ async function start({app, safeStorage}, root) {
       // An agent folder inside a container may not exist on the host; fall back to the home folder.
       catch(error){if(fallback&&x.op!=='read')return files.browse({op:x.op,path:'',host});throw error;}
     },
+    playground:x=>broker.playground(x), moveAgent:x=>broker.moveAgent(x), connectAll:x=>broker.connectAll(x),
     opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:()=>opaya.test(), opayaForgetKey:()=>opaya.forgetKey(),
     opayaSend:x=>opaya.begin(x.text), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),
     shutdown

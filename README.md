@@ -34,6 +34,10 @@ Safety boundary: it acts only through Opaya's own tools (connections and machine
 
 **Install agents** (Workspace, the Add dialog, right-click the sidebar, or ask the Opaya Agent) installs Hermes Agent, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider or Ollama, and the dependencies they need (Node.js, Python, Git, uv, tmux, OpenSSH, Homebrew, or **All essentials** for whatever is missing) with one click, on this computer or on a saved SSH machine. Opaya shows the exact vendor command first and runs it in a terminal you can watch. Then run Discover to add the agent.
 
+## Groups, tags and Playground
+
+Right-click an agent > **Group & tags** to organise the sidebar into collapsible groups and label agents with tags; drag agents to reorder them or drop them on a section header to move them. **Connect all** connects every agent at once. **Playground** (sidebar) asks two agents the same question and shows the answers side by side.
+
 ## Files and models
 
 **Files** (agent header, the Opaya Agent header, Machines, or right-click) opens a read-only side panel for the agent's folder, this computer or a saved SSH machine: folders, file previews up to 256 KB, and project info (git branch, uncommitted changes, recent commits, project files). **Terminal here** opens a shell in that folder, **Mention in message** puts the path into your message. Remote browsing needs `python3` on the machine.

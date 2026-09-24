@@ -248,3 +248,14 @@
 :where(body[data-theme="light"]) .model-scope>div{border:1px solid #c5d1cb}
 :where(body[data-theme="light"]) .dep-glyph{color:#175032}
 :where(body[data-theme="light"]) .install-card.bundle{border-color:#7cc09f66;background:radial-gradient(circle at 0 0,#badecc1c,transparent 60%),#dee5e1}
+:where(body[data-theme="light"]) .agent-nav-row.drop-before:before,:where(body[data-theme="light"]) .agent-nav-row.drop-after:after{background:#badecc}
+:where(body[data-theme="light"]) button.sidebar-section-label{color:#515c61}
+:where(body[data-theme="light"]) button.sidebar-section-label:hover{background:#d9e0de;color:#27332c}
+:where(body[data-theme="light"]) .group-count{color:#515b5e}
+:where(body[data-theme="light"]) button.sidebar-section-label.drop-into{background:#badecc22;color:#071a0f}
+:where(body[data-theme="light"]) .tag-chip{border:1px solid #becbc5;background:#d9e2de;color:#203227}
+:where(body[data-theme="light"]) button.tag-chip:hover{border-color:#7cc09f88}
+:where(body[data-theme="light"]) .tag-chip.active{background:#badecc26;border-color:#7cc09f;color:#05120b}
+:where(body[data-theme="light"]) .pg-column{border:1px solid #cad5cf;background:#e3e9e6}
+:where(body[data-theme="light"]) .pg-head{border-bottom:1px solid #cfd8d5}
+:where(body[data-theme="light"]) .pg-meta{border-bottom:1px solid #d8e0dd}

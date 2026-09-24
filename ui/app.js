@@ -14,13 +14,13 @@
   const iconImg=(src,cls='')=>`<img class="agent-logo ${cls}" src="${esc(src)}" alt="" draggable="false">`;
   const avatarSrc=a=>{const v=a?.avatar||'';if(v.startsWith('lib:'))return ICONS[v.slice(4)]?.[1]||'';if(v.startsWith('data:image/'))return v;return '';};
   const providerIcon = provider => agentLogos[provider]?`<img class="agent-logo ${provider}-logo" src="${agentLogos[provider]}" alt="" draggable="false">`:'<span class="mark custom-mark"><i></i></span>';
-  let state = {agents:[],hosts:[],conversations:[],histories:{},secureStorage:false}, overview = true, opayaView = false, renderKey = '', initialized = false, theme = 'dark';
+  let state = {agents:[],hosts:[],conversations:[],histories:{},secureStorage:false}, overview = true, opayaView = false, playgroundView = false, renderKey = '', initialized = false, theme = 'dark';
   let toastTimer, returnFocus, currentTerminal = '', lastSelected = '', modalBusy = false;
   const pendingWrites = new Set();
   const draftKey = () => currentConversation()?.id || selected()?.id || '';
   const save = promise => { pendingWrites.add(promise); promise.catch(error=>toast(error.message,true)).finally(()=>pendingWrites.delete(promise)); return promise; };
   window.agenthubFlush = () => Promise.allSettled([...pendingWrites]);
-  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,theme})); };
+  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,theme})); };
   const drafts = new Map(), pendingSends = new Set(), terminalViews = new Map(), terminalPending = new Map();
   const selected = () => state.agents.find(a => a.id === state.activeAgentId);
   const currentConversation = () => state.conversations.find(c => c.id === state.activeConversationId && c.agentId === state.activeAgentId);
@@ -37,6 +37,7 @@
   const dot = a => `<span class="status-dot ${esc(a.busy?'working':a.status||'disconnected')}"></span>`;
   const mod=()=>state.platform==='darwin'?'\u2318':'Ctrl ';
   // Motion bookkeeping: state updates re-render often, so entrance animations are keyed to first appearance, not to every render.
+  let collapsedGroups=new Set();
   const navSeen=new Map(),messageSeen=new Map();let navHtml='',navSelected='',navSelectedAt=0,messageConversation=null,overviewHtml='';
   const fresh=(map,key,now,ms)=>{if(!map.has(key))map.set(key,now);return now-map.get(key)<ms;};
   function enter(element){element.classList.remove('view-enter');void element.offsetWidth;element.classList.add('view-enter');clearTimeout(element.enterTimer);element.enterTimer=setTimeout(()=>element.classList.remove('view-enter'),900);}
@@ -58,29 +59,31 @@
   }
   function applyState(next) {
     state=next;document.body.dataset.platform=state.platform;
-    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya;applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});$('.search-trigger kbd').textContent=`${mod()}K`;}
+    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});$('.search-trigger kbd').textContent=`${mod()}K`;}
     render();
   }
   function render() {
     $('#agent-count').textContent=state.agents.length;
     $('#host-count').textContent=state.hosts.length;
-    $('.nav-overview').classList.toggle('selected',overview&&!opayaView);$('.nav-opaya').classList.toggle('selected',opayaView);renderOpayaNav();
-    const groups=[['PINNED',state.agents.filter(a=>a.pinned)],['ON THIS COMPUTER',state.agents.filter(a=>!a.pinned&&a.transport!=='ssh')],['REMOTE AGENTS',state.agents.filter(a=>!a.pinned&&a.transport==='ssh')]];
-    const now=performance.now(),current=overview||opayaView?'':state.activeAgentId||'';let row=0;
+    $('.nav-overview').classList.toggle('selected',overview&&!opayaView&&!playgroundView);$('.nav-playground')?.classList.toggle('selected',playgroundView);$('.nav-opaya').classList.toggle('selected',opayaView);renderOpayaNav();
+    // Sections: pinned, each custom group in first-seen order, then ungrouped local and remote agents. Every section collapses.
+    const customGroups=[...new Set(state.agents.filter(a=>!a.pinned&&a.group).map(a=>a.group))];
+    const groups=[['pinned','PINNED',state.agents.filter(a=>a.pinned)],...customGroups.map(g=>[`group:${g}`,g,state.agents.filter(a=>!a.pinned&&a.group===g)]),['local','ON THIS COMPUTER',state.agents.filter(a=>!a.pinned&&!a.group&&a.transport!=='ssh')],['remote','REMOTE AGENTS',state.agents.filter(a=>!a.pinned&&!a.group&&a.transport==='ssh')]];
+    const now=performance.now(),current=overview||opayaView||playgroundView?'':state.activeAgentId||'';let row=0;
     if(current!==navSelected){navSelected=current;navSelectedAt=now;}
-    const nav=groups.filter(g=>g[1].length).map(([name,agents])=>`<div class="sidebar-section-label">${name}<span>${agents.length}</span></div>${agents.map(a=>`<div class="agent-nav-row ${fresh(navSeen,a.id,now,650)?'enter':''}" style="--i:${row++}" data-agent-id="${esc(a.id)}"><button class="agent-nav ${!overview&&!opayaView&&a.id===state.activeAgentId?'selected':''} ${a.id===navSelected&&now-navSelectedAt<500?'just-selected':''}" data-action="select" data-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}">${badge(a)}<span class="agent-nav-text"><strong>${esc(title(a))}</strong><small>${esc(description(a))}</small></span>${dot(a)}</button><div class="agent-row-actions"><button data-action="move-agent" data-id="${esc(a.id)}" data-direction="up" title="Move up" aria-label="Move ${esc(title(a))} up">&#8593;</button><button data-action="move-agent" data-id="${esc(a.id)}" data-direction="down" title="Move down" aria-label="Move ${esc(title(a))} down">&#8595;</button><button data-action="agent-menu" data-id="${esc(a.id)}" title="More actions (or right-click)" aria-label="More actions for ${esc(title(a))}" aria-haspopup="menu">&#8943;</button></div></div>`).join('')}`).join('')||'<div class="sidebar-empty"><span class="connection-dots"><i></i><i></i><i></i></span>Your agents will<br>feel at home here.</div>';
+    const nav=groups.filter(g=>g[2].length).map(([key,name,all])=>{const closed=collapsedGroups.has(key),agents=closed?all.filter(a=>a.id===current):all,busy=closed&&all.some(a=>a.busy);return `<button class="sidebar-section-label ${closed?'collapsed':''} ${key.startsWith('group:')?'custom-group':''}" data-action="toggle-group" data-group="${esc(key)}" aria-expanded="${!closed}" title="${closed?'Expand':'Collapse'} ${esc(name)} (right-click for group actions)"><span class="group-chevron" aria-hidden="true">&#9662;</span><span class="group-name">${esc(name)}</span>${busy?'<span class="status-dot working"></span>':''}<span class="group-count">${all.length}</span></button><div class="sidebar-group ${closed?'closed':''}">${agents.map(a=>`<div class="agent-nav-row ${fresh(navSeen,a.id,now,650)?'enter':''}" style="--i:${row++}" data-agent-id="${esc(a.id)}" data-section="${esc(key)}" draggable="true"><button class="agent-nav ${!overview&&!opayaView&&!playgroundView&&a.id===state.activeAgentId?'selected':''} ${a.id===navSelected&&now-navSelectedAt<500?'just-selected':''}" data-action="select" data-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}">${badge(a)}<span class="agent-nav-text"><strong>${esc(title(a))}</strong><small>${esc(description(a))}</small></span>${dot(a)}</button></div>`).join('')}</div>`;}).join('')||'<div class="sidebar-empty"><span class="connection-dots"><i></i><i></i><i></i></span>Your agents will<br>feel at home here.</div>';
     if(nav!==navHtml){navHtml=nav;$('#agent-list').innerHTML=nav;}
     const a=selected();
-    if(opayaView)renderOpaya();else if(overview||!a)renderOverview();else renderAgent(a);
-    $('#status-left').textContent=opayaView?'Opaya Agent / installs, connects and troubleshoots your agents':a&&!overview?`${labels[a.provider]} / ${a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase()} / ${location(a)}`:'One place. All your agents.';
+    if(opayaView)renderOpaya();else if(playgroundView)renderPlayground();else if(overview||!a)renderOverview();else renderAgent(a);
+    $('#status-left').textContent=playgroundView?'Playground / ask two agents the same question':opayaView?'Opaya Agent / installs, connects and troubleshoots your agents':a&&!overview?`${labels[a.provider]} / ${a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase()} / ${location(a)}`:'One place. All your agents.';
     $('#status-right').textContent=state.agents.some(a=>a.busy)?`${state.agents.filter(a=>a.busy).length} agent working`:(state.service?.persistent?'Sessions protected / safe to close window':'Local workspace / no cloud account');
     if(lastSelected!==state.activeAgentId){lastSelected=state.activeAgentId;if(!$('#terminal-panel').hidden){const match=[...terminalViews.values()].find(v=>v.agentId===state.activeAgentId&&!v.exited);activateTerminal(match?.id||'');}}
   }
   function renderOverview() {
-    $('#topbar').innerHTML='<div class="breadcrumb">Workspace <span>/</span> Overview</div><div class="topbar-actions"><button class="subtle" data-action="hosts">Manage machines</button><button class="secondary" data-action="discover"><span class="radar-icon"></span> Discover agents</button></div>';
+    $('#topbar').innerHTML='<div class="breadcrumb">Workspace <span>/</span> Overview</div><div class="topbar-actions"><button class="subtle" data-action="connect-all" title="Connect every agent at once">Connect all</button><button class="subtle" data-action="hosts">Manage machines</button><button class="secondary" data-action="discover"><span class="radar-icon"></span> Discover agents</button></div>';
     const connected=state.agents.filter(a=>a.status==='connected').length,entering=renderKey!=='overview';
     contentKind('overview');
-    const html=`<div class="workspace-heading"><div><div class="eyebrow"><span class="tiny-square"></span> YOUR AGENT WORKSPACE</div><h1>One place.<br>All your agents.</h1><p>From the machine in front of you to the server across the world.<br>Connect, switch, and keep the conversation going.</p></div><div class="workspace-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="art-center"><span class="opaya-mark large"><img src="assets/opaya-logo.png" alt=""><i></i></span></div><span class="art-node node-one">${providerIcon('hermes')}</span><span class="art-node node-two">${providerIcon('codex')}</span><span class="art-node node-three">${providerIcon('claude')}</span><span class="art-node node-four">${providerIcon('openclaw')}</span><span class="orbit-signal"></span></div></div><div class="workspace-stats"><div><span class="status-dot connected"></span><strong>${connected}</strong> connected</div><div><span class="machine-icon"></span><strong>${state.hosts.length}</strong> remote machines</div><div><span class="terminal-glyph">&gt;_</span> Native terminal built in</div><div class="stats-private"><span class="lock-symbol">&#9906;</span> Private by default</div></div><div class="section-heading"><div><h2>Your agents <span>${state.agents.length}</span></h2><p>Different runtimes. One familiar workspace.</p></div><div class="section-actions"><button class="text-button" data-action="install-catalog">&#8595; Install agents</button><button class="text-button" data-action="add">+ Add connection</button></div></div><div class="agent-grid">${state.agents.map((a,i)=>`<article class="agent-card" data-agent-id="${esc(a.id)}" style="--i:${i}"><div class="card-top">${badge(a,true)}<span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span></div><h3>${esc(title(a))}</h3><div class="agent-card-meta">${meta(a)}</div><p>${esc(description(a))}</p><div class="card-connection">${envIcon(a)}${esc(connectionLabel(a))}</div><div class="card-bottom"><button class="text-button" data-action="select" data-id="${esc(a.id)}">Open workspace <span>&#8599;</span></button><button class="icon-button" data-action="agent-menu" data-id="${esc(a.id)}" aria-label="More actions for ${esc(title(a))}" title="More actions (or right-click)" aria-haspopup="menu">&#8943;</button></div></article>`).join('')}<button class="add-card" data-action="add" style="--i:${state.agents.length}"><span class="add-card-plus">+</span><strong>${state.agents.length?'Make room for another.':'Meet your first agent.'}</strong><small>Hermes, Codex, Claude, OpenClaw<br>or any ACP / compatible API agent.</small><span class="add-card-link">Add an agent &#8594;</span></button></div>${!state.agents.length?'<div class="getting-started"><span class="step-number">01</span><div><strong>Already have agents installed?</strong><p>Discover checks known install folders, CLI tools and local API ports. Review what it finds before connecting.</p></div><button class="secondary" data-action="discover">Discover this computer</button></div>':''}<div class="workspace-footnote">No account to create. No credentials to route through someone else\'s server. Just your agents, connected.</div>`;
+    const html=`<div class="workspace-heading"><div><div class="eyebrow"><span class="tiny-square"></span> YOUR AGENT WORKSPACE</div><h1>One place.<br>All your agents.</h1><p>From the machine in front of you to the server across the world.<br>Connect, switch, and keep the conversation going.</p></div><div class="workspace-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="art-center"><span class="opaya-mark large"><img src="assets/opaya-logo.png" alt=""><i></i></span></div><span class="art-node node-one">${providerIcon('hermes')}</span><span class="art-node node-two">${providerIcon('codex')}</span><span class="art-node node-three">${providerIcon('claude')}</span><span class="art-node node-four">${providerIcon('openclaw')}</span><span class="orbit-signal"></span></div></div><div class="workspace-stats"><div><span class="status-dot connected"></span><strong>${connected}</strong> connected</div><div><span class="machine-icon"></span><strong>${state.hosts.length}</strong> remote machines</div><div><span class="terminal-glyph">&gt;_</span> Native terminal built in</div><div class="stats-private"><span class="lock-symbol">&#9906;</span> Private by default</div></div><div class="section-heading"><div><h2>Your agents <span>${state.agents.length}</span></h2><p>Different runtimes. One familiar workspace.</p>${allTags().length?`<div class="tag-filter">${allTags().map(t=>`<button class="tag-chip ${t===tagFilter?'active':''}" data-action="tag-filter" data-tag="${esc(t)}">${esc(t)}</button>`).join('')}</div>`:''}</div><div class="section-actions"><button class="text-button" data-action="install-catalog">&#8595; Install agents</button><button class="text-button" data-action="add">+ Add connection</button></div></div><div class="agent-grid">${state.agents.filter(a=>!tagFilter||(a.tags||[]).includes(tagFilter)).map((a,i)=>`<article class="agent-card" data-agent-id="${esc(a.id)}" style="--i:${i}"><div class="card-top">${badge(a,true)}<span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span></div><h3>${esc(title(a))}</h3><div class="agent-card-meta">${meta(a)}</div><p>${esc(description(a))}</p>${a.tags?.length?`<div class="card-tags">${tagChips(a)}</div>`:''}<div class="card-connection">${envIcon(a)}${esc(connectionLabel(a))}</div><div class="card-bottom"><button class="text-button" data-action="select" data-id="${esc(a.id)}">Open workspace <span>&#8599;</span></button>${a.group?`<span class="card-group">${esc(a.group)}</span>`:''}</div></article>`).join('')}<button class="add-card" data-action="add" style="--i:${state.agents.length}"><span class="add-card-plus">+</span><strong>${state.agents.length?'Make room for another.':'Meet your first agent.'}</strong><small>Hermes, Codex, Claude, OpenClaw<br>or any ACP / compatible API agent.</small><span class="add-card-link">Add an agent &#8594;</span></button></div>${!state.agents.length?'<div class="getting-started"><span class="step-number">01</span><div><strong>Already have agents installed?</strong><p>Discover checks known install folders, CLI tools and local API ports. Review what it finds before connecting.</p></div><button class="secondary" data-action="discover">Discover this computer</button></div>':''}<div class="workspace-footnote">No account to create. No credentials to route through someone else\'s server. Just your agents, connected.</div>`;
     if(entering||html!==overviewHtml){overviewHtml=html;$('#content').innerHTML=html;}
     if(entering)enter($('#content'));
     renderKey='overview';
@@ -90,7 +93,7 @@
     contentKind('conversation');
     $('.topbar-actions').insertAdjacentHTML('beforeend',`${a.protocol!=='terminal'?'<button class="secondary" data-action="models" title="Choose agent model">Models</button>':''}${['hermes','openclaw'].includes(a.provider)?'<button class="secondary" data-action="gateway" title="Gateway status and restart">Gateway</button>':''}`);
     if(renderKey!==JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId])) {
-      $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity">${badge(a,true)}<div><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p><div class="identity-meta">${meta(a)}</div></div></div><div class="conversation-controls"><select id="conversation-picker" aria-label="Conversation history" title="Switch between this agent's conversations"></select><button class="icon-button" data-action="new-conversation" title="New conversation (Ctrl + N)" aria-label="New conversation">+</button><button class="icon-button" data-action="export" title="Export this conversation as Markdown" aria-label="Export conversation">&#8595;</button><button id="connect-button" class="secondary" data-action="connect"></button></div></div><div id="connection-banner"></div><div id="message-list" class="message-list"></div><div class="compose-area"><form id="message-form"><textarea id="message-input" placeholder="Message ${esc(title(a))}..." aria-label="Message ${esc(title(a))}" rows="2" maxlength="80000"></textarea><div class="compose-bottom"><div><span class="compose-provider">${esc(labels[a.provider])}</span><span id="compose-hint"></span></div><button type="button" id="stop-button" class="stop-button" data-action="stop" title="Stop this turn" hidden><span>&#9632;</span> Stop</button><button id="send-button" type="submit" class="send-button" title="Send message (Enter)" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption">Enter to send <span>&#183;</span> Shift + Enter for a new line <span>&#183;</span> Conversations stay on this computer</p></div>`;
+      $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity">${badge(a,true)}<div><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p><div class="identity-meta">${meta(a)}${a.tags?.length?`<span class="heading-tags">${tagChips(a,6)}</span>`:''}</div></div></div><div class="conversation-controls"><select id="conversation-picker" aria-label="Conversation history" title="Switch between this agent's conversations"></select><button class="icon-button" data-action="new-conversation" title="New conversation (Ctrl + N)" aria-label="New conversation">+</button><button class="icon-button" data-action="export" title="Export this conversation as Markdown" aria-label="Export conversation">&#8595;</button><button id="connect-button" class="secondary" data-action="connect"></button></div></div><div id="connection-banner"></div><div id="message-list" class="message-list"></div><div class="compose-area"><form id="message-form"><textarea id="message-input" placeholder="Message ${esc(title(a))}..." aria-label="Message ${esc(title(a))}" rows="2" maxlength="80000"></textarea><div class="compose-bottom"><div><span class="compose-provider">${esc(labels[a.provider])}</span><span id="compose-hint"></span></div><button type="button" id="stop-button" class="stop-button" data-action="stop" title="Stop this turn" hidden><span>&#9632;</span> Stop</button><button id="send-button" type="submit" class="send-button" title="Send message (Enter)" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption">Enter to send <span>&#183;</span> Shift + Enter for a new line <span>&#183;</span> Conversations stay on this computer</p></div>`;
       if(!String(renderKey).startsWith(`["${a.id}"`))enter($('#content'));
       renderKey=JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId]);$('#message-input').value=drafts.get(draftKey())??state.drafts?.[draftKey()]??'';
       $('#message-input').addEventListener('input',event=>{drafts.set(draftKey(),event.target.value);if(api.saveDraft)save(api.saveDraft({agentId:a.id,conversationId:currentConversation()?.id||'',text:event.target.value}));event.target.style.height='auto';event.target.style.height=Math.min(event.target.scrollHeight,190)+'px';});
@@ -141,7 +144,7 @@
   function openAgentForm(input={}) {
     const a={provider:'hermes',protocol:'openai',transport:'http',name:'',endpoint:'http://127.0.0.1:8642/v1',model:'hermes-agent',command:'hermes',args:[],...input};
     const options=(values,current)=>values.map(([id,label])=>`<option value="${id}" ${id===current?'selected':''}>${label}</option>`).join('');
-    modal(a.id?'Connection settings':'Add an agent',a.id?'Rename it in Opaya, add notes, or change where this connection runs.':'A name, a connection, and you are in.',`<form id="agent-form" data-id="${esc(a.id||'')}"><div class="form-grid">${inputField('name','Connection name',a.name,'e.g. Hermes / Research','required maxlength="80"')}${inputField('displayName','Display name in Opaya',a.displayName,'Leave empty to use connection name','maxlength="80"')}${inputField('description','Description',a.description,'e.g. Lead gen on Hostinger','maxlength="500"')}${inputField('icon','Text icon',a.icon,'Optional, e.g. HC or *','maxlength="16"')}<label class="field"><span>Agent</span><select name="provider">${options(Object.entries(labels),a.provider)}</select></label><label class="field"><span>Connection protocol</span><select name="protocol">${options([['openai','Gateway / OpenAI-compatible API'],['codex','Codex app server'],['claude','Claude Code (streamed CLI)'],['acp','Agent Client Protocol (ACP)'],['terminal','Native terminal only']],a.protocol)}</select></label><label class="field"><span>Where it runs</span><select name="transport">${options([['http','Direct API (local or HTTPS)'],['local','Local executable'],['ssh','Remote machine over SSH']],a.transport)}</select></label></div>${a.id?`<p class="field-help"><button type="button" class="text-button" data-action="icon-picker" data-id="${esc(a.id)}">Choose an icon from the library or upload one &#8594;</button></p>`:''}<p class="field-help">Display name, description and custom icon are only for Opaya. They do not rename the real agent, container, profile or CLI.</p><div data-field="ssh"><label class="field"><span>Remote machine</span><select name="hostId"><option value="">Select a saved SSH host</option>${state.hosts.map(h=>`<option value="${esc(h.id)}" ${a.hostId===h.id?'selected':''}>${esc(h.name)} (${esc(h.alias||h.hostname)})</option>`).join('')}</select></label><p class="field-help">The endpoint below is on the remote host. Opaya creates a loopback-only SSH tunnel. Add machines from the sidebar first.</p></div><div data-field="api">${inputField('endpoint','API base URL',a.endpoint,'http://127.0.0.1:8642/v1')}<p class="field-help">Use the base URL ending in /v1, not /chat/completions. Remote plain HTTP requires SSH.</p><div class="form-grid">${inputField('model','Model / agent ID',a.model,'Use the gateway default')}<label class="field"><span>Gateway API token ${a.hasToken?'<em>stored securely</em>':''}</span><input name="token" type="password" autocomplete="new-password" placeholder="${a.hasToken?'Leave empty to keep the saved token':'Only if the gateway requires one'}"></label></div><label class="check-row"><input type="checkbox" name="remember" ${state.secureStorage?'checked':''}> Remember token with OS encryption <small>${state.secureStorage?'Protected by your OS keychain':'Unavailable here: keep tokens in memory only'}</small></label><label class="check-row" data-field="hermes-import"><input type="checkbox" name="importToken" ${a.hermesHome&&!a.hasToken?'checked':''}> Import API_SERVER_KEY from this Hermes profile <small>A native confirmation is required. Provider keys are never imported.</small></label></div><div data-field="command"><div class="path-field">${inputField('command','Executable',a.command,'hermes, codex, claude or an absolute path')}<button type="button" class="secondary" data-action="pick" data-kind="executable" data-field-name="command" title="Choose a local executable">Browse</button></div>${inputField('args','Arguments (JSON array)',JSON.stringify(a.args||[]),'[]')}<p class="field-help">No shell interpolation. Hermes adds acp; Codex adds app-server. For a custom ACP Docker agent, use docker with ["exec","-i","container","hermes","acp"].</p></div><details class="advanced-fields" ${a.hermesHome?'open':''}><summary>Workspace, profile & advanced</summary><div class="path-field">${inputField('cwd','Working directory',a.cwd,'Absolute path on the selected machine')}<button type="button" class="secondary" data-action="pick" data-kind="directory" data-field-name="cwd">Browse</button></div><div data-field="hermes">${inputField('hermesHome','Hermes profile home',a.hermesHome,'e.g. /home/ubuntu/.hermes/profiles/research')}<p class="field-help">Existing gateway API is recommended for running agents. ACP creates a separate process; never point two writers at the same active profile.</p></div>${inputField('note','Connection note',a.note,'Optional technical context for this connection')}<label class="check-row"><input type="checkbox" name="pinned" ${a.pinned?'checked':''}> Pin to the top of the sidebar</label></details><div class="inline-notice" data-field="claude"><p>Claude keeps its CLI login and native permission defaults. When a headless tool is denied, use Run CLI in Terminal to approve it interactively.</p></div><div class="inline-notice" data-field="acp"><p>Only use trusted agent executables. ACP tool requests are shown in native approval dialogs and are denied by default. This does not sandbox the agent's own process.</p></div><div class="modal-footer"><div>${a.id?`<button type="button" class="danger-text" data-action="remove" data-id="${esc(a.id)}">Delete connection</button>`:'<span>Stored only on this computer.</span>'}</div><div><button type="submit" class="secondary" value="save">Save connection</button><button type="submit" class="primary" value="connect">Save & connect &#8594;</button></div></div></form>`,true);
+    modal(a.id?'Connection settings':'Add an agent',a.id?'Rename it in Opaya, add notes, or change where this connection runs.':'A name, a connection, and you are in.',`<form id="agent-form" data-id="${esc(a.id||'')}"><div class="form-grid">${inputField('name','Connection name',a.name,'e.g. Hermes / Research','required maxlength="80"')}${inputField('displayName','Display name in Opaya',a.displayName,'Leave empty to use connection name','maxlength="80"')}${inputField('description','Description',a.description,'e.g. Lead gen on Hostinger','maxlength="500"')}${inputField('icon','Text icon',a.icon,'Optional, e.g. HC or *','maxlength="16"')}${inputField('group','Group',a.group,'Optional, e.g. Clients','maxlength="40"')}${inputField('tags','Tags',(a.tags||[]).join(', '),'Comma separated, e.g. prod, coding','')}<label class="field"><span>Agent</span><select name="provider">${options(Object.entries(labels),a.provider)}</select></label><label class="field"><span>Connection protocol</span><select name="protocol">${options([['openai','Gateway / OpenAI-compatible API'],['codex','Codex app server'],['claude','Claude Code (streamed CLI)'],['acp','Agent Client Protocol (ACP)'],['terminal','Native terminal only']],a.protocol)}</select></label><label class="field"><span>Where it runs</span><select name="transport">${options([['http','Direct API (local or HTTPS)'],['local','Local executable'],['ssh','Remote machine over SSH']],a.transport)}</select></label></div>${a.id?`<p class="field-help"><button type="button" class="text-button" data-action="icon-picker" data-id="${esc(a.id)}">Choose an icon from the library or upload one &#8594;</button></p>`:''}<p class="field-help">Display name, description and custom icon are only for Opaya. They do not rename the real agent, container, profile or CLI.</p><div data-field="ssh"><label class="field"><span>Remote machine</span><select name="hostId"><option value="">Select a saved SSH host</option>${state.hosts.map(h=>`<option value="${esc(h.id)}" ${a.hostId===h.id?'selected':''}>${esc(h.name)} (${esc(h.alias||h.hostname)})</option>`).join('')}</select></label><p class="field-help">The endpoint below is on the remote host. Opaya creates a loopback-only SSH tunnel. Add machines from the sidebar first.</p></div><div data-field="api">${inputField('endpoint','API base URL',a.endpoint,'http://127.0.0.1:8642/v1')}<p class="field-help">Use the base URL ending in /v1, not /chat/completions. Remote plain HTTP requires SSH.</p><div class="form-grid">${inputField('model','Model / agent ID',a.model,'Use the gateway default')}<label class="field"><span>Gateway API token ${a.hasToken?'<em>stored securely</em>':''}</span><input name="token" type="password" autocomplete="new-password" placeholder="${a.hasToken?'Leave empty to keep the saved token':'Only if the gateway requires one'}"></label></div><label class="check-row"><input type="checkbox" name="remember" ${state.secureStorage?'checked':''}> Remember token with OS encryption <small>${state.secureStorage?'Protected by your OS keychain':'Unavailable here: keep tokens in memory only'}</small></label><label class="check-row" data-field="hermes-import"><input type="checkbox" name="importToken" ${a.hermesHome&&!a.hasToken?'checked':''}> Import API_SERVER_KEY from this Hermes profile <small>A native confirmation is required. Provider keys are never imported.</small></label></div><div data-field="command"><div class="path-field">${inputField('command','Executable',a.command,'hermes, codex, claude or an absolute path')}<button type="button" class="secondary" data-action="pick" data-kind="executable" data-field-name="command" title="Choose a local executable">Browse</button></div>${inputField('args','Arguments (JSON array)',JSON.stringify(a.args||[]),'[]')}<p class="field-help">No shell interpolation. Hermes adds acp; Codex adds app-server. For a custom ACP Docker agent, use docker with ["exec","-i","container","hermes","acp"].</p></div><details class="advanced-fields" ${a.hermesHome?'open':''}><summary>Workspace, profile & advanced</summary><div class="path-field">${inputField('cwd','Working directory',a.cwd,'Absolute path on the selected machine')}<button type="button" class="secondary" data-action="pick" data-kind="directory" data-field-name="cwd">Browse</button></div><div data-field="hermes">${inputField('hermesHome','Hermes profile home',a.hermesHome,'e.g. /home/ubuntu/.hermes/profiles/research')}<p class="field-help">Existing gateway API is recommended for running agents. ACP creates a separate process; never point two writers at the same active profile.</p></div>${inputField('note','Connection note',a.note,'Optional technical context for this connection')}<label class="check-row"><input type="checkbox" name="pinned" ${a.pinned?'checked':''}> Pin to the top of the sidebar</label></details><div class="inline-notice" data-field="claude"><p>Claude keeps its CLI login and native permission defaults. When a headless tool is denied, use Run CLI in Terminal to approve it interactively.</p></div><div class="inline-notice" data-field="acp"><p>Only use trusted agent executables. ACP tool requests are shown in native approval dialogs and are denied by default. This does not sandbox the agent's own process.</p></div><div class="modal-footer"><div>${a.id?`<button type="button" class="danger-text" data-action="remove" data-id="${esc(a.id)}">Delete connection</button>`:'<span>Stored only on this computer.</span>'}</div><div><button type="submit" class="secondary" value="save">Save connection</button><button type="submit" class="primary" value="connect">Save & connect &#8594;</button></div></div></form>`,true);
     const form=$('#agent-form');
     form.elements.token.addEventListener('input',()=>{if(form.elements.token.value)form.elements.importToken.checked=false;});
     function sync(){const p=form.elements.protocol.value,t=form.elements.transport.value,v=form.elements.provider.value;for(const node of form.querySelectorAll('[data-field]')){const f=node.dataset.field;node.hidden=!(f==='ssh'?t==='ssh':f==='api'?p==='openai':f==='command'?p!=='openai':f==='hermes'?v==='hermes':f==='hermes-import'?v==='hermes'&&p==='openai':f==='claude'?p==='claude':f==='acp'?p==='acp':true);}for(const button of form.querySelectorAll('[data-action="pick"]'))button.hidden=t==='ssh';}
@@ -155,7 +158,7 @@
       const agent={...a,...values,args,pinned:form.elements.pinned.checked};delete agent.token;delete agent.importToken;delete agent.remember;
       const token=values.token||undefined;
       modalBusy=true;for(const b of form.querySelectorAll('button[type="submit"]'))b.disabled=true;
-      try{const saved=await api.saveAgent({agent,token,remember:form.elements.remember.checked,importToken:form.elements.importToken.checked&&values.provider==='hermes'&&values.protocol==='openai'});modalBusy=false;overview=false;opayaView=false;closeModal();if(event.submitter?.value==='connect')await action(()=>api.connect({id:saved.id}));else toast('Connection saved.');render();}
+      try{const saved=await api.saveAgent({agent,token,remember:form.elements.remember.checked,importToken:form.elements.importToken.checked&&values.provider==='hermes'&&values.protocol==='openai'});modalBusy=false;overview=false;opayaView=false;playgroundView=false;closeModal();if(event.submitter?.value==='connect')await action(()=>api.connect({id:saved.id}));else toast('Connection saved.');render();}
       catch(error){modalBusy=false;for(const b of form.querySelectorAll('button[type="submit"]'))b.disabled=false;toast(error.message,true);}
     });
   }
@@ -192,7 +195,7 @@
   }
   function switcher(){
     modal('Jump to an agent.','Search by name, provider or machine.',`<input id="switcher-search" class="switcher-search" placeholder="Search agents..." aria-label="Search agents"><div id="switcher-list"></div>`);
-    const update=()=>{const q=$('#switcher-search').value.toLowerCase();$('#switcher-list').innerHTML=state.agents.filter(a=>`${title(a)} ${description(a)} ${labels[a.provider]} ${location(a)} ${placeText(a)}`.toLowerCase().includes(q)).map(a=>`<button class="switcher-row" data-action="switch-select" data-id="${esc(a.id)}">${badge(a)}<span><strong>${esc(title(a))}</strong><small>${esc(description(a))}</small></span>${dot(a)}</button>`).join('')||'<p class="field-help">No matching agents. Add a connection to get started.</p>';};
+    const update=()=>{const q=$('#switcher-search').value.toLowerCase();$('#switcher-list').innerHTML=state.agents.filter(a=>`${title(a)} ${description(a)} ${labels[a.provider]} ${location(a)} ${placeText(a)} ${a.group||''} ${(a.tags||[]).join(' ')}`.toLowerCase().includes(q)).map(a=>`<button class="switcher-row" data-action="switch-select" data-id="${esc(a.id)}">${badge(a)}<span><strong>${esc(title(a))}</strong><small>${esc(description(a))}</small></span>${dot(a)}</button>`).join('')||'<p class="field-help">No matching agents. Add a connection to get started.</p>';};
     $('#switcher-search').addEventListener('input',update);update();$('#switcher-search').focus();
   }
   function activateTerminal(id){
@@ -244,8 +247,13 @@
   document.addEventListener('click',event=>{
     const button=event.target.closest('[data-action]');if(!button)return;const {action:name,id,index}=button.dataset;
     if(name==='modal-close'){closeModal();return;}
-    if(name==='opaya'){overview=false;opayaView=true;closeModal();render();saveView();$('#message-input')?.focus();return;}
+    if(name==='opaya'){overview=false;opayaView=true;playgroundView=false;closeModal();render();saveView();$('#message-input')?.focus();return;}
     if(name==='opaya-config'){openOpayaConfig();return;}
+    if(name==='toggle-group'){toggleGroup(button.dataset.group);return;}
+    if(name==='playground'){overview=false;opayaView=false;playgroundView=true;closeModal();render();saveView();$('#message-input')?.focus();return;}
+    if(name==='pg-swap'){pgAgents.reverse();render();return;}
+    if(name==='tag-filter'){tagFilter=button.dataset.tag===tagFilter?'':button.dataset.tag;renderKey='';render();return;}
+    if(name==='group-tags'){const a=state.agents.find(a=>a.id===id);if(a)openGroupTags(a);return;}
     if(name==='files-agent'){const a=state.agents.find(a=>a.id===id);if(a)openFiles({agentId:a.id,label:`${title(a)} / ${location(a)}`});return;}
     if(name==='files-local'){openFiles({label:'This computer'});return;}
     if(name==='host-files'){const h=state.hosts.find(h=>h.id===id);if(h){closeModal();openFiles({hostId:h.id,label:`${h.name} over SSH`});}return;}
@@ -254,7 +262,7 @@
     if(name==='install-target'){openInstall(id||'');return;}
     if(name==='install-framework'){confirmInstall(id,button.dataset.host||'');return;}
     if(name==='icon-picker'){const a=state.agents.find(a=>a.id===id);if(a)openIconPicker(a);return;}
-    if(name==='overview'){overview=true;opayaView=false;render();saveView();return;}
+    if(name==='overview'){overview=true;opayaView=false;playgroundView=false;render();saveView();return;}
     if(name==='add'){openAdd();return;}
     if(name==='manual'){openAgentForm();return;}
     if(name==='edit'){openAgentForm(state.agents.find(a=>a.id===id));return;}
@@ -272,7 +280,11 @@
     if(name==='terminal-hide'){$('#terminal-panel').hidden=true;saveView();return;}
     if(name==='terminal-tab'){activateTerminal(id);saveView();return;}
     action(async()=>{
-      if(name==='select'||name==='switch-select'){overview=false;opayaView=false;closeModal();await api.select({id});render();saveView();}
+      if(name==='select'||name==='switch-select'){overview=false;opayaView=false;playgroundView=false;closeModal();await api.select({id});render();saveView();}
+      else if(name==='connect-all')await connectAll();
+      else if(name==='pg-connect')await api.connect({id});
+      else if(name==='pg-stop'){for(const agentId of pgAgents)if(state.agents.find(a=>a.id===agentId)?.busy)await api.stop({id:agentId});}
+      else if(name==='pg-open'){await api.selectConversation({id});overview=false;opayaView=false;playgroundView=false;render();saveView();}
       else if(name==='opaya-clear')await api.opayaClear();
       else if(name==='opaya-stop')await api.opayaStop();
       else if(name==='opaya-forget-key'){await api.opayaForgetKey();openOpayaConfig();toast('Saved key removed.');}
@@ -288,7 +300,7 @@
       else if(name==='new-conversation'){const a=selected();if(a)await api.newConversation({agentId:a.id});}
       else if(name==='export'){const c=currentConversation();if(c){if(await api.exportConversation({id:c.id}))toast('Conversation exported.');}else toast('Start a conversation first.');}
       else if(name==='stop')await api.stop({id:selected().id});
-      else if(name==='remove'){if(await api.removeAgent({id})){closeModal();overview=true;opayaView=false;state=await api.snapshot();render();}}
+      else if(name==='remove'){if(await api.removeAgent({id})){closeModal();overview=true;opayaView=false;playgroundView=false;state=await api.snapshot();render();}}
       else if(name==='remove-host'){await api.removeHost({id});state=await api.snapshot();openHosts();render();}
       else if(name==='import-hosts'){button.disabled=true;try{const result=await api.discover({});for(const h of result.hosts||[])await api.saveHost(h);state=await api.snapshot();openHosts();render();toast(`${result.hosts?.length||0} SSH aliases imported. No remote connections were opened.`);}finally{button.disabled=false;}}
       else if(name==='pick'){const value=await api.pick({kind:button.dataset.kind});if(value){const input=$(`[name="${button.dataset.fieldName}"]`,button.closest('form'));if(input)input.value=value;}}
@@ -307,7 +319,7 @@
     if($('#app-dialog'))return;
     if(event.key.toLowerCase()==='n'&&selected()){event.preventDefault();action(()=>api.newConversation({agentId:selected().id}));}
     if(event.key==='`'){event.preventDefault();if(!$('#terminal-panel').hidden)$('#terminal-panel').hidden=true;else action(()=>openTerminal());}
-    if(/^[1-9]$/.test(event.key)&&state.agents[Number(event.key)-1]){event.preventDefault();overview=false;opayaView=false;action(()=>api.select({id:state.agents[Number(event.key)-1].id}));}
+    if(/^[1-9]$/.test(event.key)&&state.agents[Number(event.key)-1]){event.preventDefault();overview=false;opayaView=false;playgroundView=false;action(()=>api.select({id:state.agents[Number(event.key)-1].id}));}
   });
   if(!api){$('#content').innerHTML='<div class="runtime-missing"><h1>Open Opaya as a desktop app.</h1><p>This workspace needs its native bridge to discover agents, use SSH and open terminals.</p><code>npm install &amp;&amp; npm start</code></div>';return;}
   async function closeTerminalTab(id){
@@ -331,7 +343,7 @@
     form.addEventListener('submit',event=>{event.preventDefault();const value=form.elements.displayName.value.trim();action(async()=>{await api.updateAgentDisplay({id:a.id,displayName:value===a.name?'':value});closeModal();toast('Agent renamed.');});});
   }
   async function refresh(){state=await api.snapshot();render();}
-  async function selectAgent(id){overview=false;opayaView=false;closeModal();await api.select({id});render();saveView();}
+  async function selectAgent(id){overview=false;opayaView=false;playgroundView=false;closeModal();await api.select({id});render();saveView();}
   function agentMenu(a){
     const id=a.id,index=state.agents.findIndex(x=>x.id===id),connected=a.status==='connected';
     return [
@@ -347,11 +359,12 @@
       {icon:a.pinned?'&#9734;':'&#9733;',label:a.pinned?'Unpin':'Pin to top',run:async()=>{await api.updateAgentDisplay({id,pinned:!a.pinned});toast(a.pinned?`${title(a)} unpinned.`:`${title(a)} pinned to the top.`);}},
       {icon:'&#9998;',label:'Rename...',run:()=>renameAgent(a)},
       {icon:'&#9680;',label:'Change icon...',run:()=>openIconPicker(a)},
+      {icon:'&#9776;',label:'Group & tags...',run:()=>openGroupTags(a)},
       {icon:'&#8593;',label:'Move up',disabled:index<=0,run:async()=>{await api.reorderAgents({id,direction:'up'});await refresh();}},
       {icon:'&#8595;',label:'Move down',disabled:index>=state.agents.length-1,run:async()=>{await api.reorderAgents({id,direction:'down'});await refresh();}},
       {icon:'&#9881;',label:'Connection settings...',run:()=>openAgentForm(a)},
       '-',
-      {icon:'&#10005;',label:'Remove connection...',danger:true,run:async()=>{if(await api.removeAgent({id})){closeModal();if(state.activeAgentId===id)overview=true;opayaView=false;await refresh();toast('Connection removed.');}}}
+      {icon:'&#10005;',label:'Remove connection...',danger:true,run:async()=>{if(await api.removeAgent({id})){closeModal();if(state.activeAgentId===id)overview=true;opayaView=false;playgroundView=false;await refresh();toast('Connection removed.');}}}
     ];
   }
   function terminalMenu(id){
@@ -365,6 +378,8 @@
   }
   function workspaceMenu(){
     return [
+      {icon:'&#9679;',label:'Connect all agents',run:()=>connectAll()},
+      {icon:'&#8644;',label:'Open Playground',run:()=>{overview=false;opayaView=false;playgroundView=true;render();saveView();}},
       {icon:'&#10038;',label:'Ask the Opaya Agent',run:()=>{overview=false;opayaView=true;render();saveView();}},
       {icon:'&#9678;',label:'Discover agents',run:()=>discover()},
       {icon:'&#8595;',label:'Install agents...',run:()=>openInstall()},
@@ -411,6 +426,8 @@
     if(target.closest('input,textarea,select,[contenteditable="true"],.terminal-views,.context-menu')||(String(window.getSelection?.()||'').trim()&&!target.closest('.sidebar')))return;
     if($('#app-dialog'))return;
     const point=element=>{if(event.clientX||event.clientY)return [event.clientX,event.clientY];const r=element.getBoundingClientRect();return [r.left+12,r.bottom-4];};
+    const section=target.closest('.sidebar-section-label[data-group]');
+    if(section){event.preventDefault();const [x,y]=point(section);openMenu(x,y,groupMenu(section.dataset.group,section.querySelector('.group-name')?.textContent||''),section.querySelector('.group-name')?.textContent||'Section');return;}
     const agentElement=target.closest('[data-agent-id]'),tab=target.closest('[data-action="terminal-tab"]');
     if(agentElement){const a=state.agents.find(a=>a.id===agentElement.dataset.agentId);if(!a)return;event.preventDefault();const [x,y]=point(agentElement);openMenu(x,y,agentMenu(a),title(a),agentElement);return;}
     if(tab){event.preventDefault();const [x,y]=point(tab);openMenu(x,y,terminalMenu(tab.dataset.id),terminalViews.get(tab.dataset.id)?.title||'Terminal');return;}
@@ -547,6 +564,103 @@
     else if(act==='files-terminal')action(terminalHere);
   });
   $('#files-panel').addEventListener('change',event=>{if(event.target.dataset.action==='files-hidden'&&files){files.hidden=event.target.checked;renderFiles();}});
+  // ---- Groups, tags, drag and drop, connect all ---------------------------------------------------------------
+  const allGroups=()=>[...new Set(state.agents.map(a=>a.group).filter(Boolean))];
+  const allTags=()=>[...new Set(state.agents.flatMap(a=>a.tags||[]))].sort((a,b)=>a.localeCompare(b));
+  const tagChips=(a,limit=4)=>(a.tags||[]).slice(0,limit).map(t=>`<span class="tag-chip">${esc(t)}</span>`).join('');
+  let tagFilter='';
+  function toggleGroup(key){if(collapsedGroups.has(key))collapsedGroups.delete(key);else collapsedGroups.add(key);navHtml='';render();saveView();}
+  function sectionAgents(key){return state.agents.filter(a=>key==='pinned'?a.pinned:key.startsWith('group:')?!a.pinned&&a.group===key.slice(6):!a.pinned&&!a.group&&(key==='remote')===(a.transport==='ssh'));}
+  async function connectAll(ids){
+    toast(ids?'Connecting this group...':'Connecting all agents...');
+    const r=await api.connectAll(ids?{ids}:{});
+    if(!r.attempted)toast('Every agent is already connected.');
+    else if(!r.failed.length)toast(`${r.connected} agent${r.connected===1?'':'s'} connected.`);
+    else toast(`${r.connected} connected, ${r.failed.length} need attention: ${r.failed.map(f=>`${f.name} (${f.error})`).join('; ').slice(0,400)}`,true);
+  }
+  function groupMenu(key,name){
+    const agents=sectionAgents(key),custom=key.startsWith('group:');
+    return [
+      {icon:collapsedGroups.has(key)?'&#9656;':'&#9662;',label:collapsedGroups.has(key)?'Expand':'Collapse',run:()=>toggleGroup(key)},
+      {icon:'&#8801;',label:'Collapse all groups',run:()=>{for(const g of ['pinned','local','remote',...allGroups().map(g=>'group:'+g)])collapsedGroups.add(g);navHtml='';render();saveView();}},
+      {icon:'&#8801;',label:'Expand all groups',run:()=>{collapsedGroups.clear();navHtml='';render();saveView();}},
+      '-',
+      {icon:'&#9679;',label:`Connect all in ${custom?name:'this section'}`,run:()=>connectAll(agents.map(a=>a.id))},
+      custom&&'-',
+      custom&&{icon:'&#9998;',label:'Rename group...',run:()=>renameGroup(name)},
+      custom&&{icon:'&#10005;',label:'Ungroup',danger:true,run:async()=>{for(const a of agents)await api.updateAgentDisplay({id:a.id,group:''});toast(`${name} ungrouped.`);}}
+    ];
+  }
+  function renameGroup(name){
+    modal('Rename group','',`<form id="group-rename-form"><label class="field"><span>Group name</span><input name="group" value="${esc(name)}" maxlength="40" required autocomplete="off"></label><div class="modal-footer"><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="submit" class="primary">Rename</button></div></form>`);
+    const form=$('#group-rename-form');form.elements.group.select();
+    form.addEventListener('submit',event=>{event.preventDefault();const next=form.elements.group.value.trim();action(async()=>{for(const a of state.agents.filter(a=>a.group===name))await api.updateAgentDisplay({id:a.id,group:next});if(collapsedGroups.delete('group:'+name))collapsedGroups.add('group:'+next);saveView();closeModal();});});
+  }
+  function openGroupTags(a){
+    const groups=allGroups(),tags=allTags();
+    modal('Group & tags',`For ${title(a)}. Groups organise the sidebar; tags help you filter and search.`,`<form id="group-tags-form"><label class="field"><span>Group</span><input name="group" value="${esc(a.group||'')}" maxlength="40" list="group-options" placeholder="e.g. Clients, Research, VPS fleet" autocomplete="off"></label><datalist id="group-options">${groups.map(g=>`<option value="${esc(g)}">`).join('')}</datalist>${groups.length?`<div class="chip-picker">${groups.map(g=>`<button type="button" class="tag-chip pick" data-group-pick="${esc(g)}">${esc(g)}</button>`).join('')}</div>`:''}<label class="field"><span>Tags</span><input name="tags" value="${esc((a.tags||[]).join(', '))}" placeholder="comma separated, e.g. prod, coding, hermes" autocomplete="off"></label>${tags.length?`<div class="chip-picker">${tags.map(t=>`<button type="button" class="tag-chip pick" data-tag-pick="${esc(t)}">+ ${esc(t)}</button>`).join('')}</div>`:''}<div class="modal-footer"><div>${a.group||a.tags?.length?'<button type="button" class="danger-text" id="clear-group-tags">Clear group and tags</button>':''}</div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="submit" class="primary">Save</button></div></div></form>`);
+    const form=$('#group-tags-form');
+    form.addEventListener('click',event=>{const g=event.target.closest('[data-group-pick]'),t=event.target.closest('[data-tag-pick]');if(g)form.elements.group.value=g.dataset.groupPick;if(t){const list=form.elements.tags.value.split(',').map(x=>x.trim()).filter(Boolean);if(!list.includes(t.dataset.tagPick))list.push(t.dataset.tagPick);form.elements.tags.value=list.join(', ');}});
+    $('#clear-group-tags')?.addEventListener('click',()=>action(async()=>{await api.updateAgentDisplay({id:a.id,group:'',tags:[]});closeModal();}));
+    form.addEventListener('submit',event=>{event.preventDefault();action(async()=>{await api.updateAgentDisplay({id:a.id,group:form.elements.group.value.trim(),tags:form.elements.tags.value.split(',').map(x=>x.trim()).filter(Boolean)});closeModal();toast('Group and tags saved.');});});
+  }
+  // Drag and drop in the sidebar: drop on an agent to place it before or after, or on a section header to move it there.
+  let dragId='';
+  const list=$('#agent-list');
+  const clearDrop=()=>list.querySelectorAll('.drop-before,.drop-after,.drop-into').forEach(el=>el.classList.remove('drop-before','drop-after','drop-into'));
+  const sectionTarget=key=>key==='pinned'?{pinned:true}:key.startsWith('group:')?{pinned:false,group:key.slice(6)}:{pinned:false,group:''};
+  list.addEventListener('dragstart',event=>{const row=event.target.closest('.agent-nav-row');if(!row)return;dragId=row.dataset.agentId;event.dataTransfer.effectAllowed='move';event.dataTransfer.setData('text/plain',dragId);requestAnimationFrame(()=>row.classList.add('dragging'));closeMenu();});
+  list.addEventListener('dragend',()=>{dragId='';clearDrop();list.querySelectorAll('.dragging').forEach(el=>el.classList.remove('dragging'));});
+  list.addEventListener('dragover',event=>{
+    if(!dragId)return;const row=event.target.closest('.agent-nav-row'),head=event.target.closest('.sidebar-section-label');if(!row&&!head)return;
+    event.preventDefault();event.dataTransfer.dropEffect='move';clearDrop();
+    if(head)head.classList.add('drop-into');else if(row.dataset.agentId!==dragId){const r=row.getBoundingClientRect();row.classList.add(event.clientY<r.top+r.height/2?'drop-before':'drop-after');}
+  });
+  list.addEventListener('drop',event=>{
+    if(!dragId)return;event.preventDefault();const id=dragId,row=event.target.closest('.agent-nav-row'),head=event.target.closest('.sidebar-section-label');clearDrop();dragId='';
+    if(head){action(()=>api.moveAgent({id,...sectionTarget(head.dataset.group)}));collapsedGroups.delete(head.dataset.group);return;}
+    if(!row||row.dataset.agentId===id)return;const r=row.getBoundingClientRect();
+    action(()=>api.moveAgent({id,targetId:row.dataset.agentId,position:event.clientY<r.top+r.height/2?'before':'after',...sectionTarget(row.dataset.section)}));
+  });
+  // ---- Playground: one question, two agents, side by side ------------------------------------------------------
+  let pgAgents=[],pgKeep=false,pgDraft='';
+  function playgroundPair(){
+    const ids=state.agents.map(a=>a.id),last=state.playground?.agentIds||[];
+    pgAgents=pgAgents.filter(id=>ids.includes(id));
+    for(const id of [...last,...state.agents.filter(a=>a.status==='connected').map(a=>a.id),...ids])if(pgAgents.length<2&&!pgAgents.includes(id))pgAgents.push(id);
+    return pgAgents;
+  }
+  function renderPlayground(){
+    const entering=renderKey!=='playground',[left,right]=playgroundPair(),run=state.playground;
+    $('#topbar').innerHTML=`<div class="breadcrumb">Workspace <span>/</span> <strong>Playground</strong></div><div class="topbar-actions"><label class="check-row inline" title="Continue the previous playground conversations instead of starting fresh"><input type="checkbox" id="pg-keep" ${pgKeep?'checked':''}> Keep context</label><button class="subtle" data-action="pg-swap" title="Swap sides">&#8646; Swap</button><button class="secondary" data-action="connect-all">Connect all</button></div>`;
+    $('#pg-keep').onchange=event=>{pgKeep=event.target.checked;};
+    contentKind('conversation playground-view');
+    if(entering){
+      $('#content').innerHTML=`<div class="pg-columns"><section class="pg-column" data-side="0"></section><section class="pg-column" data-side="1"></section></div><div class="compose-area"><form id="message-form" class="pg-form"><textarea id="message-input" rows="2" maxlength="80000" aria-label="Ask both agents" placeholder="Ask both agents the same question..."></textarea><div class="compose-bottom"><div><span class="compose-provider">Playground</span><span id="compose-hint"></span></div><button type="button" id="pg-stop" class="stop-button" data-action="pg-stop" hidden><span>&#9632;</span> Stop both</button><button id="pg-send" type="submit" class="send-button" aria-label="Ask both">&#8593;</button></div></form><p class="compose-caption">Each question starts fresh conversations unless Keep context is on <span>&#183;</span> Answers also appear in each agent's chat history</p></div>`;
+      const input=$('#message-input');input.value=pgDraft;input.addEventListener('input',()=>{pgDraft=input.value;});
+      input.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendPlayground();}});
+      $('#message-form').addEventListener('submit',event=>{event.preventDefault();sendPlayground();});
+      $('#content').addEventListener('change',event=>{const select=event.target.closest('.pg-select');if(select){pgAgents[Number(select.dataset.side)]=select.value;render();}});
+      enter($('#content'));
+    }
+    renderKey='playground';
+    [left,right].forEach((id,side)=>{
+      const a=state.agents.find(a=>a.id===id),col=$(`.pg-column[data-side="${side}"]`);if(!col)return;
+      const conv=run?.conversations?.[id],messages=conv?state.histories[conv]||[]:[],answer=messages.filter(m=>m.role==='assistant').at(-1),error=run?.errors?.[id];
+      const scroller=col.querySelector('.pg-answer'),atBottom=!scroller||scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight<80;
+      col.innerHTML=`<header class="pg-head">${a?badge(a):''}<select class="pg-select" data-side="${side}" aria-label="Agent ${side+1}">${state.agents.map(x=>`<option value="${esc(x.id)}" ${x.id===id?'selected':''} ${x.id===[left,right][1-side]?'disabled':''}>${esc(title(x))}</option>`).join('')}</select>${a?`<span class="status-pill ${esc(a.busy?'connecting':a.status)}">${dot(a)}${status(a)}</span>${a.status!=='connected'&&a.protocol!=='terminal'?`<button class="text-button" data-action="pg-connect" data-id="${esc(a.id)}">Connect</button>`:''}`:''}</header>
+        <div class="pg-meta">${a?`${esc(labels[a.provider]||'Agent')} / ${esc(conv&&state.conversations.find(c=>c.id===conv)?.model||a.model||'default model')}`:'Add an agent to compare'}${answer?.content?` <span>&#183;</span> ${answer.content.length.toLocaleString()} characters`:''}${conv?` <button class="text-button" data-action="pg-open" data-id="${esc(conv)}">Open in chat &#8599;</button>`:''}</div>
+        <div class="pg-answer">${error?`<div class="message-error">${esc(error)}</div>`:''}${answer?`${answer.activity?.length?`<details class="activity-detail" ${answer.status==='streaming'?'open':''}><summary>${esc(answer.activity.at(-1))}</summary><div>${answer.activity.slice(-8).map(t=>`<p>${esc(t)}</p>`).join('')}</div></details>`:''}<div class="message-text">${format(answer.content)}${answer.status==='streaming'&&!answer.content?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}</div>${answer.error?`<div class="message-error">${esc(answer.error)}</div>`:''}`:!error?`<div class="pg-empty">${a?`${badge(a,true)}<p>${esc(title(a))} answers here.</p>`:'<p>Choose an agent.</p>'}</div>`:''}</div>`;
+      const next=col.querySelector('.pg-answer');if(atBottom)next.scrollTop=next.scrollHeight;
+    });
+    const busy=[left,right].some(id=>state.agents.find(a=>a.id===id)?.busy);
+    if(run?.prompt)$('#compose-hint').textContent=`Last question: ${run.prompt.slice(0,80)}`;else $('#compose-hint').textContent='Pick two agents and ask';
+    $('#pg-send').hidden=busy;$('#pg-stop').hidden=!busy;$('#pg-send').disabled=!left||!right;
+  }
+  async function sendPlayground(){
+    const input=$('#message-input'),text=input?.value.trim(),[left,right]=pgAgents;if(!text||!left||!right)return;
+    await action(async()=>{await api.playground({agentIds:[left,right],text,keepContext:pgKeep});pgDraft='';input.value='';});
+  }
   const panel=$('#terminal-panel'),grip=document.createElement('div');
   grip.className='terminal-resize-grip';grip.tabIndex=0;grip.role='separator';grip.setAttribute('aria-label','Resize terminal');grip.setAttribute('aria-orientation','horizontal');grip.title='Drag to resize terminal';panel.prepend(grip);
   const setHeight=h=>{panel.style.height=Math.max(180,Math.min(window.innerHeight-140,h))+'px';};
