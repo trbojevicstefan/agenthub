@@ -1,6 +1,6 @@
 'use strict';
 const electron=require('electron');
-const {app,BrowserWindow,ipcMain,protocol,session,shell,dialog,Menu,Tray,nativeImage}=electron;
+const {app,BrowserWindow,ipcMain,protocol,session,shell,dialog,Menu,Tray,nativeImage,clipboard}=electron;
 const fs=require('node:fs/promises'),fsSync=require('node:fs'),path=require('node:path');
 const {safeError}=require('./broker.cjs');
 const APP_URL='agenthub://app/index.html';
@@ -67,7 +67,12 @@ if(hostMode){
         ['/assets/agents/openclaw.svg',['image/svg+xml',path.join(__dirname,'../ui/assets/agents/openclaw.svg')]],
         ['/vendor/xterm.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/xterm/lib/xterm.js')]],
         ['/vendor/xterm.css',['text/css',path.join(__dirname,'../node_modules/@xterm/xterm/css/xterm.css')]],
-        ['/vendor/addon-fit.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-fit/lib/addon-fit.js')]]
+        ['/vendor/addon-fit.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-fit/lib/addon-fit.js')]],
+        ['/vendor/addon-unicode11.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js')]],
+        ['/vendor/addon-webgl.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-webgl/lib/addon-webgl.js')]],
+        ['/vendor/addon-search.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-search/lib/addon-search.js')]],
+        ['/vendor/addon-web-links.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-web-links/lib/addon-web-links.js')]],
+        ['/terminal-core.js',['text/javascript',path.join(__dirname,'../ui/terminal-core.js')]]
       ]);
       // Icon library: any bundled SVG in ui/assets/icons, by strict file name only.
       const iconAsset=pathname=>/^\/assets\/icons\/[a-z0-9-]{1,40}\.svg$/.test(pathname)?['image/svg+xml',path.join(__dirname,'../ui/assets/icons',path.basename(pathname))]:null;
@@ -115,7 +120,21 @@ if(hostMode){
       const handlers=Object.fromEntries(forwards.map(method=>[method,input=>client.call(method,input)]));
       for(const method of ['agentModels','selectModel','gateway'])handlers[method]=input=>client.call(method,input);
       handlers.terminalRename=async input=>{const title=await client.call('terminalRename',input);terminalWindows.get(input.id)?.setTitle(title);return title;};
+      // In-app updates. The state goes to every Opaya window; install stops the session service first.
+      const updater=new (require('./updater.cjs').Updater)({app,emit:state=>{for(const w of [win,...terminalWindows.values()])if(w&&!w.isDestroyed())w.webContents.send('hub:update',state);}});
       Object.assign(handlers,{
+        updateState:async()=>updater.state,
+        updateCheck:()=>updater.check(),
+        updateDownload:()=>updater.download(),
+        updateInstall:async()=>{
+          const result=await dialog.showMessageBox(win,{type:'question',buttons:['Cancel','Restart and update'],defaultId:1,cancelId:0,message:`Install Opaya ${updater.state.latest?.version||''} now?`,detail:'Opaya closes, installs the update and opens again. Local agent processes and local shells end; remote tmux sessions keep running. Saved chats and settings stay.'});
+          if(result.response!==1)return false;
+          await updater.install();await client.call('shutdown').catch(()=>{});quitting=true;client?.close();tray?.destroy();app.quit();return true;
+        },
+        // Terminal helpers: text-only clipboard and http(s) links.
+        clipboardRead:async()=>clipboard.readText().slice(0,1024*1024),
+        clipboardWrite:async x=>{if(typeof x.text!=='string'||x.text.length>4*1024*1024)throw new Error('Clipboard text is too large.');clipboard.writeText(x.text);return true;},
+        openLink:async x=>{let u;try{u=new URL(String(x.url||''));}catch{throw new Error('Invalid link.');}if(!['http:','https:'].includes(u.protocol))throw new Error('Only web links open from the terminal.');await shell.openExternal(u.toString());return true;},
         windowControl:async x=>{
           if(x.action==='minimize')win.minimize();
           else if(x.action==='maximize'){if(win.isFullScreen())win.setFullScreen(false);else if(win.isMaximized())win.unmaximize();else win.maximize();}
@@ -147,6 +166,8 @@ if(hostMode){
       }catch{tray=null;}}
       win.on('close',event=>{if(quitting)return;event.preventDefault();if(tray){win.hide();}else detach();});
       await win.loadURL(APP_URL);win.show();
+      // Look for a new version shortly after start, then every six hours. Only a notice; nothing installs by itself.
+      if(!smoke){setTimeout(()=>updater.check(),20000).unref?.();setInterval(()=>updater.check(),6*60*60*1000).unref?.();}
       if(smoke){try{await require('../scripts/native-smoke.cjs').run({app,win,client});quitting=true;client.close();app.exit(0);}catch(error){await client.call('shutdown').catch(()=>{});quitting=true;throw error;}}
     }).catch(startupFailure);
     app.on('before-quit',event=>{if(!quitting){event.preventDefault();detach();}});

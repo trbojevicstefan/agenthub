@@ -11,6 +11,11 @@
   <link rel="stylesheet" href="theme-light.css">
   <script defer src="vendor/xterm.js"></script>
   <script defer src="vendor/addon-fit.js"></script>
+  <script defer src="vendor/addon-unicode11.js"></script>
+  <script defer src="vendor/addon-webgl.js"></script>
+  <script defer src="vendor/addon-search.js"></script>
+  <script defer src="vendor/addon-web-links.js"></script>
+  <script defer src="terminal-core.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -29,8 +34,8 @@
       <header id="topbar" class="topbar"></header>
       <section id="content" class="content" aria-live="off"></section>
       <aside id="files-panel" class="files-panel" hidden aria-label="Files"></aside>
-      <section id="terminal-panel" class="terminal-panel" hidden aria-label="Integrated terminal"><div class="terminal-toolbar"><strong><span class="terminal-glyph">&gt;_</span> <span id="terminal-title">Terminal</span></strong><span class="terminal-hint">Persistent session / close window safely</span><div><button data-action="terminal-shell" title="Open shell for the selected agent">New shell</button><button data-action="terminal-cli" title="Launch the selected agent's native interactive CLI">Run CLI</button><button data-action="terminal-detach" title="Detach this remote terminal and keep its tmux session">Detach</button><button data-action="terminal-end" title="Terminate this terminal session">End session</button><button data-action="terminal-hide" class="icon-button" aria-label="Hide terminal without ending the session" title="Hide terminal">&#10005;</button></div></div><div id="terminal-tabs" class="terminal-tabs"></div><div id="terminal-views" class="terminal-views"></div></section>
-      <footer class="statusbar"><span id="status-left">One place. All your agents.</span><span id="status-right">opaya.dev</span></footer>
+      <section id="terminal-panel" class="terminal-panel" hidden aria-label="Integrated terminal"><div class="terminal-toolbar"><div id="terminal-tabs" class="terminal-tabs" role="tablist" aria-label="Terminal sessions"></div><div class="terminal-actions"><button type="button" class="term-btn" data-action="terminal-shell" title="New shell for the selected agent or this computer"><span aria-hidden="true">+</span> Shell</button><button type="button" class="term-btn" data-action="terminal-cli" title="Run the selected agent's native CLI"><span class="term-play" aria-hidden="true"></span> CLI</button><span class="term-sep" aria-hidden="true"></span><button type="button" class="term-icon" data-action="terminal-search" title="Search output (Ctrl+F)" aria-label="Search output"><span class="term-search-glyph" aria-hidden="true"></span></button><button type="button" class="term-icon" data-action="terminal-detach" title="Open in a separate window" aria-label="Open in a separate window"><span class="term-popout-glyph" aria-hidden="true"></span></button><button type="button" class="term-icon danger" data-action="terminal-end" title="End this session" aria-label="End this session"><span class="term-stop-glyph" aria-hidden="true"></span></button><button type="button" class="term-icon" data-action="terminal-hide" title="Hide terminal (Ctrl+`). Sessions keep running." aria-label="Hide terminal"><span class="term-hide-glyph" aria-hidden="true"></span></button></div></div><div id="terminal-search" class="terminal-search" hidden><input id="terminal-search-input" placeholder="Find in output" aria-label="Find in terminal output" autocomplete="off" spellcheck="false"><button type="button" data-find="prev" title="Previous (Shift+Enter)" aria-label="Previous match">&#8593;</button><button type="button" data-find="next" title="Next (Enter)" aria-label="Next match">&#8595;</button><button type="button" data-find="close" title="Close (Esc)" aria-label="Close search">&#10005;</button></div><div id="terminal-views" class="terminal-views"></div></section>
+      <footer class="statusbar"><span id="status-left">One place. All your agents.</span><button type="button" id="status-update" class="status-update" data-action="updates" hidden></button><span id="status-right">opaya.dev</span></footer>
     </main>
     <aside id="projects-panel" class="projects-panel" hidden aria-label="Projects"></aside>
   </div>

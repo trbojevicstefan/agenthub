@@ -5,6 +5,7 @@ const {spawn}=require('node:child_process');
 const {randomUUID,createHash}=require('node:crypto');
 const {atomicJson,readJson}=require('./store.cjs');
 const {environment,findExecutable,windowsLaunch,sshArgs,target,remoteCommand,quote,dockerExecContainerIndex,dockerExecArgs,collect}=require('./process.cjs');
+const WINDOWS_BUILD=process.platform==='win32'?Number(os.release().split('.')[2])||0:0;
 function dimensions(cols,rows){
   if(!Number.isInteger(cols)||!Number.isInteger(rows))throw new Error('Invalid terminal dimensions.');
   return {cols:Math.max(20,Math.min(400,cols)),rows:Math.max(5,Math.min(200,rows))};
@@ -47,7 +48,8 @@ class Terminals{
     this.timer=setTimeout(()=>{this.timer=null;this.persist().catch(()=>this.emit({type:'warning',error:'Terminal history could not be saved to disk.'}));},750);
     this.timer.unref();
   }
-  attach(id){const item=this.sessions.get(id);if(!item)throw new Error('Terminal not found.');const {process,...view}=item;return view;}
+  // xterm needs the Windows build to match ConPTY's line wrapping; without it resized TUIs draw duplicate lines.
+  attach(id){const item=this.sessions.get(id);if(!item)throw new Error('Terminal not found.');const {process,...view}=item;return {...view,windowsBuild:WINDOWS_BUILD};}
   open(agent,host,mode='shell',size={cols:100,rows:28}){
     if(!['shell','agent'].includes(mode))throw new Error('Invalid terminal mode.');
     const previous=[...this.sessions.values()].find(s=>s.agentId===agent.id&&s.mode===mode&&!s.exited);
