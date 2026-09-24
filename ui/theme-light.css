@@ -246,3 +246,5 @@
 :where(body[data-theme="light"]) .file-glyph{color:#21724a}
 :where(body[data-theme="light"]) .files-code{background:#ebf0ee;border:1px solid #cfd8d5}
 :where(body[data-theme="light"]) .model-scope>div{border:1px solid #c5d1cb}
+:where(body[data-theme="light"]) .dep-glyph{color:#175032}
+:where(body[data-theme="light"]) .install-card.bundle{border-color:#7cc09f66;background:radial-gradient(circle at 0 0,#badecc1c,transparent 60%),#dee5e1}

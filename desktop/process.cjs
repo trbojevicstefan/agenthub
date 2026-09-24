@@ -4,6 +4,24 @@ const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
 function quote(value) { return "'" + String(value).replace(/'/g, "'\\''") + "'"; }
+// Installs made while Opaya runs (winget, installers) only update PATH in the registry. Read it back so new tools are
+// found without restarting the session service. Cached briefly because every process launch builds an environment.
+let registryPath = {value: '', at: 0};
+function windowsRegistryPath() {
+  if (process.platform !== 'win32') return '';
+  if (Date.now() - registryPath.at < 15000) return registryPath.value;
+  const read = key => { try { const out = require('node:child_process').execFileSync('reg', ['query', key, '/v', 'Path'], {encoding: 'utf8', windowsHide: true, timeout: 3000}); return (out.match(/\bPath\s+REG_(?:EXPAND_)?SZ\s+(.*)/i)?.[1] || '').trim(); } catch { return ''; } };
+  const value = [read('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'), read('HKCU\\Environment')].join(';').replace(/%([^%]+)%/g, (m, name) => process.env[name] ?? m);
+  registryPath = {value, at: Date.now()}; return value;
+}
+function windowsToolDirs() {
+  const local = process.env.LOCALAPPDATA || '', roaming = process.env.APPDATA || '', programs = process.env.ProgramFiles || 'C:\\Program Files';
+  const dirs = [path.join(programs, 'nodejs'), path.join(programs, 'Git', 'cmd'), path.join(local, 'Microsoft', 'WinGet', 'Links'), path.join(local, 'Programs', 'Python', 'Launcher')];
+  for (const base of [path.join(local, 'Programs', 'Python'), path.join(roaming, 'Python')]) {
+    try { for (const entry of fs.readdirSync(base)) if (/^Python3\d+/i.test(entry)) dirs.push(path.join(base, entry), path.join(base, entry, 'Scripts')); } catch {}
+  }
+  return dirs;
+}
 function environment(extra = {}) {
   const env = {...process.env};
   // Windows environment keys are case-insensitive; avoid passing both Path and PATH.
@@ -11,7 +29,7 @@ function environment(extra = {}) {
   // GUI applications do not reliably inherit the user's terminal PATH.
   const dirs = [path.join(os.homedir(), '.local', 'bin'), path.join(os.homedir(), '.cargo', 'bin'), path.join(os.homedir(), '.npm-global', 'bin')];
   if (process.platform === 'win32') {
-    dirs.push(path.join(process.env.APPDATA || '', 'npm'), path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH'));
+    dirs.push(path.join(process.env.APPDATA || '', 'npm'), path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH'), ...windowsToolDirs(), ...windowsRegistryPath().split(';'));
   } else dirs.push('/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin');
   env.PATH = [...new Set([...(env.PATH || '').split(path.delimiter), ...dirs].filter(Boolean))].join(path.delimiter);
   // Never inherit debugging/runtime injection from an embedding Electron launcher.

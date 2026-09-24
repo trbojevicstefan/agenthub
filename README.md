@@ -32,7 +32,7 @@ Safety boundary: it acts only through Opaya's own tools (connections and machine
 
 ## Install agents
 
-**Install agents** (Workspace, the Add dialog, right-click the sidebar, or ask the Opaya Agent) installs Hermes Agent, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider or Ollama with one click, on this computer or on a saved SSH machine. Opaya shows the exact vendor command first and runs it in a terminal you can watch. Then run Discover to add the agent.
+**Install agents** (Workspace, the Add dialog, right-click the sidebar, or ask the Opaya Agent) installs Hermes Agent, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider or Ollama, and the dependencies they need (Node.js, Python, Git, uv, tmux, OpenSSH, Homebrew, or **All essentials** for whatever is missing) with one click, on this computer or on a saved SSH machine. Opaya shows the exact vendor command first and runs it in a terminal you can watch. Then run Discover to add the agent.
 
 ## Files and models
 

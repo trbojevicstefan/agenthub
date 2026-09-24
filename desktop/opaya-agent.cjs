@@ -39,7 +39,7 @@ const DIAGNOSTICS={
 const fn=(name,description,properties={},required=[])=>({type:'function',function:{name,description,parameters:{type:'object',properties,required,additionalProperties:false}}});
 const TOOLS=[
   fn('get_workspace','Read all saved agent connections (with live status and last error), SSH machines and open terminals. Start here.'),
-  fn('list_frameworks','List agent frameworks and runtimes that can be installed, with their install commands and requirements.'),
+  fn('list_frameworks','List everything that can be installed: agent frameworks (kind agent), dependencies such as Node.js, Python, Git, uv, tmux, OpenSSH and Homebrew (kind dependency), and the essentials bundle that installs whatever of Node.js, Python, Git, uv and tmux is missing (kind bundle).'),
   fn('discover_agents','Read-only scan for installed agents on this computer, or on a saved SSH machine. Returns candidates; it does not add them.',{machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}}),
   fn('connect_agent','Connect (or reconnect) a saved agent and report its status or error.',{agent_id:{type:'string'}},['agent_id']),
   fn('disconnect_agent','Disconnect a saved agent.',{agent_id:{type:'string'}},['agent_id']),
@@ -51,7 +51,7 @@ const TOOLS=[
   fn('remove_connection','Remove a saved agent connection and its local chats. The user approves it first.',{agent_id:{type:'string'}},['agent_id']),
   fn('save_machine','Add or update a saved SSH machine. The user approves it first.',{machine:{type:'object',description:'Fields: id (to update), name, alias, hostname, username, port, identityFile.'}},['machine']),
   fn('remove_machine','Remove a saved SSH machine that no agent uses. The user approves it first.',{machine_id:{type:'string'}},['machine_id']),
-  fn('install_framework','Install an agent framework or runtime in a visible terminal, on this computer or a saved machine. The user approves the exact command first.',{framework_id:{type:'string'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['framework_id']),
+  fn('install_framework','Install an agent framework, a dependency or the essentials bundle in a visible terminal, on this computer or a saved machine. The user approves the exact command first. Dependency commands skip what is already installed.',{framework_id:{type:'string',description:'An id from list_frameworks, for example codex, node, python or essentials.'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['framework_id']),
   fn('ssh_key','Create an ed25519 SSH key on this computer, or install a public key on a saved machine, in a visible terminal. The user approves it first and types any passphrase or password.',{action:{type:'string',enum:['generate','install']},key_name:{type:'string',description:'File name in ~/.ssh, letters, numbers, _ and -.'},machine_id:{type:'string'}},['action','key_name']),
   fn('list_directory','Read-only: list a folder on this computer or a saved machine (default: home folder).',{path:{type:'string'},machine_id:{type:'string'}}),
   fn('read_file','Read-only: read up to 256 KB of a text file on this computer or a saved machine. Secret files such as .env, keys and tokens are refused.',{path:{type:'string'},machine_id:{type:'string'}},['path']),
@@ -104,6 +104,7 @@ class OpayaAgent{
       'Work only through your tools. Check the workspace before changing anything. Prefer the smallest change. Explain briefly what you will do before a change; every change and command is approved by the user in a native dialog, and a declined approval is final.',
       'You cannot edit the app itself, its code or files outside your home folder, and you never see or handle API tokens: ask the user to enter tokens in the connection form.',
       'For agents that fail: read the connection and error, run diagnostics, check that the endpoint/port or executable exists, reconnect, and only then propose an edited connection. Do not remove connections unless asked.',
+      'Before installing an agent, check its prerequisites with run_diagnostic versions (on the target machine) and install missing dependencies first, or the essentials bundle when several are missing. On Windows, new tools appear on PATH for terminals opened after the install.',
       'To understand a project or config, use list_directory, read_file and project_info (read-only). After an install finishes, use discover_agents and save_connection to add it. Terminal output may take a while; read it again if it is incomplete.',
       `Platform: ${this.platform}. Saved agents: ${s.agents.length}. Saved machines: ${s.hosts.length}. Your home folder: ${this.home}.`,
       'Answer in the language the user writes in. Be concise.'
@@ -165,7 +166,7 @@ class OpayaAgent{
     const b=this.broker;
     switch(name){
       case 'get_workspace':{const s=b.snapshot();return {platform:this.platform,agents:s.agents.map(({id,name,displayName,provider,protocol,transport,hostId,endpoint,model,command,args,cwd,hermesHome,status,error,busy,hasToken,note})=>({id,name,displayName,provider,protocol,transport,hostId,endpoint,model,command,args,cwd,hermesHome,status,error,busy,hasToken,note})),machines:s.hosts,terminals:this.terminals.describe()};}
-      case 'list_frameworks':return catalog.list().map(({id,name,description,requires,after,local,remote,localCommand,remoteCommand})=>({id,name,description,requires,after,installableHere:local,installableOnMachines:remote,localCommand,remoteCommand}));
+      case 'list_frameworks':return catalog.list().map(({id,kind,name,description,requires,after,local,remote,localCommand,remoteCommand})=>({id,kind,name,description,requires,after,installableHere:local,installableOnMachines:remote,localCommand,remoteCommand}));
       case 'discover_agents':{const r=await b.discover({hostId:args.machine_id?schema.id(args.machine_id):undefined});return {scope:r.scope,agents:(r.agents||[]).map(({name,provider,protocol,transport,endpoint,command,args,hermesHome,detail,readiness,existingId,hostId})=>({name,provider,protocol,transport,endpoint,command,args,hermesHome,detail,readiness,existingId,hostId})),warnings:r.warnings||[]};}
       case 'connect_agent':{const id=schema.id(args.agent_id);await b.connect(id).catch(()=>{});const r=b.runtimeFor(id);return {status:r.status,error:r.error||''};}
       case 'disconnect_agent':{const id=schema.id(args.agent_id);await b.disconnect(id);return {status:b.runtimeFor(id).status};}

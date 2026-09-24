@@ -63,3 +63,9 @@ test('the Opaya Agent can read project files but never secret files',async t=>{
   assert.equal(results[0].text,'hello project');assert.match(results[1].error,/secrets/);assert(!JSON.stringify(requests).includes('sk-live-secret'));
   assert.deepEqual(results[2].entries.map(e=>e.name).sort(),['.env','README.md']);
 });
+test('dependencies and the essentials bundle are installable through the same approved catalog path',async t=>{
+  const {agent,commands,approvals}=await fixture(t,[call('install_framework',{framework_id:'essentials'}),call('install_framework',{framework_id:'node'}),{content:'done'}]);
+  agent.begin('install everything I need');await settle(agent);
+  assert.equal(commands.length,2);assert.equal(commands[0].command,catalog.command('essentials',{remote:false}).command);assert.match(commands[1].command,/node/);assert.equal(approvals.length,2);
+  const kinds=new Set(catalog.list().map(f=>f.kind));assert.deepEqual([...kinds].sort(),['agent','bundle','dependency']);
+});

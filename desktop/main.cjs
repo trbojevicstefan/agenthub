@@ -85,7 +85,7 @@ if(hostMode){
         {label:'View',submenu:[{role:'resetZoom'},{role:'zoomIn'},{role:'zoomOut'},{type:'separator'},{role:'togglefullscreen'},...(!app.isPackaged?[{role:'toggleDevTools'}]:[])]},
         ...(mac?[{role:'windowMenu'}]:[])
       ]));
-      win=new BrowserWindow({width:1440,height:960,minWidth:940,minHeight:680,title:BRAND,icon:path.join(__dirname,'../build/icon.png'),backgroundColor:'#111214',show:false,autoHideMenuBar:true,frame:false,...(process.platform==='darwin'?{roundedCorners:true}:{}),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true,allowRunningInsecureContent:false,webviewTag:false}});
+      win=new BrowserWindow({width:1440,height:960,minWidth:940,minHeight:680,title:BRAND,icon:path.join(__dirname,'../build',process.platform==='win32'?'icon.ico':'window.png'),backgroundColor:'#111214',show:false,autoHideMenuBar:true,frame:false,...(process.platform==='darwin'?{roundedCorners:true}:{}),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true,allowRunningInsecureContent:false,webviewTag:false}});
       win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
       win.webContents.on('will-navigate',event=>event.preventDefault());
       win.webContents.on('will-attach-webview',event=>event.preventDefault());
@@ -141,7 +141,8 @@ if(hostMode){
         try{return {ok:true,data:await handler(input||{})};}catch(error){return {ok:false,error:safeError(error)};}
       });
       if(!smoke){try{
-        const icon=nativeImage.createFromPath(path.join(__dirname,'../build/icon.png')).resize(process.platform==='darwin'?{width:18,height:18}:{width:24,height:24});
+        // Windows picks the matching size from the ICO; macOS loads tray.png with tray@2x.png for Retina.
+        let icon=nativeImage.createFromPath(path.join(__dirname,'../build',process.platform==='win32'?'icon.ico':process.platform==='darwin'?'tray.png':'window.png'));if(process.platform==='linux')icon=icon.resize({width:24,height:24});
         tray=new Tray(icon);tray.setToolTip('Opaya / sessions stay running');tray.setContextMenu(Menu.buildFromTemplate([{label:'Open Opaya',click:show},{label:'Exit window (keep sessions)',click:()=>detach()},{type:'separator'},{label:'Stop all sessions and exit',click:()=>stopService().catch(startupFailure)}]));tray.on('double-click',show);
       }catch{tray=null;}}
       win.on('close',event=>{if(quitting)return;event.preventDefault();if(tray){win.hide();}else detach();});
