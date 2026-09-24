@@ -1,5 +1,6 @@
 # Opaya 0.11.0 - Chat history, skill transfer and a skills library
 
+- **macOS for Intel**: every macOS release now has an Intel build (`mac-x64`) next to Apple Silicon (`mac-arm64`), and in-app updates pick the right one.
 - **Chat history panel**:
   - Click the clock button next to a chat, press Ctrl/Cmd+Shift+H, or right-click an agent and choose **Chat history**. The panel opens on the right, in place of Projects.
   - Chats are grouped by day. Tabs show All, Chats, Projects and Playground. You can search them and switch between one agent and all agents.

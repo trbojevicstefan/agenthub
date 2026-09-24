@@ -17,6 +17,7 @@
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win nsis --x64 --publish never",
     "dist:mac": "electron-builder --mac dmg zip --arm64 --publish never",
+    "dist:mac:x64": "electron-builder --mac dmg zip --x64 --publish never",
     "dist:linux": "electron-builder --linux AppImage --publish never",
     "smoke": "electron . --smoke-test",
     "smoke:restart": "node scripts/smoke-restart.cjs",
@@ -85,18 +86,8 @@
     },
     "mac": {
       "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "arm64"
-          ]
-        },
-        {
-          "target": "zip",
-          "arch": [
-            "arm64"
-          ]
-        }
+        "dmg",
+        "zip"
       ],
       "category": "public.app-category.developer-tools",
       "hardenedRuntime": true,

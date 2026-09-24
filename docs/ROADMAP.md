@@ -15,7 +15,6 @@ These are plans, not promises. Shipped work is listed in [RELEASE_NOTES.md](RELE
 
 ## Platform
 
-- Intel (x64) macOS builds.
 - A Linux AppImage and deb.
 - Code signing on Windows and notarization on macOS, so first launch needs no extra approval.
 
