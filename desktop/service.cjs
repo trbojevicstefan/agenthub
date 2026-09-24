@@ -23,6 +23,11 @@ async function start({app, safeStorage}, root) {
   const startedAt = new Date().toISOString(), approvals = new Map();
   const descriptor = path.join(root, 'session-service.json');
   await fs.mkdir(root,{recursive:true,mode:0o700});
+  // Startup stages go to service-startup.log, so a service that hangs or dies before it is ready says where.
+  const stageLog = path.join(root,'service-startup.log');
+  await fs.writeFile(stageLog,'',{mode:0o600}).catch(()=>{});
+  const stage = name => fs.appendFile(stageLog,`${new Date().toISOString()} ${name}\n`).catch(()=>{});
+  await stage(`start pid ${process.pid}`);
   const old = await fs.readFile(descriptor,'utf8').then(JSON.parse).catch(()=>null);
   if (old && old.pid !== process.pid && alive(old.pid)) throw new Error('A session service is already running.');
   if (process.platform !== 'win32') await fs.rm(endpoint(root),{force:true});
@@ -40,6 +45,7 @@ async function start({app, safeStorage}, root) {
     });
   }
   broker = new Broker({store:new Store(root),vault:new Vault(root,safeStorage),emit,approve});
+  await stage('broker');
   await broker.init();
   // Opaya browser for agents: the MCP bridge gets a token that can only call browserTool, forwarded to the Opaya window.
   const browserToken = randomBytes(32).toString('hex'), browserCalls = new Map();
@@ -55,6 +61,7 @@ async function start({app, safeStorage}, root) {
     });
   }
   terminals = new Terminals(event => { listener?.broadcast('terminal',event); if (event.type !== 'data') emit(); },{root});
+  await stage('terminals');
   await terminals.init();
   // Installs and diagnostics run in visible one-off terminals; the UI is told to show them.
   // Background jobs (clone, redeploy): no IPC timeout, live steps and log sent to every window, kept until dismissed.
@@ -83,6 +90,7 @@ async function start({app, safeStorage}, root) {
     listener?.broadcast('terminal',{type:'opened',id:view.id});emit();return view;
   }
   opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal,trusted:()=>!!broker.data.settings?.itrustOpaya});
+  await stage('opaya agent');
   await opaya.init();
   async function shutdown() {
     if (stopping) return true; stopping = true;
@@ -201,9 +209,11 @@ async function start({app, safeStorage}, root) {
     onApproval:(socket,message)=>{const a=approvals.get(message.id);if(a?.socket===socket)a.finish(message.allow===true);},
     onDetach:socket=>{for(const a of approvals.values())if(a.socket===socket)a.finish(false);}
   });
+  await stage('listen');
   await new Promise((resolve,reject)=>{listener.once('error',reject);listener.listen(endpoint(root),resolve);});
   if(process.platform!=='win32')await fs.chmod(endpoint(root),0o600);
   await atomicJson(descriptor,{protocol:1,pid:process.pid,token,startedAt});
+  await stage('ready');
   app.on('before-quit',event=>{if(!stopping){event.preventDefault();shutdown().catch(()=>app.exit(1));}});
   process.on('SIGTERM',()=>shutdown().catch(()=>app.exit(1)));
   process.on('SIGINT',()=>shutdown().catch(()=>app.exit(1)));
