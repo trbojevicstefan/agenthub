@@ -5,13 +5,13 @@ const apiAgent=(name,port)=>({name,provider:'hermes',protocol:'openai',transport
 // A scripted OpenAI-compatible endpoint: each call returns the next scripted assistant message.
 function model(script){const requests=[];return {requests,fetch:async(url,init)=>{requests.push({url,body:init.body?JSON.parse(init.body):null,headers:init.headers});const message=script.shift()||{content:'done'};return {ok:true,status:200,json:async()=>url.endsWith('/models')?{data:[{id:'m1'}]}:{choices:[{message}]}};}};}
 const call=(name,args={})=>({content:'',tool_calls:[{id:'c'+Math.random(),type:'function',function:{name,arguments:JSON.stringify(args)}}]});
-async function fixture(t,script,{allow=true}={}){
+async function fixture(t,script,{allow=true,trusted=false}={}){
   const root=await temp(t),approvals=[],commands=[];
   const approve=async(_a,title,detail)=>{approvals.push({title,detail});return allow;};
   const broker=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve,adapterFactory:()=>({connect:async()=>({}),close(){},run:async()=>({})})});await broker.init();t.after(()=>broker.close());
   const terminals={describe:()=>[],attach:id=>({id,buffer:'installed ok',exited:true}),closeAgent(){}};
   const m=model(script);
-  const agent=new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit:()=>{},runInTerminal:async x=>{commands.push(x);return {id:'term1'};},fetchImpl:m.fetch});
+  const agent=new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit:()=>{},runInTerminal:async x=>{commands.push(x);return {id:'term1'};},fetchImpl:m.fetch,trusted:()=>trusted});
   await agent.init();await agent.saveConfig({preset:'ollama',model:'m1'});
   return {root,agent,broker,approvals,commands,requests:m.requests};
 }
@@ -82,4 +82,14 @@ test('dependencies and the essentials bundle are installable through the same ap
   agent.begin('install everything I need');await settle(agent);
   assert.equal(commands.length,2);assert.equal(commands[0].command,catalog.command('essentials',{remote:false}).command);assert.match(commands[1].command,/node/);assert.equal(approvals.length,2);
   const kinds=new Set(catalog.list().map(f=>f.kind));assert.deepEqual([...kinds].sort(),['agent','bundle','dependency']);
+});
+test('iTrust lets the Opaya Agent act without asking, but removals still ask',async t=>{
+  const {agent,broker,commands,approvals}=await fixture(t,[call('install_framework',{framework_id:'codex'}),call('get_workspace'),{content:'ok'}],{allow:false,trusted:true});
+  await broker.saveAgent({agent:apiAgent('keep',8660)});
+  agent.begin('install codex');await settle(agent);
+  assert.equal(commands.length,1);assert.equal(approvals.length,0);assert(agent.describe().messages.at(-1).activity.some(x=>/iTrust approved: Install Codex CLI/.test(x)));
+  const {agent:a2,broker:b2,approvals:ap2}=await fixture(t,[call('remove_connection',{agent_id:'keep-me'}),{content:'ok'}],{allow:false,trusted:true});
+  await b2.saveAgent({agent:{...apiAgent('keep',8661),id:'keep-me'}});
+  a2.begin('remove it');await settle(a2);
+  assert.equal(ap2.length,1);assert.match(ap2[0].title,/Remove connection/);assert.equal(b2.data.agents.length,1,'declined removal keeps the agent');
 });

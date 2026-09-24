@@ -99,7 +99,7 @@ function agent(input) {
     note: text(input.note, 'note', 400), displayName: text(input.displayName, 'display name', 80).trim(),
     description: text(input.description, 'description', 500).trim(), icon: text(input.icon, 'icon', 16).trim(),
     avatar: avatar(input.avatar), group: group(input.group), tags: tags(input.tags),
-    pinned: Boolean(input.pinned), createdAt: input.createdAt || new Date().toISOString()
+    pinned: Boolean(input.pinned), itrust: Boolean(input.itrust), browser: Boolean(input.browser), createdAt: input.createdAt || new Date().toISOString()
   };
 }
 function prompt(value) {

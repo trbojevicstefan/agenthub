@@ -10,6 +10,8 @@ const mcp=require('./mcp.cjs');
 const {listSkills}=require('./skills.cjs');
 const projects=require('./projects.cjs');
 const files=require('./files.cjs');
+// The browser bridge runs next to Opaya, so only agents on this computer (not SSH or containers) can use it.
+const browserCapable=a=>a.transport!=='ssh'&&a.command!=='docker'&&['acp','claude'].includes(a.protocol);
 function safeError(error,token=''){
   let value=String(error?.message||error||'Operation failed.');
   if(token)value=value.split(token).join('[redacted]');
@@ -23,6 +25,7 @@ class Broker{
     await this.vault.load();this.data=await this.store.load();
     this.data.drafts=this.data.drafts||{};this.data.lastConversation=this.data.lastConversation||{};this.data.view=this.data.view||{};
     this.data.agents=this.data.agents.map(a=>schema.agent(a));
+    this.data.settings={itrustAll:!!this.data.settings?.itrustAll,itrustOpaya:!!this.data.settings?.itrustOpaya};
     this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
     this.data.mcpServers=(Array.isArray(this.data.mcpServers)?this.data.mcpServers:[]).flatMap(s=>{try{return [mcp.server(s)];}catch{return [];}});this.data.hosts=this.data.hosts.map(h=>schema.host(h));
     this.data.activeAgentId=this.data.agents.some(a=>a.id===this.data.activeAgentId)?this.data.activeAgentId:this.data.agents[0]?.id||'';
@@ -38,7 +41,7 @@ class Broker{
   runtimeFor(id){if(!this.runtime.has(id))this.runtime.set(id,{status:'disconnected',error:'',models:[]});return this.runtime.get(id);}
   snapshot(){
     const {agents,hosts,conversations,activeAgentId,activeConversationId}=this.data;
-    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',commands:r.adapter?.commands||[],models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations,activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
+    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',commands:r.adapter?.commands||[],models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,settings:this.data.settings,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations,activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
   }
   changed(){if(!this.closing)this.emit(this.snapshot());}
   async persist(){await this.store.write(this.data);this.changed();}
@@ -120,9 +123,17 @@ class Broker{
     const key=conversationId||agentId;this.data.drafts[key]=text;await this.store.write(this.data);return true;
   }
   async saveView(input){
-    this.data.view={overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark',projects:!!input.projects,projectsOpen:Array.isArray(input.projectsOpen)?[...new Set(input.projectsOpen.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)))].slice(0,50):[]};await this.store.write(this.data);return true;
+    this.data.view={overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark',projects:!!input.projects,layout:(l=>({terminal:l?.terminal==='right'?'right':'bottom',browser:l?.browser==='bottom'?'bottom':'right',bottomHeight:Math.max(120,Math.min(3000,Number(l?.bottomHeight)||280)),rightWidth:Math.max(240,Math.min(4000,Number(l?.rightWidth)||520))}))(input.layout),projectsOpen:Array.isArray(input.projectsOpen)?[...new Set(input.projectsOpen.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)))].slice(0,50):[]};await this.store.write(this.data);return true;
   }
-  async updateAgentDisplay({id,displayName,pinned,avatar,group,tags}){
+  // iTrust: tool requests from this agent (or every agent) are approved without asking. Read at request time.
+  isTrusted(id){const a=this.data.agents.find(x=>x.id===id);return !!a&&(this.data.settings?.itrustAll||a.itrust);}
+  async saveSettings(input){
+    const next={...this.data.settings};
+    if(input.itrustAll!==undefined)next.itrustAll=!!input.itrustAll;
+    if(input.itrustOpaya!==undefined)next.itrustOpaya=!!input.itrustOpaya;
+    this.data.settings=next;await this.persist();return next;
+  }
+  async updateAgentDisplay({id,displayName,pinned,avatar,group,tags,itrust,browser}){
     const index=this.data.agents.findIndex(a=>a.id===schema.id(id));if(index<0)throw new Error('Agent not found.');
     const a={...this.data.agents[index]};
     if(displayName!==undefined)a.displayName=schema.text(displayName,'display name',80).trim();
@@ -130,6 +141,8 @@ class Broker{
     if(avatar!==undefined)a.avatar=schema.avatar(avatar);
     if(group!==undefined)a.group=schema.group(group);
     if(tags!==undefined)a.tags=schema.tags(tags);
+    if(itrust!==undefined)a.itrust=Boolean(itrust);
+    if(browser!==undefined)a.browser=Boolean(browser);
     this.data.agents[index]=a;await this.persist();return a;
   }
   // Drag and drop: place an agent before or after another one and optionally move it into a section (group or pinned).
@@ -176,7 +189,13 @@ class Broker{
   conversationCwd(c,a){const p=c.projectId&&(this.data.projects||[]).find(x=>x.id===c.projectId);return p&&projects.fits(a,p)?p.path:'';}
   // ---- MCP servers and skills ----------------------------------------------------------------------------------
   mcpSecrets(serverId){try{const raw=this.vault.get(mcp.vaultKey(serverId));return raw?JSON.parse(raw):{env:{},headers:{}};}catch{return {env:{},headers:{}};}}
-  mcpFor(agentId){return mcp.acpServers(this.data.mcpServers||[],agentId,id=>this.mcpSecrets(id));}
+  mcpFor(agentId){
+    const list=mcp.acpServers(this.data.mcpServers||[],agentId,id=>this.mcpSecrets(id));
+    // Built-in: Opaya's browser pane, for agents on this computer that were given it (right-click > Opaya browser).
+    const a=this.data.agents.find(x=>x.id===agentId),b=this.browserBridge;
+    if(a?.browser&&b&&browserCapable(a))list.push({name:'opaya-browser',command:b.command,args:b.args,env:Object.entries(b.env).map(([name,value])=>({name,value}))});
+    return list;
+  }
   async saveMcpServer({server:input,env,headers}){
     const existing=input?.id?this.data.mcpServers.find(s=>s.id===input.id):null;
     const saved=existing?this.mcpSecrets(existing.id):{env:{},headers:{}};
@@ -227,7 +246,7 @@ class Broker{
       const generation=(r.generation||0)+1;r.generation=generation;
       let adapter,token='';
       try{
-        token=this.vault.get(id);adapter=this.adapterFactory({agent:a,host:a.transport==='ssh'?this.host(a.hostId):null,token,approve:this.approve,mcpServers:()=>this.mcpFor(a.id),onChange:()=>this.changed()});r.adapter=adapter;
+        token=this.vault.get(id);adapter=this.adapterFactory({agent:a,host:a.transport==='ssh'?this.host(a.hostId):null,token,approve:this.approve,trusted:()=>this.isTrusted(a.id),mcpServers:()=>this.mcpFor(a.id),onChange:()=>this.changed()});r.adapter=adapter;
         const info=await adapter.connect();
         if(r.generation!==generation){adapter.close();return;}
         Object.assign(r,info,{status:'connected'});
@@ -344,4 +363,4 @@ class Broker{
   }
   async close(){this.closing=true;for(const a of this.data.agents)this.disconnect(a.id);await Promise.allSettled([...this.turns.values()].map(t=>t.done));await this.store.queue;}
 }
-module.exports={Broker,safeError};
+module.exports={Broker,safeError,browserCapable};

@@ -72,6 +72,7 @@ if(hostMode){
         ['/vendor/addon-webgl.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-webgl/lib/addon-webgl.js')]],
         ['/vendor/addon-search.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-search/lib/addon-search.js')]],
         ['/vendor/addon-web-links.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-web-links/lib/addon-web-links.js')]],
+        ['/markdown.js',['text/javascript',path.join(__dirname,'../ui/markdown.js')]],
         ['/terminal-core.js',['text/javascript',path.join(__dirname,'../ui/terminal-core.js')]]
       ]);
       // Icon library: any bundled SVG in ui/assets/icons, by strict file name only.
@@ -79,7 +80,7 @@ if(hostMode){
       protocol.handle('agenthub',async request=>{
         const u=new URL(request.url),asset=assets.get(u.pathname)||iconAsset(u.pathname);
         if(u.hostname!=='app'||u.username||u.password||u.search||!asset||request.method!=='GET')return new Response('Not found',{status:404});
-        try{return new Response(await fs.readFile(asset[1]),{headers:{'Content-Type':asset[0],'X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"}});}catch{return new Response('A packaged UI resource is missing. Reinstall Opaya.',{status:404});}
+        try{return new Response(await fs.readFile(asset[1]),{headers:{'Content-Type':asset[0],'X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"}});}catch{return new Response('A packaged UI resource is missing. Reinstall Opaya.',{status:404});}
       });
       session.defaultSession.setPermissionRequestHandler((_wc,_permission,cb)=>cb(false));
       session.defaultSession.setPermissionCheckHandler(()=>false);
@@ -92,6 +93,13 @@ if(hostMode){
       ]));
       win=new BrowserWindow({width:1440,height:960,minWidth:940,minHeight:680,title:BRAND,icon:path.join(__dirname,'../build',process.platform==='win32'?'icon.ico':'window.png'),backgroundColor:'#111214',show:false,autoHideMenuBar:true,frame:false,...(process.platform==='darwin'?{roundedCorners:true}:{}),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true,allowRunningInsecureContent:false,webviewTag:false}});
       win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
+      // Opaya browser pane (a separate sandboxed view); agents with browser access drive it through the session service.
+      const browser=new (require('./browser.cjs').BrowserPane)({win,emit:state=>{if(!win.isDestroyed())win.webContents.send('hub:browser',state);}});
+      client.on('browser-request',async request=>{
+        try{const value=await browser.tool(request.op,request.args);await client.call('browserResult',{id:request.id,ok:true,value});}
+        catch(error){await client.call('browserResult',{id:request.id,ok:false,error:String(error?.message||error).slice(0,500)}).catch(()=>{});}
+      });
+
       win.webContents.on('will-navigate',event=>event.preventDefault());
       win.webContents.on('will-attach-webview',event=>event.preventDefault());
       win.webContents.on('render-process-gone',()=>{if(!quitting)dialog.showErrorBox('The Opaya window stopped','Your session service is still running. Reopen Opaya to restore conversations and terminals. Try --safe-graphics if this repeats.');});
@@ -116,13 +124,15 @@ if(hostMode){
         pendingApprovals.set(request.id,{key,expires:Date.now()+120000});win.webContents.send('hub:approval',request);
       });
       client.on('closed',()=>{if(!quitting&&!smoke&&!win.isDestroyed())win.webContents.send('hub:service-error','Session service disconnected. Reopen Opaya to reconnect. Saved history has not been deleted.');});
-      const forwards=['projectSave','projectRemove','projectInfo','projectBranches','projectGit','projectClone','mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaStop','opayaClear','snapshot','saveAgent','reorderAgents','updateAgentDisplay','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
+      const forwards=['saveSettings','projectSave','projectRemove','projectInfo','projectBranches','projectGit','projectClone','mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaStop','opayaClear','snapshot','saveAgent','reorderAgents','updateAgentDisplay','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
       const handlers=Object.fromEntries(forwards.map(method=>[method,input=>client.call(method,input)]));
       for(const method of ['agentModels','selectModel','gateway'])handlers[method]=input=>client.call(method,input);
       handlers.terminalRename=async input=>{const title=await client.call('terminalRename',input);terminalWindows.get(input.id)?.setTitle(title);return title;};
       // In-app updates. The state goes to every Opaya window; install stops the session service first.
       const updater=new (require('./updater.cjs').Updater)({app,emit:state=>{for(const w of [win,...terminalWindows.values()])if(w&&!w.isDestroyed())w.webContents.send('hub:update',state);}});
       Object.assign(handlers,{
+        browserPlace:async x=>browser.place(x),browserOpen:async x=>browser.open(x.url),browserNav:async x=>browser.navigate(String(x.action||'')),
+        browserPreview:async x=>browser.preview(x.html),browserState:async()=>browser.state(),
         updateState:async()=>updater.state,
         updateCheck:()=>updater.check(),
         updateDownload:()=>updater.download(),

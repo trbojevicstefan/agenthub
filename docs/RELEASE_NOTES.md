@@ -1,4 +1,21 @@
-# Opaya 0.8.0 - Terminal rebuilt, updates inside the app
+# Opaya 0.9.0 - iTrust, the Opaya browser, rich messages and a flexible layout
+
+- **iTrust mode**: tool requests (commands, file edits and other actions an agent asks permission for) are approved automatically.
+  - Turn it on for one agent (right-click > Turn on iTrust), for all agents, or for the Opaya Agent (Settings > iTrust mode, or the iTrust switch in the Opaya Agent's top bar).
+  - Trusted agents show an iT mark in the sidebar and an iTrust badge in the top bar, and each automatic approval appears in the chat.
+  - Works with Hermes and other ACP agents, Codex and Claude Code; Claude Code runs in bypass-permissions mode.
+  - The Opaya Agent still asks before removing connections or machines.
+- **The Opaya browser**: a real browser pane inside Opaya (globe button in the top bar).
+  - Links in agent replies open there; Ctrl+click opens them in your own browser.
+  - Give an agent the Opaya browser (right-click > Give Opaya browser) and it can open pages, read them, take screenshots, click, type and scroll while you watch. An "Agent browsing" badge shows when it does.
+  - Available to agents on this computer that use ACP (Hermes) or Claude Code; they get it from their next conversation.
+  - The browser has its own sandboxed profile, opens only web addresses, and refuses camera, microphone, location and other permission requests.
+- **Rich messages**: agent replies render headings, tables, task lists, nested lists, quotes, images, links and code blocks with Copy. HTML and SVG blocks have a Preview that opens in the Opaya browser.
+- **Customizable layout**:
+  - The terminal and the browser dock at the bottom (side by side) or on the right (stacked). Move them with the dock button in each panel.
+  - Drag the edges to resize, and use the expand button to maximize. Opaya remembers the layout.
+
+## Earlier: 0.8.0 - Terminal rebuilt, updates inside the app
 
 - **In-app updates**: Opaya checks GitHub for a new version shortly after it starts and every six hours. When one is out, a notice appears in the status bar; click it, then **Download update** and **Restart and update**. The download is checked against the release's SHA-256 list first.
   - Windows installs silently into the same folder and opens Opaya again.

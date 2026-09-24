@@ -20,7 +20,7 @@
   const draftKey = () => currentConversation()?.id || selected()?.id || '';
   const save = promise => { pendingWrites.add(promise); promise.catch(error=>toast(error.message,true)).finally(()=>pendingWrites.delete(promise)); return promise; };
   window.agenthubFlush = () => Promise.allSettled([...pendingWrites]);
-  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,theme,projects:projectsOpen,projectsOpen:[...projectsExpanded]})); };
+  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,theme,projects:projectsOpen,projectsOpen:[...projectsExpanded],layout})); };
   const drafts = new Map(), pendingSends = new Set(), terminalViews = new Map(), terminalPending = new Map();
   const selected = () => state.agents.find(a => a.id === state.activeAgentId);
   const currentConversation = () => state.conversations.find(c => c.id === state.activeConversationId && c.agentId === state.activeAgentId);
@@ -34,10 +34,11 @@
   const meta = a => `<span class="agent-meta">${envIcon(a)}<span>${esc(placeText(a))}</span><span class="meta-divider">/</span><span>${esc(location(a))}</span></span>`;
   const connectionLabel = a => isDocker(a) ? 'Containerized agent runtime' : a.transport === 'ssh' ? 'SSH encrypted connection' : a.protocol === 'openai' ? 'Gateway API' : 'Native CLI connection';
   const status = a => a.busy?'Working':({connected:'Connected',connecting:'Connecting',disconnected:'Disconnected',error:'Needs attention'}[a.status]||'Not connected');
+  const trusted = a => !!(state.settings?.itrustAll||a?.itrust);
   const dot = a => `<span class="status-dot ${esc(a.busy?'working':a.status||'disconnected')}"></span>`;
   const mod=()=>state.platform==='darwin'?'\u2318':'Ctrl ';
   // Motion bookkeeping: state updates re-render often, so entrance animations are keyed to first appearance, not to every render.
-  let collapsedGroups=new Set(),projectsOpen=false,projectsExpanded=new Set();
+  let collapsedGroups=new Set(),projectsOpen=false,projectsExpanded=new Set(),layout={terminal:'bottom',browser:'right',bottomHeight:280,rightWidth:520};
   const navSeen=new Map(),messageSeen=new Map();let navHtml='',navSelected='',navSelectedAt=0,messageConversation=null,overviewHtml='';
   const fresh=(map,key,now,ms)=>{if(!map.has(key))map.set(key,now);return now-map.get(key)<ms;};
   function enter(element){element.classList.remove('view-enter');void element.offsetWidth;element.classList.add('view-enter');clearTimeout(element.enterTimer);element.enterTimer=setTimeout(()=>element.classList.remove('view-enter'),900);}
@@ -52,12 +53,7 @@
     clearTimeout(toastTimer);toastTimer=setTimeout(()=>box.hidden=true,error?8500:4500);
   }
   async function action(fn) { try { return await fn(); } catch(error) {toast(error.message,true); return undefined;} }
-  function format(text) {
-    return String(text||'').split(/```/).map((part,i)=>{
-      if(i%2){const nl=part.indexOf('\n');const lang=nl>=0?part.slice(0,nl):'';const code=nl>=0?part.slice(nl+1):part;return `<div class="code-block"><div>${esc(lang||'code')}</div><pre><code>${esc(code)}</code></pre></div>`;}
-      return esc(part).split(/\n\n+/).filter(Boolean).map(p=>`<p>${p.replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>').replace(/`([^`\n]+)`/g,'<code>$1</code>').replace(/\n/g,'<br>')}</p>`).join('');
-    }).join('');
-  }
+  function format(text) { return window.OpayaMarkdown?window.OpayaMarkdown.render(text):esc(text); }
   // agentId adds a live line (running time, time since the last update) that updateTurnWatch() refreshes every second.
   function activityMarkup(message,limit=20,agentId=''){
     const watch=message?.status==='streaming'&&agentId?`<footer class="turn-watch" data-turn-watch="${esc(agentId)}"></footer>`:'';
@@ -67,7 +63,7 @@
   }
   function applyState(next) {
     state=next;document.body.dataset.platform=state.platform;
-    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);projectsOpen=!!state.view?.projects;projectsExpanded=new Set(state.view?.projectsOpen||[]);if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});$('.search-trigger kbd').textContent=`${mod()}K`;}
+    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);projectsOpen=!!state.view?.projects;if(state.view?.layout)layout={...layout,...state.view.layout};queueMicrotask(()=>placePanes());projectsExpanded=new Set(state.view?.projectsOpen||[]);if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});$('.search-trigger kbd').textContent=`${mod()}K`;}
     render();
   }
   function render() {
@@ -80,7 +76,7 @@
     const groups=[['pinned','PINNED',state.agents.filter(a=>a.pinned)],...customGroups.map(g=>[`group:${g}`,g,state.agents.filter(a=>!a.pinned&&a.group===g)]),['local','ON THIS COMPUTER',state.agents.filter(a=>!a.pinned&&!a.group&&a.transport!=='ssh')],['remote','REMOTE AGENTS',state.agents.filter(a=>!a.pinned&&!a.group&&a.transport==='ssh')]];
     const now=performance.now(),current=overview||opayaView||playgroundView?'':state.activeAgentId||'';let row=0;
     if(current!==navSelected){navSelected=current;navSelectedAt=now;}
-    const nav=groups.filter(g=>g[2].length).map(([key,name,all])=>{const closed=collapsedGroups.has(key),agents=closed?all.filter(a=>a.id===current):all,busy=closed&&all.some(a=>a.busy);return `<button class="sidebar-section-label ${closed?'collapsed':''} ${key.startsWith('group:')?'custom-group':''}" data-action="toggle-group" data-group="${esc(key)}" aria-expanded="${!closed}" title="${closed?'Expand':'Collapse'} ${esc(name)} (right-click for group actions)"><span class="group-chevron" aria-hidden="true">&#9662;</span><span class="group-name">${esc(name)}</span>${busy?'<span class="status-dot working"></span>':''}<span class="group-count">${all.length}</span></button><div class="sidebar-group ${closed?'closed':''}">${agents.map(a=>`<div class="agent-nav-row ${fresh(navSeen,a.id,now,650)?'enter':''}" style="--i:${row++}" data-agent-id="${esc(a.id)}" data-section="${esc(key)}" draggable="true"><button class="agent-nav ${!overview&&!opayaView&&!playgroundView&&a.id===state.activeAgentId?'selected':''} ${a.id===navSelected&&now-navSelectedAt<500?'just-selected':''}" data-action="select" data-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}">${badge(a)}<span class="agent-nav-text"><strong>${esc(title(a))}</strong><small>${esc(description(a))}</small></span>${dot(a)}</button></div>`).join('')}</div>`;}).join('')||'<div class="sidebar-empty"><span class="connection-dots"><i></i><i></i><i></i></span>Your agents will<br>feel at home here.</div>';
+    const nav=groups.filter(g=>g[2].length).map(([key,name,all])=>{const closed=collapsedGroups.has(key),agents=closed?all.filter(a=>a.id===current):all,busy=closed&&all.some(a=>a.busy);return `<button class="sidebar-section-label ${closed?'collapsed':''} ${key.startsWith('group:')?'custom-group':''}" data-action="toggle-group" data-group="${esc(key)}" aria-expanded="${!closed}" title="${closed?'Expand':'Collapse'} ${esc(name)} (right-click for group actions)"><span class="group-chevron" aria-hidden="true">&#9662;</span><span class="group-name">${esc(name)}</span>${busy?'<span class="status-dot working"></span>':''}<span class="group-count">${all.length}</span></button><div class="sidebar-group ${closed?'closed':''}">${agents.map(a=>`<div class="agent-nav-row ${fresh(navSeen,a.id,now,650)?'enter':''}" style="--i:${row++}" data-agent-id="${esc(a.id)}" data-section="${esc(key)}" draggable="true"><button class="agent-nav ${!overview&&!opayaView&&!playgroundView&&a.id===state.activeAgentId?'selected':''} ${a.id===navSelected&&now-navSelectedAt<500?'just-selected':''}" data-action="select" data-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}">${badge(a)}<span class="agent-nav-text"><strong>${esc(title(a))}${trusted(a)?'<span class="itrust-mark" title="iTrust: approved automatically">iT</span>':''}</strong><small>${esc(description(a))}</small></span>${dot(a)}</button></div>`).join('')}</div>`;}).join('')||'<div class="sidebar-empty"><span class="connection-dots"><i></i><i></i><i></i></span>Your agents will<br>feel at home here.</div>';
     if(nav!==navHtml){navHtml=nav;$('#agent-list').innerHTML=nav;}
     const a=selected();
     if(opayaView)renderOpaya();else if(playgroundView)renderPlayground();else if(overview||!a)renderOverview();else renderAgent(a);
@@ -99,7 +95,7 @@
     renderKey='overview';
   }
   function renderAgent(a) {
-    const proj=projectOf(currentConversation());$('#topbar').innerHTML=`<div class="breadcrumb">${proj?`<button type="button" class="crumb-project" data-action="project-focus" data-id="${esc(proj.id)}" title="${esc(proj.path)}"><span class="project-folder" aria-hidden="true"></span>${esc(proj.name)}</button>`:'Agents'} <span>/</span> <strong>${esc(title(a))}</strong></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span><button class="subtle" data-action="skills" data-id="${esc(a.id)}" title="Skills, tools and MCP servers"><span aria-hidden="true">&#10022;</span> Skills</button><button class="subtle" data-action="files-agent" data-id="${esc(a.id)}" title="Browse this agent's folders and project"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="terminal" title="Open terminal (Ctrl + backtick)"><span class="terminal-glyph">&gt;_</span> Terminal</button><button class="icon-button" data-action="edit" data-id="${esc(a.id)}" title="Edit connection settings" aria-label="Connection settings">&#9881;</button></div>`;
+    const proj=projectOf(currentConversation());$('#topbar').innerHTML=`<div class="breadcrumb">${proj?`<button type="button" class="crumb-project" data-action="project-focus" data-id="${esc(proj.id)}" title="${esc(proj.path)}"><span class="project-folder" aria-hidden="true"></span>${esc(proj.name)}</button>`:'Agents'} <span>/</span> <strong>${esc(title(a))}</strong></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span>${trusted(a)?`<button type="button" class="itrust-pill" data-action="itrust-agent" data-id="${esc(a.id)}" title="iTrust is on: ${esc(title(a))}'s tool requests are approved automatically. Click to change.">iTrust</button>`:''}<button class="subtle" data-action="skills" data-id="${esc(a.id)}" title="Skills, tools and MCP servers"><span aria-hidden="true">&#10022;</span> Skills</button><button class="subtle" data-action="files-agent" data-id="${esc(a.id)}" title="Browse this agent's folders and project"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="terminal" title="Open terminal (Ctrl + backtick)"><span class="terminal-glyph">&gt;_</span> Terminal</button><button class="icon-button" data-action="edit" data-id="${esc(a.id)}" title="Edit connection settings" aria-label="Connection settings">&#9881;</button></div>`;
     contentKind('conversation');
     $('.topbar-actions').insertAdjacentHTML('beforeend',`${a.protocol!=='terminal'?'<button class="secondary" data-action="models" title="Choose agent model">Models</button>':''}${['hermes','openclaw'].includes(a.provider)?'<button class="secondary" data-action="gateway" title="Gateway status and restart">Gateway</button>':''}`);
     if(renderKey!==JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId])) {
@@ -204,7 +200,7 @@
   }
   function openSettings(){
     const localCount=state.agents.filter(a=>a.transport!=='ssh').length,remoteCount=state.agents.filter(a=>a.transport==='ssh').length,dockerCount=state.agents.filter(isDocker).length;
-    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section><h3>Updates</h3><p class="settings-copy">Installed: Opaya ${esc(update.current||'')}. ${update.status==='available'?`Version ${esc(update.latest?.version||'')} is ready to download.`:'Opaya checks GitHub for new versions.'}</p><button class="secondary" data-action="updates">${update.status==='available'?'Update now':'Check for updates'}</button></section><section><h3>MCP servers</h3><p class="settings-copy">${(state.mcpServers||[]).length} saved. Tools such as GitHub, a browser or a database that Opaya passes to Hermes (ACP) and Claude Code.</p><button class="secondary" data-action="mcp-manage">Manage MCP servers</button></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
+    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section class="itrust-settings"><h3>iTrust mode</h3><p class="settings-copy">Approve tool requests automatically: commands, file edits and other actions agents ask permission for. Works for Hermes and other ACP agents, Codex and Claude Code. Turn it on only for agents you trust with this computer.</p><label class="switch-row"><input type="checkbox" data-setting="itrustAll" ${state.settings?.itrustAll?'checked':''}><span class="switch" aria-hidden="true"></span><span>All agents</span></label><label class="switch-row"><input type="checkbox" data-setting="itrustOpaya" ${state.settings?.itrustOpaya?'checked':''}><span class="switch" aria-hidden="true"></span><span>Opaya Agent <small>(removals still ask)</small></span></label><p class="field-help">Per agent: right-click an agent &gt; Turn on iTrust.</p></section><section><h3>Updates</h3><p class="settings-copy">Installed: Opaya ${esc(update.current||'')}. ${update.status==='available'?`Version ${esc(update.latest?.version||'')} is ready to download.`:'Opaya checks GitHub for new versions.'}</p><button class="secondary" data-action="updates">${update.status==='available'?'Update now':'Check for updates'}</button></section><section><h3>MCP servers</h3><p class="settings-copy">${(state.mcpServers||[]).length} saved. Tools such as GitHub, a browser or a database that Opaya passes to Hermes (ACP) and Claude Code.</p><button class="secondary" data-action="mcp-manage">Manage MCP servers</button></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
   }
   function switcher(){
     modal('Jump to an agent.','Search by name, provider or machine.',`<input id="switcher-search" class="switcher-search" placeholder="Search agents..." aria-label="Search agents"><div id="switcher-list"></div>`);
@@ -265,6 +261,10 @@
     if(name==='diagnostics'){openDiagnostics(id);return;}
     if(name==='skills'){openSkills(id);return;}
     if(name==='updates'){openUpdates();return;}
+    if(name==='dock-move'){moveDock(button.dataset.pane);return;}
+    if(name==='itrust-agent'){const a=state.agents.find(x=>x.id===id);if(a)toggleAgentTrust(a);return;}
+    if(name==='opaya-itrust'){action(async()=>{const on=!state.settings?.itrustOpaya;if(on&&!confirm('Turn on iTrust for the Opaya Agent?\n\nIt will install, connect and change things without asking each time. Removing connections or machines still asks.'))return;await api.saveSettings({itrustOpaya:on});await refresh();toast(on?'iTrust is on for the Opaya Agent.':'iTrust is off for the Opaya Agent.');});return;}
+    if(name==='browser-open'||name==='browser-toggle'){const p=$('#browser-panel');if(name==='browser-toggle'&&!p.hidden){p.hidden=true;$('#browser-toggle')?.classList.remove('selected');return;}showBrowser();$('#browser-toggle')?.classList.add('selected');$('#browser-url').focus();return;}
     if(name==='projects-toggle'){toggleProjects();return;}
     if(name==='project-focus'){projectsExpanded.add(id);toggleProjects(true);return;}
     if(name==='mcp-manage'){openMcpManager();return;}
@@ -396,6 +396,8 @@
       {icon:'&#9776;',label:'Group & tags...',run:()=>openGroupTags(a)},
       {icon:'&#10022;',label:'Skills, tools & MCP...',run:()=>openSkills(id)},
       {icon:'&#9635;',label:'Projects...',run:()=>openAgentProjects(a)},
+      {icon:'&#9888;',label:a.itrust?'Turn off iTrust':'Turn on iTrust...',run:()=>toggleAgentTrust(a)},
+      {icon:'&#9711;',label:a.browser?'Take away Opaya browser':'Give Opaya browser',disabled:!browserCapable(a),hint:browserCapable(a)?'':'local only',run:async()=>{await api.updateAgentDisplay({id,browser:!a.browser});await refresh();toast(a.browser?`${title(a)} no longer has the Opaya browser.`:`${title(a)} can use the Opaya browser from its next conversation.`);}},
       {icon:'&#8801;',label:'Connection log...',run:()=>openDiagnostics(id)},
       {icon:'&#8593;',label:'Move up',disabled:index<=0,run:async()=>{await api.reorderAgents({id,direction:'up'});await refresh();}},
       {icon:'&#8595;',label:'Move down',disabled:index>=state.agents.length-1,run:async()=>{await api.reorderAgents({id,direction:'down'});await refresh();}},
@@ -483,7 +485,7 @@
   const OPAYA_STARTERS=[['Why is an agent not connecting?','One of my agents is not working. Check my workspace, find what is wrong and help me fix it.'],['Install Codex on this computer','Install the Codex CLI on this computer and add it to Opaya when it is done.'],['Set up my VPS','Help me add my VPS as a machine, set up an SSH key for it and find the agents running there.'],['What do I have?','Give me a short overview of my agents, their status and my machines.']];
   function renderOpaya(){
     const o=opaya(),entering=renderKey!=='opaya';
-    $('#topbar').innerHTML=`<div class="breadcrumb">Opaya <span>/</span> <strong>Opaya Agent</strong></div><div class="topbar-actions">${o.configured?`<span class="status-pill ${o.busy?'connecting':'connected'}">${o.busy?'<span class="status-dot working"></span>Working':'<span class="status-dot connected"></span>'+esc(opayaModelLabel(o))}</span>`:''}<button class="subtle" data-action="files-local" title="Browse folders on this computer"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="install-catalog" title="Install agent frameworks locally or on a machine"><span class="install-glyph">&#8595;</span> Install agents</button>${o.messages.length?'<button class="subtle" data-action="opaya-clear" title="Start a new chat with the Opaya Agent">New chat</button>':''}<button class="secondary" data-action="opaya-config" title="Choose the model the Opaya Agent uses">Model settings</button></div>`;
+    $('#topbar').innerHTML=`<div class="breadcrumb">Opaya <span>/</span> <strong>Opaya Agent</strong></div><div class="topbar-actions"><button type="button" class="itrust-toggle ${state.settings?.itrustOpaya?'on':''}" data-action="opaya-itrust" title="iTrust: let the Opaya Agent act without asking each time (removals still ask)"><span class="itrust-switch" aria-hidden="true"></span>iTrust</button>${o.configured?`<span class="status-pill ${o.busy?'connecting':'connected'}">${o.busy?'<span class="status-dot working"></span>Working':'<span class="status-dot connected"></span>'+esc(opayaModelLabel(o))}</span>`:''}<button class="subtle" data-action="files-local" title="Browse folders on this computer"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="install-catalog" title="Install agent frameworks locally or on a machine"><span class="install-glyph">&#8595;</span> Install agents</button>${o.messages.length?'<button class="subtle" data-action="opaya-clear" title="Start a new chat with the Opaya Agent">New chat</button>':''}<button class="secondary" data-action="opaya-config" title="Choose the model the Opaya Agent uses">Model settings</button></div>`;
     contentKind('conversation opaya-view');
     if(entering){
       $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity"><span class="agent-avatar large opaya-avatar"><span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""><i></i></span></span><div><h1>Opaya Agent</h1><p>Installs, connects, maintains and troubleshoots your agents and machines.</p><div class="identity-meta"><span class="agent-meta"><span class="meta-icon local-mark" aria-hidden="true"></span><span>Lives in Opaya's home folder</span><span class="meta-divider">/</span><span>Changes only with your approval</span></span></div></div></div></div><div id="opaya-banner"></div><div id="opaya-messages" class="message-list"></div><div class="compose-area"><form id="message-form" class="opaya-form"><textarea id="message-input" class="opaya-input" rows="2" maxlength="80000" aria-label="Message the Opaya Agent" placeholder="Ask the Opaya Agent to install, connect or fix an agent..."></textarea><div class="compose-bottom"><div><span class="compose-provider">Opaya Agent</span><span id="compose-hint"></span></div><button type="button" id="opaya-stop" class="stop-button" data-action="opaya-stop" hidden><span>&#9632;</span> Stop</button><button id="opaya-send" type="submit" class="send-button" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption">Every change and command asks for your approval <span>&#183;</span> It never sees your API tokens <span>&#183;</span> It cannot modify the app itself</p></div>`;
@@ -754,6 +756,16 @@
     const put=()=>{const input=$('#message-input');if(!input)return;input.value=`/${name} `;drafts.set(draftKey(),input.value);input.focus();input.setSelectionRange(input.value.length,input.value.length);};
     if(state.activeAgentId!==a.id||overview||opayaView||playgroundView){overview=false;opayaView=false;playgroundView=false;action(async()=>{await api.select({id:a.id});await refresh();put();});}else put();
   }
+  const browserCapable=a=>a.transport!=='ssh'&&a.command!=='docker'&&['acp','claude'].includes(a.protocol);
+  async function toggleAgentTrust(a){
+    if(state.settings?.itrustAll&&a.itrust===false){toast('iTrust is on for all agents in Settings.');return;}
+    const on=!a.itrust;
+    if(on&&!confirm(`Turn on iTrust for ${title(a)}?\n\nIts tool requests (commands, file edits and other actions) will be approved automatically, without asking you.`))return;
+    await action(async()=>{await api.updateAgentDisplay({id:a.id,itrust:on});await refresh();toast(on?`iTrust is on for ${title(a)}.`:`iTrust is off for ${title(a)}.`);});
+  }
+  document.addEventListener('change',event=>{const key=event.target.dataset?.setting;if(!key)return;const on=event.target.checked;
+    if(on&&key==='itrustAll'&&!confirm('Turn on iTrust for all agents?\n\nEvery agent\'s tool requests will be approved automatically.')){event.target.checked=false;return;}
+    action(async()=>{await api.saveSettings({[key]:on});await refresh();});});
   async function openSkills(id){
     const a=state.agents.find(x=>x.id===id);if(!a)return;
     modal('Skills, tools & MCP',`${title(a)} / ${labels[a.provider]||a.provider}${a.agentVersion?` ${a.agentVersion}`:''}`,`<div id="skills-body"><p class="field-help">Loading skills...</p></div>`,true);
@@ -894,7 +906,9 @@
     const bar=$('#topbar');if(!bar||$('#projects-toggle',bar))return;
     const button=document.createElement('button');button.id='projects-toggle';button.type='button';button.className='icon-button projects-toggle';button.dataset.action='projects-toggle';
     button.title=`Projects (${mod()}Shift+P)`;button.setAttribute('aria-label','Projects');button.innerHTML='<span class="project-folder" aria-hidden="true"></span>';
-    button.classList.toggle('selected',projectsOpen);bar.append(button);
+    button.classList.toggle('selected',projectsOpen);
+    const web=document.createElement('button');web.id='browser-toggle';web.type='button';web.className='icon-button projects-toggle';web.dataset.action='browser-toggle';web.title='Opaya browser';web.setAttribute('aria-label','Opaya browser');web.innerHTML='<span class="globe-glyph" aria-hidden="true"></span>';
+    web.classList.toggle('selected',!$('#browser-panel').hidden);bar.append(web,button);
   }
   async function startProjectChat(p,agentId){
     await api.newConversation({agentId,projectId:p.id});overview=false;opayaView=false;playgroundView=false;await refresh();$('#message-input')?.focus();
@@ -1025,14 +1039,78 @@
   }
   api.onUpdate?.(value=>{const was=update.status;update=value||{status:'idle'};renderUpdate();if(was!=='available'&&update.status==='available'&&!$('#app-dialog'))toast(`Opaya ${update.latest?.version} is available. Click the notice in the status bar to update.`);});
   api.updateState?.().then(value=>{update=value||update;renderUpdate();}).catch(()=>{});
-  const panel=$('#terminal-panel'),grip=document.createElement('div');
-  grip.className='terminal-resize-grip';grip.tabIndex=0;grip.role='separator';grip.setAttribute('aria-label','Resize terminal');grip.setAttribute('aria-orientation','horizontal');grip.title='Drag to resize terminal';panel.prepend(grip);
-  const setHeight=h=>{panel.style.height=Math.max(180,Math.min(window.innerHeight-140,h))+'px';};
-  grip.addEventListener('pointerdown',e=>{const y=e.clientY,height=panel.offsetHeight;grip.setPointerCapture(e.pointerId);const move=event=>setHeight(height+y-event.clientY);grip.addEventListener('pointermove',move);grip.addEventListener('lostpointercapture',()=>grip.removeEventListener('pointermove',move),{once:true});});
-  grip.addEventListener('keydown',e=>{if(['ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();setHeight(panel.offsetHeight+(e.key==='ArrowUp'?32:-32));}});
-  const expand=document.createElement('button');expand.type='button';expand.className='term-icon';expand.innerHTML='<span class="term-expand-glyph" aria-hidden="true"></span>';expand.title='Expand / restore terminal';expand.setAttribute('aria-label',expand.title);let savedHeight=0;
-  expand.onclick=()=>{if(savedHeight){setHeight(savedHeight);savedHeight=0;}else{savedHeight=panel.offsetHeight;setHeight(window.innerHeight-140);}};
-  $('.terminal-actions [data-action="terminal-hide"]').before(expand);
+  // ---- Layout: the terminal and the browser dock at the bottom (side by side) or on the right (stacked) -------------
+  const saveLayout=()=>saveView();
+  const clampBottom=h=>Math.max(160,Math.min(window.innerHeight-200,h)),clampRight=w=>Math.max(300,Math.min(window.innerWidth-560,w));
+  function placePanes(){
+    for(const name of ['terminal','browser']){const pane=$(`[data-pane="${name}"].dock-pane`),dock=$(`#dock-${layout[name]==='right'?'right':'bottom'} .dock-panes`);if(pane&&pane.parentElement!==dock)dock.append(pane);}
+    syncDocks();
+  }
+  function syncDocks(){
+    for(const id of ['dock-bottom','dock-right']){const dock=$('#'+id),any=[...dock.querySelectorAll('.dock-pane')].some(p=>!p.hidden);dock.hidden=!any;}
+    $('#dock-bottom').style.height=clampBottom(layout.bottomHeight)+'px';$('#dock-right').style.width=clampRight(layout.rightWidth)+'px';
+    for(const b of document.querySelectorAll('[data-action="dock-move"]')){const where=layout[b.dataset.pane];b.title=where==='right'?'Move to the bottom':'Move to the side';b.classList.toggle('to-bottom',where==='right');}
+    placeBrowser();
+  }
+  function moveDock(name){layout[name]=layout[name]==='right'?'bottom':'right';saveLayout();placePanes();for(const v of terminalViews.values())requestAnimationFrame(()=>{if(!v.exited)v.core?.fitAndReport(v.report);});}
+  for(const grip of document.querySelectorAll('.dock-grip')){
+    const side=grip.dataset.grip;
+    grip.addEventListener('pointerdown',e=>{const start=side==='bottom'?e.clientY:e.clientX,size=side==='bottom'?$('#dock-bottom').offsetHeight:$('#dock-right').offsetWidth;grip.setPointerCapture(e.pointerId);document.body.classList.add('dock-resizing');
+      const move=event=>{if(side==='bottom')layout.bottomHeight=clampBottom(size+start-event.clientY);else layout.rightWidth=clampRight(size+start-event.clientX);syncDocks();};
+      grip.addEventListener('pointermove',move);grip.addEventListener('lostpointercapture',()=>{grip.removeEventListener('pointermove',move);document.body.classList.remove('dock-resizing');saveLayout();},{once:true});});
+    grip.addEventListener('keydown',e=>{const step=e.key==='ArrowUp'||e.key==='ArrowLeft'?32:e.key==='ArrowDown'||e.key==='ArrowRight'?-32:0;if(!step)return;e.preventDefault();if(side==='bottom')layout.bottomHeight=clampBottom(layout.bottomHeight+step);else layout.rightWidth=clampRight(layout.rightWidth+step);syncDocks();saveLayout();});
+  }
+  // Panes show and hide through their hidden attribute (many places toggle the terminal); keep the docks in step.
+  new MutationObserver(syncDocks).observe($('#terminal-panel'),{attributes:true,attributeFilter:['hidden']});
+  new MutationObserver(syncDocks).observe($('#browser-panel'),{attributes:true,attributeFilter:['hidden']});
+  const expand=document.createElement('button');expand.type='button';expand.className='term-icon';expand.innerHTML='<span class="term-expand-glyph" aria-hidden="true"></span>';expand.title='Expand / restore';expand.setAttribute('aria-label',expand.title);let savedSize=0;
+  expand.onclick=()=>{const right=layout.terminal==='right';if(savedSize){if(right)layout.rightWidth=savedSize;else layout.bottomHeight=savedSize;savedSize=0;}else{savedSize=right?layout.rightWidth:layout.bottomHeight;if(right)layout.rightWidth=window.innerWidth;else layout.bottomHeight=window.innerHeight;}syncDocks();saveLayout();};
+  $('.terminal-actions [data-action="dock-move"]').before(expand);
+  // ---- Opaya browser pane -------------------------------------------------------------------------------------------
+  let browserState={url:''},browserFrame=0,agentBrowsingTimer=0;
+  function placeBrowser(){
+    cancelAnimationFrame(browserFrame);
+    browserFrame=requestAnimationFrame(()=>{
+      if(!api.browserPlace)return;const panel=$('#browser-panel'),view=$('#browser-view');
+      const covered=!!document.querySelector('dialog[open],.context-menu')||document.body.classList.contains('dock-resizing');
+      const shown=!panel.hidden&&!covered&&!!browserState.url;const r=view.getBoundingClientRect();
+      $('.browser-empty').hidden=!!browserState.url;
+      api.browserPlace({x:r.left,y:r.top,width:r.width,height:r.height,visible:shown}).catch(()=>{});
+    });
+  }
+  function showBrowser(){$('#browser-panel').hidden=false;syncDocks();}
+  async function openInBrowser(url){showBrowser();try{browserState=await api.browserOpen({url});}catch(error){toast(error.message,true);}renderBrowser();}
+  function renderBrowser(){
+    const input=$('#browser-url');if(document.activeElement!==input)input.value=browserState.url?.startsWith('data:')?'Preview':browserState.url||'';
+    $('[data-browser="back"]').disabled=!browserState.canGoBack;$('[data-browser="forward"]').disabled=!browserState.canGoForward;
+    $('#browser-panel').classList.toggle('loading',!!browserState.loading);$('.browser-lock').classList.toggle('secure',String(browserState.url).startsWith('https:'));
+    placeBrowser();
+  }
+  new ResizeObserver(placeBrowser).observe($('#browser-view'));window.addEventListener('resize',placeBrowser);
+  new MutationObserver(placeBrowser).observe(document.body,{childList:true,subtree:false});
+  new MutationObserver(placeBrowser).observe($('#modal-root'),{childList:true,subtree:true,attributes:true,attributeFilter:['open']});
+  api.onBrowser?.(value=>{
+    browserState=value||browserState;
+    if(value?.request==='show'){showBrowser();if(value.agent){const badge=$('#browser-agent');badge.hidden=false;clearTimeout(agentBrowsingTimer);agentBrowsingTimer=setTimeout(()=>{badge.hidden=true;},8000);}}
+    renderBrowser();
+  });
+  $('#browser-form').addEventListener('submit',event=>{event.preventDefault();const v=$('#browser-url').value.trim();if(v)openInBrowser(v);});
+  $('#browser-panel').addEventListener('click',event=>{
+    const b=event.target.closest('[data-browser]');if(!b)return;const act=b.dataset.browser;
+    if(act==='close'){$('#browser-panel').hidden=true;return;}
+    if(act==='external'){if(browserState.url&&!browserState.url.startsWith('data:'))action(()=>api.openLink({url:browserState.url}));return;}
+    action(async()=>{browserState=await api.browserNav({action:act});renderBrowser();});
+  });
+  // ---- Rich message actions: links, copy and preview -----------------------------------------------------------------
+  document.addEventListener('click',event=>{
+    const el=event.target.closest('[data-action="open-link"],[data-action="md-copy"],[data-action="md-preview"]');if(!el)return;event.preventDefault();event.stopPropagation();
+    const act=el.dataset.action;
+    if(act==='open-link'){const url=el.dataset.url;if(!url)return;if(url.startsWith('mailto:')||event.ctrlKey||event.metaKey||event.shiftKey)action(()=>api.openLink({url}));else openInBrowser(url);return;}
+    const code=el.closest('.code-block')?.querySelector('pre')?.textContent||'';
+    if(act==='md-copy'){action(async()=>{await api.clipboardWrite({text:code});el.textContent='Copied';setTimeout(()=>{el.textContent='Copy';},1400);});return;}
+    if(act==='md-preview'){showBrowser();action(async()=>{browserState=await api.browserPreview({html:code});renderBrowser();});}
+  },true);
+  placePanes();
   const approvalQueue=[];let approvalVisible=false;
   function showApproval(){
     if(approvalVisible||!approvalQueue.length)return;approvalVisible=true;const request=approvalQueue.shift(),dialog=document.createElement('dialog');dialog.className='approval-dialog';

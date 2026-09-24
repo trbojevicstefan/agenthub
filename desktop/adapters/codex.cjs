@@ -2,12 +2,13 @@
 const {Rpc}=require('../rpc.cjs');
 const {launch}=require('../process.cjs');
 class CodexAdapter{
-  constructor({agent,host,approve,spawnAgent=launch}){this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.threads=new Map();this.active=null;}
+  constructor({agent,host,approve,spawnAgent=launch,trusted=()=>false,mcpServers=()=>[]}){this.trusted=trusted;this.mcpServers=mcpServers;this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.threads=new Map();this.active=null;}
   async connect(){
     this.rpc=new Rpc(this.spawnAgent(this.agent,[...this.agent.args,'app-server'],this.host),{jsonrpc:false,onRequest:async(method,params)=>{
       if(['item/commandExecution/requestApproval','item/fileChange/requestApproval'].includes(method)){
         if(!this.active||params.threadId!==this.active.threadId||(this.active.turnId&&params.turnId!==this.active.turnId)||this.active.signal.aborted)return {decision:'decline'};
         const pending=this.active;
+        if(this.trusted()){pending.onEvent?.({type:'activity',text:`iTrust approved: ${method.includes('fileChange')?'file changes':'command'}`});return {decision:'accept'};}
         const accepted=await this.approve(this.agent,method.includes('fileChange')?'Approve file changes?':'Approve command?',JSON.stringify(params,null,2).slice(0,5000));
         return {decision:accepted&&this.active===pending&&!pending.signal.aborted?'accept':'decline'};
       }
