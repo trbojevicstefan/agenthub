@@ -4,6 +4,22 @@ const {launch}=require('../process.cjs');
 function sessionCwd(agent){
   return agent.command==='docker'&&agent.provider==='hermes'&&agent.hermesHome?agent.hermesHome:agent.cwd;
 }
+const short=value=>String(value??'').replace(/\s+/g,' ').trim().slice(0,300);
+function activityOf(update){
+  const kind=update.sessionUpdate;
+  if(kind==='agent_thought_chunk')return 'Thinking';
+  if(kind==='plan'){
+    const entries=Array.isArray(update.entries)?update.entries:[];
+    const active=entries.find(e=>e?.status==='in_progress'),done=entries.filter(e=>e?.status==='completed').length;
+    return active?`Plan ${done}/${entries.length}: ${short(active.content)}`:entries.length?`Plan: ${done}/${entries.length} complete`:'Plan updated';
+  }
+  if(!['tool_call','tool_call_update'].includes(kind))return '';
+  const title=short(update.title||update.toolCall?.title||update.name||update.kind||'Agent tool');
+  const status=short(update.status||update.toolCall?.status||'');
+  const locations=Array.isArray(update.locations)?update.locations:Array.isArray(update.toolCall?.locations)?update.toolCall.locations:[];
+  const location=locations.map(x=>short(x?.path||x?.uri||x)).filter(Boolean).slice(0,2).join(', ');
+  return [title,status&&status!=='pending'?status:'',location].filter(Boolean).join(' — ');
+}
 class AcpAdapter {
   constructor({agent,host,approve,spawnAgent=launch}){this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.sessions=new Map();this.active=null;}
   async connect(){
@@ -24,7 +40,7 @@ class AcpAdapter {
       if(method!=='session/update'||!this.active||params.sessionId!==this.active.sessionId)return;
       const update=params.update||{};
       if(update.sessionUpdate==='agent_message_chunk'&&update.content?.type==='text')this.active.onEvent({type:'text',text:update.content.text});
-      else if(['tool_call','tool_call_update'].includes(update.sessionUpdate))this.active.onEvent({type:'activity',text:String(update.title||update.status||'Agent tool').slice(0,200)});
+      else {const text=activityOf(update);if(text)this.active.onEvent({type:'activity',text});}
     });
     const init=await this.rpc.request('initialize',{protocolVersion:1,clientCapabilities:{fs:{readTextFile:false,writeTextFile:false},terminal:false},clientInfo:{name:'agenthub',version:'0.1.0'}},60000);
     if(init.protocolVersion!==1)throw new Error('This ACP protocol version is not supported.');
@@ -66,4 +82,4 @@ class AcpAdapter {
   }
   close(){this.rpc?.close();}
 }
-module.exports={AcpAdapter,sessionCwd};
+module.exports={AcpAdapter,sessionCwd,activityOf};

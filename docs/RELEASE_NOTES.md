@@ -1,4 +1,12 @@
-# Opaya 0.5.0 - Groups, tags and Playground
+# Opaya 0.5.1 - Local Hermes visibility and Codex-powered Opaya Agent
+
+- **Local Hermes live activity**: Hermes ACP thinking, plan and tool updates now appear while it works, with useful status and file/location context instead of a silent spinner.
+- **No cropped working view**: the conversation shell no longer creates a second vertical scrollbar; messages scroll independently while the composer and Stop control remain visible.
+- **Local Codex for Opaya Agent**: the built-in Opaya Agent can run through the installed Codex CLI and its native app-server protocol, including scoped Opaya tools and live streamed replies.
+- **More model providers**: DeepSeek, OpenAI, Gemini, OpenRouter, xAI, Groq, Mistral, Ollama and LM Studio have ready-to-use default endpoints.
+- **Model dropdowns**: provider models are selected from presets or the provider's live `/models` response instead of being typed manually. DeepSeek includes `deepseek-v4-pro` and `deepseek-v4-flash`.
+
+## Earlier: 0.5.0 - Groups, tags and Playground
 
 - **Groups and tags**: put agents into named groups and give them tags (right-click > Group & tags, or the connection settings). The sidebar shows pinned agents, each group, then local and remote agents; every section collapses and expands and remembers it. Right-click a section to rename, ungroup, collapse or expand all, or connect everything in it. Filter the Workspace by tag; search matches groups and tags.
 - **Drag and drop**: drag agents in the sidebar to reorder them, or drop them on a section header to move them into that group (or Pinned). The up/down arrows and the dots button are gone; right-click has every action.

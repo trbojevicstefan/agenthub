@@ -7,6 +7,7 @@ const {Store, Vault, atomicJson} = require('./store.cjs');
 const {Broker, safeError} = require('./broker.cjs');
 const {Terminals} = require('./terminal.cjs');
 const {server, endpoint} = require('./wire.cjs');
+const {PROVIDERS}=require('./providers.cjs');
 const {alive} = require('./host-client.cjs');
 const schema = require('./schema.cjs');
 const catalog = require('./catalog.cjs');
@@ -20,7 +21,7 @@ async function start({app, safeStorage}, root) {
   const old = await fs.readFile(descriptor,'utf8').then(JSON.parse).catch(()=>null);
   if (old && old.pid !== process.pid && alive(old.pid)) throw new Error('A session service is already running.');
   if (process.platform !== 'win32') await fs.rm(endpoint(root),{force:true});
-  function snapshot() { return {...broker.snapshot(), opayaAgent:opaya?.describe() || null, frameworks:catalog.list(), platform:process.platform, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true}}; }
+  function snapshot() { return {...broker.snapshot(), opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, frameworks:catalog.list(), platform:process.platform, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true}}; }
   const emit = () => listener?.broadcast('state', snapshot());
   async function approve(agent, title, detail) {
     const socket = [...(listener?.clients || [])].at(-1);
@@ -48,7 +49,7 @@ async function start({app, safeStorage}, root) {
   async function shutdown() {
     if (stopping) return true; stopping = true;
     for (const a of approvals.values()) a.finish(false);
-    await terminals.shutdown(); await broker.close();
+    await terminals.shutdown(); await opaya?.close?.(); await broker.close();
     await fs.rm(descriptor,{force:true});
     setTimeout(()=>app.exit(0),100).unref(); return true;
   }
@@ -80,7 +81,7 @@ async function start({app, safeStorage}, root) {
       catch(error){if(fallback&&x.op!=='read')return files.browse({op:x.op,path:'',host});throw error;}
     },
     playground:x=>broker.playground(x), moveAgent:x=>broker.moveAgent(x), connectAll:x=>broker.connectAll(x),
-    opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:()=>opaya.test(), opayaForgetKey:()=>opaya.forgetKey(),
+    opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}), opayaForgetKey:()=>opaya.forgetKey(),
     opayaSend:x=>opaya.begin(x.text), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),
     shutdown
   };

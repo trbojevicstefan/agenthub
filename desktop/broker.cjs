@@ -233,7 +233,10 @@ class Broker{
           if(typeof event.text!=='string')return;
           assistant.content+=event.text;
           if(assistant.content.length>2*1024*1024){abort.abort();adapter.close();return;}
-        }else if(event.type==='activity')assistant.activity=[...assistant.activity.slice(-39),String(event.text).slice(0,500)];
+        }else if(event.type==='activity'){
+          const text=String(event.text||'').trim().slice(0,500),last=assistant.activity.at(-1);
+          if(text&&text!==last)assistant.activity=[...assistant.activity.slice(-79),text];
+        }
         if(!emitTimer)emitTimer=setTimeout(()=>{emitTimer=null;this.changed();},40);
       };
       turn.task=Promise.resolve().then(()=>{

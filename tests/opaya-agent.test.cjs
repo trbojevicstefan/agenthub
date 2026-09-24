@@ -1,6 +1,6 @@
 'use strict';
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const path=require('node:path');
-const {Broker}=require('../desktop/broker.cjs');const {Store,Vault}=require('../desktop/store.cjs');const {OpayaAgent}=require('../desktop/opaya-agent.cjs');const catalog=require('../desktop/catalog.cjs');const {temp,secure}=require('./helpers.cjs');
+const {Broker}=require('../desktop/broker.cjs');const {Store,Vault}=require('../desktop/store.cjs');const {OpayaAgent}=require('../desktop/opaya-agent.cjs');const catalog=require('../desktop/catalog.cjs');const {temp,secure,childMock}=require('./helpers.cjs');
 const apiAgent=(name,port)=>({name,provider:'hermes',protocol:'openai',transport:'http',endpoint:`http://127.0.0.1:${port}/v1`,model:'hermes-agent'});
 // A scripted OpenAI-compatible endpoint: each call returns the next scripted assistant message.
 function model(script){const requests=[];return {requests,fetch:async(url,init)=>{requests.push({url,body:init.body?JSON.parse(init.body):null,headers:init.headers});const message=script.shift()||{content:'done'};return {ok:true,status:200,json:async()=>url.endsWith('/models')?{data:[{id:'m1'}]}:{choices:[{message}]}};}};}
@@ -23,6 +23,20 @@ test('Opaya Agent answers through tools and shows one reply per request',async t
   const shown=agent.describe().messages;assert.deepEqual(shown.map(m=>m.role),['user','assistant']);assert.equal(shown[1].content,'You have one agent.');assert.deepEqual(shown[1].activity,['Using get workspace']);
   const toolResult=requests[1].body.messages.find(m=>m.role==='tool');assert.match(toolResult.content,/"name":"one"/);
   assert.equal(requests[0].body.tools.some(t=>t.function.name==='save_connection'),true);
+});
+test('Opaya Agent uses the local Codex app-server and exposes live tool activity',async t=>{
+  const root=await temp(t),broker=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory:()=>({connect:async()=>({}),close(){}})});await broker.init();
+  const child=childMock((m,c)=>{
+    if(m.method==='initialize')c.reply(m,{});
+    if(m.method==='model/list')c.reply(m,{data:[{model:'gpt-local'}]});
+    if(m.method==='thread/start'){assert.equal(m.params.sandbox,'read-only');assert.equal(m.params.approvalPolicy,'never');assert.equal(m.params.dynamicTools.some(x=>x.name==='get_workspace'),true);c.reply(m,{thread:{id:'opaya-thread'}});}
+    if(m.method==='turn/start'){c.reply(m,{turn:{id:'opaya-turn'}});c.send({method:'turn/started',params:{threadId:'opaya-thread',turn:{id:'opaya-turn'}}});c.send({id:77,method:'item/tool/call',params:{threadId:'opaya-thread',turnId:'opaya-turn',callId:'call-1',tool:'get_workspace',arguments:{}}});}
+    if(m.id===77&&!m.method){assert.equal(m.result.success,true);c.send({method:'item/agentMessage/delta',params:{threadId:'opaya-thread',itemId:'answer',delta:'Local Codex works.'}});c.send({method:'turn/completed',params:{threadId:'opaya-thread',turn:{id:'opaya-turn',status:'completed'}}});}
+  });
+  const agent=new OpayaAgent({root,vault:broker.vault,broker,terminals:{describe:()=>[]},approve:async()=>true,emit:()=>{},runInTerminal:async()=>({id:'x'}),spawnAgent:()=>child});await agent.init();await agent.saveConfig({preset:'codex',model:''});
+  t.after(async()=>{await agent.close();await broker.close();});
+  assert.deepEqual((await agent.test({preset:'codex'})).models,['gpt-local']);agent.begin('Inspect my workspace');await settle(agent);
+  const answer=agent.describe().messages.at(-1);assert.equal(answer.content,'Local Codex works.');assert.deepEqual(answer.activity,['Using get workspace']);
 });
 test('Opaya Agent changes connections only after approval and never stores tokens it is given',async t=>{
   const {agent,broker,approvals}=await fixture(t,[call('save_connection',{connection:{...apiAgent('added',8650),token:'secret-token'}}),{content:'Added.'}]);

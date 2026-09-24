@@ -13,16 +13,23 @@ const schema=require('./schema.cjs');
 const catalog=require('./catalog.cjs');
 const files=require('./files.cjs');
 const {atomicJson,readJson}=require('./store.cjs');
-const {quote,target}=require('./process.cjs');
+const {quote,target,launch}=require('./process.cjs');
+const {Rpc}=require('./rpc.cjs');
+const {PROVIDERS}=require('./providers.cjs');
 
 const PRESETS={
-  openai:{label:'OpenAI',baseUrl:'https://api.openai.com/v1',model:''},
-  anthropic:{label:'Anthropic',baseUrl:'https://api.anthropic.com/v1',model:'claude-sonnet-5'},
-  openrouter:{label:'OpenRouter',baseUrl:'https://openrouter.ai/api/v1',model:''},
-  ollama:{label:'Ollama (this computer)',baseUrl:'http://127.0.0.1:11434/v1',model:''},
-  lmstudio:{label:'LM Studio (this computer)',baseUrl:'http://127.0.0.1:1234/v1',model:''},
-  hermes:{label:'Hermes gateway',baseUrl:'http://127.0.0.1:8642/v1',model:'hermes-agent'},
-  custom:{label:'Custom OpenAI-compatible API',baseUrl:'',model:''}
+  codex:{label:'Codex CLI (this computer)',kind:'codex',baseUrl:'',model:'',models:[]},
+  deepseek:{label:'DeepSeek',baseUrl:PROVIDERS.deepseek.endpoint,model:'deepseek-v4-pro',models:PROVIDERS.deepseek.models},
+  openai:{label:'OpenAI',baseUrl:PROVIDERS.openai.endpoint,model:'',models:[]},
+  google:{label:'Google Gemini',baseUrl:PROVIDERS.google.endpoint,model:PROVIDERS.google.models[0],models:PROVIDERS.google.models},
+  openrouter:{label:'OpenRouter',baseUrl:PROVIDERS.openrouter.endpoint,model:PROVIDERS.openrouter.models[0],models:PROVIDERS.openrouter.models},
+  xai:{label:'xAI',baseUrl:PROVIDERS.xai.endpoint,model:PROVIDERS.xai.models[0],models:PROVIDERS.xai.models},
+  groq:{label:'Groq',baseUrl:PROVIDERS.groq.endpoint,model:PROVIDERS.groq.models[0],models:PROVIDERS.groq.models},
+  mistral:{label:'Mistral',baseUrl:PROVIDERS.mistral.endpoint,model:PROVIDERS.mistral.models[0],models:PROVIDERS.mistral.models},
+  ollama:{label:'Ollama (this computer)',baseUrl:PROVIDERS.ollama.endpoint,model:'',models:[]},
+  lmstudio:{label:'LM Studio (this computer)',baseUrl:PROVIDERS.lmstudio.endpoint,model:'',models:[]},
+  hermes:{label:'Hermes gateway',baseUrl:PROVIDERS.hermes.endpoint,model:'hermes-agent',models:PROVIDERS.hermes.models},
+  custom:{label:'Custom OpenAI-compatible API',baseUrl:'',model:'',models:[]}
 };
 const KEY='opaya-agent',MAX_STEPS=12,TIMEOUT=120000;
 const DIAGNOSTICS={
@@ -62,38 +69,51 @@ const TOOLS=[
 const stripAnsi=text=>String(text||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)/g,'').replace(/\r/g,'');
 
 class OpayaAgent{
-  constructor({root,vault,broker,terminals,approve,emit,runInTerminal,platform=process.platform,fetchImpl=globalThis.fetch}){
-    Object.assign(this,{home:path.join(root,'opaya-agent'),root,vault,broker,terminals,approve,emit,runInTerminal,platform,fetch:fetchImpl});
-    this.config={preset:'',baseUrl:'',model:''};this.messages=[];this.busy=false;this.status='';this.error='';this.controller=null;
+  constructor({root,vault,broker,terminals,approve,emit,runInTerminal,platform=process.platform,fetchImpl=globalThis.fetch,spawnAgent=launch}){
+    Object.assign(this,{home:path.join(root,'opaya-agent'),root,vault,broker,terminals,approve,emit,runInTerminal,platform,fetch:fetchImpl,spawnAgent});
+    this.config={preset:'',baseUrl:'',model:''};this.messages=[];this.busy=false;this.status='';this.error='';this.controller=null;this.liveReply=null;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;
   }
   async init(){
     await fs.mkdir(this.home,{recursive:true,mode:0o700});
     const config=await readJson(path.join(this.home,'config.json'),{});this.config={...this.config,...config};
     const history=await readJson(path.join(this.home,'history.json'),[]);this.messages=Array.isArray(history)?history.slice(-200):[];
   }
-  configured(){return !!(this.config.baseUrl&&this.config.model);}
+  configured(){return this.config.preset==='codex'||!!(this.config.baseUrl&&this.config.model);}
   describe(){
     const shown=this.messages.filter(m=>m.role==='user'||m.summary).slice(-80).map(({id,role,content,activity,createdAt,error})=>({id,role,content:content||'',activity:activity||[],createdAt,error}));
-    return {configured:this.configured(),config:this.config,hasKey:this.vault.has(KEY),presets:PRESETS,busy:this.busy,status:this.status,error:this.error,messages:shown,home:this.home};
+    return {configured:this.configured(),config:this.config,hasKey:this.config.preset!=='codex'&&this.vault.has(KEY),presets:PRESETS,busy:this.busy,status:this.status,error:this.error,messages:shown,live:this.liveReply?{...this.liveReply}:null,home:this.home};
   }
   async saveConfig({preset='custom',baseUrl,model,apiKey,remember=true}){
     if(!Object.hasOwn(PRESETS,preset))throw new Error('Unknown model provider.');
-    const config={preset,baseUrl:schema.endpoint(baseUrl||PRESETS[preset].baseUrl),model:schema.text(model,'model',256).trim()};
-    if(!config.model)throw new Error('Enter the model ID the Opaya Agent should use.');
-    if(apiKey!==undefined&&apiKey!=='')await this.vault.set(KEY,schema.text(apiKey,'API key',16000).trim(),Boolean(remember));
+    const codex=preset==='codex';
+    const config={preset,baseUrl:codex?'':schema.endpoint(baseUrl||PRESETS[preset].baseUrl),model:schema.text(model,'model',256).trim()};
+    if(!codex&&!config.model)throw new Error('Choose a model from the provider list.');
+    if(!codex&&apiKey!==undefined&&apiKey!=='')await this.vault.set(KEY,schema.text(apiKey,'API key',16000).trim(),Boolean(remember));
+    if(this.config.preset!==config.preset||this.config.model!==config.model||this.config.baseUrl!==config.baseUrl)await this.closeCodex();
     this.config=config;await atomicJson(path.join(this.home,'config.json'),config);this.error='';this.emit();return this.describe();
   }
   async forgetKey(){await this.vault.set(KEY,'',true);this.emit();return true;}
-  headers(){const key=this.vault.has(KEY)?this.vault.get(KEY):'';return {'Content-Type':'application/json',...(key?{Authorization:`Bearer ${key}`}:{}),'X-Title':'Opaya'};}
-  async test(){
-    if(!this.config.baseUrl)throw new Error('Choose a model provider first.');
-    const response=await this.fetch(`${this.config.baseUrl}/models`,{headers:this.headers(),signal:AbortSignal.timeout(15000)});
+  headers(candidateKey){const key=candidateKey||(this.vault.has(KEY)?this.vault.get(KEY):'');return {'Content-Type':'application/json',...(key?{Authorization:`Bearer ${key}`}:{}),'X-Title':'Opaya'};}
+  async test(candidate={}){
+    const preset=candidate.preset||this.config.preset;
+    if(preset==='codex'){
+      const rpc=await this.ensureCodex(),result=await rpc.request('model/list',{limit:200});
+      const models=(result.data||[]).map(m=>m.model||m.id).filter(m=>typeof m==='string');
+      return {ok:true,models,message:`Codex CLI connected. ${models.length} models available.`};
+    }
+    const baseUrl=schema.endpoint(candidate.baseUrl||this.config.baseUrl||PRESETS[preset]?.baseUrl);
+    if(!baseUrl)throw new Error('Choose a model provider first.');
+    const response=await this.fetch(`${baseUrl}/models`,{headers:this.headers(candidate.apiKey),signal:AbortSignal.timeout(15000)});
     if(!response.ok)throw new Error(`The model API answered ${response.status}. Check the base URL and API key.`);
     const data=await response.json().catch(()=>({}));const models=(data.data||[]).map(m=>m.id).filter(Boolean).slice(0,200);
     return {ok:true,models,message:models.length?`Connected. ${models.length} models available.`:'Connected.'};
   }
-  async clear(){if(this.busy)throw new Error('Stop the current answer first.');this.messages=[];this.error='';await this.persist();this.emit();return true;}
-  stop(){this.controller?.abort();return true;}
+  async clear(){if(this.busy)throw new Error('Stop the current answer first.');this.messages=[];this.error='';this.codexThreadId='';await this.persist();this.emit();return true;}
+  stop(){
+    this.controller?.abort();const active=this.codexActive,rpc=this.codexRpc;
+    if(active){this.codexRpc=null;this.codexThreadId='';this.codexActive=null;if(rpc&&!rpc.closed)rpc.close();active.reject(new Error('Stopped.'));}
+    return true;
+  }
   async persist(){await atomicJson(path.join(this.home,'history.json'),this.messages.slice(-200));}
   system(){
     const s=this.broker.snapshot();
@@ -118,12 +138,13 @@ class OpayaAgent{
     text=schema.prompt(text);
     this.messages.push({id:randomUUID(),role:'user',content:text,createdAt:new Date().toISOString()});
     const reply={id:randomUUID(),role:'assistant',content:'',activity:[],createdAt:new Date().toISOString()};
-    this.busy=true;this.error='';this.status='Thinking...';this.controller=new AbortController();this.emit();
+    this.busy=true;this.error='';this.status='Thinking...';this.controller=new AbortController();this.liveReply=reply;this.emit();
     let recent=this.messages.filter(m=>!m.summary).slice(-40);const start=recent.findIndex(m=>m.role==='user');recent=start<0?[]:recent.slice(start);
     const context=recent.map(({role,content,tool_calls,tool_call_id})=>({role,content:content??'',...(tool_calls?{tool_calls}:{}),...(tool_call_id?{tool_call_id}:{})}));
     const conversation=[{role:'system',content:this.system()},...context];
     try{
-      for(let step=0;step<MAX_STEPS;step++){
+      if(this.config.preset==='codex')await this.runCodex(text,reply);
+      else for(let step=0;step<MAX_STEPS;step++){
         const message=await this.complete(conversation);
         const calls=message.tool_calls||[];
         conversation.push({role:'assistant',content:message.content||'',...(calls.length?{tool_calls:calls}:{})});
@@ -144,7 +165,7 @@ class OpayaAgent{
       // Internal tool turns stay in history for context; the chat shows one reply per request.
       this.messages.push({...reply,summary:true});
       // Save before reporting idle, so nothing still writes to the home folder once a request is finished.
-      await this.persist().catch(()=>{});this.busy=false;this.status='';this.controller=null;this.emit();
+      await this.persist().catch(()=>{});this.busy=false;this.status='';this.controller=null;this.liveReply=null;this.emit();
     }
     return {ok:!reply.error};
   }
@@ -156,6 +177,52 @@ class OpayaAgent{
     const message=data.choices?.[0]?.message;if(!message)throw new Error('The model API returned no answer.');
     return message;
   }
+  dynamicTools(){return TOOLS.map(t=>({type:'function',name:t.function.name,description:t.function.description,inputSchema:t.function.parameters}));}
+  async ensureCodex(){
+    if(this.codexRpc&&!this.codexRpc.closed)return this.codexRpc;
+    const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
+    const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
+    this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.5.1'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+  }
+  async codexRequest(method,params){
+    if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
+    const active=this.codexActive;if(!active||params.threadId!==active.threadId||this.controller?.signal.aborted)throw new Error('This Opaya turn is no longer active.');
+    const name=String(params.tool||'');this.status=`Using ${name.replace(/_/g,' ')}...`;active.reply.activity.push(this.status.replace('...',''));this.emit();
+    try{const result=await this.tool(name,params.arguments&&typeof params.arguments==='object'?params.arguments:{});return {contentItems:[{type:'inputText',text:JSON.stringify(result).slice(0,24000)}],success:true};}
+    catch(error){return {contentItems:[{type:'inputText',text:JSON.stringify({error:String(error.message||error).slice(0,1000)})}],success:false};}
+  }
+  codexNotification(method,p){
+    const a=this.codexActive;if(!a||p.threadId!==a.threadId)return;
+    if(method==='turn/started')a.turnId=p.turn?.id;
+    if(method==='item/agentMessage/delta'){a.deltaItems.add(p.itemId||'unknown');a.reply.content+=p.delta||'';this.emit();}
+    if(method==='item/started'&&p.item?.type!=='agentMessage'){
+      const label=String(p.item?.tool||p.item?.type||'working').replace(/([a-z])([A-Z])/g,'$1 $2');this.status=`Codex: ${label}`;if(a.reply.activity.at(-1)!==this.status)a.reply.activity.push(this.status);this.emit();
+    }
+    if(method==='item/completed'&&p.item?.type==='agentMessage'&&!a.deltaItems.has(p.item.id||'unknown')&&p.item.text){a.reply.content+=p.item.text;this.emit();}
+    if(method==='turn/completed'){
+      if(p.turn?.status==='failed')a.reject(new Error(p.turn?.error?.message||'Codex turn failed.'));
+      else if(p.turn?.status==='interrupted')a.reject(new Error('Stopped.'));
+      else a.resolve();
+    }
+    if(method==='error'&&!p.willRetry)a.reject(new Error(p.error?.message||'Codex reported an error.'));
+  }
+  async runCodex(text,reply){
+    const rpc=await this.ensureCodex();
+    if(!this.codexThreadId){
+      const started=await rpc.request('thread/start',{cwd:this.home,model:this.config.model||null,sandbox:'read-only',approvalPolicy:'never',developerInstructions:this.system(),dynamicTools:this.dynamicTools(),ephemeral:false});
+      this.codexThreadId=started.thread?.id||'';if(!this.codexThreadId)throw new Error('Codex did not return a thread ID.');
+    }
+    await new Promise((resolve,reject)=>{
+      let done=false;const finish=error=>{if(done)return;done=true;clearTimeout(timer);this.codexActive=null;error?reject(error):resolve();};
+      const timer=setTimeout(()=>{this.stop();finish(new Error('Codex turn timed out.'));},10*60*1000);timer.unref?.();
+      this.codexActive={threadId:this.codexThreadId,turnId:'',reply,deltaItems:new Set(),resolve:()=>finish(),reject:finish};
+      if(this.controller.signal.aborted){finish(new Error('Stopped.'));return;}
+      rpc.request('turn/start',{threadId:this.codexThreadId,input:[{type:'text',text}],...(this.config.model?{model:this.config.model}:{})},60000).then(result=>{if(this.codexActive)this.codexActive.turnId=result.turn?.id||this.codexActive.turnId;},finish);
+    });
+  }
+  async closeCodex(){const rpc=this.codexRpc,active=this.codexActive;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;if(rpc&&!rpc.closed)rpc.close();active?.reject(new Error('Codex stopped.'));}
+  async close(){await this.closeCodex();}
   host(id){return id?this.broker.host(id):null;}
   async ask(title,detail){if(!await this.approve({name:'Opaya Agent'},title,detail))throw new Error('The user declined this action.');}
   async terminalOutput(id,wait=0){

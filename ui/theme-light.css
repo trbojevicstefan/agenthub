@@ -183,6 +183,12 @@
 :where(body[data-theme="light"]) .terminal-window{background:#eaecee;color:#16191b}
 :where(body[data-theme="light"]) .terminal-window header{border-bottom:1px solid #c2c8cc}
 :where(body[data-theme="light"]) .terminal-window #status{color:#421813}
+:where(body[data-theme="light"]) .activity-live{border:1px solid #b7c5bb;background:#dce7e0;color:#2e3a31}
+:where(body[data-theme="light"]) .activity-live header{border-bottom:1px solid #c2d0c7;color:#18231b}
+:where(body[data-theme="light"]) .activity-live header small{color:#546359}
+:where(body[data-theme="light"]) .activity-live p{color:#4b5a51}
+:where(body[data-theme="light"]) .activity-live p.current{color:#1b2a20}
+:where(body[data-theme="light"]) .activity-live p span{color:#37503e}
 :where(body[data-theme="light"]) .agent-row-actions button{color:#424f49}
 :where(body[data-theme="light"]) .agent-row-actions button:hover{background:#cdd7d2;color:#0f1d13}
 :where(body[data-theme="light"]) .field textarea{background:#e3e9e6;border-color:#bbc9c0}

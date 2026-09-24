@@ -2,7 +2,8 @@
 const {randomUUID} = require('node:crypto');
 const path = require('node:path');
 const net = require('node:net');
-const PROVIDERS = new Set(['hermes', 'codex', 'claude', 'openclaw', 'custom']);
+const {PROVIDERS:PROVIDER_PRESETS}=require('./providers.cjs');
+const PROVIDERS = new Set(Object.keys(PROVIDER_PRESETS));
 const PROTOCOLS = new Set(['openai', 'acp', 'codex', 'claude', 'terminal']);
 const TRANSPORTS = new Set(['local', 'ssh', 'http']);
 function text(value, label, max = 1024, fallback = '') {
