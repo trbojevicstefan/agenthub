@@ -79,7 +79,7 @@ class AcpAdapter {
   async run(ctx){
     let sessionId=this.sessions.get(ctx.conversation.id);
     if(!sessionId){
-      const cwd=sessionCwd(this.agent);
+      const cwd=ctx.cwd||sessionCwd(this.agent);
       if(!cwd)throw new Error('ACP requires an absolute working directory. Edit this agent first.');
       if(ctx.conversation.externalSessionId){
         if(!this.capabilities.loadSession)throw new Error('This ACP server cannot resume a previous process session. The local transcript is preserved. Start a new conversation.');

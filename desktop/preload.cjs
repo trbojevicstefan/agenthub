@@ -4,7 +4,7 @@ const methods=['snapshot','saveAgent','reorderAgents','removeAgent','saveHost','
 const api={};
 methods.push('approvalAnswer','terminalPopout','terminalRename');
 methods.push('agentModels','selectModel','gateway','updateAgentDisplay');
-methods.push('mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaStop','opayaClear','windowControl');
+methods.push('projectSave','projectRemove','projectInfo','projectBranches','projectGit','projectClone','mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaStop','opayaClear','windowControl');
 for(const method of methods)api[method]=async input=>{
   const result=await ipcRenderer.invoke(`hub:${method}`,input);
   if(!result?.ok)throw new Error(result?.error||'Desktop request failed.');

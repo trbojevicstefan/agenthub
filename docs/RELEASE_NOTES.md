@@ -1,4 +1,18 @@
-# Opaya 0.6.0 - Skills, tools and MCP servers
+# Opaya 0.7.0 - Projects panel with git
+
+- **Projects panel** on the right. Open or close it with the folder button in the top bar or Ctrl/Cmd + Shift + P; it takes no space while closed, and Opaya remembers whether it was open.
+- **A project is a folder** on this computer or a saved machine, plus the agents that work in it. Add an existing folder (with suggestions from your agents' working folders) or clone a repository.
+- **Chats in projects**: click an agent in a project to start a chat in that folder. Hermes and other ACP agents, Codex and Claude Code start in the folder. Gateway agents are told the folder. Each project lists its chats from every agent, and the top bar shows which project a chat belongs to.
+- **Change agents in a project** from the panel (+ Agent), by right-clicking an agent chip, or from an agent's right-click menu > Projects.
+- **Git and GitHub CLI** (right-click a project, or click its branch):
+  - git: status, pull, push, fetch, commit, commit and push, stash, new branch, switch branch, merge and history;
+  - GitHub CLI (`gh`): create a pull request, list PRs, PR status and checks, open a PR in the browser, check out a PR, merge a PR and sign in.
+  - Commands run in the project's own visible terminal. Branch names, commit messages and PR numbers are checked before they are used.
+- The branch and the number of uncommitted changes show next to each project.
+- **GitHub CLI** is in the installable dependencies.
+- **Opaya Agent** can list projects.
+
+## Earlier: 0.6.0 - Skills, tools and MCP servers
 
 - **Skills**: the new **Skills** button (and right-click > Skills, tools & MCP) lists the skills installed for an agent, read from their SKILL.md folders, for Hermes, Claude Code, Codex and OpenClaw, on this computer or over SSH. **Use** puts `/skill` in the message box.
 - **Install Hermes skills**: enter a hub id (for example `official/security/1password`) or a link to a SKILL.md, or open the Hermes skills hub. Installs run with `hermes skills install` in a visible terminal after you approve them.

@@ -20,7 +20,7 @@
   const draftKey = () => currentConversation()?.id || selected()?.id || '';
   const save = promise => { pendingWrites.add(promise); promise.catch(error=>toast(error.message,true)).finally(()=>pendingWrites.delete(promise)); return promise; };
   window.agenthubFlush = () => Promise.allSettled([...pendingWrites]);
-  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,theme})); };
+  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,theme,projects:projectsOpen,projectsOpen:[...projectsExpanded]})); };
   const drafts = new Map(), pendingSends = new Set(), terminalViews = new Map(), terminalPending = new Map();
   const selected = () => state.agents.find(a => a.id === state.activeAgentId);
   const currentConversation = () => state.conversations.find(c => c.id === state.activeConversationId && c.agentId === state.activeAgentId);
@@ -37,7 +37,7 @@
   const dot = a => `<span class="status-dot ${esc(a.busy?'working':a.status||'disconnected')}"></span>`;
   const mod=()=>state.platform==='darwin'?'\u2318':'Ctrl ';
   // Motion bookkeeping: state updates re-render often, so entrance animations are keyed to first appearance, not to every render.
-  let collapsedGroups=new Set();
+  let collapsedGroups=new Set(),projectsOpen=false,projectsExpanded=new Set();
   const navSeen=new Map(),messageSeen=new Map();let navHtml='',navSelected='',navSelectedAt=0,messageConversation=null,overviewHtml='';
   const fresh=(map,key,now,ms)=>{if(!map.has(key))map.set(key,now);return now-map.get(key)<ms;};
   function enter(element){element.classList.remove('view-enter');void element.offsetWidth;element.classList.add('view-enter');clearTimeout(element.enterTimer);element.enterTimer=setTimeout(()=>element.classList.remove('view-enter'),900);}
@@ -66,10 +66,11 @@
   }
   function applyState(next) {
     state=next;document.body.dataset.platform=state.platform;
-    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});$('.search-trigger kbd').textContent=`${mod()}K`;}
+    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);projectsOpen=!!state.view?.projects;projectsExpanded=new Set(state.view?.projectsOpen||[]);if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});$('.search-trigger kbd').textContent=`${mod()}K`;}
     render();
   }
   function render() {
+    queueMicrotask(()=>{ensureProjectsToggle();renderProjects();});
     $('#agent-count').textContent=state.agents.length;
     $('#host-count').textContent=state.hosts.length;
     $('.nav-overview').classList.toggle('selected',overview&&!opayaView&&!playgroundView);$('.nav-playground')?.classList.toggle('selected',playgroundView);$('.nav-opaya').classList.toggle('selected',opayaView);renderOpayaNav();
@@ -97,7 +98,7 @@
     renderKey='overview';
   }
   function renderAgent(a) {
-    $('#topbar').innerHTML=`<div class="breadcrumb">Agents <span>/</span> <strong>${esc(title(a))}</strong></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span><button class="subtle" data-action="skills" data-id="${esc(a.id)}" title="Skills, tools and MCP servers"><span aria-hidden="true">&#10022;</span> Skills</button><button class="subtle" data-action="files-agent" data-id="${esc(a.id)}" title="Browse this agent's folders and project"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="terminal" title="Open terminal (Ctrl + backtick)"><span class="terminal-glyph">&gt;_</span> Terminal</button><button class="icon-button" data-action="edit" data-id="${esc(a.id)}" title="Edit connection settings" aria-label="Connection settings">&#9881;</button></div>`;
+    const proj=projectOf(currentConversation());$('#topbar').innerHTML=`<div class="breadcrumb">${proj?`<button type="button" class="crumb-project" data-action="project-focus" data-id="${esc(proj.id)}" title="${esc(proj.path)}"><span class="project-folder" aria-hidden="true"></span>${esc(proj.name)}</button>`:'Agents'} <span>/</span> <strong>${esc(title(a))}</strong></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span><button class="subtle" data-action="skills" data-id="${esc(a.id)}" title="Skills, tools and MCP servers"><span aria-hidden="true">&#10022;</span> Skills</button><button class="subtle" data-action="files-agent" data-id="${esc(a.id)}" title="Browse this agent's folders and project"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="terminal" title="Open terminal (Ctrl + backtick)"><span class="terminal-glyph">&gt;_</span> Terminal</button><button class="icon-button" data-action="edit" data-id="${esc(a.id)}" title="Edit connection settings" aria-label="Connection settings">&#9881;</button></div>`;
     contentKind('conversation');
     $('.topbar-actions').insertAdjacentHTML('beforeend',`${a.protocol!=='terminal'?'<button class="secondary" data-action="models" title="Choose agent model">Models</button>':''}${['hermes','openclaw'].includes(a.provider)?'<button class="secondary" data-action="gateway" title="Gateway status and restart">Gateway</button>':''}`);
     if(renderKey!==JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId])) {
@@ -263,6 +264,8 @@
     if(name==='toggle-group'){toggleGroup(button.dataset.group);return;}
     if(name==='diagnostics'){openDiagnostics(id);return;}
     if(name==='skills'){openSkills(id);return;}
+    if(name==='projects-toggle'){toggleProjects();return;}
+    if(name==='project-focus'){projectsExpanded.add(id);toggleProjects(true);return;}
     if(name==='mcp-manage'){openMcpManager();return;}
     if(name==='playground'){overview=false;opayaView=false;playgroundView=true;closeModal();render();saveView();$('#message-input')?.focus();return;}
     if(name==='pg-swap'){pgAgents.reverse();render();return;}
@@ -376,6 +379,7 @@
       {icon:'&#9680;',label:'Change icon...',run:()=>openIconPicker(a)},
       {icon:'&#9776;',label:'Group & tags...',run:()=>openGroupTags(a)},
       {icon:'&#10022;',label:'Skills, tools & MCP...',run:()=>openSkills(id)},
+      {icon:'&#9635;',label:'Projects...',run:()=>openAgentProjects(a)},
       {icon:'&#8801;',label:'Connection log...',run:()=>openDiagnostics(id)},
       {icon:'&#8593;',label:'Move up',disabled:index<=0,run:async()=>{await api.reorderAgents({id,direction:'up'});await refresh();}},
       {icon:'&#8595;',label:'Move down',disabled:index>=state.agents.length-1,run:async()=>{await api.reorderAgents({id,direction:'down'});await refresh();}},
@@ -422,7 +426,7 @@
     const element=document.createElement('div');element.className='context-menu';element.setAttribute('role','menu');if(label)element.setAttribute('aria-label',label);
     element.innerHTML=(label?`<div class="context-menu-label">${esc(label)}</div>`:'')+list.map((item,i)=>item==='-'?'<div class="context-menu-separator" role="separator"></div>':`<button type="button" role="menuitem" data-menu-index="${i}" class="${item.danger?'danger':''}" ${item.disabled?'disabled':''} style="--i:${i}"><span class="context-menu-icon" aria-hidden="true">${item.icon||''}</span><span class="context-menu-text">${esc(item.label)}</span>${item.hint?`<kbd>${esc(item.hint)}</kbd>`:''}</button>`).join('');
     document.body.append(element);
-    const {width,height}=element.getBoundingClientRect(),left=Math.max(8,Math.min(x,innerWidth-width-8)),flip=y+height>innerHeight-8,top=Math.max(8,flip?y-height:y);
+    const edge=document.body.classList.contains('frameless')?44:8;element.style.maxHeight=`${innerHeight-edge-8}px`;const {width,height}=element.getBoundingClientRect(),left=Math.max(8,Math.min(x,innerWidth-width-8)),flip=y+height>innerHeight-8,top=Math.max(edge,flip?y-height:y);
     element.style.left=left+'px';element.style.top=top+'px';element.style.transformOrigin=`${x-left}px ${flip?'100%':'0'}`;
     menu={element,previous:document.activeElement,owner};owner?.classList.add('menu-open');
     const buttons=()=>[...element.querySelectorAll('button:not(:disabled)')];
@@ -825,6 +829,157 @@
     if(event.key==='Escape'){event.preventDefault();closeSlash();return true;}
     return false;
   }
+  // ---- Projects panel: folders, the agents that work in them and their chats, with git actions --------------------
+  let projectFilter='',projectsHtml='';const projectGit=new Map();
+  const projectOf=c=>c?.projectId?(state.projects||[]).find(p=>p.id===c.projectId):null;
+  const hostName=id=>id?(state.hosts.find(h=>h.id===id)?.name||'Machine'):'This computer';
+  const fitsProject=(a,p)=>a.command!=='docker'&&(p.hostId?a.transport==='ssh'&&a.hostId===p.hostId:a.transport!=='ssh');
+  const ago=iso=>{const s=Math.max(0,(Date.now()-new Date(iso).getTime())/1000);return s<60?'now':s<3600?`${Math.floor(s/60)}m`:s<86400?`${Math.floor(s/3600)}h`:s<604800?`${Math.floor(s/86400)}d`:new Date(iso).toLocaleDateString([],{month:'short',day:'numeric'});};
+  const saveProjectsView=()=>saveView();
+  function toggleProjects(force){projectsOpen=force??!projectsOpen;renderProjects();saveProjectsView();if(projectsOpen)refreshProjectGit();}
+  async function loadProjectGit(p){
+    const entry=projectGit.get(p.id)||{};if(entry.loading)return;entry.loading=true;projectGit.set(p.id,entry);
+    try{const info=await api.projectInfo({id:p.id});projectGit.set(p.id,{info,at:Date.now()});}catch(error){projectGit.set(p.id,{error:error.message,at:Date.now()});}
+    renderProjects();
+  }
+  function refreshProjectGit(force=false){for(const p of state.projects||[]){const e=projectGit.get(p.id);if(force||!e||Date.now()-(e.at||0)>60000)loadProjectGit(p);}}
+  function projectChats(p){return state.conversations.filter(c=>c.projectId===p.id).slice().sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));}
+  function renderProjects(){
+    const box=$('#projects-panel');if(!box)return;
+    box.hidden=!projectsOpen;document.body.classList.toggle('projects-open',projectsOpen);
+    $('#projects-toggle')?.classList.toggle('selected',projectsOpen);
+    if(!projectsOpen)return;
+    const list=(state.projects||[]).filter(p=>!projectFilter||`${p.name} ${p.path}`.toLowerCase().includes(projectFilter));
+    const active=currentConversation()?.projectId||'';
+    const card=p=>{
+      const open=projectsExpanded.has(p.id),g=projectGit.get(p.id),git=g?.info?.git,agents=p.agentIds.map(id=>state.agents.find(a=>a.id===id)).filter(Boolean),chats=projectChats(p);
+      const working=agents.some(a=>a.busy);
+      return `<section class="project-card ${open?'open':''} ${active===p.id?'current':''}" data-project-id="${esc(p.id)}">
+        <div class="project-row">
+          <button type="button" class="project-head" data-action="project-toggle" data-id="${esc(p.id)}" aria-expanded="${open}"><span class="project-chevron" aria-hidden="true">&#9656;</span><span class="project-folder" aria-hidden="true"></span><span class="project-name">${esc(p.name)}</span>${working?'<span class="status-dot working" title="An agent is working"></span>':''}</button>
+          ${git?`<button type="button" class="project-branch ${git.changes.length?'dirty':''}" data-action="project-git" data-id="${esc(p.id)}" title="Git actions">&#5833; ${esc((git.branch||'').split('...')[0].slice(0,24)||'git')}${git.changes.length?` <b>${git.changes.length>=60?'60+':git.changes.length}</b>`:''}</button>`:g?.error?'<span class="project-branch muted" title="Folder not found or not reachable">!</span>':''}
+        </div>
+        ${open?`<div class="project-body">
+          <div class="project-path" title="${esc(p.path)}">${esc(hostName(p.hostId))} <span>/</span> ${esc(p.path)}</div>
+          <div class="project-agents">${agents.map(a=>`<button type="button" class="project-agent" data-action="project-chat" data-id="${esc(p.id)}" data-agent="${esc(a.id)}" data-pa-agent="${esc(a.id)}" title="New chat with ${esc(title(a))} in ${esc(p.name)}">${badge(a)}<span>${esc(title(a))}</span>${dot(a)}</button>`).join('')}<button type="button" class="project-agent add" data-action="project-add-agent" data-id="${esc(p.id)}" title="Add or remove agents">+ Agent</button></div>
+          <div class="project-chats">${chats.slice(0,8).map(c=>{const a=state.agents.find(x=>x.id===c.agentId);return `<button type="button" class="project-chat ${c.id===state.activeConversationId&&!overview&&!opayaView&&!playgroundView?'selected':''}" data-action="project-open-chat" data-id="${esc(c.id)}">${a?badge(a):''}<span class="project-chat-title">${esc(c.title)}</span>${a?.busy&&state.activeConversationId===c.id?'<span class="status-dot working"></span>':`<small>${esc(ago(c.createdAt))}</small>`}</button>`;}).join('')||`<p class="project-empty">${agents.length?'No chats yet. Pick an agent above to start one.':'Add an agent to start a chat in this folder.'}</p>`}${chats.length>8?`<p class="project-empty">${chats.length-8} older chats in each agent's history.</p>`:''}</div>
+          <div class="project-tools"><button type="button" class="text-button" data-action="project-files" data-id="${esc(p.id)}">Files</button><button type="button" class="text-button" data-action="project-terminal" data-id="${esc(p.id)}">&gt;_ Terminal</button><button type="button" class="text-button" data-action="project-git" data-id="${esc(p.id)}">Git</button></div>
+        </div>`:''}
+      </section>`;
+    };
+    const html=`<header class="projects-header"><strong>Projects</strong><small>${(state.projects||[]).length||''}</small></header>
+      <div class="projects-toolbar">${(state.projects||[]).length>5?`<input id="projects-filter" placeholder="Filter projects..." aria-label="Filter projects" value="${esc(projectFilter)}">`:'<span></span>'}<button class="icon-button" data-action="project-refresh" title="Refresh git status" aria-label="Refresh git status">&#8635;</button><button class="icon-button" data-action="project-new" title="Add project" aria-label="Add project">+</button><button class="icon-button" data-action="projects-close" title="Close projects (${mod()}Shift+P)" aria-label="Close projects">&#10005;</button></div>
+      <div class="projects-list">${list.map(card).join('')||((state.projects||[]).length?'<p class="project-empty">No project matches.</p>':`<div class="projects-intro"><span class="project-folder big" aria-hidden="true"></span><strong>Keep work together.</strong><p>A project is a folder with the agents that work in it. Their chats, git status and actions live here.</p><button class="primary" data-action="project-new">Add project</button></div>`)}</div>
+      <footer class="projects-footer">Right-click a project for git and GitHub</footer>`;
+    if(projectsHtml===html)return;projectsHtml=html;box.innerHTML=html;
+    const filter=$('#projects-filter');if(filter)filter.oninput=()=>{projectFilter=filter.value.toLowerCase();const at=filter.selectionStart;renderProjects();const f=$('#projects-filter');f?.focus();f?.setSelectionRange(at,at);};
+  }
+  function ensureProjectsToggle(){
+    const bar=$('#topbar');if(!bar||$('#projects-toggle',bar))return;
+    const button=document.createElement('button');button.id='projects-toggle';button.type='button';button.className='icon-button projects-toggle';button.dataset.action='projects-toggle';
+    button.title=`Projects (${mod()}Shift+P)`;button.setAttribute('aria-label','Projects');button.innerHTML='<span class="project-folder" aria-hidden="true"></span>';
+    button.classList.toggle('selected',projectsOpen);bar.append(button);
+  }
+  async function startProjectChat(p,agentId){
+    await api.newConversation({agentId,projectId:p.id});overview=false;opayaView=false;playgroundView=false;await refresh();$('#message-input')?.focus();
+  }
+  async function openProjectChat(id){await api.selectConversation({id});overview=false;opayaView=false;playgroundView=false;await refresh();}
+  async function projectTerminal(p){
+    const windows=!p.hostId&&state.platform==='win32';
+    await openTerminal(p.hostId?{hostId:p.hostId}:{local:true});
+    if(currentTerminal)await api.terminalWrite({id:currentTerminal,data:(windows?`Set-Location -LiteralPath '${p.path.replace(/'/g,"''")}'`:`cd -- '${p.path.replace(/'/g,"'\\''")}'`)+'\r'});
+  }
+  // A git action from the menu: ask for input when it needs one, then run it in the project's terminal.
+  async function runGit(p,key){
+    const a=(state.gitActions||[]).find(x=>x.key===key);if(!a)return;
+    const go=async extra=>{await api.projectGit({id:p.id,action:key,...extra});closeModal();toast(`${a.label}: running in Terminal.`);for(const ms of [3000,10000])setTimeout(()=>loadProjectGit(p),ms);};
+    if(!a.input)return go({});
+    const fields={message:`<label>Commit message<input name="message" required maxlength="500" placeholder="Describe the change" autocomplete="off"></label>`,
+      branch:`<label>New branch name<input name="branch" required maxlength="120" placeholder="feature/projects-panel" autocomplete="off"></label>`,
+      number:`<label>Pull request number<input name="number" required inputmode="numeric" pattern="[0-9]+" placeholder="12"></label>`,
+      title:`<label>Title <small>leave empty to use the commits</small><input name="title" maxlength="200" placeholder="Add the Projects panel"></label><label>Description <small>optional</small><textarea name="body" rows="3" maxlength="2000"></textarea></label>`,
+      pick:`<label>Branch<select name="branch" required><option value="">Loading branches...</option></select></label>`}[a.input];
+    modal(a.label,`${p.name} / ${p.path}`,`<form id="git-form" class="mcp-form">${fields}<div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">${esc(a.label)}</button></div></div></form>`);
+    const f=$('#git-form');f.querySelector('input,select,textarea')?.focus();
+    if(a.input==='pick'){try{const r=await api.projectBranches({id:p.id});const sel=f.elements.branch;sel.innerHTML=r.branches.filter(b=>b!==r.current).map(b=>`<option value="${esc(key==='switch'?b.replace(/^origin\//,''):b)}">${esc(b)}</option>`).join('')||'<option value="">No other branches</option>';}catch(error){toast(error.message,true);}}
+    f.onsubmit=event=>{event.preventDefault();const data=Object.fromEntries(new FormData(f));action(()=>go(data));};
+  }
+  function gitMenu(p,withHeader=false){
+    const acts=state.gitActions||[],item=(key,icon)=>{const a=acts.find(x=>x.key===key);return a&&{icon,label:a.label+(a.input?'...':''),run:()=>runGit(p,key)};};
+    return [item('status','&#9679;'),item('pull','&#8595;'),item('push','&#8593;'),item('fetch','&#8635;'),item('commit','&#10003;'),item('commitPush','&#10003;'),item('stash','&#8615;'),item('stashPop','&#8613;'),'-',
+      item('branchNew','+'),item('switch','&#5833;'),item('merge','&#8644;'),item('log','&#8801;'),'-',
+      item('prCreate','&#10549;'),item('prList','&#9776;'),item('prStatus','&#9673;'),item('prView','&#8599;'),item('prCheckout','&#8618;'),item('prMerge','&#8644;'),item('ghLogin','&#9919;')];
+  }
+  function projectMenu(p){
+    const agents=p.agentIds.map(id=>state.agents.find(a=>a.id===id)).filter(Boolean);
+    return [...agents.slice(0,4).map(a=>({icon:'+',label:`New chat with ${title(a)}`,run:()=>startProjectChat(p,a.id)})),{icon:'&#9786;',label:'Agents...',run:()=>openProjectAgents(p)},'-',
+      ...gitMenu(p),'-',
+      {icon:'&#9656;',label:'Browse files',run:()=>openFiles({hostId:p.hostId||undefined,path:p.path,label:`${p.name} / ${hostName(p.hostId)}`})},
+      {icon:'&gt;_',label:'Terminal here',run:()=>projectTerminal(p)},
+      {icon:'&#9998;',label:'Edit project...',run:()=>openProjectForm(p)},
+      {icon:'&#10005;',label:'Remove project',danger:true,run:async()=>{if(!confirm(`Remove project ${p.name}? Its chats stay with their agents; the folder is not touched.`))return;await api.projectRemove({id:p.id});await refresh();toast('Project removed.');}}];
+  }
+  function agentChecks(p,hostId){
+    return state.agents.filter(a=>a.protocol!=='terminal').map(a=>{const ok=fitsProject(a,{hostId});return `<label class="check-row inline project-agent-check ${ok?'':'off'}" title="${ok?'':'Runs on another machine than this folder'}"><input type="checkbox" name="agent" value="${esc(a.id)}" ${p?.agentIds?.includes(a.id)&&ok?'checked':''} ${ok?'':'disabled'}> ${badge(a)} ${esc(title(a))}</label>`;}).join('')||'<p class="field-help">Add an agent first.</p>';
+  }
+  function openProjectAgents(p){
+    modal('Agents in this project',`${p.name} / ${hostName(p.hostId)}`,`<form id="project-agents" class="mcp-form"><div class="project-agent-grid">${agentChecks(p,p.hostId)}</div><p class="field-help">Chats you start from the project open these agents in ${esc(p.path)}.</p><div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Save</button></div></div></form>`);
+    $('#project-agents').onsubmit=event=>{event.preventDefault();action(async()=>{await api.projectSave({...p,agentIds:[...event.target.querySelectorAll('[name="agent"]:checked')].map(c=>c.value)});closeModal();await refresh();});};
+  }
+  function openProjectForm(p=null,mode='folder'){
+    const known=new Set((state.projects||[]).map(x=>`${x.hostId}|${x.path}`));
+    const suggestions=[...new Map(state.agents.filter(a=>a.cwd&&a.command!=='docker').map(a=>{const hostId=a.transport==='ssh'?a.hostId:'';return [`${hostId}|${a.cwd}`,{path:a.cwd,hostId}];})).values()].filter(s=>!known.has(`${s.hostId}|${s.path}`)).slice(0,6);
+    const machines=`<option value="">This computer</option>${state.hosts.map(h=>`<option value="${esc(h.id)}" ${p?.hostId===h.id?'selected':''}>${esc(h.name)}</option>`).join('')}`;
+    modal(p?'Edit project':'Add a project',p?p.path:'A project is a folder. Pick it, then choose the agents that work in it.',`${p?'':`<div class="segmented" role="tablist"><button type="button" role="tab" class="${mode==='folder'?'selected':''}" data-project-mode="folder">Existing folder</button><button type="button" role="tab" class="${mode==='clone'?'selected':''}" data-project-mode="clone">Clone repository</button></div>`}
+      <form id="project-form" class="mcp-form">
+        ${!p&&mode==='folder'&&suggestions.length?`<div class="project-suggest"><span>From your agents</span>${suggestions.map(s=>`<button type="button" class="marker-chip" data-suggest-path="${esc(s.path)}" data-suggest-host="${esc(s.hostId)}">${esc(s.path)}${s.hostId?` / ${esc(hostName(s.hostId))}`:''}</button>`).join('')}</div>`:''}
+        ${mode==='clone'&&!p?`<label>Repository<input name="url" required placeholder="https://github.com/owner/repo.git" autocomplete="off"></label>`:''}
+        <div class="form-grid"><label>Machine<select name="hostId">${machines}</select></label><label>Name<input name="name" maxlength="60" value="${esc(p?.name||'')}" placeholder="${mode==='clone'?'From the repository':'Folder name'}"></label></div>
+        <label>${mode==='clone'&&!p?'Clone into folder':'Folder'}<span class="input-with-button"><input name="path" required value="${esc(p?.path||'')}" placeholder="${state.platform==='win32'?'C:\\Projects\\app':'/home/me/app'}" autocomplete="off"><button type="button" class="secondary" id="project-browse">Browse</button></span></label>
+        ${mode==='clone'&&!p?'<label>Folder name <small>optional</small><input name="folder" maxlength="100" placeholder="repo name"></label>':''}
+        <fieldset class="mcp-agents"><legend>Agents that work here</legend><div class="project-agent-grid" id="project-agent-grid">${agentChecks(p,p?.hostId||'')}</div></fieldset>
+        <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">${p?'Save':mode==='clone'?'Clone and add':'Add project'}</button></div></div>
+      </form>`);
+    for(const b of document.querySelectorAll('[data-project-mode]'))b.onclick=()=>openProjectForm(null,b.dataset.projectMode);
+    const f=$('#project-form'),el=n=>f.elements[n];
+    const syncHost=()=>{$('#project-browse').hidden=!!el('hostId').value;const chosen=[...f.querySelectorAll('[name="agent"]:checked')].map(c=>c.value);$('#project-agent-grid').innerHTML=agentChecks({agentIds:chosen},el('hostId').value);};
+    el('hostId').onchange=syncHost;$('#project-browse').hidden=!!el('hostId').value;
+    $('#project-browse').onclick=()=>action(async()=>{const v=await api.pick({kind:'directory'});if(v)el('path').value=v;});
+    for(const b of f.querySelectorAll('[data-suggest-path]'))b.onclick=()=>{el('path').value=b.dataset.suggestPath;el('hostId').value=b.dataset.suggestHost;syncHost();for(const c of f.querySelectorAll('[name="agent"]'))if(!c.disabled&&state.agents.find(a=>a.id===c.value)?.cwd===b.dataset.suggestPath)c.checked=true;};
+    f.querySelector('input')?.focus();
+    f.onsubmit=event=>{event.preventDefault();action(async()=>{
+      const agentIds=[...f.querySelectorAll('[name="agent"]:checked')].map(c=>c.value),hostId=el('hostId').value;
+      const saved=mode==='clone'&&!p?await api.projectClone({url:el('url').value,parent:el('path').value,folder:el('folder').value,name:el('name').value,hostId,agentIds}):await api.projectSave({...(p||{}),name:el('name').value,path:el('path').value.trim(),hostId,agentIds});
+      closeModal();projectsExpanded.add(saved.id);projectsOpen=true;await refresh();saveProjectsView();loadProjectGit(saved);toast(mode==='clone'&&!p?'Cloning in Terminal. The project is ready when it finishes.':p?'Project saved.':'Project added.');
+    });};
+  }
+  function openAgentProjects(a){
+    const list=(state.projects||[]).filter(p=>fitsProject(a,p));
+    if(!list.length){toast('No project on this agent\'s machine yet. Add one in the Projects panel.');toggleProjects(true);return;}
+    modal('Projects',`${title(a)} works in`,`<form id="agent-projects" class="mcp-form"><div class="project-agent-grid">${list.map(p=>`<label class="check-row inline"><input type="checkbox" name="project" value="${esc(p.id)}" ${p.agentIds.includes(a.id)?'checked':''}> ${esc(p.name)} <small>${esc(p.path)}</small></label>`).join('')}</div><div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Save</button></div></div></form>`);
+    $('#agent-projects').onsubmit=event=>{event.preventDefault();action(async()=>{const on=new Set([...event.target.querySelectorAll('[name="project"]:checked')].map(c=>c.value));for(const p of list){const has=p.agentIds.includes(a.id);if(on.has(p.id)!==has)await api.projectSave({...p,agentIds:has?p.agentIds.filter(x=>x!==a.id):[...p.agentIds,a.id]});}closeModal();await refresh();});};
+  }
+  $('#projects-panel').addEventListener('click',event=>{
+    const b=event.target.closest('[data-action]');if(!b)return;const act=b.dataset.action,p=b.dataset.id&&(state.projects||[]).find(x=>x.id===b.dataset.id);
+    if(act==='projects-close')toggleProjects(false);
+    else if(act==='project-new')openProjectForm();
+    else if(act==='project-refresh')refreshProjectGit(true);
+    else if(act==='project-toggle'&&p){if(projectsExpanded.has(p.id))projectsExpanded.delete(p.id);else{projectsExpanded.add(p.id);loadProjectGit(p);}renderProjects();saveProjectsView();}
+    else if(act==='project-chat'&&p)action(()=>startProjectChat(p,b.dataset.agent));
+    else if(act==='project-open-chat')action(()=>openProjectChat(b.dataset.id));
+    else if(act==='project-add-agent'&&p)openProjectAgents(p);
+    else if(act==='project-files'&&p)openFiles({hostId:p.hostId||undefined,path:p.path,label:`${p.name} / ${hostName(p.hostId)}`});
+    else if(act==='project-terminal'&&p)action(()=>projectTerminal(p));
+    else if(act==='project-git'&&p){const r=b.getBoundingClientRect();openMenu(r.left,r.bottom+4,gitMenu(p),`${p.name} / git`,b);}
+  });
+  $('#projects-panel').addEventListener('contextmenu',event=>{
+    const el=event.target.closest('[data-project-id]');if(!el||event.target.closest('input'))return;const p=(state.projects||[]).find(x=>x.id===el.dataset.projectId);if(!p)return;
+    event.preventDefault();event.stopPropagation();
+    const agent=event.target.closest('[data-pa-agent]');
+    if(agent){const a=state.agents.find(x=>x.id===agent.dataset.paAgent);openMenu(event.clientX,event.clientY,[{icon:'+',label:`New chat in ${p.name}`,run:()=>startProjectChat(p,a.id)},{icon:'&#10005;',label:'Remove from project',danger:true,run:async()=>{await api.projectSave({...p,agentIds:p.agentIds.filter(x=>x!==a.id)});await refresh();}}],title(a));return;}
+    openMenu(event.clientX,event.clientY,projectMenu(p),p.name,el);
+  });
+  document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==='p'&&!$('#app-dialog')){event.preventDefault();toggleProjects();}});
   const panel=$('#terminal-panel'),grip=document.createElement('div');
   grip.className='terminal-resize-grip';grip.tabIndex=0;grip.role='separator';grip.setAttribute('aria-label','Resize terminal');grip.setAttribute('aria-orientation','horizontal');grip.title='Drag to resize terminal';panel.prepend(grip);
   const setHeight=h=>{panel.style.height=Math.max(180,Math.min(window.innerHeight-140,h))+'px';};
