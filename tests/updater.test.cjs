@@ -36,3 +36,13 @@ test('downloads only verified builds and reports progress states',async()=>{
   assert.equal((await current.check()).status,'current');
   assert.equal((await new Updater({app:{getVersion:()=>'0.7.0'},platform:'linux'}).check()).status,'unsupported');
 });
+test('the Windows update script waits for every Opaya process, installs into the same folder and restarts Opaya',()=>{
+  const {windowsScript}=require('../desktop/updater.cjs');
+  const s=windowsScript({pid:4242,exe:"C:\\Users\\O'Brien\\AppData\\Local\\Programs\\Opaya\\Opaya.exe",installer:'C:\\Temp\\u\\Opaya-0.10.1-Setup-x64.exe',log:'C:\\Temp\\u\\update.log'});
+  assert.match(s,/Wait-Process -Id 4242/);
+  assert.match(s,/\$exe = 'C:\\Users\\O''Brien\\AppData\\Local\\Programs\\Opaya\\Opaya\.exe'/,'single quotes are doubled for PowerShell');
+  assert.match(s,/Stop-Process -Force/);
+  assert.match(s,/-ArgumentList \('\/S \/D=' \+ \$dir\.TrimEnd/,'NSIS /D stays last and unquoted');
+  assert.match(s,/if \(\$p\.ExitCode -ne 0\) \{[^}]*Start-Process -FilePath \$installer/,'a failed silent install opens the normal installer');
+  assert.match(s,/Start-Process -FilePath \$exe/,'Opaya starts again after the install');
+});

@@ -1,4 +1,14 @@
-# Opaya 0.10.0 - Clone agents, new VPS in minutes, clearer Discover, a friendlier Opaya Agent
+# Opaya 0.10.1 - Updates that finish
+
+- **Windows: Restart and update now installs and reopens Opaya.** Before, Opaya closed and started the installer silently. If anything went wrong (for example the session service or a helper still running), nothing happened and Opaya did not come back. Now:
+  - Opaya waits until every Opaya process from its install folder has exited, and stops any that hang.
+  - It runs the installer into the same folder, checks the result and starts Opaya again.
+  - If the silent install fails, it opens the normal installer so you can see why.
+  - Each step is logged to `update.log` next to the download.
+- After an update, Opaya confirms it: "Opaya updated to 0.10.1".
+- Versions 0.8.0 to 0.10.0 still use their old updater, so install 0.10.1 by hand once; later updates use the fixed one.
+
+## Earlier: 0.10.0 - Clone agents, new VPS in minutes, clearer Discover, a friendlier Opaya Agent
 
 - **Clone a Hermes agent** (right-click > Clone):
   - Choose what to copy: **Everything**, **Skills + personality** (skills, SOUL.md, USER.md), **Skills** or **Memory**, with or without API keys.
