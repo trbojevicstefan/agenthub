@@ -1,3 +1,13 @@
+# Opaya 0.12.1 - Models and skills for every agent
+
+- **Model selector**:
+  - **Hermes (ACP)**: models are read from the session's model setting (`configOptions`), which newer Hermes versions use instead of the older `models` list, and are set the same way. Before, a newer Hermes looked like it had no models.
+  - **Claude Code** offers `sonnet`, `opus`, `haiku`, `opusplan` and the current full model ids.
+  - **Codex** reads every page of its model list.
+  - An agent that reports no models no longer shows an empty dropdown. You can type the model name, and Opaya tries it and says so in the chat if the agent refuses it.
+  - While Hermes loads its models, the dialog says it can take up to a minute.
+- **Skills for Hermes on a VPS and in Docker**: the Skills panel now reads the agent's real Hermes home. For Hermes in a container that is inside the container; for Hermes on a VPS it is found through SSH. It uses plain `sh`, so `python3` is no longer needed on the server.
+
 # Opaya 0.12.0 - Free models for the Opaya Agent, out of the box
 
 - **Start free**: one click sets up the Opaya Agent with a free, open model on this computer. No account, no API key, nothing to type:

@@ -85,11 +85,11 @@ class AcpAdapter {
       if(!cwd)throw new Error('ACP requires an absolute working directory. Edit this agent first.');
       if(ctx.conversation.externalSessionId){
         if(!this.capabilities.loadSession)throw new Error('This ACP server cannot resume a previous process session. The local transcript is preserved. Start a new conversation.');
-        await this.rpc.request('session/load',{sessionId:ctx.conversation.externalSessionId,cwd,mcpServers:this.sessionMcp()});
+        this.readModels(await this.rpc.request('session/load',{sessionId:ctx.conversation.externalSessionId,cwd,mcpServers:this.sessionMcp()}));
         sessionId=ctx.conversation.externalSessionId;
       }else{
         const session=this.preparedSession||await this.rpc.request('session/new',{cwd,mcpServers:this.sessionMcp()},60000);this.preparedSession=null;sessionId=session.sessionId;
-        this.modelIds=(session.models?.availableModels||[]).map(m=>m.modelId);
+        this.readModels(session);
       }
       if(typeof sessionId!=='string')throw new Error('ACP did not return a session ID.');
       this.sessions.set(ctx.conversation.id,sessionId);await ctx.onSession(sessionId);
@@ -100,7 +100,14 @@ class AcpAdapter {
     try{
       if(ctx.signal.aborted)throw new Error('Cancelled.');
       const model=ctx.conversation.model||this.agent.model;
-      if(model&&(model.includes(':')||this.modelIds?.includes(model)))await this.rpc.request('session/set_model',{sessionId,modelId:model},60000);
+      if(model){
+        // Newer ACP servers expose the model as a session config option; older ones take session/set_model. A model the
+        // server never listed (typed by the user) is tried, and a refusal is reported instead of failing the turn.
+        const listed=model.includes(':')||this.modelIds?.includes(model);
+        const apply=()=>this.modelConfigId?this.rpc.request('session/set_config_option',{sessionId,configId:this.modelConfigId,value:model},60000):this.rpc.request('session/set_model',{sessionId,modelId:model},60000);
+        if(listed)await apply();
+        else if(!this.modelIds?.length)await apply().catch(error=>ctx.onEvent({type:'activity',text:`Model ${model} was not applied: ${String(error.message||error).slice(0,160)}. Using the agent's own setting.`}));
+      }
       // No fixed cap: long tool runs are normal. The broker's inactivity limit and Stop end a stuck turn.
       this.tools.clear();
       const pending=this.active;
@@ -112,8 +119,19 @@ class AcpAdapter {
   }
   async listModels(){
     if(!this.preparedSession)this.preparedSession=await this.rpc.request('session/new',{cwd:sessionCwd(this.agent),mcpServers:this.sessionMcp()},60000);
-    this.modelIds=(this.preparedSession.models?.availableModels||[]).map(m=>m.modelId).filter(m=>typeof m==='string');
-    return this.modelIds;
+    this.readModels(this.preparedSession);
+    return this.modelIds||[];
+  }
+  // Models from a session/new or session/load result: the unstable `models.availableModels` field, or the newer
+  // session config option with category "model" (options may be grouped).
+  readModels(session){
+    if(!session||typeof session!=='object')return;
+    const legacy=(session.models?.availableModels||[]).map(m=>m?.modelId).filter(m=>typeof m==='string');
+    const option=(Array.isArray(session.configOptions)?session.configOptions:[]).find(o=>o&&(o.category==='model'||o.id==='model'));
+    const flat=list=>(Array.isArray(list)?list:[]).flatMap(o=>Array.isArray(o?.options)?flat(o.options):[o?.value]).filter(v=>typeof v==='string');
+    const configured=option?flat(option.options):[];
+    if(option&&typeof option.id==='string')this.modelConfigId=option.id;
+    if(legacy.length||configured.length)this.modelIds=[...new Set([...legacy,...configured])];
   }
   diagnostics(){
     const now=Date.now();
