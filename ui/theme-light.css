@@ -232,3 +232,17 @@
 :where(body[data-theme="light"]) .icon-choice:hover{border-color:#bbc8c1}
 :where(body[data-theme="light"]) .icon-choice.selected{border-color:#7cc09f;background:#badecc14}
 :where(body[data-theme="light"]) .agent-avatar.has-avatar{background:#f6f7f3!important;border-color:#d6ddd5!important}
+:where(body[data-theme="light"]) .files-panel{background:#e5eae8;border-left:1px solid #c5d1cb}
+:where(body[data-theme="light"]) .files-header{border-bottom:1px solid #cfd8d5}
+:where(body[data-theme="light"]) .files-path{border-bottom:1px solid #cfd8d5}
+:where(body[data-theme="light"]) .files-crumbs button{color:#202823}
+:where(body[data-theme="light"]) .files-project{border:1px solid #c9d5ce;background:#dfe7e3}
+:where(body[data-theme="light"]) .git-branch{color:#0c2a17}
+:where(body[data-theme="light"]) .files-project pre{background:#ebf0ee}
+:where(body[data-theme="light"]) .marker-chip{border:1px solid #becbc5;color:#1e2922}
+:where(body[data-theme="light"]) .files-toolbar{border-bottom:1px solid #cfd8d5}
+:where(body[data-theme="light"]) .file-row:hover{background:#d3ddd8}
+:where(body[data-theme="light"]) .file-row.dir .file-name{color:#0e1b12}
+:where(body[data-theme="light"]) .file-glyph{color:#21724a}
+:where(body[data-theme="light"]) .files-code{background:#ebf0ee;border:1px solid #cfd8d5}
+:where(body[data-theme="light"]) .model-scope>div{border:1px solid #c5d1cb}

@@ -59,7 +59,7 @@ class HttpAdapter {
   async run({text,messages,conversation,signal,onEvent}) {
     const history=messages.filter((m,i)=>['user','assistant'].includes(m.role)&&m.status!=='error'&&m.status!=='cancelled'&&!(m.role==='user'&&['error','cancelled'].includes(messages[i+1]?.status))).map(m=>({role:m.role,content:m.content}));
     if(JSON.stringify(history).length>500000)throw new Error('This conversation is too large to resend safely. Start a new conversation.');
-    const model=this.agent.model||this.models?.[0];
+    const model=conversation?.model||this.agent.model||this.models?.[0];
     if(!model)throw new Error('Choose a model in the agent connection settings.');
     const payload={model,stream:true,messages:history};
     if(this.agent.provider==='hermes'&&model.includes(':')){

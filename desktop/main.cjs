@@ -111,7 +111,7 @@ if(hostMode){
         pendingApprovals.set(request.id,{key,expires:Date.now()+120000});win.webContents.send('hub:approval',request);
       });
       client.on('closed',()=>{if(!quitting&&!smoke&&!win.isDestroyed())win.webContents.send('hub:service-error','Session service disconnected. Reopen Opaya to reconnect. Saved history has not been deleted.');});
-      const forwards=['installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaStop','opayaClear','snapshot','saveAgent','reorderAgents','updateAgentDisplay','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
+      const forwards=['files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaStop','opayaClear','snapshot','saveAgent','reorderAgents','updateAgentDisplay','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
       const handlers=Object.fromEntries(forwards.map(method=>[method,input=>client.call(method,input)]));
       for(const method of ['agentModels','selectModel','gateway'])handlers[method]=input=>client.call(method,input);
       handlers.terminalRename=async input=>{const title=await client.call('terminalRename',input);terminalWindows.get(input.id)?.setTitle(title);return title;};

@@ -52,7 +52,8 @@ class AcpAdapter {
     ctx.signal.addEventListener('abort',cancel,{once:true});
     try{
       if(ctx.signal.aborted)throw new Error('Cancelled.');
-      if(this.agent.model&&(this.agent.model.includes(':')||this.modelIds?.includes(this.agent.model)))await this.rpc.request('session/set_model',{sessionId,modelId:this.agent.model},60000);
+      const model=ctx.conversation.model||this.agent.model;
+      if(model&&(model.includes(':')||this.modelIds?.includes(model)))await this.rpc.request('session/set_model',{sessionId,modelId:model},60000);
       await this.rpc.request('session/prompt',{sessionId,prompt:[{type:'text',text:ctx.text}]},10*60*1000);
       if(ctx.signal.aborted)throw new Error('Cancelled.');
       return {externalSessionId:sessionId};
