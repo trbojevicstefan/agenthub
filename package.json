@@ -16,7 +16,7 @@
     "postinstall": "node scripts/generate-icons.cjs && electron-builder install-app-deps",
     "dist": "electron-builder --publish never",
     "dist:win": "electron-builder --win nsis --x64 --publish never",
-    "dist:mac": "electron-builder --mac dmg zip --arm64 --x64 --publish never",
+    "dist:mac": "electron-builder --mac dmg zip --arm64 --publish never",
     "dist:linux": "electron-builder --linux AppImage --publish never",
     "smoke": "electron . --smoke-test",
     "smoke:restart": "node scripts/smoke-restart.cjs",
@@ -75,15 +75,13 @@
         {
           "target": "dmg",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         },
         {
           "target": "zip",
           "arch": [
-            "arm64",
-            "x64"
+            "arm64"
           ]
         }
       ],

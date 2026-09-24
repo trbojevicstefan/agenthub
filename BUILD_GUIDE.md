@@ -13,7 +13,7 @@
 - [x] Remote tmux create-or-attach and discovery of existing named sessions.
 - [x] Native Windows restart test and installed-EXE packaging workflow.
 - [x] Opaya rebrand with automatic reuse of existing AgentHub workspaces.
-- [x] macOS arm64/x64 DMG and ZIP workflow with ad-hoc signing and packaged-app restart test.
+- [x] macOS Apple Silicon DMG and ZIP workflow with ad-hoc signing and packaged-app restart test.
 - [x] Context menus for agents, terminal tabs and the workspace; first-appearance motion system.
 
 ## Acceptance still requiring the owner's machines
