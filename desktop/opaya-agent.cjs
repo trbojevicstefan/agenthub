@@ -75,8 +75,8 @@ const TOOLS=[
 const stripAnsi=text=>String(text||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)/g,'').replace(/\r/g,'');
 
 class OpayaAgent{
-  constructor({root,vault,broker,terminals,approve,emit,runInTerminal,platform=process.platform,fetchImpl=globalThis.fetch,spawnAgent=launch}){
-    Object.assign(this,{home:path.join(root,'opaya-agent'),root,vault,broker,terminals,approve,emit,runInTerminal,platform,fetch:fetchImpl,spawnAgent});
+  constructor({root,vault,broker,terminals,approve,emit,runInTerminal,platform=process.platform,fetchImpl=globalThis.fetch,spawnAgent=launch,trusted=()=>false}){
+    Object.assign(this,{home:path.join(root,'opaya-agent'),root,vault,broker,terminals,approve,emit,runInTerminal,platform,fetch:fetchImpl,spawnAgent,trusted});
     this.config={preset:'',baseUrl:'',model:''};this.messages=[];this.busy=false;this.status='';this.error='';this.controller=null;this.liveReply=null;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;
   }
   async init(){
@@ -145,7 +145,7 @@ class OpayaAgent{
     if(!this.configured())throw new Error('Connect the Opaya Agent to a model first.');
     text=schema.prompt(text);
     this.messages.push({id:randomUUID(),role:'user',content:text,createdAt:new Date().toISOString()});
-    const reply={id:randomUUID(),role:'assistant',content:'',activity:[],createdAt:new Date().toISOString()};
+    const reply={id:randomUUID(),role:'assistant',content:'',activity:[],createdAt:new Date().toISOString()};this.current=reply;
     this.busy=true;this.error='';this.status='Thinking...';this.controller=new AbortController();this.liveReply=reply;this.emit();
     let recent=this.messages.filter(m=>!m.summary).slice(-40);const start=recent.findIndex(m=>m.role==='user');recent=start<0?[]:recent.slice(start);
     const context=recent.map(({role,content,tool_calls,tool_call_id})=>({role,content:content??'',...(tool_calls?{tool_calls}:{}),...(tool_call_id?{tool_call_id}:{})}));
@@ -191,7 +191,7 @@ class OpayaAgent{
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.8.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.9.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
@@ -232,7 +232,8 @@ class OpayaAgent{
   async closeCodex(){const rpc=this.codexRpc,active=this.codexActive;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;if(rpc&&!rpc.closed)rpc.close();active?.reject(new Error('Codex stopped.'));}
   async close(){await this.closeCodex();}
   host(id){return id?this.broker.host(id):null;}
-  async ask(title,detail){if(!await this.approve({name:'Opaya Agent'},title,detail))throw new Error('The user declined this action.');}
+  // iTrust for the Opaya Agent skips the dialog, except for removals, which always ask.
+  async ask(title,detail,{always=false}={}){if(!always&&this.trusted?.()){this.status=`iTrust approved: ${title}`;this.current?.activity?.push(this.status);this.emit();return;}if(!await this.approve({name:'Opaya Agent'},title,detail))throw new Error('The user declined this action.');}
   async terminalOutput(id,wait=0){
     const deadline=Date.now()+wait;
     for(;;){const view=this.terminals.attach(id);if(view.exited||Date.now()>=deadline)return stripAnsi(view.buffer).slice(-6000);await new Promise(r=>setTimeout(r,800));}
@@ -266,14 +267,14 @@ class OpayaAgent{
         await this.ask(existing?`Update connection "${existing.name}"?`:`Add connection "${agent.name}"?`,JSON.stringify(Object.fromEntries(Object.entries(agent).filter(([k,v])=>v!==''&&!(Array.isArray(v)&&!v.length)&&!['createdAt','avatar'].includes(k))),null,2));
         const saved=await b.saveAgent({agent});return {saved:{id:saved.id,name:saved.name},note:'Ask the user to add an API token in the connection form if the agent needs one.'};
       }
-      case 'remove_connection':{const a=b.agent(args.agent_id);await this.ask(`Remove connection "${a.name}"?`,'Deletes the saved connection and its local chats in Opaya, not the agent installation.');this.terminals.closeAgent(a.id);await b.removeAgent(a.id);return {removed:a.id};}
+      case 'remove_connection':{const a=b.agent(args.agent_id);await this.ask(`Remove connection "${a.name}"?`,'Deletes the saved connection and its local chats in Opaya, not the agent installation.',{always:true});this.terminals.closeAgent(a.id);await b.removeAgent(a.id);return {removed:a.id};}
       case 'save_machine':{
         const input=args.machine&&typeof args.machine==='object'?args.machine:{};const existing=input.id?b.host(input.id):null;
         const host=schema.host({...(existing||{}),...input});
         await this.ask(existing?`Update machine "${existing.name}"?`:`Add machine "${host.name}"?`,JSON.stringify(host,null,2));
         const saved=await b.saveHost(host);return {saved:{id:saved.id,name:saved.name}};
       }
-      case 'remove_machine':{const h=b.host(args.machine_id);await this.ask(`Remove machine "${h.name}"?`,'Only the saved machine entry is removed. Nothing changes on the machine.');await b.removeHost(h.id);return {removed:h.id};}
+      case 'remove_machine':{const h=b.host(args.machine_id);await this.ask(`Remove machine "${h.name}"?`,'Only the saved machine entry is removed. Nothing changes on the machine.',{always:true});await b.removeHost(h.id);return {removed:h.id};}
       case 'install_framework':{
         const host=this.host(args.machine_id);const {framework,command}=catalog.command(String(args.framework_id||''),{remote:!!host});
         await this.ask(`Install ${framework.name} ${host?`on ${host.name}`:'on this computer'}?`,`Runs in a visible terminal:\n\n${command}\n\n${framework.requires?`Requires ${framework.requires}.\n`:''}Afterwards: ${framework.after}`);

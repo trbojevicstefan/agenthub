@@ -7,11 +7,11 @@ async function run({win,client,output}){
   await until(()=>js(`!!document.querySelector('[data-action="terminal-tab"]')`));
   const id=await js(`document.querySelector('[data-action="terminal-tab"]').dataset.id`);
   await js(`document.querySelector('[data-action="terminal-tab"]').dispatchEvent(new MouseEvent('contextmenu',{bubbles:true}));document.querySelector('#terminal-rename-form input').value='UI verification';document.querySelector('#terminal-rename-form').requestSubmit()`);
-  await until(()=>js(`document.querySelector('#terminal-title').textContent==='UI verification'`));
+  await until(()=>js(`document.querySelector('.terminal-tab.selected .terminal-tab-title')?.textContent==='UI verification'`));
   assert.equal((await client.call('terminalAttach',{id})).title,'UI verification');
-  const before=await js(`document.querySelector('#terminal-panel').offsetHeight`);
-  await js(`document.querySelector('.terminal-resize-grip').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true}))`);
-  assert(await js(`document.querySelector('#terminal-panel').offsetHeight>${before}`));
+  const before=await js(`document.querySelector('#dock-bottom').offsetHeight`);
+  await js(`document.querySelector('.dock-grip[data-grip="bottom"]').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true}))`);
+  assert(await js(`document.querySelector('#dock-bottom').offsetHeight>${before}`));
   await js(`document.querySelector('[data-action="terminal-detach"]').click()`);
   const {BrowserWindow}=require('electron');let popup;
   await until(async()=>{popup=BrowserWindow.getAllWindows().find(w=>w!==win);return popup&&await popup.webContents.executeJavaScript(`!!document.querySelector('#terminal .xterm')`).catch(()=>false);});

@@ -37,6 +37,19 @@ async function start({app, safeStorage}, root) {
   }
   broker = new Broker({store:new Store(root),vault:new Vault(root,safeStorage),emit,approve});
   await broker.init();
+  // Opaya browser for agents: the MCP bridge gets a token that can only call browserTool, forwarded to the Opaya window.
+  const browserToken = randomBytes(32).toString('hex'), browserCalls = new Map();
+  broker.browserBridge = {command:process.execPath, args:[path.join(__dirname,'browser-mcp.cjs')], env:{ELECTRON_RUN_AS_NODE:'1',OPAYA_BROWSER_ENDPOINT:endpoint(root),OPAYA_BROWSER_TOKEN:browserToken}};
+  function browserTool(input){
+    const socket=[...(listener?.clients||[])].at(-1);
+    if(!socket)return Promise.reject(new Error('Open the Opaya window to use its browser.'));
+    const id=randomUUID();
+    return new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{browserCalls.delete(id);reject(new Error('The browser did not answer in time.'));},110000);
+      browserCalls.set(id,{resolve,reject,timer});
+      listener.notify(socket,'browser-request',{id,op:String(input.op||''),args:input.args&&typeof input.args==='object'?input.args:{}});
+    });
+  }
   terminals = new Terminals(event => { listener?.broadcast('terminal',event); if (event.type !== 'data') emit(); },{root});
   await terminals.init();
   // Installs and diagnostics run in visible one-off terminals; the UI is told to show them.
@@ -46,7 +59,7 @@ async function start({app, safeStorage}, root) {
     if(!host||reused)terminals.write(view.id,command+'\r');
     listener?.broadcast('terminal',{type:'opened',id:view.id});emit();return view;
   }
-  opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal});
+  opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal,trusted:()=>!!broker.data.settings?.itrustOpaya});
   await opaya.init();
   async function shutdown() {
     if (stopping) return true; stopping = true;
@@ -96,6 +109,8 @@ async function start({app, safeStorage}, root) {
       const p=await broker.saveProject({name:x.name||name,path:folder,hostId:host?.id||'',agentIds:x.agentIds||[]});
       await runInTerminal({label:`Clone ${name}`,key:`clone_${p.id}`.slice(0,60),host,command});return p;
     },
+    saveSettings:x=>broker.saveSettings(x),
+    browserTool, browserResult:async x=>{const c=browserCalls.get(x.id);if(!c)return false;clearTimeout(c.timer);browserCalls.delete(x.id);x.ok?c.resolve(x.value):c.reject(new Error(String(x.error||'Browser action failed.')));return true;},
     mcpSave:x=>broker.saveMcpServer(x), mcpRemove:x=>broker.removeMcpServer(x.id), agentMcp:x=>broker.setAgentMcp(x), agentSkills:x=>broker.skills(x.id),
     // Hermes skills: browse the hub or install one with the Hermes CLI in a visible terminal.
     skillAction:async x=>{
@@ -110,7 +125,7 @@ async function start({app, safeStorage}, root) {
     shutdown
   };
   const token = randomBytes(32).toString('hex');
-  listener = server({token,snapshot,
+  listener = server({token,snapshot,scopes:()=>new Map([[browserToken,new Set(['browserTool'])]]),
     dispatch:async (method,input)=>{if(!Object.hasOwn(actions,method))throw new Error('Unsupported desktop action.');try{return await actions[method](input||{});}catch(error){throw new Error(safeError(error));}},
     onApproval:(socket,message)=>{const a=approvals.get(message.id);if(a?.socket===socket)a.finish(message.allow===true);},
     onDetach:socket=>{for(const a of approvals.values())if(a.socket===socket)a.finish(false);}

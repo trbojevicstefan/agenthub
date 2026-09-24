@@ -72,7 +72,9 @@ function connect(address, token, timeout = 2000) {
     client.once('closed', () => { if (!client.ready) fail(new Error('Session service rejected the connection.')); });
   });
 }
-function server({token, dispatch, snapshot, onApproval, onDetach}) {
+// scopes(): Map of extra tokens to the only methods they may call. Scoped clients (for example the browser MCP bridge
+// that agents start) get no state and no broadcasts.
+function server({token, dispatch, snapshot, onApproval, onDetach, scopes = () => new Map()}) {
   const clients = new Set();
   const listener = net.createServer(socket => {
     let authenticated = false;
@@ -81,9 +83,13 @@ function server({token, dispatch, snapshot, onApproval, onDetach}) {
     socket.on('close', () => { clearTimeout(deadline); clients.delete(socket); onDetach?.(socket); });
     frames(socket, message => {
       if (!authenticated) {
-        if (message.kind !== 'hello' || !sameToken(token, message.token)) { socket.destroy(); return; }
-        clearTimeout(deadline); authenticated = true; clients.add(socket); send(socket, {kind:'hello', value:snapshot()}); return;
+        if (message.kind !== 'hello') { socket.destroy(); return; }
+        if (sameToken(token, message.token)) { clearTimeout(deadline); authenticated = true; clients.add(socket); send(socket, {kind:'hello', value:snapshot()}); return; }
+        const scope = [...scopes()].find(([t]) => sameToken(t, message.token));
+        if (!scope) { socket.destroy(); return; }
+        clearTimeout(deadline); authenticated = true; socket.scope = scope[1]; send(socket, {kind:'hello', value:null}); return;
       }
+      if (socket.scope && (message.kind !== 'call' || !socket.scope.has(message.method))) { send(socket, {kind:'result', id:message.id, error:'Not allowed.'}); return; }
       if (message.kind === 'approval') { onApproval?.(socket, message); return; }
       if (message.kind !== 'call' || !Number.isSafeInteger(message.id) || typeof message.method !== 'string') { socket.destroy(); return; }
       Promise.resolve().then(() => dispatch(message.method, message.input, socket)).then(

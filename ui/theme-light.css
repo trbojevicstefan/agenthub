@@ -335,3 +335,40 @@
 :where(body[data-theme="light"]) .status-update.ready{background:#b5f5cf;color:#0f2a1a;border-color:#b5f5cf}
 :where(body[data-theme="light"]) .update-progress{background:#cfddd4}
 :where(body[data-theme="light"]) .update-notes{border:1px solid #cdd9d2;background:#e2eae6;color:#242b27}
+:where(body[data-theme="light"]) .dock-bottom{border-top:1px solid #cbd5d1}
+:where(body[data-theme="light"]) .dock-right{border-left:1px solid #cbd5d1}
+:where(body[data-theme="light"]) .dock-panes{background:#cfd6d9}
+:where(body[data-theme="light"]) .dock-grip:hover,:where(body[data-theme="light"]) .dock-grip:focus-visible,:where(body[data-theme="light"]).dock-resizing .dock-grip{background:#b5f5cf55}
+:where(body[data-theme="light"]) .browser-panel{background:#eaecee}
+:where(body[data-theme="light"]) .browser-toolbar{background:#e6e9eb;border-bottom:1px solid #d4dadd}
+:where(body[data-theme="light"]) .browser-address{border:1px solid #ced5d7;background:#ebeef0}
+:where(body[data-theme="light"]) .browser-address:focus-within{border-color:#a6bcae}
+:where(body[data-theme="light"]) .browser-address input{color:#111617}
+:where(body[data-theme="light"]) .browser-lock{border:1.5px solid #96a2a6}
+:where(body[data-theme="light"]) .browser-lock::before{border:1.5px solid #96a2a6}
+:where(body[data-theme="light"]) .browser-lock.secure,:where(body[data-theme="light"]) .browser-lock.secure::before{border-color:#7cc099}
+:where(body[data-theme="light"]) .browser-agent{background:#cae5d8;color:#0e2f1b}
+:where(body[data-theme="light"]) .browser-view{background:#fff}
+:where(body[data-theme="light"]) .browser-empty{background:#eaecee;color:#445054}
+:where(body[data-theme="light"]) .browser-empty strong{color:#111617}
+:where(body[data-theme="light"]) .itrust-mark{background:#e4dcc8;color:#5c491b}
+:where(body[data-theme="light"]) .itrust-pill{border:1px solid #dbd0b4;background:#eae2d3;color:#5c491b}
+:where(body[data-theme="light"]) .itrust-pill:hover{background:#e4dcc8}
+:where(body[data-theme="light"]) .itrust-toggle{border:1px solid #c1c8cb}
+:where(body[data-theme="light"]) .itrust-toggle.on{border-color:#dbd0b4;background:#eae2d3;color:#5c491b}
+:where(body[data-theme="light"]) .itrust-switch{background:#c8ced0}
+:where(body[data-theme="light"]) .itrust-switch::after{background:#c9d1d4}
+:where(body[data-theme="light"]) .itrust-toggle.on .itrust-switch{background:#ded2ba}
+:where(body[data-theme="light"]) .itrust-toggle.on .itrust-switch::after{background:#fff}
+:where(body[data-theme="light"]) .switch-row .switch{background:#c8ced0}
+:where(body[data-theme="light"]) .switch-row .switch::after{background:#c9d1d4}
+:where(body[data-theme="light"]) .switch-row input:checked+.switch{background:#ded2ba}
+:where(body[data-theme="light"]) .switch-row input:checked+.switch::after{background:#fff}
+:where(body[data-theme="light"]) .task-box{border:1.5px solid #9aa5aa}
+:where(body[data-theme="light"]) .message-text blockquote{border-left:3px solid #aec8b7;color:#2c3730}
+:where(body[data-theme="light"]) .message-text hr{border-top:1px solid #cbd5d1}
+:where(body[data-theme="light"]) .message-text a{color:#144526}
+:where(body[data-theme="light"]) .md-table{border:1px solid #cbd5d1}
+:where(body[data-theme="light"]) .md-table th,:where(body[data-theme="light"]) .md-table td{border-bottom:1px solid #d5ddd9}
+:where(body[data-theme="light"]) .md-table th{background:#dee5e2}
+:where(body[data-theme="light"]) .md-image img{border:1px solid #cbd5d1}

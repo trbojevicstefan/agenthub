@@ -28,7 +28,7 @@ const ENV_STALL_MS=30000;
 const envHint=agent=>`${agent.provider==='hermes'?'Hermes':'The agent'} is still starting its local terminal after 30 seconds. On Windows this is a known Hermes issue with Git Bash under ACP: run \`hermes update\` in Terminal and reconnect. If it persists, connect this Hermes through its gateway API (hermes gateway) instead of ACP.`;
 const commandList=list=>(Array.isArray(list)?list:[]).filter(c=>c&&typeof c.name==='string'&&/^[\w.:-]{1,64}$/.test(c.name)).slice(0,200).map(c=>({name:c.name,description:String(c.description||'').slice(0,300),hint:String(c.input?.hint||'').slice(0,120)}));
 class AcpAdapter {
-  constructor({agent,host,approve,spawnAgent=launch,mcpServers=()=>[],onChange=()=>{},envStallMs=ENV_STALL_MS}){this.envStallMs=envStallMs;this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.mcpServers=mcpServers;this.onChange=onChange;this.sessions=new Map();this.active=null;this.log=new ConnectionLog();this.tools=new Map();this.permission=null;this.envStart=null;this.commands=[];this.agentInfo=null;}
+  constructor({agent,host,approve,spawnAgent=launch,mcpServers=()=>[],onChange=()=>{},trusted=()=>false,envStallMs=ENV_STALL_MS}){this.trusted=trusted;this.envStallMs=envStallMs;this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.mcpServers=mcpServers;this.onChange=onChange;this.sessions=new Map();this.active=null;this.log=new ConnectionLog();this.tools=new Map();this.permission=null;this.envStart=null;this.commands=[];this.agentInfo=null;}
   watchStderr(text){
     for(const line of String(text).split(/\r?\n/)){
       if(ENV_START.test(line))this.envStart={at:Date.now(),warned:false};
@@ -52,6 +52,8 @@ class AcpAdapter {
       const allow=options.find(o=>o.kind==='allow_once')||options.find(o=>o.kind==='allow_always');
       if(!allow){this.log.add('info','Permission request had no allow option; cancelled.');return {outcome:{outcome:'cancelled'}};}
       const pending=this.active,title=String(params.toolCall?.title||'Agent tool request');
+      // iTrust: approve on the agent's own terms (prefer "always" so it stops asking), without a dialog.
+      if(this.trusted()){const pick=options.find(o=>o.kind==='allow_always')||allow;pending.onEvent({type:'activity',text:`iTrust approved: ${title}`});this.log.add('info',`iTrust approved: ${title}`);return {outcome:{outcome:'selected',optionId:pick.optionId}};}
       this.permission={title,since:Date.now()};pending.onEvent({type:'activity',text:`Waiting for your approval: ${title}`});
       let accepted;try{accepted=await this.approve(this.agent, title, JSON.stringify(params.toolCall?.rawInput||params.toolCall||{},null,2).slice(0,5000));}finally{this.permission=null;}
       pending.onEvent({type:'activity',text:`${accepted?'Approved':'Declined'}: ${title}`});

@@ -11,13 +11,13 @@ function mcpFile(servers){
   return {file,remove:()=>fs.rmSync(dir,{recursive:true,force:true})};
 }
 class ClaudeAdapter{
-  constructor({agent,host,spawnAgent=launch,mcpServers=()=>[]}){this.agent=agent;this.host=host;this.spawnAgent=spawnAgent;this.mcpServers=mcpServers;}
+  constructor({agent,host,spawnAgent=launch,mcpServers=()=>[],trusted=()=>false}){this.trusted=trusted;this.agent=agent;this.host=host;this.spawnAgent=spawnAgent;this.mcpServers=mcpServers;}
   async connect(){
     const version=await collect(this.spawnAgent(this.agent,[...this.agent.args,'--version'],this.host),{timeout:15000,maxBytes:16384});
     return {description:`CLI available: ${version.trim().slice(0,100)}. Sign-in is checked when sending.`};
   }
   async run(ctx){
-    const args=[...this.agent.args,'-p','--output-format','stream-json','--verbose','--include-partial-messages','--permission-mode','default'];
+    const args=[...this.agent.args,'-p','--output-format','stream-json','--verbose','--include-partial-messages','--permission-mode',this.trusted()?'bypassPermissions':'default'];
     if(ctx.conversation.externalSessionId)args.push('--resume',ctx.conversation.externalSessionId);
     const model=ctx.conversation.model||this.agent.model;if(model)args.push('--model',model);
     const servers=this.mcpServers()||[];let config=null;
