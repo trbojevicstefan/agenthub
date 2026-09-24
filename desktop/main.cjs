@@ -59,6 +59,12 @@ if(hostMode){
         ['/terminal.html',['text/html',path.join(__dirname,'../ui/terminal.html')]],
         ['/terminal-window.js',['text/javascript',path.join(__dirname,'../ui/terminal-window.js')]],
         ['/style.css',['text/css',path.join(__dirname,'../ui/style.css')]],
+        ['/theme-light.css',['text/css',path.join(__dirname,'../ui/theme-light.css')]],
+        ['/assets/opaya-logo.png',['image/png',path.join(__dirname,'../ui/assets/opaya-logo.png')]],
+        ['/assets/agents/hermes.png',['image/png',path.join(__dirname,'../ui/assets/agents/hermes.png')]],
+        ['/assets/agents/claude.png',['image/png',path.join(__dirname,'../ui/assets/agents/claude.png')]],
+        ['/assets/agents/codex.png',['image/png',path.join(__dirname,'../ui/assets/agents/codex.png')]],
+        ['/assets/agents/openclaw.svg',['image/svg+xml',path.join(__dirname,'../ui/assets/agents/openclaw.svg')]],
         ['/vendor/xterm.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/xterm/lib/xterm.js')]],
         ['/vendor/xterm.css',['text/css',path.join(__dirname,'../node_modules/@xterm/xterm/css/xterm.css')]],
         ['/vendor/addon-fit.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-fit/lib/addon-fit.js')]]
