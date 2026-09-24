@@ -1,4 +1,11 @@
-# Opaya 0.3.0 - Windows and macOS preview
+# Opaya 0.4.0 - Opaya Agent preview
+
+- **Opaya Agent**: a built-in assistant for installing, connecting, maintaining and troubleshooting agents, machines and SSH keys. It connects to any OpenAI-compatible model API (OpenAI, Anthropic, OpenRouter, Ollama, LM Studio, a Hermes gateway). Changes and commands always need your approval; it never sees API tokens and cannot modify the app.
+- **One-click installs** of Hermes Agent, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider and Ollama, locally or on a saved SSH machine, in a visible terminal.
+- **Own window frame** with Opaya window controls on Windows, Linux and macOS.
+- **Codex icon** instead of the OpenAI logo, and an **icon library** (33 icons) plus image upload per agent.
+
+## Earlier: 0.3.0 - Windows and macOS preview
 
 **One place. All your agents.** AgentHub is now **Opaya** ([opaya.dev](https://opaya.dev)).
 

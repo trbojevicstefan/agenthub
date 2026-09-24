@@ -71,3 +71,11 @@ test('remote terminal detach closes only the local PTY and keeps scrollback',()=
   assert.equal(events.at(-1).exitCode,'detached');
   assert.throws(()=>terminals.detach(terminals.open({id:'local-agent',name:'Local',provider:'custom',transport:'local',command:'',args:[],cwd:process.cwd()},null,'shell').id),/Only remote/);
 });
+test('service install terminals over SSH pass the command to ssh and do not require tmux',()=>{
+  const spawned=[],terminals=new Terminals(()=>{},{ptyFactory:{spawn:(command,args)=>{spawned.push(args);return {onData(){},onExit(){},write(){},resize(){},kill(){}};}}});
+  terminals.open({id:'svc_install_codex_h',name:'Install Codex',provider:'custom',transport:'ssh',hostId:'h',command:'',args:[],cwd:'',ephemeral:true,run:'npm install -g @openai/codex'},{alias:'vps'},'shell');
+  const remote=spawned[0].at(-1);
+  assert.match(remote,/^npm install -g @openai\/codex; /);assert.doesNotMatch(remote,/tmux/);
+  terminals.open({id:'regular',name:'Regular',provider:'custom',transport:'ssh',hostId:'h',command:'',args:[],cwd:''},{alias:'vps'},'shell');
+  assert.match(spawned[1].at(-1),/tmux/);
+});

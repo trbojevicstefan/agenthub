@@ -19,6 +19,7 @@
     <aside class="sidebar" aria-label="Agent navigation">
       <div class="brand"><span class="opaya-mark" aria-hidden="true"><img src="assets/opaya-logo.png" alt=""><i></i></span><span class="brand-name" title="opaya.dev">Opaya</span><button class="icon-button brand-discover" data-action="discover" title="Discover installed agents and SSH hosts" aria-label="Discover agents"><span class="radar-icon"></span></button></div>
       <button class="search-trigger" data-action="switcher" title="Switch agents (Ctrl or Command + K)"><span class="search-icon"></span><span>Find an agent...</span><kbd>Ctrl K</kbd></button>
+      <button class="nav-opaya" data-action="opaya" title="Opaya Agent: installs, connects and troubleshoots your agents"><span class="opaya-mark small" aria-hidden="true"><img src="assets/opaya-logo.png" alt=""><i></i></span><span class="nav-opaya-text"><strong>Opaya Agent</strong><small id="opaya-nav-status">Set up</small></span></button>
       <button class="nav-overview" data-action="overview"><span class="grid-icon" aria-hidden="true"></span> Workspace <span id="agent-count">0</span></button>
       <div id="agent-list" class="agent-list"></div>
       <div class="sidebar-bottom"><button data-action="hosts" title="Saved SSH aliases, keys and remote machines"><span class="machine-icon" aria-hidden="true"></span> Machines <span id="host-count">0</span></button><button data-action="settings" title="Theme and workspace preferences"><span class="settings-icon" aria-hidden="true">&#9881;</span> Settings</button><button data-action="help" title="Connection help, privacy and shortcuts"><span class="help-icon">?</span> Help</button></div>
@@ -30,6 +31,7 @@
       <footer class="statusbar"><span id="status-left">One place. All your agents.</span><span id="status-right">opaya.dev</span></footer>
     </main>
   </div>
+  <div id="window-controls" class="window-controls" role="toolbar" aria-label="Window controls"></div>
   <div id="modal-root"></div>
   <div id="toast" class="toast" role="status" hidden></div>
 </body>

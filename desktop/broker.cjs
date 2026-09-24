@@ -94,13 +94,14 @@ class Broker{
     const key=conversationId||agentId;this.data.drafts[key]=text;await this.store.write(this.data);return true;
   }
   async saveView(input){
-    this.data.view={overview:!!input.overview,terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark'};await this.store.write(this.data);return true;
+    this.data.view={overview:!!input.overview,opaya:!!input.opaya,terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark'};await this.store.write(this.data);return true;
   }
-  async updateAgentDisplay({id,displayName,pinned}){
+  async updateAgentDisplay({id,displayName,pinned,avatar}){
     const index=this.data.agents.findIndex(a=>a.id===schema.id(id));if(index<0)throw new Error('Agent not found.');
     const a={...this.data.agents[index]};
     if(displayName!==undefined)a.displayName=schema.text(displayName,'display name',80).trim();
     if(pinned!==undefined)a.pinned=Boolean(pinned);
+    if(avatar!==undefined)a.avatar=schema.avatar(avatar);
     this.data.agents[index]=a;await this.persist();return a;
   }
   async reorderAgents({id,direction}){

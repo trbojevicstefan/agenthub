@@ -9,15 +9,17 @@ const {Terminals} = require('./terminal.cjs');
 const {server, endpoint} = require('./wire.cjs');
 const {alive} = require('./host-client.cjs');
 const schema = require('./schema.cjs');
+const catalog = require('./catalog.cjs');
+const {OpayaAgent} = require('./opaya-agent.cjs');
 async function start({app, safeStorage}, root) {
-  let broker, terminals, listener, stopping = false;
+  let broker, terminals, listener, opaya, stopping = false;
   const startedAt = new Date().toISOString(), approvals = new Map();
   const descriptor = path.join(root, 'session-service.json');
   await fs.mkdir(root,{recursive:true,mode:0o700});
   const old = await fs.readFile(descriptor,'utf8').then(JSON.parse).catch(()=>null);
   if (old && old.pid !== process.pid && alive(old.pid)) throw new Error('A session service is already running.');
   if (process.platform !== 'win32') await fs.rm(endpoint(root),{force:true});
-  function snapshot() { return {...broker.snapshot(), terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true}}; }
+  function snapshot() { return {...broker.snapshot(), opayaAgent:opaya?.describe() || null, frameworks:catalog.list(), platform:process.platform, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true}}; }
   const emit = () => listener?.broadcast('state', snapshot());
   async function approve(agent, title, detail) {
     const socket = [...(listener?.clients || [])].at(-1);
@@ -33,6 +35,15 @@ async function start({app, safeStorage}, root) {
   await broker.init();
   terminals = new Terminals(event => { listener?.broadcast('terminal',event); if (event.type !== 'data') emit(); },{root});
   await terminals.init();
+  // Installs and diagnostics run in visible one-off terminals; the UI is told to show them.
+  async function runInTerminal({label,key,host,command}){
+    const pseudo={id:`svc_${key}_${host?host.id:'local'}`.slice(0,80),name:label,provider:'custom',transport:host?'ssh':'local',hostId:host?.id||'',command:'',args:[],cwd:host?'':app.getPath('home'),ephemeral:true,run:host?command:''};
+    const reused=terminals.hasLive(pseudo.id,'shell'),view=terminals.open(pseudo,host,'shell',{cols:110,rows:30});
+    if(!host||reused)terminals.write(view.id,command+'\r');
+    listener?.broadcast('terminal',{type:'opened',id:view.id});emit();return view;
+  }
+  opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal});
+  await opaya.init();
   async function shutdown() {
     if (stopping) return true; stopping = true;
     for (const a of approvals.values()) a.finish(false);
@@ -58,6 +69,9 @@ async function start({app, safeStorage}, root) {
     terminalRename:async x=>{const title=await terminals.rename(schema.id(x.id),x.title);emit();return title;},
     terminalDetach:async x=>{terminals.detach(schema.id(x.id));emit();return true;},
     terminalClose:async x=>{const s=terminals.describe().find(s=>s.id===schema.id(x.id));if(!s)return false;const host=s.remote?broker.host(s.agentId.startsWith('host_')?s.agentId.slice(5):broker.agent(s.agentId).hostId):null;await terminals.end(x.id,host);emit();return true;},
+    installFramework:async x=>{const host=x.hostId?broker.host(x.hostId):null;const {framework,command}=catalog.command(String(x.id||''),{remote:!!host});return runInTerminal({label:`Install ${framework.name}`,key:`install_${framework.id}`,host,command});},
+    opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:()=>opaya.test(), opayaForgetKey:()=>opaya.forgetKey(),
+    opayaSend:x=>opaya.begin(x.text), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),
     shutdown
   };
   const token = randomBytes(32).toString('hex');

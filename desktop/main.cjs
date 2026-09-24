@@ -63,14 +63,16 @@ if(hostMode){
         ['/assets/opaya-logo.png',['image/png',path.join(__dirname,'../ui/assets/opaya-logo.png')]],
         ['/assets/agents/hermes.png',['image/png',path.join(__dirname,'../ui/assets/agents/hermes.png')]],
         ['/assets/agents/claude.png',['image/png',path.join(__dirname,'../ui/assets/agents/claude.png')]],
-        ['/assets/agents/codex.png',['image/png',path.join(__dirname,'../ui/assets/agents/codex.png')]],
+        ['/assets/agents/codex.svg',['image/svg+xml',path.join(__dirname,'../ui/assets/agents/codex.svg')]],
         ['/assets/agents/openclaw.svg',['image/svg+xml',path.join(__dirname,'../ui/assets/agents/openclaw.svg')]],
         ['/vendor/xterm.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/xterm/lib/xterm.js')]],
         ['/vendor/xterm.css',['text/css',path.join(__dirname,'../node_modules/@xterm/xterm/css/xterm.css')]],
         ['/vendor/addon-fit.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-fit/lib/addon-fit.js')]]
       ]);
+      // Icon library: any bundled SVG in ui/assets/icons, by strict file name only.
+      const iconAsset=pathname=>/^\/assets\/icons\/[a-z0-9-]{1,40}\.svg$/.test(pathname)?['image/svg+xml',path.join(__dirname,'../ui/assets/icons',path.basename(pathname))]:null;
       protocol.handle('agenthub',async request=>{
-        const u=new URL(request.url),asset=assets.get(u.pathname);
+        const u=new URL(request.url),asset=assets.get(u.pathname)||iconAsset(u.pathname);
         if(u.hostname!=='app'||u.username||u.password||u.search||!asset||request.method!=='GET')return new Response('Not found',{status:404});
         try{return new Response(await fs.readFile(asset[1]),{headers:{'Content-Type':asset[0],'X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"}});}catch{return new Response('A packaged UI resource is missing. Reinstall Opaya.',{status:404});}
       });
@@ -83,7 +85,7 @@ if(hostMode){
         {label:'View',submenu:[{role:'resetZoom'},{role:'zoomIn'},{role:'zoomOut'},{type:'separator'},{role:'togglefullscreen'},...(!app.isPackaged?[{role:'toggleDevTools'}]:[])]},
         ...(mac?[{role:'windowMenu'}]:[])
       ]));
-      win=new BrowserWindow({width:1440,height:960,minWidth:940,minHeight:680,title:BRAND,icon:path.join(__dirname,'../build/icon.png'),backgroundColor:'#111214',show:false,autoHideMenuBar:true,...(process.platform==='darwin'?{titleBarStyle:'hiddenInset'}:{}),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true,allowRunningInsecureContent:false,webviewTag:false}});
+      win=new BrowserWindow({width:1440,height:960,minWidth:940,minHeight:680,title:BRAND,icon:path.join(__dirname,'../build/icon.png'),backgroundColor:'#111214',show:false,autoHideMenuBar:true,frame:false,...(process.platform==='darwin'?{roundedCorners:true}:{}),webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false,webSecurity:true,allowRunningInsecureContent:false,webviewTag:false}});
       win.webContents.setWindowOpenHandler(()=>({action:'deny'}));
       win.webContents.on('will-navigate',event=>event.preventDefault());
       win.webContents.on('will-attach-webview',event=>event.preventDefault());
@@ -93,6 +95,10 @@ if(hostMode){
         const editable=params.isEditable,selection=!!params.selectionText?.trim();if(!editable&&!selection)return;
         Menu.buildFromTemplate(editable?[{role:'undo',enabled:params.editFlags.canUndo},{role:'redo',enabled:params.editFlags.canRedo},{type:'separator'},{role:'cut',enabled:params.editFlags.canCut},{role:'copy',enabled:params.editFlags.canCopy},{role:'paste',enabled:params.editFlags.canPaste},{type:'separator'},{role:'selectAll'}]:[{role:'copy'},{role:'selectAll'}]).popup({window:win});
       });
+      // Opaya draws its own window controls on Windows, macOS and Linux.
+      const windowState=()=>{if(!win.isDestroyed())win.webContents.send('hub:window-state',{maximized:win.isMaximized(),fullscreen:win.isFullScreen(),focused:win.isFocused()});};
+      for(const event of ['maximize','unmaximize','enter-full-screen','leave-full-screen','focus','blur'])win.on(event,windowState);
+      win.webContents.on('did-finish-load',windowState);
       client.on('state',value=>{if(!win.isDestroyed())win.webContents.send('hub:state',value);});
       client.on('terminal',value=>{for(const w of [win,...terminalWindows.values()])if(!w.isDestroyed())w.webContents.send('hub:terminal',value);});
       const pendingApprovals=new Map(),approvalFile=path.join(app.getPath('userData'),'approval-rules.json');
@@ -105,11 +111,19 @@ if(hostMode){
         pendingApprovals.set(request.id,{key,expires:Date.now()+120000});win.webContents.send('hub:approval',request);
       });
       client.on('closed',()=>{if(!quitting&&!smoke&&!win.isDestroyed())win.webContents.send('hub:service-error','Session service disconnected. Reopen Opaya to reconnect. Saved history has not been deleted.');});
-      const forwards=['snapshot','saveAgent','reorderAgents','updateAgentDisplay','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
+      const forwards=['installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaStop','opayaClear','snapshot','saveAgent','reorderAgents','updateAgentDisplay','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
       const handlers=Object.fromEntries(forwards.map(method=>[method,input=>client.call(method,input)]));
       for(const method of ['agentModels','selectModel','gateway'])handlers[method]=input=>client.call(method,input);
       handlers.terminalRename=async input=>{const title=await client.call('terminalRename',input);terminalWindows.get(input.id)?.setTitle(title);return title;};
       Object.assign(handlers,{
+        windowControl:async x=>{
+          if(x.action==='minimize')win.minimize();
+          else if(x.action==='maximize'){if(win.isFullScreen())win.setFullScreen(false);else if(win.isMaximized())win.unmaximize();else win.maximize();}
+          else if(x.action==='fullscreen')win.setFullScreen(!win.isFullScreen());
+          else if(x.action==='close')win.close();
+          else if(x.action!=='state')throw new Error('Unknown window action.');
+          return {maximized:win.isMaximized(),fullscreen:win.isFullScreen(),focused:win.isFocused()};
+        },
         terminalPopout:async x=>{
           const item=await client.call('terminalAttach',x);const existing=terminalWindows.get(item.id);if(existing){existing.show();existing.focus();return true;}
           const popup=new BrowserWindow({width:1000,height:650,minWidth:480,minHeight:300,title:item.title,backgroundColor:'#111315',autoHideMenuBar:true,webPreferences:{preload:path.join(__dirname,'preload.cjs'),contextIsolation:true,sandbox:true,nodeIntegration:false}});terminalWindows.set(item.id,popup);
@@ -119,7 +133,7 @@ if(hostMode){
         },
         approvalAnswer:async x=>{const pending=pendingApprovals.get(x.id);if(!pending)return false;pendingApprovals.delete(x.id);if(Date.now()>pending.expires){client.answer(x.id,false);return false;}if(x.choice==='always'){approvalRules.add(pending.key);await fs.writeFile(approvalFile,JSON.stringify([...approvalRules]),{mode:0o600});}client.answer(x.id,x.choice==='once'||x.choice==='always');return true;},
         pick:async x=>{if(!['directory','identityFile','executable'].includes(x.kind))throw new Error('Invalid file picker.');const result=await dialog.showOpenDialog(win,{title:'Choose '+x.kind,properties:[x.kind==='directory'?'openDirectory':'openFile']});return result.canceled?'':result.filePaths[0];},
-        openDocs:x=>{if(!Object.hasOwn(docs,x.topic))throw new Error('Unknown documentation topic.');return shell.openExternal(docs[x.topic]);},
+        openDocs:x=>{const framework=String(x.topic||'').startsWith('framework:')&&require('./catalog.cjs').FRAMEWORKS.find(f=>'framework:'+f.id===x.topic);if(framework)return shell.openExternal(framework.docs);if(!Object.hasOwn(docs,x.topic))throw new Error('Unknown documentation topic.');return shell.openExternal(docs[x.topic]);},
         exportConversation:async x=>{const {conversation:c,agent:a,messages}=await client.call('transcript',x);const result=await dialog.showSaveDialog(win,{title:'Export conversation',defaultPath:(c.title.replace(/[^a-zA-Z0-9 -]/g,'').slice(0,70)||'conversation')+'.md',filters:[{name:'Markdown',extensions:['md']}]});if(result.canceled||!result.filePath)return false;await fs.writeFile(result.filePath,`# ${c.title}\n\nAgent: ${a.name}\n\n`+messages.map(m=>`## ${m.role==='user'?'You':a.name}\n\n${m.content}\n${m.error?'> '+m.error:''}\n`).join('\n'),{mode:0o600});return true;}
       });
       for(const [method,handler]of Object.entries(handlers))ipcMain.handle(`hub:${method}`,async(event,input)=>{
