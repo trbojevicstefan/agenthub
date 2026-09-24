@@ -65,8 +65,10 @@ class Terminals{
       if(mode==='agent')remote=remoteCommand(agent,this.cliArgs(agent));
       else if(dockerShell)remote=remoteCommand(agent,dockerShell);
       else remote=(agent.cwd?`cd ${quote(agent.cwd)} || exit 1; `:'')+(agent.hermesHome?`export HERMES_HOME=${quote(agent.hermesHome)}; `:'')+'exec "${SHELL:-/bin/sh}" -l';
-      sessionName=tmuxName(agent,mode);
-      remote=tmuxCommand(sessionName,remote,{existing:!!agent.tmuxSession});
+      // Service-run commands (installs, diagnostics) go to ssh as the remote command, so SSH prompts cannot swallow them.
+      if(agent.ephemeral&&agent.run)remote=`${agent.run}; printf '\n[Finished. This shell stays open.]\n'; exec "\${SHELL:-/bin/sh}" -l`;
+      // One-off service terminals (installs, diagnostics) must work on fresh hosts without tmux.
+      if(!agent.ephemeral){sessionName=tmuxName(agent,mode);remote=tmuxCommand(sessionName,remote,{existing:!!agent.tmuxSession});}
       args=[...sshArgs(host,{interactive:true}),'-tt',target(host),remote];cwd=os.homedir();
     }else if(agent.command==='docker'&&dockerExecContainerIndex(agent.args)>=0){
       command=findExecutable('docker',env);if(!command)throw new Error('Docker client is not installed on this computer.');

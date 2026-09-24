@@ -24,6 +24,20 @@ Conversations, drafts, exact provider session IDs, selected conversations and wi
 
 A power loss, OS reboot or explicitly stopping the session service cannot keep a **local OS process** alive. Its saved history remains. Codex and Claude structured chat resume stored provider IDs where supported. ACP resume support is negotiated. Remote terminals use **tmux** so they survive an SSH client disconnect; reboot survival requires the remote machine's own service/session setup. Saved terminal history is clearly distinguished from a live process.
 
+## Opaya Agent
+
+The **Opaya Agent** (top of the sidebar) is a built-in assistant for the app itself: it installs agent frameworks, connects and maintains agents, manages SSH machines and keys, and troubleshoots agents that do not work. Connect it to a model in **Model settings**, like a Hermes gateway: OpenAI, Anthropic, OpenRouter, a local Ollama or LM Studio model, a Hermes gateway, or any OpenAI-compatible `/v1` API. The key is stored with OS encryption.
+
+Safety boundary: it acts only through Opaya's own tools (connections and machines through the same validation as the UI, read-only discovery, fixed diagnostics, and vendor install commands from `desktop/catalog.cjs`). Every change and every command opens a native approval dialog and runs in a visible terminal. It never receives API tokens, has no generic shell or file access, and cannot modify the app. Its config, chat and notes live in `<app data>/opaya-agent`.
+
+## Install agents
+
+**Install agents** (Workspace, the Add dialog, right-click the sidebar, or ask the Opaya Agent) installs Hermes Agent, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider or Ollama with one click, on this computer or on a saved SSH machine. Opaya shows the exact vendor command first and runs it in a terminal you can watch. Then run Discover to add the agent.
+
+## Icons and window
+
+Agents show their official logos. Right-click an agent and choose **Change icon** to pick one of 33 library icons (LobeHub Icons, MIT) or upload a PNG, JPEG or WebP. Opaya draws its own window controls on Windows, Linux and macOS.
+
 ## Everyday use
 
 Right-click any agent in the sidebar or on the Workspace cards (or use its `⋯` button) to open, start a new conversation, connect/disconnect, open a shell or the native CLI, pin, rename, reorder, edit or remove it. Pinning and renaming do not interrupt a live connection. Right-click a terminal tab to rename it, move it to its own window or end it; right-click empty sidebar space for Discover, Add connection, Machines, a local terminal and the theme. Text fields and selections keep the standard copy/paste menu. Animations follow the OS *reduce motion* setting.

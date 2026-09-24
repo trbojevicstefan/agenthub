@@ -1,4 +1,13 @@
-# Opaya 0.3.0 - Windows and macOS preview
+# Opaya 0.4.0 - Opaya Agent preview
+
+- **Opaya Agent**: a built-in assistant for installing, connecting, maintaining and troubleshooting agents, machines and SSH keys. It connects to any OpenAI-compatible model API (OpenAI, Anthropic, OpenRouter, Ollama, LM Studio, a Hermes gateway). Changes and commands always need your approval; it never sees API tokens and cannot modify the app.
+- **One-click installs** of Hermes Agent, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider and Ollama, locally or on a saved SSH machine, in a visible terminal.
+- **Own window frame** with Opaya window controls on Windows, Linux and macOS.
+- **Stop keeps the agent connected**: Stop now cancels only the current answer (HTTP abort, ACP cancel, Codex interrupt, Claude turn) and keeps the partial text; the connection is only reset if an agent ignores the cancel for 15 seconds.
+- **Hermes communication**: long tool runs no longer drop after 5 minutes of silence (no fetch body/header timeout for chat, inactivity limit of 15 minutes instead of a hard 10-minute cap), streams that end with `finish_reason` but no `[DONE]` are complete, reasoning shows as "Thinking", array content is read, and gateway errors include the gateway's message.
+- **Codex icon** instead of the OpenAI logo, and an **icon library** (33 icons) plus image upload per agent.
+
+## Earlier: 0.3.0 - Windows and macOS preview
 
 **One place. All your agents.** AgentHub is now **Opaya** ([opaya.dev](https://opaya.dev)).
 

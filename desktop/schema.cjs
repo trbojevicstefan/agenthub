@@ -53,6 +53,14 @@ function host(input) {
   if (identityFile && !(path.posix.isAbsolute(identityFile) || path.win32.isAbsolute(identityFile))) throw new Error('Choose an absolute path to the SSH identity file.');
   return {id: input.id ? id(input.id) : randomUUID(), name: text(input.name, 'host name', 80, alias || hostname).trim() || alias || hostname, alias, hostname, username, port: port(input.port), identityFile};
 }
+// Agent picture: '' (provider default), 'lib:<name>' from the bundled icon library, or a small uploaded raster image.
+function avatar(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string') throw new Error('Invalid agent icon.');
+  if (/^lib:[a-z0-9-]{1,40}$/.test(value)) return value;
+  if (value.length <= 200000 && /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)) return value;
+  throw new Error('Agent icons must be a library icon or a PNG, JPEG or WebP image under 150 KB.');
+}
 function agent(input) {
   if (!input || typeof input !== 'object') throw new Error('Missing agent.');
   const provider = input.provider || 'custom';
@@ -79,6 +87,7 @@ function agent(input) {
     tmuxSession: input.tmuxSession ? id(input.tmuxSession) : '',
     note: text(input.note, 'note', 400), displayName: text(input.displayName, 'display name', 80).trim(),
     description: text(input.description, 'description', 500).trim(), icon: text(input.icon, 'icon', 16).trim(),
+    avatar: avatar(input.avatar),
     pinned: Boolean(input.pinned), createdAt: input.createdAt || new Date().toISOString()
   };
 }
@@ -86,4 +95,4 @@ function prompt(value) {
   if (typeof value !== 'string' || !value.trim() || value.length > 80000 || value.includes('\0')) throw new Error('Enter a message shorter than 80,000 characters.');
   return value;
 }
-module.exports = {text, id, port, endpoint, host, agent, prompt, parseAddress};
+module.exports = {text, id, port, endpoint, host, agent, avatar, prompt, parseAddress};

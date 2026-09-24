@@ -19,6 +19,16 @@ class SSE {
   }
   end() { if(this.buffer.trim())this.feed('\n\n'); }
 }
+// Node's fetch drops a response after 300 s without data (and waits at most 300 s for headers). Hermes and other
+// gateways run tools for minutes without sending anything, so chat requests use a dispatcher without those timeouts;
+// the broker's inactivity limit and the Stop button still end a turn.
+let streamingDispatcher;
+function longRequestDispatcher(){
+  if(!streamingDispatcher){try{const current=globalThis[Symbol.for('undici.globalDispatcher.1')];if(current)streamingDispatcher=new current.constructor({bodyTimeout:0,headersTimeout:0});}catch{}}
+  return streamingDispatcher||undefined;
+}
+// Text from OpenAI-style content, which may be a string or an array of typed parts.
+const textOf=content=>typeof content==='string'?content:Array.isArray(content)?content.map(p=>typeof p==='string'?p:p?.type==='text'||p?.type==='output_text'?String(p.text||''):'').join(''):'';
 class HttpAdapter {
   constructor({agent,host,token,fetchImpl=fetch}) { this.agent=agent;this.host=host;this.token=token;this.fetch=async(...args)=>{try{return await fetchImpl(...args);}catch(error){if(error.name==='AbortError'||error.name==='TimeoutError')throw error;throw new Error(`Cannot reach ${agent.provider} gateway at ${agent.endpoint}${agent.transport==='ssh'?' on the selected VPS':''}. Check Gateway status, or use the native CLI/ACP connection when its API is disabled.`);}};this.url=agent.endpoint;this.tunnel=null; }
   headers() { return {'Content-Type':'application/json',...(this.token?{Authorization:`Bearer ${this.token}`}:{})}; }
@@ -32,8 +42,17 @@ class HttpAdapter {
     this.models=data.data.slice(0,200).map(x=>x.id).filter(x=>typeof x==='string'&&x.length<=256);
     return {models:this.models,description:this.agent.transport==='ssh'?'Private SSH tunnel established':'API authenticated'};
   }
+  async failureFrom(r){
+    let detail='';
+    if(![401,403].includes(r.status)){try{const body=(await limitedBody(r,64*1024)).trim();try{const data=JSON.parse(body);detail=String(data.error?.message||data.detail||data.message||'');}catch{detail=body;}}catch{}}
+    else await r.body?.cancel();
+    detail=detail.replace(/\s+/g,' ').slice(0,300);
+    return this.failure(r.status)+(detail?` Gateway said: ${detail}`:'');
+  }
   failure(status) {
     if(status===401||status===403)return 'API authentication failed. Edit this agent and add or import its gateway token.';
+    if(status===429)return 'The gateway is rate limited or busy (HTTP 429). Wait a moment and send again.';
+    if(status>=500)return `The ${this.agent.provider==='hermes'?'Hermes gateway':'gateway'} failed while answering (HTTP ${status}). Check its logs in Terminal${this.agent.provider==='hermes'?' (hermes gateway status)':''}.`;
     if(status===404)return this.agent.provider==='openclaw'?'Enable gateway.http.endpoints.chatCompletions on OpenClaw, then reconnect.':'API route not found. Verify the base URL ends with /v1 and that this gateway API is enabled.';
     return `API request failed (HTTP ${status}). Check the agent gateway in Terminal.`;
   }
@@ -52,32 +71,39 @@ class HttpAdapter {
     if(this.agent.provider==='openclaw') { payload.user=`agenthub:${conversation.id}`;payload.messages=[{role:'user',content:text}]; }
     const headers=this.headers();
     if(this.agent.provider==='hermes'){headers['X-Hermes-Session-Id']=conversation.id;headers['X-Hermes-Session-Key']=`agenthub:${this.agent.id}:${conversation.id}`;}
-    const r=await this.fetch(`${this.url}/chat/completions`,{method:'POST',headers,body:JSON.stringify(payload),signal,redirect:'error'});
-    if(!r.ok) { await r.body?.cancel();throw new Error(this.failure(r.status)); }
+    const r=await this.fetch(`${this.url}/chat/completions`,{method:'POST',headers:{...headers,Accept:'text/event-stream'},body:JSON.stringify(payload),signal,redirect:'error',dispatcher:longRequestDispatcher()});
+    if(!r.ok) throw new Error(await this.failureFrom(r));
     if(!(r.headers.get('content-type')||'').includes('text/event-stream')) {
       const data=JSON.parse(await limitedBody(r,2*1024*1024));
       if(data.error)throw new Error(String(data.error.message||'Agent API failed.'));
-      const content=data.choices?.[0]?.message?.content;
-      if(data.choices?.[0]?.message?.tool_calls)throw new Error('This endpoint requested client-side tools. Connect an agent gateway or ACP server instead.');
-      if(typeof content!=='string')throw new Error('API returned no assistant text. This client does not execute model-side tool calls.');
+      const message=data.choices?.[0]?.message||{},content=textOf(message.content);
+      if(message.tool_calls?.length)throw new Error('This endpoint requested client-side tools. Connect an agent gateway or ACP server instead.');
+      if(!content&&typeof message.content!=='string')throw new Error('API returned no assistant text. This client does not execute model-side tool calls.');
       onEvent({type:'text',text:content});return {};
     }
     if(!r.body)throw new Error('API returned an empty stream.');
-    let completed=false,bytes=0;
+    let completed=false,ended=false,bytes=0,thinking=false;
     const parser=new SSE((event,raw)=>{
-      if(raw==='[DONE]'){completed=true;return;}
+      if(raw==='[DONE]'){completed=ended=true;return;}
       let data;try{data=JSON.parse(raw);}catch{throw new Error('Invalid JSON in API event stream.');}
       if(data.error)throw new Error(String(data.error.message||'The agent run failed.'));
-      if(event==='hermes.tool.progress'||event==='tool.started'||event==='tool.completed') {
-        onEvent({type:'activity',text:`${event}: ${String(data.tool_name||data.name||data.status||'agent tool').slice(0,180)}`});return;
+      // Hermes and other gateways report their own tool runs as named events; show them as activity.
+      if(event!=='message'&&/tool|progress|status|step/i.test(event)) {
+        const name=String(data.tool_name||data.tool||data.name||data.label||data.status||data.message||'agent tool').slice(0,160);
+        onEvent({type:'activity',text:`${event.replace(/^hermes\./,'').replace(/[._]/g,' ')}: ${name}`});return;
       }
-      const delta=data.choices?.[0]?.delta?.content;
-      if(typeof delta==='string') {bytes+=delta.length;if(bytes>2*1024*1024)throw new Error('Assistant output exceeds the safety limit.');onEvent({type:'text',text:delta});}
-      if(data.choices?.[0]?.delta?.tool_calls)throw new Error('This endpoint requested client-side tools. Use an agent gateway that executes its own tools, or connect through ACP.');
+      const choice=data.choices?.[0]||{},delta=choice.delta||choice.message||{};
+      const reasoning=delta.reasoning_content??delta.reasoning;
+      if(!thinking&&typeof reasoning==='string'&&reasoning.trim()){thinking=true;onEvent({type:'activity',text:'Thinking'});}
+      const text=textOf(delta.content);
+      if(text) {bytes+=text.length;if(bytes>2*1024*1024)throw new Error('Assistant output exceeds the safety limit.');onEvent({type:'text',text});}
+      if(delta.tool_calls?.length)throw new Error('This endpoint requested client-side tools. Use an agent gateway that executes its own tools, or connect through ACP.');
+      // Some gateways end with finish_reason and close without the [DONE] marker; that is a complete answer.
+      if(choice.finish_reason&&choice.finish_reason!=='tool_calls')completed=true;
     });
     const reader=r.body.getReader(),decoder=new TextDecoder();
     try {
-      while(true){const {done,value}=await reader.read();if(done)break;parser.feed(decoder.decode(value,{stream:true}));if(completed)break;}
+      while(true){const {done,value}=await reader.read();if(done)break;parser.feed(decoder.decode(value,{stream:true}));if(ended)break;}
       parser.feed(decoder.decode());parser.end();
       if(!completed)throw new Error('The stream disconnected before its completion marker. Partial output was kept; the task may still be running remotely.');
     }finally{await reader.cancel().catch(()=>{});}

@@ -154,3 +154,106 @@ body[data-theme="light"] .status-pill.disconnected{background:#eef1f2;border-col
 body[data-theme="light"] .status-pill.error{background:#fbe9e6;border-color:#efc3bb;color:#a13e30}
 body[data-theme="light"] .status-pill.connecting{background:#fbf2dc;border-color:#ecd49a;color:#86600c}
 body[data-theme="light"] .orbit-signal{background:#0f8a57;box-shadow:0 0 0 5px #e3f4ea}
+
+/* Frameless window: Opaya draws its own controls on Windows, Linux and macOS. */
+body.frameless .topbar,body.frameless .sidebar{-webkit-app-region:drag}
+body.frameless .topbar :is(button,select,input,a,.status-pill),body.frameless .sidebar :is(button,input,a,.agent-list,.agent-nav-row),dialog,.context-menu,.toast,.window-controls button{-webkit-app-region:no-drag}
+body.frameless:not([data-platform="darwin"]) .topbar{padding-right:156px}
+.window-controls{position:fixed;z-index:10002;display:flex;-webkit-app-region:no-drag}
+.window-controls:empty{display:none}
+.window-controls.win{top:0;right:0;height:40px}
+.window-controls.win button{width:46px;height:40px;border-radius:0;border:0;color:#aeb8bd;padding:0;transition:background .15s,color .15s}
+.window-controls.win button:hover{background:#2a3134;color:#fff}
+.window-controls.win button.wc-close:hover{background:#c42b1c;color:#fff}
+.window-controls.win svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1.1}
+.window-controls.mac{top:15px;left:15px;gap:8px}
+.window-controls.mac button{width:13px;height:13px;min-width:0;padding:0;border-radius:50%;border:1px solid #0000001f;display:grid;place-items:center;transition:filter .15s,transform .15s}
+.window-controls.mac .wc-close{background:#ff5f57}.window-controls.mac .wc-min{background:#febc2e}.window-controls.mac .wc-max{background:#28c840}
+.window-controls.mac svg{width:8px;height:8px;fill:none;stroke:#0000008c;stroke-width:1.4;opacity:0;transition:opacity .12s}
+.window-controls.mac:hover svg{opacity:1}
+body.window-blurred .window-controls.mac button{background:#4a4f52;border-color:#5a5f62}
+body.window-blurred .window-controls.win button{color:#6f797e}
+body.window-fullscreen .window-controls.mac{opacity:0;transition:opacity .2s}body.window-fullscreen .window-controls.mac:hover{opacity:1}
+body[data-theme="light"] .window-controls.win button{color:#4b5752}
+body[data-theme="light"] .window-controls.win button:hover{background:#e3e9e4;color:#111}
+body[data-theme="light"] .window-controls.win button.wc-close:hover{background:#c42b1c;color:#fff}
+body[data-theme="light"].window-blurred .window-controls.mac button{background:#d7ddd8;border-color:#c5ccc7}
+
+/* Opaya Agent entry in the sidebar. */
+.nav-opaya{display:flex;width:100%;justify-content:flex-start;gap:9px;padding:8px 8px;margin:2px 0 4px;border:1px solid #2f3d36;background:linear-gradient(135deg,#1c2a23,#18201c);border-radius:8px;text-align:left}
+.nav-opaya:hover{border-color:#4a6b58;background:linear-gradient(135deg,#213229,#1b241f)}
+.nav-opaya.selected{border-color:#4fe39a88;box-shadow:0 0 0 1px #4fe39a33 inset}
+.nav-opaya-text{display:flex;flex-direction:column;min-width:0}
+.nav-opaya-text strong{font-size:11px;font-weight:600;color:#e3f5ea}
+.nav-opaya-text small{font-size:9px;color:#8fb09e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+.nav-opaya.busy small{color:#dfc789}
+.opaya-mark.small{width:18px;height:18px}.opaya-mark.small i{inset:-3px}.opaya-mark.small i:after{width:4px;height:4px;margin-left:-2px}
+body[data-theme="light"] .nav-opaya{background:linear-gradient(135deg,#e6f5ec,#f3f8f4);border-color:#b8dcc6}
+body[data-theme="light"] .nav-opaya-text strong{color:#133322}body[data-theme="light"] .nav-opaya-text small{color:#3d6b52}
+body[data-theme="light"] .nav-opaya.selected{border-color:#0f8a57;box-shadow:0 0 0 1px #0f8a5733 inset}
+
+/* Opaya Agent chat and setup. */
+.opaya-avatar{background:#f6f7f3!important;border-color:#cfe5d7!important}
+.opaya-avatar .opaya-mark{width:62%;height:62%}.opaya-avatar .opaya-mark i{display:none}
+.agent-avatar.large.opaya-avatar .opaya-mark{width:64%;height:64%}.agent-avatar.large.opaya-avatar .opaya-mark i{display:block;inset:-7px}
+.message-avatar.opaya-avatar .opaya-mark{position:relative;width:18px;height:18px}
+.opaya-setup{display:grid;grid-template-columns:120px 1fr;gap:28px;align-items:center;max-width:830px;margin:10px auto 0;padding:28px 30px;border:1px solid #33443b;border-radius:14px;background:radial-gradient(circle at 12% 30%,#4fe39a1f,transparent 45%),#18201c;animation:op-pop .45s cubic-bezier(.2,.8,.2,1) both}
+.opaya-setup-art{display:grid;place-items:center;height:120px}
+.opaya-setup h2{font-size:22px;letter-spacing:-.4px}
+.opaya-setup p{color:#a7b7ae;margin-top:8px;line-height:1.65}
+.opaya-abilities{list-style:none;padding:0;margin:16px 0;display:grid;gap:7px}
+.opaya-abilities li{font-size:12px;color:#b9c8bf;padding-left:18px;position:relative}
+.opaya-abilities li:before{content:"";position:absolute;left:0;top:7px;width:7px;height:7px;border-radius:50%;background:#4fe39a}
+.opaya-abilities strong{color:#e6f4ea;margin-right:4px}
+.opaya-setup-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+body[data-theme="light"] .opaya-setup{background:radial-gradient(circle at 12% 30%,#4fe39a2e,transparent 45%),#fff;border-color:#cfe2d6}
+body[data-theme="light"] .opaya-setup p,body[data-theme="light"] .opaya-abilities li{color:#4f6158}
+body[data-theme="light"] .opaya-abilities strong{color:#15271d}
+body[data-theme="light"] .opaya-abilities li:before{background:#0f8a57}
+.preset-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-bottom:16px}
+.preset-option{display:flex;gap:9px;align-items:flex-start;padding:10px 11px;border:1px solid #37433d;border-radius:9px;cursor:pointer;transition:border-color .15s,background .15s}
+.preset-option:hover{border-color:#5c7a69}
+.preset-option:has(input:checked){border-color:#4fe39a;background:#4fe39a14}
+.preset-option input{margin-top:2px;accent-color:#4fe39a}
+.preset-option span{display:flex;flex-direction:column;min-width:0}
+.preset-option strong{font-size:12px}.preset-option small{font-size:10px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body[data-theme="light"] .preset-option{border-color:#d3ddd6}
+body[data-theme="light"] .preset-option:has(input:checked){border-color:#0f8a57;background:#e6f5ec}
+.opaya-boundary{margin:14px 0 4px;padding:12px 14px;border:1px solid #37433d;border-left:3px solid #4fe39a;border-radius:8px;background:#141a17}
+.opaya-boundary strong{font-size:12px}.opaya-boundary p{font-size:11px;line-height:1.7;color:var(--muted);margin-top:4px}
+body[data-theme="light"] .opaya-boundary{background:#f3f8f5;border-color:#d3e2d8;border-left-color:#0f8a57}
+
+/* Install catalog. */
+.install-target{display:flex;flex-wrap:wrap;align-items:center;gap:7px;margin-bottom:16px;font-size:11px;color:var(--muted)}
+.install-target>span{margin-right:4px}
+.target-chip{padding:5px 11px;border:1px solid #3a4540;border-radius:999px;font-size:11px}
+.target-chip.selected{border-color:#4fe39a;background:#4fe39a1f;color:#d9f7e6}
+.target-chip.add{border-style:dashed;color:var(--muted)}
+body[data-theme="light"] .target-chip{border-color:#cdd8d0}
+body[data-theme="light"] .target-chip.selected{border-color:#0f8a57;background:#e3f4ea;color:#11442b}
+.install-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px}
+.install-card{display:flex;flex-direction:column;gap:10px;padding:15px;border:1px solid #34403a;border-radius:11px;background:#1a211d;animation:op-pop .35s cubic-bezier(.2,.8,.2,1) both}
+.install-card:nth-child(2){animation-delay:30ms}.install-card:nth-child(3){animation-delay:60ms}.install-card:nth-child(4){animation-delay:90ms}.install-card:nth-child(n+5){animation-delay:120ms}
+.install-card-top{display:flex;gap:11px;align-items:center}
+.install-card h3{font-size:13px}.install-card small{font-size:10px;color:var(--faint)}
+.install-card p{font-size:11px;line-height:1.6;color:var(--muted);flex:1}
+.install-card button{align-self:flex-start}
+.install-card.unavailable{opacity:.6}
+.agent-avatar.no-logo{background:#2a3430}
+body[data-theme="light"] .install-card{background:#fff;border-color:#d3ddd6}
+.install-command{margin:10px 0;padding:12px 14px;border-radius:8px;background:#0f1412;border:1px solid #2d3a33;color:#bff3d2;font-size:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+body[data-theme="light"] .install-command{background:#f2f6f3;border-color:#d3ddd6;color:#0f4a2e}
+.install-glyph{font-weight:700}
+.section-actions{display:flex;gap:18px;align-items:center}
+
+/* Icon library and agent pictures. */
+.icon-library{display:grid;grid-template-columns:repeat(auto-fill,minmax(82px,1fr));gap:8px;max-height:52vh;overflow:auto;padding:2px}
+.icon-choice{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 4px;border:1px solid transparent;border-radius:10px}
+.icon-choice small{font-size:10px;color:var(--muted);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.icon-choice:hover{border-color:#3d4c44}
+.icon-choice.selected{border-color:#4fe39a;background:#4fe39a14}
+body[data-theme="light"] .icon-choice.selected{border-color:#0f8a57;background:#e6f5ec}
+.upload-button{cursor:pointer}
+.agent-avatar.has-avatar{background:#f6f7f3!important;border-color:#d6ddd5!important;overflow:hidden}
+.agent-logo.custom-logo[src^="data:"]{width:100%;height:100%;object-fit:cover;border-radius:inherit}
+body:not([data-theme="light"]) .agent-avatar.has-avatar{background:#eef1ec!important;border-color:#56625b!important}
