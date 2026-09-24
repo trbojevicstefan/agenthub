@@ -143,11 +143,13 @@ class Broker{
     r.models=(r.models||[]).filter(m=>typeof m==='string'&&m.length<=256).slice(0,500);
     this.changed();return {models:r.models||[],selected:a.model||''};
   }
-  async selectModel({id,model}){
+  // scope 'default' sets the agent's model for every chat; scope 'conversation' overrides it for one chat only.
+  async selectModel({id,model,scope='default',conversationId}){
     const a=this.agent(id);if(this.turns.has(id)||this.connecting.has(id))throw new Error('Wait for the current operation before changing models.');
     model=schema.text(model,'model',256).trim();
     if(a.protocol==='acp'&&model&&!(this.runtimeFor(id).models||[]).includes(model))throw new Error('Refresh models and choose an available ACP model.');
     if(a.protocol==='terminal')throw new Error('Choose the model in this agent\'s CLI.');
+    if(scope==='conversation'){const c=this.data.conversations.find(c=>c.id===schema.id(conversationId)&&c.agentId===a.id);if(!c)throw new Error('Start a conversation first.');c.model=model;await this.persist();return true;}
     a.model=model;await this.persist();return true;
   }
   async gateway({id,operation}){

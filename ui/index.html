@@ -27,6 +27,7 @@
     <main class="main-area">
       <header id="topbar" class="topbar"></header>
       <section id="content" class="content" aria-live="off"></section>
+      <aside id="files-panel" class="files-panel" hidden aria-label="Files"></aside>
       <section id="terminal-panel" class="terminal-panel" hidden aria-label="Integrated terminal"><div class="terminal-toolbar"><strong><span class="terminal-glyph">&gt;_</span> <span id="terminal-title">Terminal</span></strong><span class="terminal-hint">Persistent session / close window safely</span><div><button data-action="terminal-shell" title="Open shell for the selected agent">New shell</button><button data-action="terminal-cli" title="Launch the selected agent's native interactive CLI">Run CLI</button><button data-action="terminal-detach" title="Detach this remote terminal and keep its tmux session">Detach</button><button data-action="terminal-end" title="Terminate this terminal session">End session</button><button data-action="terminal-hide" class="icon-button" aria-label="Hide terminal without ending the session" title="Hide terminal">&#10005;</button></div></div><div id="terminal-tabs" class="terminal-tabs"></div><div id="terminal-views" class="terminal-views"></div></section>
       <footer class="statusbar"><span id="status-left">One place. All your agents.</span><span id="status-right">opaya.dev</span></footer>
     </main>

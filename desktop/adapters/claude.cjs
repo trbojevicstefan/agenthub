@@ -9,7 +9,7 @@ class ClaudeAdapter{
   async run(ctx){
     const args=[...this.agent.args,'-p','--output-format','stream-json','--verbose','--include-partial-messages','--permission-mode','default'];
     if(ctx.conversation.externalSessionId)args.push('--resume',ctx.conversation.externalSessionId);
-    if(this.agent.model)args.push('--model',this.agent.model);
+    const model=ctx.conversation.model||this.agent.model;if(model)args.push('--model',model);
     const child=this.spawnAgent(this.agent,args,this.host);this.child=child;
     return new Promise((resolve,reject)=>{
       let buffer='',stderr='',sessionId='',sawText=false,resultSeen=false,done=false,resultError='';

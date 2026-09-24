@@ -34,6 +34,12 @@ Safety boundary: it acts only through Opaya's own tools (connections and machine
 
 **Install agents** (Workspace, the Add dialog, right-click the sidebar, or ask the Opaya Agent) installs Hermes Agent, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider or Ollama with one click, on this computer or on a saved SSH machine. Opaya shows the exact vendor command first and runs it in a terminal you can watch. Then run Discover to add the agent.
 
+## Files and models
+
+**Files** (agent header, the Opaya Agent header, Machines, or right-click) opens a read-only side panel for the agent's folder, this computer or a saved SSH machine: folders, file previews up to 256 KB, and project info (git branch, uncommitted changes, recent commits, project files). **Terminal here** opens a shell in that folder, **Mention in message** puts the path into your message. Remote browsing needs `python3` on the machine.
+
+**Models** sets an agent's default model for every chat, or overrides it for the current chat only.
+
 ## Icons and window
 
 Agents show their official logos. Right-click an agent and choose **Change icon** to pick one of 33 library icons (LobeHub Icons, MIT) or upload a PNG, JPEG or WebP. Opaya draws its own window controls on Windows, Linux and macOS.

@@ -11,6 +11,7 @@ const path=require('node:path');
 const {randomUUID}=require('node:crypto');
 const schema=require('./schema.cjs');
 const catalog=require('./catalog.cjs');
+const files=require('./files.cjs');
 const {atomicJson,readJson}=require('./store.cjs');
 const {quote,target}=require('./process.cjs');
 
@@ -52,6 +53,9 @@ const TOOLS=[
   fn('remove_machine','Remove a saved SSH machine that no agent uses. The user approves it first.',{machine_id:{type:'string'}},['machine_id']),
   fn('install_framework','Install an agent framework or runtime in a visible terminal, on this computer or a saved machine. The user approves the exact command first.',{framework_id:{type:'string'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['framework_id']),
   fn('ssh_key','Create an ed25519 SSH key on this computer, or install a public key on a saved machine, in a visible terminal. The user approves it first and types any passphrase or password.',{action:{type:'string',enum:['generate','install']},key_name:{type:'string',description:'File name in ~/.ssh, letters, numbers, _ and -.'},machine_id:{type:'string'}},['action','key_name']),
+  fn('list_directory','Read-only: list a folder on this computer or a saved machine (default: home folder).',{path:{type:'string'},machine_id:{type:'string'}}),
+  fn('read_file','Read-only: read up to 256 KB of a text file on this computer or a saved machine. Secret files such as .env, keys and tokens are refused.',{path:{type:'string'},machine_id:{type:'string'}},['path']),
+  fn('project_info','Read-only: project markers, git branch, uncommitted changes and recent commits for a folder.',{path:{type:'string'},machine_id:{type:'string'}},['path']),
   fn('read_notes','Read your notes file in your home folder.'),
   fn('write_notes','Replace your notes file in your home folder (max 20000 characters). Use it to remember setup decisions.',{content:{type:'string'}},['content'])
 ];
@@ -100,7 +104,7 @@ class OpayaAgent{
       'Work only through your tools. Check the workspace before changing anything. Prefer the smallest change. Explain briefly what you will do before a change; every change and command is approved by the user in a native dialog, and a declined approval is final.',
       'You cannot edit the app itself, its code or files outside your home folder, and you never see or handle API tokens: ask the user to enter tokens in the connection form.',
       'For agents that fail: read the connection and error, run diagnostics, check that the endpoint/port or executable exists, reconnect, and only then propose an edited connection. Do not remove connections unless asked.',
-      'After an install finishes, use discover_agents and save_connection to add it. Terminal output may take a while; read it again if it is incomplete.',
+      'To understand a project or config, use list_directory, read_file and project_info (read-only). After an install finishes, use discover_agents and save_connection to add it. Terminal output may take a while; read it again if it is incomplete.',
       `Platform: ${this.platform}. Saved agents: ${s.agents.length}. Saved machines: ${s.hosts.length}. Your home folder: ${this.home}.`,
       'Answer in the language the user writes in. Be concise.'
     ].join('\n');
@@ -138,7 +142,8 @@ class OpayaAgent{
     finally{
       // Internal tool turns stay in history for context; the chat shows one reply per request.
       this.messages.push({...reply,summary:true});
-      this.busy=false;this.status='';this.controller=null;await this.persist().catch(()=>{});this.emit();
+      // Save before reporting idle, so nothing still writes to the home folder once a request is finished.
+      await this.persist().catch(()=>{});this.busy=false;this.status='';this.controller=null;this.emit();
     }
     return {ok:!reply.error};
   }
@@ -212,6 +217,9 @@ class OpayaAgent{
         const view=await this.runInTerminal({label:`SSH key ${name}`,key:`sshkey_${name}`,host:null,command});
         return {terminal_id:view.id,output:await this.terminalOutput(view.id,3000),identity_file:win?path.join(require('node:os').homedir(),'.ssh',name):`~/.ssh/${name}`};
       }
+      case 'list_directory':{const r=await files.browse({op:'list',path:String(args.path||''),host:this.host(args.machine_id)});return {...r,entries:r.entries.slice(0,300)};}
+      case 'read_file':{const p=String(args.path||'');if(files.isSecret(p))throw new Error('That file may contain secrets, so the Opaya Agent does not read it. Ask the user to check it in the Files panel.');const r=await files.browse({op:'read',path:p,host:this.host(args.machine_id)});if(files.isSecret(r.path))throw new Error('That file may contain secrets.');return {...r,text:r.text.slice(0,24000)};}
+      case 'project_info':return files.browse({op:'project',path:String(args.path||''),host:this.host(args.machine_id)});
       case 'read_notes':return {notes:await fs.readFile(path.join(this.home,'notes.md'),'utf8').catch(()=>'')};
       case 'write_notes':{const content=String(args.content??'');if(content.length>20000||content.includes('\0'))throw new Error('Notes must be under 20000 characters.');await fs.writeFile(path.join(this.home,'notes.md'),content,{mode:0o600});return {saved:true};}
       default:throw new Error('Unknown tool.');

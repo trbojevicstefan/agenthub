@@ -55,3 +55,11 @@ test('ssh key actions reject names that could inject shell syntax',async t=>{
   agent.begin('make a key');await settle(agent);
   assert.equal(commands.length,0);assert.match(JSON.parse(requests.at(-1).body.messages.find(m=>m.role==='tool').content).error,/key name/);
 });
+test('the Opaya Agent can read project files but never secret files',async t=>{
+  const dir=await temp(t);await fs.writeFile(path.join(dir,'README.md'),'hello project');await fs.writeFile(path.join(dir,'.env'),'API_KEY=sk-live-secret');
+  const {agent,requests}=await fixture(t,[call('read_file',{path:path.join(dir,'README.md')}),call('read_file',{path:path.join(dir,'.env')}),call('list_directory',{path:dir}),{content:'ok'}]);
+  agent.begin('look at my project');await settle(agent);
+  const results=requests.at(-1).body.messages.filter(m=>m.role==='tool').map(m=>JSON.parse(m.content));
+  assert.equal(results[0].text,'hello project');assert.match(results[1].error,/secrets/);assert(!JSON.stringify(requests).includes('sk-live-secret'));
+  assert.deepEqual(results[2].entries.map(e=>e.name).sort(),['.env','README.md']);
+});

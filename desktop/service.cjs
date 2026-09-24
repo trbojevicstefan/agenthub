@@ -10,6 +10,7 @@ const {server, endpoint} = require('./wire.cjs');
 const {alive} = require('./host-client.cjs');
 const schema = require('./schema.cjs');
 const catalog = require('./catalog.cjs');
+const files = require('./files.cjs');
 const {OpayaAgent} = require('./opaya-agent.cjs');
 async function start({app, safeStorage}, root) {
   let broker, terminals, listener, opaya, stopping = false;
@@ -70,6 +71,14 @@ async function start({app, safeStorage}, root) {
     terminalDetach:async x=>{terminals.detach(schema.id(x.id));emit();return true;},
     terminalClose:async x=>{const s=terminals.describe().find(s=>s.id===schema.id(x.id));if(!s)return false;const host=s.remote?broker.host(s.agentId.startsWith('host_')?s.agentId.slice(5):broker.agent(s.agentId).hostId):null;await terminals.end(x.id,host);emit();return true;},
     installFramework:async x=>{const host=x.hostId?broker.host(x.hostId):null;const {framework,command}=catalog.command(String(x.id||''),{remote:!!host});return runInTerminal({label:`Install ${framework.name}`,key:`install_${framework.id}`,host,command});},
+    files:async x=>{
+      let host=null,folder=typeof x.path==='string'?x.path:'',fallback=false;
+      if(x.agentId){const a=broker.agent(x.agentId);if(a.transport==='ssh')host=broker.host(a.hostId);if(!folder){folder=a.cwd||a.hermesHome||'';fallback=!!folder;}}
+      else if(x.hostId)host=broker.host(x.hostId);
+      try{return await files.browse({op:x.op,path:folder,host});}
+      // An agent folder inside a container may not exist on the host; fall back to the home folder.
+      catch(error){if(fallback&&x.op!=='read')return files.browse({op:x.op,path:'',host});throw error;}
+    },
     opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:()=>opaya.test(), opayaForgetKey:()=>opaya.forgetKey(),
     opayaSend:x=>opaya.begin(x.text), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),
     shutdown
