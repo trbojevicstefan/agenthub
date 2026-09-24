@@ -32,7 +32,7 @@ async function start({app, safeStorage}, root) {
     if (!socket) return false; // No UI present: never approve unattended operations.
     const id = randomUUID();
     return new Promise(resolve => {
-      const timer = setTimeout(() => finish(false), 120000);
+      const timer = setTimeout(() => finish(false), 10 * 60 * 1000);
       function finish(value) { clearTimeout(timer); approvals.delete(id); resolve(value); }
       approvals.set(id,{socket,finish}); listener.notify(socket,'approval',{id,agent:{name:agent.name},title,detail});
     });
@@ -55,6 +55,25 @@ async function start({app, safeStorage}, root) {
   terminals = new Terminals(event => { listener?.broadcast('terminal',event); if (event.type !== 'data') emit(); },{root});
   await terminals.init();
   // Installs and diagnostics run in visible one-off terminals; the UI is told to show them.
+  // Background jobs (clone, redeploy): no IPC timeout, live steps and log sent to every window, kept until dismissed.
+  const jobs=new Map();
+  function publishJob(job){listener?.broadcast('job',job);}
+  function startJob({kind,title,detail,steps,route},work){
+    const job={id:randomUUID(),kind,title,detail,route,status:'running',startedAt:Date.now(),steps:steps.map(([key,label])=>({key,label,state:'pending'})),log:[],bytes:0,total:0,result:null,error:''};
+    jobs.set(job.id,job);if(jobs.size>20)jobs.delete(jobs.keys().next().value);
+    let timer=null;const flush=()=>{timer=null;publishJob(job);};
+    const progress=e=>{
+      if(e.step){const s=job.steps.find(x=>x.key===e.step);if(s&&e.state)s.state=e.state;}
+      if(e.message)job.log.push({at:Date.now(),text:String(e.message).slice(0,600),state:e.state||''});if(job.log.length>300)job.log.splice(0,job.log.length-300);
+      if(Number.isFinite(e.bytes))job.bytes=e.bytes;if(Number.isFinite(e.total)&&e.total>0)job.total=e.total;
+      if(e.message||e.state)flush();else if(!timer)timer=setTimeout(flush,250);
+    };
+    publishJob(job);
+    Promise.resolve().then(()=>work(progress)).then(result=>{job.status='done';job.result=result;job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='pending')s.state='skipped';job.log.push({at:Date.now(),text:'Done.',state:'done'});},
+      error=>{job.status='error';job.error=safeError(error);job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='active')s.state='error';job.log.push({at:Date.now(),text:job.error,state:'error'});})
+      .finally(()=>{clearTimeout(timer);publishJob(job);emit();});
+    return job;
+  }
   async function runInTerminal({label,key,host,command}){
     const pseudo={id:`svc_${key}_${host?host.id:'local'}`.slice(0,80),name:label,provider:'custom',transport:host?'ssh':'local',hostId:host?.id||'',command:'',args:[],cwd:host?'':app.getPath('home'),ephemeral:true,run:host?command:''};
     const reused=terminals.hasLive(pseudo.id,'shell'),view=terminals.open(pseudo,host,'shell',{cols:110,rows:30});
@@ -112,7 +131,16 @@ async function start({app, safeStorage}, root) {
       await runInTerminal({label:`Clone ${name}`,key:`clone_${p.id}`.slice(0,60),host,command});return p;
     },
     sshKeyCreate:x=>vps.createKey(x.name), hostTest:x=>vps.test(x.hostId?broker.host(x.hostId):schema.host(x.host||{})),
-    saveSettings:x=>broker.saveSettings(x), cloneAgent:x=>broker.cloneAgent(x), redeployAgent:x=>broker.redeployAgent(x.id),
+    saveSettings:x=>broker.saveSettings(x), cloneAgent:async x=>{
+      const a=broker.agent(x.id),host=x.hostId?broker.host(x.hostId):null;
+      return startJob({kind:'clone',route:{from:a.name,fromWhere:a.transport==='ssh'?broker.host(a.hostId).name:'This computer',to:x.name||`${a.name}-clone`,toWhere:host?host.name:'This computer',toHostId:host?.id||'',provider:a.provider},title:`Cloning ${a.name}`,detail:`${a.name} to ${host?host.name:'this computer'} / ${x.runtime==='docker'?'Docker container':'Hermes profile'}`,steps:[['target','Check the target'],['source','Find the source'],['select','Choose files'],['copy','Copy'],...(x.runtime==='docker'?[['start','Start the container']]:[]),['save','Add to Opaya'],['connect','Connect']]},progress=>broker.cloneAgent(x,progress));
+    },
+    redeployAgent:async x=>{
+      const a=broker.agent(x.id);if(!a.clone)throw new Error('This agent is not a clone.');
+      const src=broker.data.agents.find(s=>s.id===a.clone.from);
+      return startJob({kind:'redeploy',route:{from:src?.name||'source',fromWhere:src?.transport==='ssh'?broker.host(src.hostId).name:'This computer',to:a.name,toWhere:a.transport==='ssh'?broker.host(a.hostId).name:'This computer',provider:a.provider},title:`Redeploying ${a.name}`,detail:`From ${broker.data.agents.find(s=>s.id===a.clone.from)?.name||'source'}`,steps:[['source','Find the source'],['select','Choose files'],['copy','Copy'],...(a.clone.container?[['start','Restart the container']]:[]),['connect','Reconnect']]},progress=>broker.redeployAgent(a.id,progress));
+    },
+    jobs:async()=>[...jobs.values()], jobDismiss:async x=>jobs.delete(String(x.id||'')),
     browserTool, browserResult:async x=>{const c=browserCalls.get(x.id);if(!c)return false;clearTimeout(c.timer);browserCalls.delete(x.id);x.ok?c.resolve(x.value):c.reject(new Error(String(x.error||'Browser action failed.')));return true;},
     mcpSave:x=>broker.saveMcpServer(x), mcpRemove:x=>broker.removeMcpServer(x.id), agentMcp:x=>broker.setAgentMcp(x), agentSkills:x=>broker.skills(x.id),
     // Hermes skills: browse the hub or install one with the Hermes CLI in a visible terminal.

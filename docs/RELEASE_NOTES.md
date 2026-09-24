@@ -1,4 +1,18 @@
-# Opaya 0.10.1 - Updates that finish
+# Opaya 0.10.2 - A clone window worth watching
+
+- **Clone and Redeploy run in their own window**:
+  - A route from the source agent to the target machine, with packets moving while files copy.
+  - A large live percentage and progress bar showing copied size, speed, time left and elapsed time.
+  - A checklist of every step (check target, find source, choose files, copy, start container, add to Opaya, connect), plus a live log of what is happening.
+  - **Minimize** it to a progress ring in the status bar and keep working. Click the ring to bring it back. It shows again after Opaya restarts.
+  - When it finishes: **Open** the new agent, or **Copy log**. If the target is missing Hermes, **Install Hermes there** is one click away.
+- **No more timeouts**:
+  - Clones run in the background with no request timeout, and copying may take up to two hours.
+  - The size is measured first and files are sent uncompressed through tar (SSH compresses on the network), so the percentage is accurate.
+- **No second "Trust this agent?"**: you already confirmed the clone, so Opaya no longer asks again at the end (that prompt could time out).
+- **Approvals wait 10 minutes** (was 2). When Opaya is not in front, a system notification and a flashing taskbar button tell you an approval is waiting, and also when a clone or redeploy finishes or fails.
+
+## Earlier: 0.10.1 - Updates that finish
 
 - **Windows: Restart and update now installs and reopens Opaya.** Before, Opaya closed and started the installer silently. If anything went wrong (for example the session service or a helper still running), nothing happened and Opaya did not come back. Now:
   - Opaya waits until every Opaya process from its install folder has exited, and stops any that hang.

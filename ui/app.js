@@ -277,6 +277,7 @@
     if(name==='updates'){openUpdates();return;}
     if(name==='dock-move'){moveDock(button.dataset.pane);return;}
     if(name==='new-vps'){openNewVps();return;}
+    if(name==='job-restore'){const running=[...jobs.values()].filter(j=>j.status==='running');if(!jobs.has(jobShown))jobShown=(running[0]||[...jobs.values()].at(-1))?.id||'';jobMinimized=false;renderJobs();return;}
     if(name==='opaya-new'){action(async()=>{await api.opayaNewSession();opayaCount=-1;$('#message-input')?.focus();});return;}
     if(name==='opaya-delete-session'){const o=opaya();if(!confirm('Delete this chat with the Opaya Agent?'))return;action(async()=>{await api.opayaDeleteSession({id:o.sessionId});opayaCount=-1;});return;}
     if(name==='discover-tab'){discover(id||undefined);return;}
@@ -1057,6 +1058,62 @@
     document.body.append(card);if(!n.urgent)setTimeout(()=>{if(card.isConnected)close();},30000);
   }
   setInterval(checkNudges,30000);
+  // ---- Job window: live progress for clones and redeploys; minimizes to a chip in the status bar ------------------
+  const jobs=new Map();let jobShown='',jobMinimized=false;const jobRate=new Map();
+  const fmtBytes=n=>!n?'0 B':n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
+  const fmtTime=s=>!Number.isFinite(s)||s<0?'--':s<60?`${Math.round(s)}s`:`${Math.floor(s/60)}m ${String(Math.round(s%60)).padStart(2,'0')}s`;
+  function jobPercent(j){
+    if(j.status==='done')return 100;
+    const steps=j.steps||[],done=steps.filter(s=>['done','skipped','warn'].includes(s.state)).length,copyIndex=steps.findIndex(s=>s.key==='copy');
+    // Copying is most of the work: it spans 15% to 85%; the other steps share the rest.
+    const copy=steps[copyIndex];const copyShare=copy?.state==='done'?1:copy?.state==='active'&&j.total?Math.min(1,j.bytes/j.total):0;
+    const others=steps.length-1||1,otherDone=done-(copy?.state==='done'?1:0);
+    return Math.round(Math.min(99,(otherDone/others)*30+copyShare*70));
+  }
+  function trackRate(j){
+    const now=Date.now(),r=jobRate.get(j.id)||{samples:[]};r.samples.push([now,j.bytes||0]);r.samples=r.samples.filter(([t])=>now-t<5000);jobRate.set(j.id,r);
+    const [t0,b0]=r.samples[0],rate=now>t0?((j.bytes||0)-b0)/((now-t0)/1000):0;return rate;
+  }
+  function onJob(j){
+    const prev=jobs.get(j.id);jobs.set(j.id,j);
+    if(!prev&&j.status==='running'){jobShown=j.id;jobMinimized=false;}
+    if(prev?.status==='running'&&j.status!=='running'){
+      if(j.status==='done'){toast(`${j.title.replace(/^Cloning/,'Cloned').replace(/^Redeploying/,'Redeployed')}. ${j.result?.copied?`Copied: ${j.result.copied.join(', ')}.`:''}`);refresh();}
+      else toast(`${j.title} failed: ${j.error}`,true);
+    }
+    renderJobs();
+  }
+  function renderJobs(){
+    const running=[...jobs.values()].filter(j=>j.status==='running');
+    const chip=$('#status-jobs');
+    if(chip){const current=jobs.get(jobShown)||running[0];const show=!!current&&(jobMinimized||!$('#job-window'))&&(running.length||current.status!=='running');chip.hidden=!(current&&(jobMinimized&&current));
+      if(current)chip.innerHTML=`<span class="job-chip-ring" style="--p:${jobPercent(current)}"></span>${esc(current.status==='running'?current.title:current.status==='done'?'Finished: '+current.title.replace(/^Cloning |^Redeploying /,''):'Failed: '+current.title.replace(/^Cloning |^Redeploying /,''))} ${current.status==='running'?`${jobPercent(current)}%`:''}${running.length>1?` <b>+${running.length-1}</b>`:''}`;}
+    const j=jobs.get(jobShown);let win=$('#job-window');
+    document.body.classList.toggle('job-open',!!j&&!jobMinimized);
+    if(!j||jobMinimized){win?.remove();return;}
+    if(!win){win=document.createElement('section');win.id='job-window';win.className='job-window';win.setAttribute('role','dialog');win.setAttribute('aria-label',j.title);document.body.append(win);
+      win.addEventListener('click',event=>{const b=event.target.closest('[data-job]');if(!b)return;const act=b.dataset.job,job=jobs.get(jobShown);
+        if(act==='min'){jobMinimized=true;renderJobs();}
+        else if(act==='close'){if(job?.status==='running'){jobMinimized=true;}else{api.jobDismiss({id:jobShown}).catch(()=>{});jobs.delete(jobShown);jobShown=[...jobs.values()].find(x=>x.status==='running')?.id||'';}renderJobs();}
+        else if(act==='open'&&job?.result?.agent){overview=false;opayaView=false;playgroundView=false;action(async()=>{await api.select({id:job.result.agent.id});await refresh();});jobMinimized=true;renderJobs();}
+        else if(act==='install'){action(async()=>{await api.installFramework({id:'hermes',hostId:job?.route?.toHostId||undefined});toast('Installing Hermes in Terminal. Clone again when it finishes.');});}
+        else if(act==='copy'){action(()=>api.clipboardWrite({text:job.log.map(l=>`${new Date(l.at).toLocaleTimeString()} ${l.text}`).join('\n')}));toast('Log copied.');}
+      });}
+    const pct=jobPercent(j),rate=j.status==='running'?trackRate(j):0,eta=rate>0&&j.total?(j.total-j.bytes)/rate:NaN,elapsed=((j.finishedAt||Date.now())-j.startedAt)/1000;
+    const copying=j.steps.find(s=>s.key==='copy')?.state==='active',r=j.route||{};
+    const icon=s=>({done:'<span class="job-step-icon done">&#10003;</span>',active:'<span class="job-step-icon active"></span>',error:'<span class="job-step-icon error">&#10005;</span>',warn:'<span class="job-step-icon warn">!</span>',skipped:'<span class="job-step-icon skipped">&#8211;</span>'}[s]||'<span class="job-step-icon"></span>');
+    const html=`<header class="job-head"><div class="job-title"><strong>${esc(j.title)}</strong><small>${esc(j.detail||'')}</small></div><button type="button" class="icon-button" data-job="min" title="Minimize" aria-label="Minimize">&#8211;</button><button type="button" class="icon-button" data-job="close" title="${j.status==='running'?'Hide (keeps running)':'Close'}" aria-label="Close">&#10005;</button></header>
+      <div class="job-route ${j.status}"><div class="job-node"><span class="job-node-icon">${badge({provider:r.provider||'hermes'})}</span><strong>${esc(r.from||'')}</strong><small>${esc(r.fromWhere||'')}</small></div><div class="job-wire ${copying?'flowing':''}"><i></i><i></i><i></i><i></i></div><div class="job-node"><span class="job-node-icon target"><span class="machine-icon"></span></span><strong>${esc(r.to||'')}</strong><small>${esc(r.toWhere||'')}</small></div></div>
+      <div class="job-progress"><div class="job-percent"><span>${pct}<small>%</small></span><em>${j.status==='done'?'Complete':j.status==='error'?'Stopped':copying?`${fmtBytes(j.bytes)} of ${fmtBytes(j.total)}`:esc(j.steps.find(s=>s.state==='active')?.label||'Working')}</em></div><div class="job-bar ${j.status}"><span style="width:${pct}%"></span></div>
+        <div class="job-stats"><span>Speed <b>${copying&&rate>0?fmtBytes(rate)+'/s':'--'}</b></span><span>Left <b>${copying?fmtTime(eta):'--'}</b></span><span>Elapsed <b>${fmtTime(elapsed)}</b></span></div></div>
+      <ol class="job-steps">${j.steps.map(s=>`<li class="${s.state}">${icon(s.state)}<span>${esc(s.label)}</span></li>`).join('')}</ol>
+      <div class="job-log" id="job-log">${j.log.slice(-120).map(l=>`<p class="${esc(l.state||'')}"><time>${new Date(l.at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</time>${esc(l.text)}</p>`).join('')}</div>
+      ${j.status!=='running'?`<footer class="job-foot">${j.status==='error'?`<p class="job-error">${esc(j.error)}</p>${/Hermes is not installed/.test(j.error)?'<button type="button" class="secondary" data-job="install">Install Hermes there</button>':''}`:''}<button type="button" class="text-button" data-job="copy">Copy log</button>${j.status==='done'&&j.result?.agent?`<button type="button" class="primary" data-job="open">Open ${esc(j.result.agent.name)}</button>`:''}<button type="button" class="secondary" data-job="close">Close</button></footer>`:''}`;
+    if(win.dataset.html!==html){const log=$('#job-log',win),atBottom=!log||log.scrollHeight-log.scrollTop-log.clientHeight<30;win.innerHTML=html;win.dataset.html=html;win.classList.toggle('finished',j.status!=='running');const nl=$('#job-log',win);if(nl&&atBottom)nl.scrollTop=nl.scrollHeight;}
+  }
+  api.onJob?.(onJob);
+  api.jobs?.().then(list=>{for(const j of list||[]){jobs.set(j.id,j);if(j.status==='running'){jobShown=j.id;jobMinimized=true;}}renderJobs();}).catch(()=>{});
+  setInterval(()=>{if([...jobs.values()].some(j=>j.status==='running'))renderJobs();},1000);
   // ---- Clone and redeploy (Hermes) --------------------------------------------------------------------------------
   const CLONE_SCOPES=[['everything','Everything','Config, skills, memory, personality, plugins and cron jobs. No chat history.'],['personality','Skills + personality','Skills, SOUL.md and USER.md (who you are), plus config.'],['skills','Skills','Installed skills and config.'],['memory','Memory','MEMORY.md and USER.md, plus config.']];
   function openClone(a,preset={}){
@@ -1073,19 +1130,14 @@
       <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Clone</button></div></div></form>`,true);
     const f=$('#clone-form');
     f.onsubmit=event=>{event.preventDefault();const data=Object.fromEntries(new FormData(f));
-      const where=data.hostId?state.hosts.find(h=>h.id===data.hostId)?.name:'this computer';
-      $('#clone-status').innerHTML=`<div class="clone-progress"><span class="status-dot working"></span> Copying ${esc(title(a))} to ${esc(where)}${data.runtime==='docker'?' and starting its container':''}... This can take a minute.</div>`;
-      for(const el of f.elements)el.disabled=true;modalBusy=true;
-      api.cloneAgent({id:a.id,name:data.name,hostId:data.hostId||'',runtime:data.runtime,scope:data.scope,keys:!!data.keys}).then(async r=>{modalBusy=false;closeModal();await refresh();toast(`${r.agent.name} is ready on ${where}. Copied: ${r.copied.join(', ')}.`);},error=>{modalBusy=false;for(const el of f.elements)el.disabled=false;
-        const install=/not installed/i.test(error.message)&&/Hermes/.test(error.message);
-        $('#clone-status').innerHTML=`<div class="inline-notice error-notice"><p>${esc(error.message)}</p>${install?`<button type="button" class="secondary small" data-action="clone-install" data-host="${esc(data.hostId||'')}">Install Hermes there</button>`:''}</div>`;});
+      // The clone runs as a background job with its own window; this dialog closes right away.
+      action(async()=>{const job=await api.cloneAgent({id:a.id,name:data.name,hostId:data.hostId||'',runtime:data.runtime,scope:data.scope,keys:!!data.keys});closeModal();onJob(job);});
     };
   }
   async function redeploy(a){
     const src=state.agents.find(x=>x.id===a.clone?.from);if(!src){toast('The source agent of this clone was removed.',true);return;}
     if(!confirm(`Redeploy ${title(a)} from ${title(src)}?\n\nCopies ${CLONE_SCOPES.find(s=>s[0]===a.clone.scope)?.[1]||a.clone.scope} again over the clone${a.clone.container?' and restarts its container':''}. Chat history on the clone is kept.`))return;
-    toast(`Redeploying ${title(a)}...`);
-    await action(async()=>{const r=await api.redeployAgent({id:a.id});await refresh();toast(`${title(a)} redeployed. Copied: ${r.copied.join(', ')}.`);});
+    await action(async()=>{const job=await api.redeployAgent({id:a.id});onJob(job);});
   }
   // ---- New VPS: key, public key for the provider, connection test, save ------------------------------------------
   function openNewVps(){

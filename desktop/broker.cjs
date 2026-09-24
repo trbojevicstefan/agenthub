@@ -58,14 +58,15 @@ class Broker{
     await this.persist();return host;
   }
   async removeHost(id){this.host(id);if(this.data.agents.some(a=>a.hostId===id))throw new Error('Remove or reassign this host\'s agents before removing the host.');this.data.hosts=this.data.hosts.filter(h=>h.id!==id);await this.persist();}
-  async saveAgent({agent:input,token,remember=true,importToken=false}){
+  // `preapproved` is internal only (the service passes one argument): a clone the user just confirmed is not asked again.
+  async saveAgent({agent:input,token,remember=true,importToken=false},{preapproved=false}={}){
     const a=schema.agent(input);if(a.transport==='ssh')this.host(a.hostId);
     const existing=this.data.agents.find(x=>x.id===a.id);
     if(existing&&this.turns.has(a.id))throw new Error('Stop the active turn before editing this agent.');
     if(!existing&&this.data.agents.length>=128)throw new Error('Workspace limit reached (128 agents).');
     const duplicate=this.data.agents.find(x=>x.id!==a.id&&fingerprint(x)===fingerprint(a));
     if(duplicate)throw new Error(`This connection already exists as ${duplicate.name}.`);
-    if(a.protocol!=='openai'&&(!existing||existing.command!==a.command||JSON.stringify(existing.args)!==JSON.stringify(a.args)||existing.hermesHome!==a.hermesHome)){
+    if(!preapproved&&a.protocol!=='openai'&&(!existing||existing.command!==a.command||JSON.stringify(existing.args)!==JSON.stringify(a.args)||existing.hermesHome!==a.hermesHome)){
       const ok=await this.approve(a,'Trust this agent executable?',`${a.command} ${a.args.join(' ')}\n${a.transport==='ssh'?'Runs on '+this.host(a.hostId).name:'Runs on this computer'}\n\nThe agent can use the permissions of that OS account. Hermes ACP starts a new process: do not run it against a profile already used by a gateway.`);
       if(!ok)throw new Error('Agent executable was not approved.');
     }
@@ -189,19 +190,24 @@ class Broker{
   // The folder a conversation's agent should work in: its project's folder when the agent runs on that machine.
   conversationCwd(c,a){const p=c.projectId&&(this.data.projects||[]).find(x=>x.id===c.projectId);return p&&projects.fits(a,p)?p.path:'';}
   // ---- Clone and redeploy (Hermes) ------------------------------------------------------------------------------
-  async cloneAgent({id,name,hostId='',runtime='regular',scope='everything',keys=true}){
+  async cloneAgent({id,name,hostId='',runtime='regular',scope='everything',keys=true},progress=()=>{}){
     const a=this.agent(id),host=hostId?this.host(hostId):null;
-    const result=await cloner.clone({agent:a,sourceHost:a.transport==='ssh'?this.host(a.hostId):null,host,runtime,scope,keys,name:name||`${a.name}-clone`});
-    const saved=await this.saveAgent({agent:result.connection});
+    const result=await cloner.clone({agent:a,sourceHost:a.transport==='ssh'?this.host(a.hostId):null,host,runtime,scope,keys,name:name||`${a.name}-clone`,progress});
+    progress({step:'save',state:'active',message:'Adding the clone to Opaya'});
+    const saved=await this.saveAgent({agent:result.connection},{preapproved:true});
+    progress({step:'save',state:'done',message:`${saved.name} added`});
+    progress({step:'connect',state:'active',message:`Connecting to ${saved.name}`});
+    try{await this.connect(saved.id);progress({step:'connect',state:'done',message:`${saved.name} is connected`});}
+    catch(error){progress({step:'connect',state:'warn',message:`Saved, but connecting failed: ${safeError(error).slice(0,200)}. Open it and reconnect.`});}
     return {agent:saved,copied:result.copied};
   }
-  async redeployAgent(id){
+  async redeployAgent(id,progress=()=>{}){
     const a=this.agent(id);if(!a.clone)throw new Error('This agent is not a clone.');
     if(this.turns.has(id))throw new Error('Stop this agent\'s current turn first.');
     const source=this.agent(a.clone.from),wasConnected=this.runtimeFor(id).status==='connected';
     this.disconnect(id);
-    const result=await cloner.redeploy({agent:a,source,sourceHost:source.transport==='ssh'?this.host(source.hostId):null,host:a.transport==='ssh'?this.host(a.hostId):null});
-    if(wasConnected)await this.connect(id).catch(()=>{});
+    const result=await cloner.redeploy({agent:a,source,sourceHost:source.transport==='ssh'?this.host(source.hostId):null,host:a.transport==='ssh'?this.host(a.hostId):null,progress});
+    if(wasConnected){progress({step:'connect',state:'active',message:`Reconnecting ${a.name}`});await this.connect(id).then(()=>progress({step:'connect',state:'done',message:`${a.name} is connected`}),()=>progress({step:'connect',state:'warn',message:'Reconnect failed. Open the agent and connect.'}));}
     return result;
   }
   // ---- MCP servers and skills ----------------------------------------------------------------------------------
