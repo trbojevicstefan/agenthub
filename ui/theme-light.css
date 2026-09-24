@@ -437,3 +437,6 @@
 :where(body[data-theme="light"]) .condense-engine{border:1px solid #cbd7cf;background:#e2eae6}
 :where(body[data-theme="light"]) .condense-engine.model strong{color:#144526}
 :where(body[data-theme="light"]) .status-update.failed{background:#e2c5c5;border-color:#cc9595;color:#220a0a}
+:where(body[data-theme="light"]) .free-pick{color:#144526;background:#d5e5dc;border:1px solid #aed5be}
+:where(body[data-theme="light"]) .preset-free{color:#144526;background:#d5e5dc;border:1px solid #aed5be}
+:where(body[data-theme="light"]) .preset-signup{color:#144526}

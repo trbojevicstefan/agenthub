@@ -991,3 +991,11 @@ body.frameless.history-panel-open .topbar{padding-right:25px}
 .history-toolbar select{padding:0 8px;line-height:28px}
 .status-update.failed{background:#3a1d1d;border-color:#7a3434;color:#ffc2c2}
 body[data-theme="light"] .status-update.failed{background:#fdeaea;border-color:#e6a3a3;color:#8a1f1f}
+.free-size{font-style:normal;font-weight:500;font-size:10.5px;color:var(--muted);margin-left:6px}
+.free-pick{font-style:normal;font-weight:600;font-size:10px;color:#9fe3b8;background:#1a2a21;border:1px solid #2f5a41;border-radius:99px;padding:1px 7px;margin-left:4px}
+body[data-theme="light"] .free-pick{color:#1f7a47;background:#e3f1e7;border-color:#b7dcc3}
+.preset-free{font-style:normal;font-weight:600;font-size:9.5px;color:#9fe3b8;background:#1a2a21;border:1px solid #2f5a41;border-radius:99px;padding:0 6px;margin-left:4px;white-space:nowrap}
+.preset-signup{font-size:10.5px;color:#9fe3b8;text-decoration:none;margin-top:2px}
+.preset-signup:hover{text-decoration:underline}
+body[data-theme="light"] .preset-free{color:#1f7a47;background:#e3f1e7;border-color:#b7dcc3}
+body[data-theme="light"] .preset-signup{color:#1f7a47}

@@ -18,6 +18,7 @@ const projects = require('./projects.cjs');
 const vps = require('./vps.cjs');
 const moves = require('./transfer.cjs');
 const {condense} = require('./condense.cjs');
+const free = require('./free-model.cjs');
 async function start({app, safeStorage}, root) {
   let broker, terminals, listener, opaya, stopping = false;
   const startedAt = new Date().toISOString(), approvals = new Map();
@@ -92,6 +93,8 @@ async function start({app, safeStorage}, root) {
   opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal,trusted:()=>!!broker.data.settings?.itrustOpaya});
   await stage('opaya agent');
   await opaya.init();
+  // A fresh install: connect the Opaya Agent to a local Ollama model with tools if one already runs (no input needed).
+  free.autoConnect({opaya}).then(model=>{if(model)emit();}).catch(()=>{});
   async function shutdown() {
     if (stopping) return true; stopping = true;
     for (const a of approvals.values()) a.finish(false);
@@ -199,6 +202,10 @@ async function start({app, safeStorage}, root) {
       return runInTerminal({label:x.action==='install'?`Skill ${x.skill}`:'Hermes skills',key:`skills_${a.id}`.slice(0,60),host,command});
     },
     playground:x=>broker.playground(x), moveAgent:x=>broker.moveAgent(x), connectAll:x=>broker.connectAll(x),
+    // Free local model: install Ollama if needed, start it, download the model and connect the Opaya Agent.
+    opayaFreeModels:async()=>({models:free.FREE_MODELS.map(({id,label,size,note})=>({id,label,size,note})),recommended:free.recommended(),installed:await free.ollamaModels()}),
+    opayaFreeSetup:async x=>{const model=String(x?.model||free.recommended());const m=free.FREE_MODELS.find(f=>f.id===model);if(!m)throw new Error('Choose one of the free models.');
+      return startJob({kind:'free-model',route:{from:m.label,fromWhere:`Free / ${m.size}`,to:'Opaya Agent',toWhere:'This computer',provider:'ollama'},title:`Setting up ${m.label}`,detail:'Free local model through Ollama. No account and no key.',steps:[['ollama','Install and start Ollama'],['download',`Download ${m.label} (${m.size})`],['connect','Connect the Opaya Agent']]},progress=>free.setupFree({opaya,model,progress}).then(r=>{emit();return r;}));},
     opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}), opayaForgetKey:()=>opaya.forgetKey(),
     opayaSend:x=>opaya.begin(x.text), opayaNewSession:()=>opaya.newSession(), opayaSelectSession:x=>opaya.selectSession(String(x.id||'')), opayaDeleteSession:x=>opaya.deleteSession(String(x.id||'')), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),
     shutdown
