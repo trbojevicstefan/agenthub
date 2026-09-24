@@ -77,7 +77,11 @@ jobs:
           test -d "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
           AGENTHUB_TEST_EXE="$PWD/$app/Contents/MacOS/Opaya" npm run smoke:restart 2>&1 | tee artifacts/native-packaged.txt
-          test "${PIPESTATUS[0]}" -eq 0
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            echo "::group::Startup logs"; find artifacts/native-packaged -maxdepth 3 -type f \( -name '*.txt' -o -name '*.log' \) -print -exec tail -n 60 {} \; ; echo "::endgroup::"
+          fi
+          test "$status" -eq 0
       - name: Build provenance
         env:
           SMOKE_DEV: ${{ steps.smoke_dev.outcome }}

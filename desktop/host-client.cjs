@@ -19,7 +19,8 @@ async function attach(app, root) {
   const args = [...(app.isPackaged ? [] : [app.getAppPath()]), '--agenthub-host', `--agenthub-profile=${root}`];
   const child = spawn(process.execPath, args, {detached:true, windowsHide:true, stdio:'ignore', env:environment()});
   let spawnError; child.on('error', e => { spawnError = e; }); child.unref();
-  for (let i=0; i<150; i++) {
+  // Up to 60 seconds: the first launch on a slow or older Mac (Gatekeeper scan, cold disk) can take well over 15.
+  for (let i=0; i<600; i++) {
     if (spawnError) throw spawnError;
     const data = await read();
     if (data?.protocol === 1 && data.pid !== existing?.pid) {
