@@ -79,7 +79,7 @@ jobs:
           AGENTHUB_TEST_EXE="$PWD/$app/Contents/MacOS/Opaya" npm run smoke:restart 2>&1 | tee artifacts/native-packaged.txt
           status=${PIPESTATUS[0]}
           if [ "$status" -ne 0 ]; then
-            echo "::group::Startup logs"; find artifacts/native-packaged -maxdepth 3 -type f \( -name '*.txt' -o -name '*.log' \) -print -exec tail -n 60 {} \; ; echo "::endgroup::"
+            echo "::group::Startup logs"; find artifacts/native-packaged -maxdepth 3 -type f \( -name '*.txt' -o -name '*.log' \) -print -exec tail -n 80 {} \; ; log show --last 3m --style compact --predicate 'process == "Opaya"' 2>/dev/null | tail -n 80 || true; echo "::endgroup::"
           fi
           test "$status" -eq 0
       - name: Build provenance
@@ -109,6 +109,8 @@ jobs:
             artifacts/native-packaged/*.png
             artifacts/**/startup-error.txt
             artifacts/**/service-startup-error.txt
+            artifacts/**/service-startup.log
+            artifacts/**/service-output.log
           if-no-files-found: warn
   # One release with both architectures and a single checksum file, which the in-app updater reads.
   publish:

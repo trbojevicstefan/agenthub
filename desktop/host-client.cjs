@@ -17,8 +17,12 @@ async function attach(app, root) {
   }
   await fs.rm(path.join(root,'service-startup-error.txt'), {force:true});
   const args = [...(app.isPackaged ? [] : [app.getAppPath()]), '--agenthub-host', `--agenthub-profile=${root}`];
-  const child = spawn(process.execPath, args, {detached:true, windowsHide:true, stdio:'ignore', env:environment()});
-  let spawnError; child.on('error', e => { spawnError = e; }); child.unref();
+  // The service's own output (Electron and native errors) goes to service-output.log for diagnostics.
+  let out = 'ignore';
+  try { out = require('node:fs').openSync(path.join(root,'service-output.log'),'w',0o600); } catch {}
+  const child = spawn(process.execPath, args, {detached:true, windowsHide:true, stdio:['ignore',out,out], env:environment()});
+  if (typeof out === 'number') require('node:fs').closeSync(out);
+  let spawnError, exitCode = null; child.on('error', e => { spawnError = e; }); child.on('exit', code => { exitCode = code; }); child.unref();
   // Up to 60 seconds: the first launch on a slow or older Mac (Gatekeeper scan, cold disk) can take well over 15.
   for (let i=0; i<600; i++) {
     if (spawnError) throw spawnError;
@@ -28,8 +32,11 @@ async function attach(app, root) {
     }
     const failure = await fs.readFile(path.join(root,'service-startup-error.txt'),'utf8').catch(()=> '');
     if (failure) throw new Error(failure);
+    if (exitCode !== null && i > 10) break;
     await new Promise(resolve => setTimeout(resolve, 100));
   }
-  throw new Error(`The session service did not start. See the local logs in ${root}.`);
+  const last = (await fs.readFile(path.join(root,'service-startup.log'),'utf8').catch(()=>'')).trim().split('\n').pop()?.replace(/^\S+\s/,'') || 'before it logged anything';
+  const output = (await fs.readFile(path.join(root,'service-output.log'),'utf8').catch(()=>'')).split('\n').map(l=>l.trim()).filter(l=>l&&!/dbus|Fontconfig/i.test(l)).pop() || '';
+  throw new Error(`The session service did not start (${exitCode !== null ? `exited with code ${exitCode}` : 'still starting'}; last step: ${last}${output ? `; output: ${output.slice(0,300)}` : ''}). See service-startup.log and service-output.log in ${root}.`);
 }
 module.exports = {attach, alive};
