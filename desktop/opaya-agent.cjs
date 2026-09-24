@@ -142,7 +142,8 @@ class OpayaAgent{
     finally{
       // Internal tool turns stay in history for context; the chat shows one reply per request.
       this.messages.push({...reply,summary:true});
-      this.busy=false;this.status='';this.controller=null;await this.persist().catch(()=>{});this.emit();
+      // Save before reporting idle, so nothing still writes to the home folder once a request is finished.
+      await this.persist().catch(()=>{});this.busy=false;this.status='';this.controller=null;this.emit();
     }
     return {ok:!reply.error};
   }
