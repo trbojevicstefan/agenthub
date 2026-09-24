@@ -97,15 +97,16 @@
     renderKey='overview';
   }
   function renderAgent(a) {
-    $('#topbar').innerHTML=`<div class="breadcrumb">Agents <span>/</span> <strong>${esc(title(a))}</strong></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span><button class="subtle" data-action="files-agent" data-id="${esc(a.id)}" title="Browse this agent's folders and project"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="terminal" title="Open terminal (Ctrl + backtick)"><span class="terminal-glyph">&gt;_</span> Terminal</button><button class="icon-button" data-action="edit" data-id="${esc(a.id)}" title="Edit connection settings" aria-label="Connection settings">&#9881;</button></div>`;
+    $('#topbar').innerHTML=`<div class="breadcrumb">Agents <span>/</span> <strong>${esc(title(a))}</strong></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span><button class="subtle" data-action="skills" data-id="${esc(a.id)}" title="Skills, tools and MCP servers"><span aria-hidden="true">&#10022;</span> Skills</button><button class="subtle" data-action="files-agent" data-id="${esc(a.id)}" title="Browse this agent's folders and project"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="terminal" title="Open terminal (Ctrl + backtick)"><span class="terminal-glyph">&gt;_</span> Terminal</button><button class="icon-button" data-action="edit" data-id="${esc(a.id)}" title="Edit connection settings" aria-label="Connection settings">&#9881;</button></div>`;
     contentKind('conversation');
     $('.topbar-actions').insertAdjacentHTML('beforeend',`${a.protocol!=='terminal'?'<button class="secondary" data-action="models" title="Choose agent model">Models</button>':''}${['hermes','openclaw'].includes(a.provider)?'<button class="secondary" data-action="gateway" title="Gateway status and restart">Gateway</button>':''}`);
     if(renderKey!==JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId])) {
       $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity">${badge(a,true)}<div><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p><div class="identity-meta">${meta(a)}${a.tags?.length?`<span class="heading-tags">${tagChips(a,6)}</span>`:''}</div></div></div><div class="conversation-controls"><select id="conversation-picker" aria-label="Conversation history" title="Switch between this agent's conversations"></select><button class="icon-button" data-action="new-conversation" title="New conversation (Ctrl + N)" aria-label="New conversation">+</button><button class="icon-button" data-action="export" title="Export this conversation as Markdown" aria-label="Export conversation">&#8595;</button><button id="connect-button" class="secondary" data-action="connect"></button></div></div><div id="connection-banner"></div><div id="message-list" class="message-list"></div><div class="compose-area"><form id="message-form"><textarea id="message-input" placeholder="Message ${esc(title(a))}..." aria-label="Message ${esc(title(a))}" rows="2" maxlength="80000"></textarea><div class="compose-bottom"><div><span class="compose-provider">${esc(labels[a.provider])}</span><span id="compose-hint"></span></div><button type="button" id="stop-button" class="stop-button" data-action="stop" title="Stop this turn" hidden><span>&#9632;</span> Stop</button><button id="send-button" type="submit" class="send-button" title="Send message (Enter)" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption">Enter to send <span>&#183;</span> Shift + Enter for a new line <span>&#183;</span> Conversations stay on this computer</p></div>`;
       if(!String(renderKey).startsWith(`["${a.id}"`))enter($('#content'));
       renderKey=JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId]);$('#message-input').value=drafts.get(draftKey())??state.drafts?.[draftKey()]??'';
-      $('#message-input').addEventListener('input',event=>{drafts.set(draftKey(),event.target.value);if(api.saveDraft)save(api.saveDraft({agentId:a.id,conversationId:currentConversation()?.id||'',text:event.target.value}));event.target.style.height='auto';event.target.style.height=Math.min(event.target.scrollHeight,190)+'px';});
-      $('#message-input').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendMessage();}});
+      $('#message-input').addEventListener('input',event=>{drafts.set(draftKey(),event.target.value);if(api.saveDraft)save(api.saveDraft({agentId:a.id,conversationId:currentConversation()?.id||'',text:event.target.value}));event.target.style.height='auto';event.target.style.height=Math.min(event.target.scrollHeight,190)+'px';updateSlash();});
+      $('#message-input').addEventListener('blur',()=>setTimeout(closeSlash,120));
+      $('#message-input').addEventListener('keydown',event=>{if(slashKey(event))return;if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendMessage();}});
       $('#message-form').addEventListener('submit',event=>{event.preventDefault();sendMessage();});
       $('#conversation-picker').addEventListener('change',event=>action(()=>api.selectConversation({id:event.target.value})));
     }
@@ -201,7 +202,7 @@
   }
   function openSettings(){
     const localCount=state.agents.filter(a=>a.transport!=='ssh').length,remoteCount=state.agents.filter(a=>a.transport==='ssh').length,dockerCount=state.agents.filter(isDocker).length;
-    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
+    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section><h3>MCP servers</h3><p class="settings-copy">${(state.mcpServers||[]).length} saved. Tools such as GitHub, a browser or a database that Opaya passes to Hermes (ACP) and Claude Code.</p><button class="secondary" data-action="mcp-manage">Manage MCP servers</button></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
   }
   function switcher(){
     modal('Jump to an agent.','Search by name, provider or machine.',`<input id="switcher-search" class="switcher-search" placeholder="Search agents..." aria-label="Search agents"><div id="switcher-list"></div>`);
@@ -261,6 +262,8 @@
     if(name==='opaya-config'){openOpayaConfig();return;}
     if(name==='toggle-group'){toggleGroup(button.dataset.group);return;}
     if(name==='diagnostics'){openDiagnostics(id);return;}
+    if(name==='skills'){openSkills(id);return;}
+    if(name==='mcp-manage'){openMcpManager();return;}
     if(name==='playground'){overview=false;opayaView=false;playgroundView=true;closeModal();render();saveView();$('#message-input')?.focus();return;}
     if(name==='pg-swap'){pgAgents.reverse();render();return;}
     if(name==='tag-filter'){tagFilter=button.dataset.tag===tagFilter?'':button.dataset.tag;renderKey='';render();return;}
@@ -372,6 +375,7 @@
       {icon:'&#9998;',label:'Rename...',run:()=>renameAgent(a)},
       {icon:'&#9680;',label:'Change icon...',run:()=>openIconPicker(a)},
       {icon:'&#9776;',label:'Group & tags...',run:()=>openGroupTags(a)},
+      {icon:'&#10022;',label:'Skills, tools & MCP...',run:()=>openSkills(id)},
       {icon:'&#8801;',label:'Connection log...',run:()=>openDiagnostics(id)},
       {icon:'&#8593;',label:'Move up',disabled:index<=0,run:async()=>{await api.reorderAgents({id,direction:'up'});await refresh();}},
       {icon:'&#8595;',label:'Move down',disabled:index>=state.agents.length-1,run:async()=>{await api.reorderAgents({id,direction:'down'});await refresh();}},
@@ -705,8 +709,9 @@
         ['Current answer',d.turn?`running ${duration(d.turn.runningSeconds*1000)}, last update ${duration(d.turn.secondsSinceLastEvent*1000)} ago`:'idle'],
         ['Last message from agent',ad?.lastIn?`${time(ad.lastIn)} (${duration(Date.now()-ad.lastIn)} ago)`:'none yet'],
         ['Waiting for approval',ad?.waitingForApproval?`${ad.waitingForApproval.title} (${duration(ad.waitingForApproval.seconds*1000)})`:'no'],
-        ['Running tools',ad?.runningTools?.length?ad.runningTools.map(t=>`${t.title} (${t.status}, ${duration(t.seconds*1000)})`).join('; '):'none']];
-      $('#diag-body').innerHTML=`<dl class="diag-summary">${rows.map(([k,v])=>`<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
+        ['Running tools',ad?.runningTools?.length?ad.runningTools.map(t=>`${t.title} (${t.status}, ${duration(t.seconds*1000)})`).join('; '):'none'],
+        ...(ad?.agentVersion?[['Agent version',ad.agentVersion]]:[]),...(ad?.terminalStarting?[['Terminal starting',`${duration(ad.terminalStarting*1000)}`]]:[])];
+      $('#diag-body').innerHTML=`${ad?.hint?`<div class="diag-hint">${esc(ad.hint)}</div>`:''}<dl class="diag-summary">${rows.map(([k,v])=>`<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
         <h3 class="diag-heading">Protocol log <small>newest last, secrets redacted</small></h3><pre class="diag-log">${esc((ad?.entries||[]).slice(-250).map(e=>`${time(e.at)} ${e.direction==='in'?'<-':e.direction==='out'?'->':e.direction==='stderr'?'!!':'--'} ${e.text}`).join('\n')||'No messages recorded yet. Connect the agent and send a message.')}</pre>
         ${ad?.stderr?`<h3 class="diag-heading">Agent stderr</h3><pre class="diag-log">${esc(ad.stderr.slice(-6000))}</pre>`:''}
         ${d.hermesLogs?.length?d.hermesLogs.map(l=>`<h3 class="diag-heading">${esc(l.path)} <small>${esc(l.modified||'')}</small></h3><pre class="diag-log">${esc(l.tail)}</pre>`).join(''):d.agent.provider==='hermes'?'<p class="field-help">No Hermes log files found in the Hermes home folder.</p>':''}`;
@@ -717,6 +722,108 @@
     $('#diag-ask').onclick=()=>{closeModal();overview=false;playgroundView=false;opayaView=true;opayaDraft=`${title(a)} is not answering. Run agent_diagnostics for it and tell me exactly what is wrong and how to fix it.`;renderKey='';render();saveView();};
     diagTimer=setInterval(()=>{if(!$('#diag-body')){clearInterval(diagTimer);return;}if($('#diag-live')?.checked)load().catch(()=>{});},2000);
     await action(load);
+  }
+  // ---- Skills, tools and MCP servers ------------------------------------------------------------------------------
+  const skillCache=new Map();
+  const mcpSupport=a=>a.protocol==='acp'?'Passed to new sessions. Start a new conversation after changing them.':a.protocol==='claude'?(a.transport==='ssh'?'Not passed over SSH. Add them on that machine with claude mcp add.':'Passed to Claude with every message.'):a.provider==='hermes'?'This Hermes connection uses its gateway API, which takes MCP servers from its own config. Use hermes mcp on that machine.':a.protocol==='codex'?'Codex reads MCP servers from ~/.codex/config.toml.':'This connection type does not accept MCP servers from Opaya.';
+  const mcpPassed=a=>a.protocol==='acp'||a.protocol==='claude'&&a.transport!=='ssh';
+  const usesMcp=(s,a)=>s.enabled&&(s.agents==='all'||s.agents.includes(a.id));
+  async function loadSkills(id,force=false){if(!force&&skillCache.has(id))return skillCache.get(id);const r=await api.agentSkills({id});skillCache.set(id,r);return r;}
+  function useCommand(a,name){
+    closeModal();
+    const put=()=>{const input=$('#message-input');if(!input)return;input.value=`/${name} `;drafts.set(draftKey(),input.value);input.focus();input.setSelectionRange(input.value.length,input.value.length);};
+    if(state.activeAgentId!==a.id||overview||opayaView||playgroundView){overview=false;opayaView=false;playgroundView=false;action(async()=>{await api.select({id:a.id});await refresh();put();});}else put();
+  }
+  async function openSkills(id){
+    const a=state.agents.find(x=>x.id===id);if(!a)return;
+    modal('Skills, tools & MCP',`${title(a)} / ${labels[a.provider]||a.provider}${a.agentVersion?` ${a.agentVersion}`:''}`,`<div id="skills-body"><p class="field-help">Loading skills...</p></div>`,true);
+    const draw=async(force=false)=>{
+      let r;try{r=await loadSkills(id,force);}catch(error){r={skills:[],dirs:[],supported:true,error:error.message};}
+      const body=$('#skills-body');if(!body)return;const live=state.agents.find(x=>x.id===id)||a;
+      const q=($('#skills-search')?.value||'').toLowerCase();
+      const list=r.skills.filter(s=>`${s.name} ${s.description} ${s.category}`.toLowerCase().includes(q));
+      const commands=live.commands||[];
+      body.innerHTML=`<section class="skills-section"><div class="skills-head"><h3>Skills <small>${r.skills.length}</small></h3><div><input id="skills-search" class="skills-search" placeholder="Filter skills..." aria-label="Filter skills" value="${esc(q)}"><button class="text-button" id="skills-refresh">Refresh</button></div></div>
+        ${r.error?`<div class="message-error">${esc(r.error)}</div>`:''}
+        ${!r.supported?'<p class="field-help">Opaya does not know where this agent keeps skills.</p>':list.length?`<div class="skill-list">${list.slice(0,200).map(s=>`<div class="skill-row"><div><strong>/${esc(s.name)}</strong>${s.category?`<em>${esc(s.category)}</em>`:''}<p>${esc(s.description||'No description.')}</p></div><button class="secondary small" data-skill-use="${esc(s.name)}">Use</button></div>`).join('')}</div>`:`<p class="field-help">${r.skills.length?'No skills match this filter.':'No skills installed yet.'}</p>`}
+        ${r.dirs?.length?`<p class="field-help">Skill folders: ${r.dirs.map(d=>`<code>${esc(d)}</code>`).join(', ')}. Each skill is a folder with a SKILL.md.${a.transport!=='ssh'?' <button class="text-button" id="skills-open-folder">Open folder</button>':''}</p>`:''}
+        ${a.provider==='hermes'?`<div class="skill-install"><input id="skill-id" placeholder="official/security/1password or https://.../SKILL.md" aria-label="Skill id or link"><button class="primary" id="skill-install">Install</button><button class="secondary" id="skill-browse">Browse Hermes hub</button></div>`:''}
+      </section>
+      <section class="skills-section"><div class="skills-head"><h3>Commands <small>${commands.length}</small></h3></div>
+        ${commands.length?`<div class="skill-list">${commands.map(c=>`<div class="skill-row"><div><strong>/${esc(c.name)}</strong><p>${esc(c.description||'')}${c.hint?` <em>${esc(c.hint)}</em>`:''}</p></div><button class="secondary small" data-skill-use="${esc(c.name)}">Use</button></div>`).join('')}</div>`:`<p class="field-help">${a.protocol==='acp'?'The agent announces its commands after its first session. Send a message or refresh models.':'Type / in the message box to use skills.'}</p>`}
+        ${a.protocol==='acp'&&a.provider==='hermes'?`<p class="field-help">Tools: <button class="text-button" id="skills-tools" ${live.status!=='connected'||live.busy?'disabled':''}>Ask Hermes for its tool list (/tools)</button></p>`:''}
+      </section>
+      <section class="skills-section"><div class="skills-head"><h3>MCP servers <small>${(state.mcpServers||[]).length}</small></h3><button class="secondary small" data-action="mcp-manage">Manage MCP servers</button></div>
+        <p class="field-help">${esc(mcpSupport(a))}</p>
+        ${(state.mcpServers||[]).length?`<div class="skill-list">${state.mcpServers.map(s=>`<label class="skill-row mcp-row"><div><strong>${esc(s.name)}</strong><em>${esc(s.type)}</em><p>${esc(s.type==='stdio'?`${s.command} ${s.args.join(' ')}`:s.url)}${s.note?` / ${esc(s.note)}`:''}</p></div><input type="checkbox" data-mcp-toggle="${esc(s.id)}" ${usesMcp(s,a)?'checked':''} ${mcpPassed(a)?'':'disabled'} aria-label="Use ${esc(s.name)} with ${esc(title(a))}"></label>`).join('')}</div>`:'<p class="field-help">No MCP servers yet. Add one to give your agents tools such as GitHub, a browser or a database.</p>'}
+      </section>`;
+      const search=$('#skills-search');search.addEventListener('input',()=>draw());if(q){search.focus();search.setSelectionRange(q.length,q.length);}
+      $('#skills-refresh').onclick=()=>draw(true);
+      for(const b of body.querySelectorAll('[data-skill-use]'))b.onclick=()=>useCommand(a,b.dataset.skillUse);
+      for(const c of body.querySelectorAll('[data-mcp-toggle]'))c.onchange=()=>action(async()=>{await api.agentMcp({agentId:a.id,serverId:c.dataset.mcpToggle,enabled:c.checked});await refresh();toast(a.protocol==='acp'?'Saved. Start a new conversation to use it.':'Saved.');});
+      $('#skills-open-folder')&&($('#skills-open-folder').onclick=()=>{closeModal();openFiles({agentId:a.id,path:r.dirs[0],label:`${title(a)} / skills`});});
+      $('#skill-install')&&($('#skill-install').onclick=()=>action(async()=>{const skill=$('#skill-id').value.trim();if(!skill)return;await api.skillAction({agentId:a.id,action:'install',skill});skillCache.delete(a.id);toast('Installing in Terminal. Refresh when it finishes.');}));
+      $('#skill-browse')&&($('#skill-browse').onclick=()=>action(()=>api.skillAction({agentId:a.id,action:'browse'})));
+      $('#skills-tools')&&($('#skills-tools').onclick=()=>action(async()=>{closeModal();await api.send({agentId:a.id,conversationId:currentConversation()?.agentId===a.id?currentConversation().id:'',text:'/tools'});}));
+    };
+    await draw();
+  }
+  function openMcpManager(editId=''){
+    const list=state.mcpServers||[],s=list.find(x=>x.id===editId)||null,adding=editId==='new';
+    const form=adding||s?`<form id="mcp-form" class="mcp-form">
+      <div class="form-grid"><label>Name<input name="name" required maxlength="40" pattern="[a-zA-Z0-9][a-zA-Z0-9_-]*" value="${esc(s?.name||'')}" placeholder="github"></label>
+      <label>Type<select name="type"><option value="stdio" ${s?.type==='stdio'||!s?'selected':''}>Program (stdio)</option><option value="http" ${s?.type==='http'?'selected':''}>HTTP</option><option value="sse" ${s?.type==='sse'?'selected':''}>SSE</option></select></label></div>
+      <div data-mcp="stdio"><label>Command<input name="command" value="${esc(s?.command||'')}" placeholder="npx"></label><label>Arguments <small>one per line</small><textarea name="args" rows="3" placeholder="-y&#10;@modelcontextprotocol/server-github">${esc((s?.args||[]).join('\n'))}</textarea></label>
+        <label>Environment variables <small>NAME=value, one per line. Stored encrypted. ${s?.envNames?.length?`Saved: ${esc(s.envNames.join(', '))}. Leave empty to keep them.`:''}</small><textarea name="env" rows="2" class="secret-text" autocomplete="off" spellcheck="false" placeholder="GITHUB_PERSONAL_ACCESS_TOKEN=..."></textarea></label></div>
+      <div data-mcp="remote"><label>URL<input name="url" value="${esc(s?.url||'')}" placeholder="https://mcp.example.com/mcp"></label>
+        <label>Headers <small>Name: value, one per line. Stored encrypted. ${s?.headerNames?.length?`Saved: ${esc(s.headerNames.join(', '))}. Leave empty to keep them.`:''}</small><textarea name="headers" rows="2" class="secret-text" autocomplete="off" spellcheck="false" placeholder="Authorization: Bearer ..."></textarea></label></div>
+      <fieldset class="mcp-agents"><legend>Use with</legend><label class="check-row inline"><input type="radio" name="scope" value="all" ${!s||s.agents==='all'?'checked':''}> All agents</label><label class="check-row inline"><input type="radio" name="scope" value="some" ${s&&s.agents!=='all'?'checked':''}> Chosen agents</label>
+        <div class="mcp-agent-list">${state.agents.map(x=>`<label class="check-row inline"><input type="checkbox" name="agent" value="${esc(x.id)}" ${s&&s.agents!=='all'&&s.agents.includes(x.id)?'checked':''}> ${esc(title(x))}</label>`).join('')}</div></fieldset>
+      <label>Note<input name="note" maxlength="300" value="${esc(s?.note||'')}" placeholder="What this server is for"></label>
+      <label class="check-row inline"><input type="checkbox" name="enabled" ${!s||s.enabled?'checked':''}> Enabled</label>
+      <div class="modal-footer"><div></div><div><button type="button" class="secondary" id="mcp-cancel">Back</button><button class="primary" type="submit">Save server</button></div></div></form>`:'';
+    modal('MCP servers','Tools your agents can call. Opaya passes them to ACP agents such as Hermes and to Claude Code.',`${adding||s?form:`<div class="skill-list">${list.map(x=>`<div class="skill-row"><div><strong>${esc(x.name)}</strong><em>${esc(x.type)}${x.enabled?'':' / off'}</em><p>${esc(x.type==='stdio'?`${x.command} ${x.args.join(' ')}`:x.url)}</p><p>${x.agents==='all'?'All agents':`${x.agents.length} agent${x.agents.length===1?'':'s'}`}${x.envNames.length||x.headerNames.length?` / secrets: ${esc([...x.envNames,...x.headerNames].join(', '))}`:''}</p></div><div class="row-actions"><button class="secondary small" data-mcp-edit="${esc(x.id)}">Edit</button><button class="text-button danger-text" data-mcp-remove="${esc(x.id)}">Remove</button></div></div>`).join('')||'<p class="field-help">No MCP servers yet.</p>'}</div>
+      <div class="mcp-examples"><p class="field-help">Examples: <code>npx -y @modelcontextprotocol/server-filesystem C:\\Projects</code>, <code>uvx mcp-server-fetch</code>, or an HTTPS server such as <code>https://mcp.context7.com/mcp</code>.</p></div>
+      <div class="modal-footer"><div></div><div><button class="primary" id="mcp-add">Add MCP server</button></div></div>`}`,true);
+    $('#mcp-add')&&($('#mcp-add').onclick=()=>openMcpManager('new'));
+    for(const b of document.querySelectorAll('[data-mcp-edit]'))b.onclick=()=>openMcpManager(b.dataset.mcpEdit);
+    for(const b of document.querySelectorAll('[data-mcp-remove]'))b.onclick=()=>action(async()=>{const x=list.find(y=>y.id===b.dataset.mcpRemove);if(!confirm(`Remove MCP server ${x?.name}? Its saved secrets are deleted.`))return;await api.mcpRemove({id:b.dataset.mcpRemove});await refresh();openMcpManager();});
+    const f=$('#mcp-form');if(!f)return;const el=n=>f.elements[n];
+    const sync=()=>{const stdio=el('type').value==='stdio';f.querySelector('[data-mcp="stdio"]').hidden=!stdio;f.querySelector('[data-mcp="remote"]').hidden=stdio;f.querySelector('.mcp-agent-list').hidden=el('scope').value!=='some';};
+    el('type').onchange=sync;for(const r of f.querySelectorAll('[name="scope"]'))r.onchange=sync;sync();
+    $('#mcp-cancel').onclick=()=>openMcpManager();
+    f.onsubmit=event=>{event.preventDefault();action(async()=>{
+      const agents=el('scope').value==='all'?'all':[...f.querySelectorAll('[name="agent"]:checked')].map(c=>c.value);
+      modalBusy=true;try{await api.mcpSave({server:{id:s?.id,name:el('name').value.trim(),type:el('type').value,command:el('command').value.trim(),args:el('args').value,url:el('url').value.trim(),agents,note:el('note').value,enabled:el('enabled').checked},env:el('env').value,headers:el('headers').value});}finally{modalBusy=false;}
+      await refresh();toast('MCP server saved. New conversations use it.');openMcpManager();
+    });};
+  }
+  // "/" in the message box lists the agent's commands and installed skills.
+  let slash={items:[],index:0,open:false};
+  function slashItems(a,query){
+    const skills=skillCache.get(a.id)?.skills||[],seen=new Set(),out=[];
+    for(const x of [...(a.commands||[]).map(c=>({name:c.name,description:c.description,kind:'command'})),...skills.map(s=>({name:s.name,description:s.description,kind:'skill'}))]){if(seen.has(x.name))continue;seen.add(x.name);if(x.name.toLowerCase().includes(query))out.push(x);}
+    return out.sort((x,y)=>(y.name.toLowerCase().startsWith(query))-(x.name.toLowerCase().startsWith(query))).slice(0,8);
+  }
+  function closeSlash(){slash.open=false;$('#slash-menu')?.remove();}
+  function updateSlash(){
+    const a=selected(),input=$('#message-input');if(!a||!input||opayaView||playgroundView||overview){closeSlash();return;}
+    const m=/^\/([\w.:-]*)$/.exec(input.value);if(!m){closeSlash();return;}
+    if(!skillCache.has(a.id))loadSkills(a.id).then(()=>updateSlash()).catch(()=>skillCache.set(a.id,{skills:[],dirs:[],supported:false}));
+    slash.items=slashItems(a,m[1].toLowerCase());slash.index=Math.min(slash.index,Math.max(0,slash.items.length-1));
+    if(!slash.items.length){closeSlash();return;}
+    let menu=$('#slash-menu');if(!menu){menu=document.createElement('div');menu.id='slash-menu';menu.className='slash-menu';menu.setAttribute('role','listbox');$('#message-form').prepend(menu);}
+    slash.open=true;
+    menu.innerHTML=slash.items.map((x,i)=>`<button type="button" role="option" class="${i===slash.index?'active':''}" aria-selected="${i===slash.index}" data-slash="${i}"><strong>/${esc(x.name)}</strong><em>${x.kind}</em><span>${esc(x.description||'')}</span></button>`).join('');
+    for(const b of menu.querySelectorAll('[data-slash]'))b.onmousedown=event=>{event.preventDefault();pickSlash(Number(b.dataset.slash));};
+  }
+  function pickSlash(i){const x=slash.items[i],input=$('#message-input');if(!x||!input)return;input.value=`/${x.name} `;drafts.set(draftKey(),input.value);closeSlash();input.focus();}
+  function slashKey(event){
+    if(!slash.open)return false;
+    if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();slash.index=(slash.index+(event.key==='ArrowDown'?1:-1)+slash.items.length)%slash.items.length;updateSlash();return true;}
+    if(event.key==='Enter'||event.key==='Tab'){event.preventDefault();pickSlash(slash.index);return true;}
+    if(event.key==='Escape'){event.preventDefault();closeSlash();return true;}
+    return false;
   }
   const panel=$('#terminal-panel'),grip=document.createElement('div');
   grip.className='terminal-resize-grip';grip.tabIndex=0;grip.role='separator';grip.setAttribute('aria-label','Resize terminal');grip.setAttribute('aria-orientation','horizontal');grip.title='Drag to resize terminal';panel.prepend(grip);

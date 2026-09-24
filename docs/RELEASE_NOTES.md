@@ -1,4 +1,13 @@
-# Opaya 0.5.3 - Readable Hermes logs
+# Opaya 0.6.0 - Skills, tools and MCP servers
+
+- **Skills**: the new **Skills** button (and right-click > Skills, tools & MCP) lists the skills installed for an agent, read from their SKILL.md folders, for Hermes, Claude Code, Codex and OpenClaw, on this computer or over SSH. **Use** puts `/skill` in the message box.
+- **Install Hermes skills**: enter a hub id (for example `official/security/1password`) or a link to a SKILL.md, or open the Hermes skills hub. Installs run with `hermes skills install` in a visible terminal after you approve them.
+- **/ in the message box** lists the agent's commands (Hermes: /tools, /model, /compress ...) and its skills. Use the arrow keys and Enter or Tab to pick one.
+- **MCP servers** (Settings > MCP servers): add a program (stdio) or an HTTP/SSE server once, then choose which agents use it. Opaya passes them to Hermes and other ACP agents when a conversation starts, and to Claude Code on this computer. Environment variables and headers (API keys) are stored in the OS-encrypted vault and are never shown again.
+- **Opaya Agent** can list skills, install Hermes skills (with your approval) and list MCP servers (names only, never values).
+- **Local Hermes that never answers**: the Connection log now shows the Hermes version. If Hermes is still starting its terminal after 30 seconds, the chat says so. This is a known Hermes-on-Windows problem with Git Bash under ACP, and the chat suggests the fix: run `hermes update`, or use the Hermes gateway API. On Windows, Opaya now passes `HERMES_HOME` and `HERMES_GIT_BASH_PATH` from your user settings to Hermes, even when Hermes was installed after Opaya started.
+
+## Earlier: 0.5.3 - Readable Hermes logs
 
 - **Connection log stays readable**: a retry loop that repeats the same error thousands of times, such as the Hermes Slack reconnect bug (`slack_bolt ... Session is closed`), is collapsed into one entry with a repeat count. Opaya reads more of each log file, so the lines around the problem stay visible.
 - **Opaya Agent knows the Hermes Slack bug**: it recognizes the known Hermes gateway Slack reconnect loop (NousResearch/hermes-agent#83662) and suggests restarting the Hermes gateway.

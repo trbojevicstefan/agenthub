@@ -60,3 +60,20 @@ test('diagnostics collapse repeated log tracebacks and redact secrets',()=>{
   assert.equal(text.split('RuntimeError').length,2);assert.match(text,/repeated 39 more times\]\nINFO prompt received$/);
   assert.equal(redact('api_key: sk-abcdef123456'),'api_key: [redacted]');
 });
+test('ACP passes MCP servers, records Hermes version and slash commands, and warns when the terminal never starts',async()=>{
+  const child=childMock((m,c)=>{
+    if(m.method==='initialize')c.reply(m,{protocolVersion:1,agentCapabilities:{mcpCapabilities:{http:true}},agentInfo:{name:'hermes-agent',version:'0.21.5'}});
+    if(m.method==='session/new'){c.reply(m,{sessionId:'s1'});c.send({method:'session/update',params:{sessionId:'s1',update:{sessionUpdate:'available_commands_update',availableCommands:[{name:'tools',description:'List tools'},{name:'bad name;',description:'x'}]}}});}
+    if(m.method==='session/prompt'){c.stderr.write('2026 [INFO] tools.terminal_tool: Creating new local environment for task default...\n');c.prompt=m;setTimeout(()=>c.reply(m,{stopReason:'end_turn'}),120);}
+  });
+  const servers=[{name:'files',command:'npx',args:['-y','srv'],env:[{name:'TOKEN',value:'t'}]},{type:'http',name:'web',url:'https://x/mcp',headers:[]},{type:'sse',name:'old',url:'https://y/sse',headers:[]}];
+  let changes=0;const events=[];
+  const a=new AcpAdapter({agent:{provider:'hermes',args:[],cwd:path.resolve('.')},approve:async()=>true,spawnAgent:()=>child,mcpServers:()=>servers,onChange:()=>changes++,envStallMs:30});
+  const info=await a.connect();assert.match(info.description,/0\.21\.5/);assert.equal(info.agentVersion,'0.21.5');
+  await a.run(context({onEvent:e=>events.push(e)}));
+  const sent=child.frames.find(f=>f.method==='session/new').params.mcpServers;
+  assert.deepEqual(sent.map(s=>s.name),['files','web']);assert.equal(sent[1].type,'http');assert.equal(sent[0].type,undefined);
+  assert.deepEqual(a.commands.map(c=>c.name),['tools']);assert(changes>0);
+  assert(events.some(e=>e.type==='activity'&&/hermes update/.test(e.text)));
+  assert.equal(a.diagnostics().agentVersion,'0.21.5');a.close();
+});
