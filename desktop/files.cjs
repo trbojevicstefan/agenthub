@@ -40,6 +40,9 @@ try:
     markers=[m for m in ${JSON.stringify(MARKERS)} if os.path.exists(os.path.join(p,m))]
     status=git(['status','--porcelain=v1','--branch']).splitlines()
     out({'path':p,'markers':markers,'git':{'branch':status[0][3:] if status else '','changes':status[1:61],'recent':git(['log','--oneline','-8']).splitlines()} if status else None})
+  if op=='branches':
+    current=git(['branch','--show-current']).strip()
+    out({'path':p,'current':current,'branches':[b for b in git(['for-each-ref','--format=%(refname:short)','refs/heads','refs/remotes']).splitlines() if b and not b.endswith('/HEAD')][:300]})
   out({'error':'Unknown operation.'})
 except Exception as e:
   out({'error':str(e)[:400]})
@@ -65,6 +68,10 @@ async function local(op,input){
     const status=(await git(p,['status','--porcelain=v1','--branch'])).split(/\r?\n/).filter(Boolean);
     return {path:p,markers,git:status.length?{branch:status[0].slice(3),changes:status.slice(1,61),recent:(await git(p,['log','--oneline','-8'])).split(/\r?\n/).filter(Boolean)}:null};
   }
+  if(op==='branches'){
+    const current=(await git(p,['branch','--show-current'])).trim();
+    return {path:p,current,branches:(await git(p,['for-each-ref','--format=%(refname:short)','refs/heads','refs/remotes'])).split(/\r?\n/).filter(b=>b&&!b.endsWith('/HEAD')).slice(0,300)};
+  }
   throw new Error('Unknown operation.');
 }
 async function remote(host,op,input){
@@ -76,7 +83,7 @@ async function remote(host,op,input){
   if(result.error)throw new Error(result.error);return result;
 }
 async function browse({op,path:input='',host=null}){
-  if(!['list','read','project'].includes(op))throw new Error('Unknown file operation.');
+  if(!['list','read','project','branches'].includes(op))throw new Error('Unknown file operation.');
   if(typeof input!=='string'||input.length>4096||/[\0\r\n]/.test(input))throw new Error('Invalid path.');
   return host?remote(host,op,input):local(op,input);
 }

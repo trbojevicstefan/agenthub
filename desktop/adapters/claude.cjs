@@ -23,7 +23,7 @@ class ClaudeAdapter{
     const servers=this.mcpServers()||[];let config=null;
     if(servers.length&&this.agent.transport==='ssh')ctx.onEvent({type:'activity',text:'MCP servers from Opaya are not passed to Claude over SSH. Add them on that machine with `claude mcp add`.'});
     else if(servers.length){config=mcpFile(servers);args.push('--mcp-config',config.file);}
-    let child;try{child=this.spawnAgent(this.agent,args,this.host);}catch(error){config?.remove();throw error;}this.child=child;
+    let child;try{child=this.spawnAgent(ctx.cwd?{...this.agent,cwd:ctx.cwd}:this.agent,args,this.host);}catch(error){config?.remove();throw error;}this.child=child;
     return new Promise((resolve,reject)=>{
       let buffer='',stderr='',sessionId='',sawText=false,resultSeen=false,done=false,resultError='';
       const finish=(error)=>{if(done)return;done=true;config?.remove();clearTimeout(timer);ctx.signal.removeEventListener('abort',cancel);this.child=null;error?reject(error):resolve({externalSessionId:sessionId||ctx.conversation.externalSessionId});};

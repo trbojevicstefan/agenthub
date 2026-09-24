@@ -35,7 +35,7 @@ class CodexAdapter{
   async run(ctx){
     const model=ctx.conversation.model||this.agent.model;let threadId=this.threads.get(ctx.conversation.id);
     if(!threadId){
-      const params={cwd:this.agent.cwd||undefined,approvalPolicy:'on-request',sandbox:'workspace-write',...(model?{model}:{})};
+      const params={cwd:ctx.cwd||this.agent.cwd||undefined,approvalPolicy:'on-request',sandbox:'workspace-write',...(model?{model}:{})};
       const result=ctx.conversation.externalSessionId?await this.rpc.request('thread/resume',{...params,threadId:ctx.conversation.externalSessionId}):await this.rpc.request('thread/start',params);
       threadId=result.thread?.id;if(!threadId)throw new Error('Codex did not return a thread ID.');
       this.threads.set(ctx.conversation.id,threadId);await ctx.onSession(threadId);

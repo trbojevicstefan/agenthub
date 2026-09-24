@@ -284,3 +284,26 @@
 :where(body[data-theme="light"]) .slash-menu button.active,:where(body[data-theme="light"]) .slash-menu button:hover{background:#cfddd4}
 :where(body[data-theme="light"]) .slash-menu em{color:#37503e}
 :where(body[data-theme="light"]) .slash-menu span{color:#44514a}
+:where(body[data-theme="light"]) .projects-panel{border-left:1px solid #d3d6d9}
+:where(body[data-theme="light"]) .projects-toolbar{border-bottom:1px solid #d9dfe0}
+:where(body[data-theme="light"]) .projects-toolbar .icon-button:hover{border-color:#c1c8cb}
+:where(body[data-theme="light"]) .projects-footer{border-top:1px solid #d9dfe0}
+:where(body[data-theme="light"]) .project-card.open{background:#e2e7e5;border-color:#d4dbd7}
+:where(body[data-theme="light"]) .project-card.current{border-color:#bcd5c6}
+:where(body[data-theme="light"]) .project-folder{color:#33513c}
+:where(body[data-theme="light"]) .project-folder.big{color:#3a6849}
+:where(body[data-theme="light"]) .project-branch{border:1px solid #cbd5d0}
+:where(body[data-theme="light"]) .project-branch:hover{border-color:#abbcb3}
+:where(body[data-theme="light"]) .project-branch b{color:#58441a}
+:where(body[data-theme="light"]) .project-branch.dirty{border-color:#dbd1ba}
+:where(body[data-theme="light"]) .project-agent{border:1px solid #cbd5d0;background:#dbe2df}
+:where(body[data-theme="light"]) .project-agent:hover{border-color:#a6bcae;background:#d3ddd8}
+:where(body[data-theme="light"]) .project-agent.add{color:#144526}
+:where(body[data-theme="light"]) .project-chat{color:#242b27}
+:where(body[data-theme="light"]) .project-chat.selected{background:#d4e0d9}
+:where(body[data-theme="light"]) .project-tools{border-top:1px solid #d6deda}
+:where(body[data-theme="light"]) .projects-toggle.selected{border-color:#bcd5c6;background:#d4e0d9;color:#0e2f1b}
+:where(body[data-theme="light"]) .crumb-project{border:1px solid #cbd5d0;color:#203226}
+:where(body[data-theme="light"]) .crumb-project:hover{border-color:#a6bcae}
+:where(body[data-theme="light"]) .segmented{background:#dee4e3;border:1px solid #d1d8d7}
+:where(body[data-theme="light"]) .segmented button.selected{background:#cfd9d4}

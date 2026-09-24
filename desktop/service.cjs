@@ -14,6 +14,7 @@ const catalog = require('./catalog.cjs');
 const files = require('./files.cjs');
 const {OpayaAgent} = require('./opaya-agent.cjs');
 const skills = require('./skills.cjs');
+const projects = require('./projects.cjs');
 async function start({app, safeStorage}, root) {
   let broker, terminals, listener, opaya, stopping = false;
   const startedAt = new Date().toISOString(), approvals = new Map();
@@ -22,7 +23,7 @@ async function start({app, safeStorage}, root) {
   const old = await fs.readFile(descriptor,'utf8').then(JSON.parse).catch(()=>null);
   if (old && old.pid !== process.pid && alive(old.pid)) throw new Error('A session service is already running.');
   if (process.platform !== 'win32') await fs.rm(endpoint(root),{force:true});
-  function snapshot() { return {...broker.snapshot(), opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, frameworks:catalog.list(), platform:process.platform, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true}}; }
+  function snapshot() { return {...broker.snapshot(), opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true}}; }
   const emit = () => listener?.broadcast('state', snapshot());
   async function approve(agent, title, detail) {
     const socket = [...(listener?.clients || [])].at(-1);
@@ -59,7 +60,7 @@ async function start({app, safeStorage}, root) {
     snapshot, saveAgent:x=>broker.saveAgent(x), reorderAgents:x=>broker.reorderAgents(x), updateAgentDisplay:x=>broker.updateAgentDisplay(x), saveHost:x=>broker.saveHost(x), removeHost:x=>broker.removeHost(x.id),
     removeAgent:async x=>{const a=broker.agent(x.id); if(!await approve(a,'Remove this agent connection?','Deletes its saved connection and local chat transcripts, not the agent installation.'))return false;terminals.closeAgent(a.id);await broker.removeAgent(a.id);return true;},
     discover:x=>broker.discover(x), connect:x=>broker.connect(x.id), disconnect:x=>broker.disconnect(x.id), clearError:x=>broker.clearError(x.id),
-    select:x=>broker.select(x.id), newConversation:x=>broker.newConversation(x.agentId), selectConversation:x=>broker.selectConversation(x.id),
+    select:x=>broker.select(x.id), newConversation:x=>broker.newConversation(x.agentId,x.projectId||''), selectConversation:x=>broker.selectConversation(x.id),
     send:x=>broker.send(x), stop:x=>broker.stop(x.id), saveDraft:x=>broker.saveDraft(x), saveView:x=>broker.saveView(x),
     transcript:async x=>{const c=broker.data.conversations.find(c=>c.id===schema.id(x.id));if(!c)throw new Error('Conversation not found.');return {conversation:c,agent:broker.agent(c.agentId),messages:broker.histories.get(c.id)||await broker.store.transcript(c.id)};},
     terminalOpen:async x=>{
@@ -82,6 +83,19 @@ async function start({app, safeStorage}, root) {
       catch(error){if(fallback&&x.op!=='read')return files.browse({op:x.op,path:'',host});throw error;}
     },
     agentDiagnostics:x=>broker.diagnostics(x.id),
+    projectSave:x=>broker.saveProject(x), projectRemove:x=>broker.removeProject(x.id), projectInfo:x=>broker.projectInfo(x.id), projectBranches:x=>broker.projectBranches(x.id),
+    // Git and GitHub CLI actions run as fixed commands in the project's own visible terminal.
+    projectGit:async x=>{
+      const p=broker.project(x.id),host=broker.projectHost(p);
+      const command=projects.gitCommand(p,String(x.action||''),x,{windows:process.platform==='win32'});
+      return runInTerminal({label:`${p.name} / git`,key:`git_${p.id}`.slice(0,60),host,command});
+    },
+    projectClone:async x=>{
+      const host=x.hostId?broker.host(x.hostId):null;
+      const {command,path:folder,name}=projects.cloneCommand(x,{windows:process.platform==='win32'});
+      const p=await broker.saveProject({name:x.name||name,path:folder,hostId:host?.id||'',agentIds:x.agentIds||[]});
+      await runInTerminal({label:`Clone ${name}`,key:`clone_${p.id}`.slice(0,60),host,command});return p;
+    },
     mcpSave:x=>broker.saveMcpServer(x), mcpRemove:x=>broker.removeMcpServer(x.id), agentMcp:x=>broker.setAgentMcp(x), agentSkills:x=>broker.skills(x.id),
     // Hermes skills: browse the hub or install one with the Hermes CLI in a visible terminal.
     skillAction:async x=>{

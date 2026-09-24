@@ -8,6 +8,8 @@ const {importGatewayToken}=require('./credentials.cjs');
 const {gatewayOperation}=require('./management.cjs');
 const mcp=require('./mcp.cjs');
 const {listSkills}=require('./skills.cjs');
+const projects=require('./projects.cjs');
+const files=require('./files.cjs');
 function safeError(error,token=''){
   let value=String(error?.message||error||'Operation failed.');
   if(token)value=value.split(token).join('[redacted]');
@@ -21,6 +23,7 @@ class Broker{
     await this.vault.load();this.data=await this.store.load();
     this.data.drafts=this.data.drafts||{};this.data.lastConversation=this.data.lastConversation||{};this.data.view=this.data.view||{};
     this.data.agents=this.data.agents.map(a=>schema.agent(a));
+    this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
     this.data.mcpServers=(Array.isArray(this.data.mcpServers)?this.data.mcpServers:[]).flatMap(s=>{try{return [mcp.server(s)];}catch{return [];}});this.data.hosts=this.data.hosts.map(h=>schema.host(h));
     this.data.activeAgentId=this.data.agents.some(a=>a.id===this.data.activeAgentId)?this.data.activeAgentId:this.data.agents[0]?.id||'';
     for(const a of this.data.agents)this.runtime.set(a.id,{status:'disconnected',error:'',models:[]});
@@ -35,7 +38,7 @@ class Broker{
   runtimeFor(id){if(!this.runtime.has(id))this.runtime.set(id,{status:'disconnected',error:'',models:[]});return this.runtime.get(id);}
   snapshot(){
     const {agents,hosts,conversations,activeAgentId,activeConversationId}=this.data;
-    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',commands:r.adapter?.commands||[],models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations,activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
+    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',commands:r.adapter?.commands||[],models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations,activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
   }
   changed(){if(!this.closing)this.emit(this.snapshot());}
   async persist(){await this.store.write(this.data);this.changed();}
@@ -77,6 +80,7 @@ class Broker{
     const conversations=this.data.conversations.filter(c=>c.agentId===id);this.data.conversations=this.data.conversations.filter(c=>c.agentId!==id);
     for(const c of conversations){this.histories.delete(c.id);delete this.data.drafts[c.id];await this.store.deleteTranscript(c.id);}
     delete this.data.drafts[id];delete this.data.lastConversation[id];
+    for(const p of this.data.projects||[])p.agentIds=p.agentIds.filter(x=>x!==id);
     await this.vault.remove(id);this.runtime.delete(id);
     if(this.data.activeAgentId===id){this.data.activeAgentId=this.data.agents[0]?.id||'';this.data.activeConversationId='';}
     await this.persist();return a;
@@ -99,13 +103,14 @@ class Broker{
     await Promise.all(ids.filter(id=>conversations[id]).map(id=>this.send({agentId:id,conversationId:conversations[id],text}).catch(error=>{errors[id]=safeError(error);})));
     await this.persist();return this.data.playground;
   }
-  async newConversation(agentId){
-    this.agent(agentId);if(this.turns.has(agentId))throw new Error('Wait for or stop this agent\'s current turn first.');
-    return this.createConversation(agentId);
+  async newConversation(agentId,projectId=''){
+    const a=this.agent(agentId);if(this.turns.has(agentId))throw new Error('Wait for or stop this agent\'s current turn first.');
+    if(projectId){const p=this.project(projectId);if(!projects.fits(a,p))throw new Error(`${a.name} runs on a different machine than ${p.name}.`);}
+    return this.createConversation(agentId,{projectId});
   }
-  async createConversation(agentId,{activate=true,title='New conversation'}={}){
+  async createConversation(agentId,{activate=true,title='New conversation',projectId=''}={}){
     if(this.data.conversations.length>=2000)throw new Error('Conversation limit reached. Export and remove old agent connections.');
-    const c={id:randomUUID(),agentId,title,createdAt:new Date().toISOString(),externalSessionId:''};
+    const c={id:randomUUID(),agentId,title,createdAt:new Date().toISOString(),externalSessionId:'',...(projectId?{projectId}:{})};
     this.data.conversations.push(c);this.histories.set(c.id,[]);if(activate){this.data.activeConversationId=c.id;this.data.activeAgentId=agentId;this.data.lastConversation[agentId]=c.id;}await this.persist();return c;
   }
   async selectConversation(id){const c=this.data.conversations.find(c=>c.id===schema.id(id));if(!c)throw new Error('Conversation not found.');this.data.activeAgentId=c.agentId;this.data.activeConversationId=c.id;this.data.lastConversation[c.agentId]=c.id;if(!this.histories.has(c.id))this.histories.set(c.id,await this.store.transcript(c.id));await this.persist();}
@@ -115,7 +120,7 @@ class Broker{
     const key=conversationId||agentId;this.data.drafts[key]=text;await this.store.write(this.data);return true;
   }
   async saveView(input){
-    this.data.view={overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark'};await this.store.write(this.data);return true;
+    this.data.view={overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark',projects:!!input.projects,projectsOpen:Array.isArray(input.projectsOpen)?[...new Set(input.projectsOpen.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)))].slice(0,50):[]};await this.store.write(this.data);return true;
   }
   async updateAgentDisplay({id,displayName,pinned,avatar,group,tags}){
     const index=this.data.agents.findIndex(a=>a.id===schema.id(id));if(index<0)throw new Error('Agent not found.');
@@ -148,6 +153,27 @@ class Broker{
       turn:turn?{runningSeconds:Math.round((now-(turn.startedAt||now))/1000),secondsSinceLastEvent:Math.round((now-(turn.lastEventAt||turn.startedAt||now))/1000),lastEvent:turn.lastEvent||''}:null,
       adapter,hermesLogs:a.provider==='hermes'?await hermesLogs(a,a.transport==='ssh'?this.data.hosts.find(h=>h.id===a.hostId):null).catch(()=>[]):[]};
   }
+  // ---- Projects ---------------------------------------------------------------------------------------------------
+  project(id){const p=(this.data.projects||[]).find(p=>p.id===schema.id(id));if(!p)throw new Error('Project not found.');return p;}
+  projectHost(p){return p.hostId?this.host(p.hostId):null;}
+  async saveProject(input){
+    const existing=input?.id?this.data.projects.find(p=>p.id===input.id):null;
+    const p=projects.project({...(existing||{}),...input});if(p.hostId)this.host(p.hostId);
+    p.agentIds=p.agentIds.filter(id=>this.data.agents.some(a=>a.id===id));
+    if(!existing&&this.data.projects.length>=200)throw new Error('Project limit reached (200).');
+    if(this.data.projects.some(x=>x.id!==p.id&&x.path===p.path&&x.hostId===p.hostId))throw new Error('This folder is already a project.');
+    this.data.projects=existing?this.data.projects.map(x=>x.id===p.id?p:x):[...this.data.projects,p];
+    await this.persist();return p;
+  }
+  async removeProject(id){
+    const p=this.project(id);this.data.projects=this.data.projects.filter(x=>x.id!==p.id);
+    for(const c of this.data.conversations)if(c.projectId===p.id)delete c.projectId;
+    await this.persist();return true;
+  }
+  async projectInfo(id){const p=this.project(id);return files.browse({op:'project',path:p.path,host:this.projectHost(p)});}
+  async projectBranches(id){const p=this.project(id);return files.browse({op:'branches',path:p.path,host:this.projectHost(p)});}
+  // The folder a conversation's agent should work in: its project's folder when the agent runs on that machine.
+  conversationCwd(c,a){const p=c.projectId&&(this.data.projects||[]).find(x=>x.id===c.projectId);return p&&projects.fits(a,p)?p.path:'';}
   // ---- MCP servers and skills ----------------------------------------------------------------------------------
   mcpSecrets(serverId){try{const raw=this.vault.get(mcp.vaultKey(serverId));return raw?JSON.parse(raw):{env:{},headers:{}};}catch{return {env:{},headers:{}};}}
   mcpFor(agentId){return mcp.acpServers(this.data.mcpServers||[],agentId,id=>this.mcpSecrets(id));}
@@ -288,7 +314,7 @@ class Broker{
       };
       turn.task=Promise.resolve().then(()=>{
         if(abort.signal.aborted)throw new Error('Turn cancelled before it was sent.');
-        return adapter.run({text,messages:messages.filter(m=>m!==assistant),conversation:c,signal:abort.signal,onEvent,onSession:async sessionId=>{c.externalSessionId=sessionId;await this.store.write(this.data);}});
+        return adapter.run({text,messages:messages.filter(m=>m!==assistant),conversation:c,cwd:this.conversationCwd(c,this.agent(agentId)),signal:abort.signal,onEvent,onSession:async sessionId=>{c.externalSessionId=sessionId;await this.store.write(this.data);}});
       }).then(result=>{
         if(abort.signal.aborted){assistant.status='cancelled';assistant.error=turn.reason||'Stopped. The answer so far is kept and the agent stays connected.';}else assistant.status='done';
         if(result?.externalSessionId)c.externalSessionId=result.externalSessionId;

@@ -67,6 +67,7 @@ const TOOLS=[
   fn('project_info','Read-only: project markers, git branch, uncommitted changes and recent commits for a folder.',{path:{type:'string'},machine_id:{type:'string'}},['path']),
   fn('list_skills','Read-only: the skills installed for an agent (folders with a SKILL.md) and where they live. Users run a skill with /name in the chat.',{agent_id:{type:'string'}},['agent_id']),
   fn('install_skill','Install a Hermes skill with `hermes skills install` in a visible terminal. The user approves it first. Use hub ids such as official/security/1password or skills-sh/owner/repo/skill, or an https link to a SKILL.md.',{agent_id:{type:'string'},skill:{type:'string'}},['agent_id','skill']),
+  fn('list_projects','Read-only: saved projects (a folder on this computer or a machine, and the agents that work in it). Use project_info with the folder for git state. The user runs git actions from the Projects panel.'),
   fn('list_mcp_servers','Read-only: MCP servers saved in Opaya and which agents use them. Values of environment variables and headers are never shown. The user adds or edits servers in Settings > MCP servers.'),
   fn('read_notes','Read your notes file in your home folder.'),
   fn('write_notes','Replace your notes file in your home folder (max 20000 characters). Use it to remember setup decisions.',{content:{type:'string'}},['content'])
@@ -128,6 +129,7 @@ class OpayaAgent{
       'Your job: help install new agents, connect and maintain existing ones, manage SSH machines and keys, and troubleshoot agents that do not work.',
       'Work only through your tools. Check the workspace before changing anything. Prefer the smallest change. Explain briefly what you will do before a change; every change and command is approved by the user in a native dialog, and a declined approval is final.',
       'You cannot edit the app itself, its code or files outside your home folder, and you never see or handle API tokens: ask the user to enter tokens in the connection form.',
+      'Projects: list_projects shows saved project folders and their agents; chats started from a project open the agent in that folder. Git and GitHub CLI actions are in the Projects panel (right-click a project). '+
       'Skills: list_skills shows what an agent has; users run one with /name in its chat. Install Hermes skills with install_skill. MCP servers are added by the user in Settings > MCP servers (list_mcp_servers shows them); Opaya passes them to Hermes over ACP and to Claude Code. ',
       'When an agent hangs or does not answer, call agent_diagnostics first and explain what it shows: a pending approval, a tool that is still running, stderr errors or Hermes log errors. A Hermes log full of repeated "slack_bolt ... Session is closed" tracebacks is a known Hermes gateway bug in its Slack reconnect (NousResearch/hermes-agent#83662); it only affects the gateway and Slack, and restarting the Hermes gateway clears it. For agents that fail: read the connection and error, run diagnostics, check that the endpoint/port or executable exists, reconnect, and only then propose an edited connection. Do not remove connections unless asked.',
       'Before installing an agent, check its prerequisites with run_diagnostic versions (on the target machine) and install missing dependencies first, or the essentials bundle when several are missing. On Windows, new tools appear on PATH for terminals opened after the install.',
@@ -189,7 +191,7 @@ class OpayaAgent{
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.6.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.7.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
@@ -303,6 +305,7 @@ class OpayaAgent{
         const view=await this.runInTerminal({label:`Skill ${args.skill}`,key:`skills_${a.id}`.slice(0,60),host,command});
         return {terminal_id:view.id,output:await this.terminalOutput(view.id,6000),next:'Start a new conversation with the agent to use the skill.'};
       }
+      case 'list_projects':return {projects:(b.data.projects||[]).map(p=>({id:p.id,name:p.name,path:p.path,machine:p.hostId?b.data.hosts.find(h=>h.id===p.hostId)?.name||p.hostId:'this computer',machine_id:p.hostId||undefined,agents:p.agentIds.map(id=>b.data.agents.find(a=>a.id===id)?.name||id),conversations:b.data.conversations.filter(c=>c.projectId===p.id).length}))};
       case 'list_mcp_servers':return {servers:b.snapshot().mcpServers.map(({name,type,command,args,url,envNames,headerNames,agents,enabled})=>({name,type,command,args,url,envNames,headerNames,enabled,agents:agents==='all'?'all':agents.map(id=>b.data.agents.find(x=>x.id===id)?.name||id)}))};
       case 'read_notes':return {notes:await fs.readFile(path.join(this.home,'notes.md'),'utf8').catch(()=>'')};
       case 'write_notes':{const content=String(args.content??'');if(content.length>20000||content.includes('\0'))throw new Error('Notes must be under 20000 characters.');await fs.writeFile(path.join(this.home,'notes.md'),content,{mode:0o600});return {saved:true};}

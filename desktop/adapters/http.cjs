@@ -57,11 +57,13 @@ class HttpAdapter {
     if(status===404)return this.agent.provider==='openclaw'?'Enable gateway.http.endpoints.chatCompletions on OpenClaw, then reconnect.':'API route not found. Verify the base URL ends with /v1 and that this gateway API is enabled.';
     return `API request failed (HTTP ${status}). Check the agent gateway in Terminal.`;
   }
-  async run({text,messages,conversation,signal,onEvent}) {
+  async run({text,messages,conversation,signal,onEvent,cwd}) {
     const history=messages.filter((m,i)=>['user','assistant'].includes(m.role)&&m.status!=='error'&&m.status!=='cancelled'&&!(m.role==='user'&&['error','cancelled'].includes(messages[i+1]?.status))).map(m=>({role:m.role,content:m.content}));
     if(JSON.stringify(history).length>500000)throw new Error('This conversation is too large to resend safely. Start a new conversation.');
     const model=conversation?.model||this.agent.model||this.models?.[0];
     if(!model)throw new Error('Choose a model in the agent connection settings.');
+    // Gateway agents keep their own working folder; a project conversation tells them which folder it is about.
+    if(cwd)history.unshift({role:'system',content:`This conversation is about the project folder ${cwd}. Work in that folder unless the user says otherwise.`});
     const payload={model,stream:true,messages:history};
     if(this.agent.provider==='hermes'&&model.includes(':')){
       const separator=model.indexOf(':',model.startsWith('custom:')?7:0);
@@ -69,7 +71,7 @@ class HttpAdapter {
     }
     // OpenClaw owns conversation history when given a stable user key. Sending only
     // the new turn avoids replaying previously stored messages into its session.
-    if(this.agent.provider==='openclaw') { payload.user=`agenthub:${conversation.id}`;payload.messages=[{role:'user',content:text}]; }
+    if(this.agent.provider==='openclaw') { payload.user=`agenthub:${conversation.id}`;payload.messages=[...(cwd?[history[0]]:[]),{role:'user',content:text}]; }
     const headers=this.headers();
     if(this.agent.provider==='hermes'){headers['X-Hermes-Session-Id']=conversation.id;headers['X-Hermes-Session-Key']=`agenthub:${this.agent.id}:${conversation.id}`;}
     this.log.add('out',`POST ${this.url}/chat/completions model=${payload.model} messages=${payload.messages.length}`);
