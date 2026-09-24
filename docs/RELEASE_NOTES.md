@@ -1,4 +1,9 @@
-# Opaya 0.5.2 - Hang diagnostics and the Windows icon
+# Opaya 0.5.3 - Readable Hermes logs
+
+- **Connection log stays readable**: a retry loop that repeats the same error thousands of times, such as the Hermes Slack reconnect bug (`slack_bolt ... Session is closed`), is collapsed into one entry with a repeat count. Opaya reads more of each log file, so the lines around the problem stay visible.
+- **Opaya Agent knows the Hermes Slack bug**: it recognizes the known Hermes gateway Slack reconnect loop (NousResearch/hermes-agent#83662) and suggests restarting the Hermes gateway.
+
+## Earlier: 0.5.2 - Hang diagnostics and the Windows icon
 
 - **Windows icon is back** in the taskbar, window and shortcuts. Every size in the .ico is now a plain bitmap, so Windows always draws it, and the installer and uninstaller use the Opaya icon too.
 - **Long Hermes runs no longer time out**: the 10-minute cap on a local ACP answer is gone. A command or terminal run can take as long as it needs, and Stop still cancels it.
