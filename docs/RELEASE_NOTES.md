@@ -1,3 +1,16 @@
+# Opaya 0.12.0 - Free models for the Opaya Agent, out of the box
+
+- **Start free**: one click sets up the Opaya Agent with a free, open model on this computer. No account, no API key, nothing to type:
+  - Opaya installs Ollama if it is missing: with winget on Windows, with Homebrew or into your Applications folder on macOS.
+  - It starts Ollama, downloads the model in the progress window (size, speed, time left) and connects the Opaya Agent.
+  - Choose Qwen3 4B (recommended, 2.5 GB), Llama 3.2 3B (smallest, 2 GB) or Qwen3 8B (smarter, 5.2 GB, needs 16 GB RAM). Opaya recommends the one that fits your computer's memory.
+- **Zero-click on a fresh install**: if Ollama already runs with a model that can use tools, the Opaya Agent connects to it by itself on first launch.
+- **More free providers** in Model settings, each marked "Free tier" with a "Get a free key" link:
+  - new: **Ollama Cloud** and **Cerebras**;
+  - OpenRouter now starts with its `:free` models;
+  - Groq, Google Gemini and Mistral are marked as free tiers.
+  - Test connection loads each provider's live model list.
+
 # Opaya 0.11.2 - Windows updates that actually install
 
 - **Windows: Restart and update now uses the standard Electron installer update.** Opaya starts the installer with `--updated /S --force-run`, the method electron-updater uses. The installer closes every running Opaya, including the background session service, installs over your installation and starts Opaya again. Opaya no longer relies on its own PowerShell script.

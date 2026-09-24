@@ -4,7 +4,7 @@
 
 Opaya is a local-first desktop app for your own AI agents: **Hermes, Claude Code, Codex, OpenClaw**, and any other CLI or OpenAI-compatible API. It works with agents on this computer, on your VPS machines over SSH, and in Docker containers. Chat with them, watch their terminals, give them a browser, and share skills and tools between them, all from one window. Opaya needs no hosted account, collects no telemetry and sends nothing through a third-party relay.
 
-**Current version: 0.11.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
+**Current version: 0.12.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
 
 ## Download
 
@@ -110,7 +110,9 @@ The **Opaya Agent** at the top of the sidebar is a built-in assistant for Opaya 
 - It installs agents, connects and repairs them, manages machines and keys, and runs diagnostics when an agent hangs.
 - It keeps its own chat sessions, and offers a friendly tip now and then when something useful applies.
 
-Connect it to any model in **Model settings**: DeepSeek, OpenAI, Google Gemini, OpenRouter, xAI, Groq, Mistral, a local Ollama or LM Studio model, a Hermes gateway, the Codex CLI, or any OpenAI-compatible `/v1` API. The API key is stored with OS encryption.
+**Start free**: one click installs Ollama and a free open model (Qwen3 or Llama) on this computer and connects the Opaya Agent. No account, no key. If Ollama already runs with a model that can use tools, it connects by itself. Free tiers with an account are marked in Model settings: Ollama Cloud, OpenRouter `:free` models, Groq, Cerebras, Gemini and Mistral.
+
+Or connect it to any model in **Model settings**: DeepSeek, OpenAI, Google Gemini, OpenRouter, xAI, Groq, Mistral, a local Ollama or LM Studio model, a Hermes gateway, the Codex CLI, or any OpenAI-compatible `/v1` API. The API key is stored with OS encryption.
 
 It acts only through Opaya's own tools, and every change or command asks for your approval unless iTrust is on. It never sees API tokens or secret files, has no general shell or file access, and cannot modify the app.
 

@@ -22,13 +22,15 @@ const PRESETS={
   codex:{label:'Codex CLI (this computer)',kind:'codex',baseUrl:'',model:'',models:[]},
   deepseek:{label:'DeepSeek',baseUrl:PROVIDERS.deepseek.endpoint,model:'deepseek-v4-pro',models:PROVIDERS.deepseek.models},
   openai:{label:'OpenAI',baseUrl:PROVIDERS.openai.endpoint,model:'',models:[]},
-  google:{label:'Google Gemini',baseUrl:PROVIDERS.google.endpoint,model:PROVIDERS.google.models[0],models:PROVIDERS.google.models},
-  openrouter:{label:'OpenRouter',baseUrl:PROVIDERS.openrouter.endpoint,model:PROVIDERS.openrouter.models[0],models:PROVIDERS.openrouter.models},
+  google:{label:'Google Gemini',baseUrl:PROVIDERS.google.endpoint,model:PROVIDERS.google.models[0],models:PROVIDERS.google.models,free:'Free tier',signup:'https://aistudio.google.com/apikey'},
+  openrouter:{label:'OpenRouter',baseUrl:PROVIDERS.openrouter.endpoint,model:'deepseek/deepseek-chat-v3.1:free',models:['deepseek/deepseek-chat-v3.1:free','qwen/qwen3-coder:free','meta-llama/llama-3.3-70b-instruct:free',...PROVIDERS.openrouter.models],free:'Free models (:free)',signup:'https://openrouter.ai/keys'},
+  'ollama-cloud':{label:'Ollama Cloud',baseUrl:'https://ollama.com/v1',model:'gpt-oss:120b',models:['gpt-oss:120b','gpt-oss:20b','qwen3-coder:480b','deepseek-v3.1:671b'],free:'Free tier',signup:'https://ollama.com/settings/keys'},
+  cerebras:{label:'Cerebras',baseUrl:'https://api.cerebras.ai/v1',model:'gpt-oss-120b',models:['gpt-oss-120b','qwen-3-235b-a22b-instruct-2507','llama-3.3-70b'],free:'Free tier',signup:'https://cloud.cerebras.ai'},
   xai:{label:'xAI',baseUrl:PROVIDERS.xai.endpoint,model:PROVIDERS.xai.models[0],models:PROVIDERS.xai.models},
-  groq:{label:'Groq',baseUrl:PROVIDERS.groq.endpoint,model:PROVIDERS.groq.models[0],models:PROVIDERS.groq.models},
-  mistral:{label:'Mistral',baseUrl:PROVIDERS.mistral.endpoint,model:PROVIDERS.mistral.models[0],models:PROVIDERS.mistral.models},
-  ollama:{label:'Ollama (this computer)',baseUrl:PROVIDERS.ollama.endpoint,model:'',models:[]},
-  lmstudio:{label:'LM Studio (this computer)',baseUrl:PROVIDERS.lmstudio.endpoint,model:'',models:[]},
+  groq:{label:'Groq',baseUrl:PROVIDERS.groq.endpoint,model:PROVIDERS.groq.models[0],models:PROVIDERS.groq.models,free:'Free tier',signup:'https://console.groq.com/keys'},
+  mistral:{label:'Mistral',baseUrl:PROVIDERS.mistral.endpoint,model:PROVIDERS.mistral.models[0],models:PROVIDERS.mistral.models,free:'Free tier',signup:'https://console.mistral.ai/api-keys'},
+  ollama:{label:'Ollama (this computer)',baseUrl:PROVIDERS.ollama.endpoint,model:'',models:['qwen3:4b','llama3.2:3b','qwen3:8b'],free:'Free, local'},
+  lmstudio:{label:'LM Studio (this computer)',baseUrl:PROVIDERS.lmstudio.endpoint,model:'',models:[],free:'Free, local'},
   hermes:{label:'Hermes gateway',baseUrl:PROVIDERS.hermes.endpoint,model:'hermes-agent',models:PROVIDERS.hermes.models},
   custom:{label:'Custom OpenAI-compatible API',baseUrl:'',model:'',models:[]}
 };
@@ -273,7 +275,7 @@ class OpayaAgent{
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.11.2'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.12.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
