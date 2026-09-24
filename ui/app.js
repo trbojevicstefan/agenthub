@@ -45,6 +45,7 @@
   function applyTheme(value) {
     theme=value==='light'?'light':'dark';
     document.body.dataset.theme=theme;
+    for(const view of terminalViews?.values?.()||[])view.core?.setLight(theme==='light');
   }
   function toast(message, error=false) {
     const box=$('#toast');box.textContent=message;box.classList.toggle('error',error);box.hidden=false;
@@ -203,7 +204,7 @@
   }
   function openSettings(){
     const localCount=state.agents.filter(a=>a.transport!=='ssh').length,remoteCount=state.agents.filter(a=>a.transport==='ssh').length,dockerCount=state.agents.filter(isDocker).length;
-    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section><h3>MCP servers</h3><p class="settings-copy">${(state.mcpServers||[]).length} saved. Tools such as GitHub, a browser or a database that Opaya passes to Hermes (ACP) and Claude Code.</p><button class="secondary" data-action="mcp-manage">Manage MCP servers</button></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
+    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section><h3>Updates</h3><p class="settings-copy">Installed: Opaya ${esc(update.current||'')}. ${update.status==='available'?`Version ${esc(update.latest?.version||'')} is ready to download.`:'Opaya checks GitHub for new versions.'}</p><button class="secondary" data-action="updates">${update.status==='available'?'Update now':'Check for updates'}</button></section><section><h3>MCP servers</h3><p class="settings-copy">${(state.mcpServers||[]).length} saved. Tools such as GitHub, a browser or a database that Opaya passes to Hermes (ACP) and Claude Code.</p><button class="secondary" data-action="mcp-manage">Manage MCP servers</button></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
   }
   function switcher(){
     modal('Jump to an agent.','Search by name, provider or machine.',`<input id="switcher-search" class="switcher-search" placeholder="Search agents..." aria-label="Search agents"><div id="switcher-list"></div>`);
@@ -217,15 +218,15 @@
     $('[data-action="terminal-detach"]').disabled=!active||active.poppedOut;
     $('[data-action="terminal-detach"]').title='Open terminal in a separate window';
     $('[data-action="terminal-end"]').disabled=!active;
-    $('#terminal-title').textContent=active?.title||`Terminal / ${selected()?title(selected()):'no session'}`;
-    $('.terminal-hint').textContent=active?.exited?'Saved output only / open a new shell to reconnect':'Persistent session / close window safely';
-    $('#terminal-tabs').innerHTML=[...terminalViews.values()].map(v=>`<button class="${v.id===id?'selected':''} ${v.exited?'archived':''}" data-action="terminal-tab" data-id="${esc(v.id)}">${v.exited?'&#9633;':'&#9679;'} ${esc(v.title)}</button>`).join('');
+    $('[data-action="terminal-search"]').disabled=!active;
+    $('#terminal-tabs').innerHTML=[...terminalViews.values()].map(v=>`<div class="terminal-tab ${v.id===id?'selected':''} ${v.exited?'archived':''}"><button type="button" data-action="terminal-tab" data-id="${esc(v.id)}" title="${esc(v.title)}${v.exited?' (saved output)':''}"><span class="terminal-tab-dot" aria-hidden="true"></span><span class="terminal-tab-title">${esc(v.title)}</span></button><button type="button" class="terminal-tab-close" data-action="terminal-tab-close" data-id="${esc(v.id)}" aria-label="Close ${esc(v.title)}" title="Close">&#10005;</button></div>`).join('')||'<span class="terminal-tabs-empty"><span class="terminal-glyph">&gt;_</span> Terminal</span>';
+    if(!active)closeTerminalSearch();
     let placeholder=$('#terminal-placeholder');if(!placeholder){placeholder=document.createElement('div');placeholder.id='terminal-placeholder';placeholder.className='terminal-placeholder';placeholder.textContent='Open a shell or launch the native agent CLI. Switching agents keeps existing terminal sessions alive.';$('#terminal-views').append(placeholder);}placeholder.hidden=!!id;
-    const view=terminalViews.get(id);if(view&&!view.poppedOut){requestAnimationFrame(()=>{view.fit.fit();if(!view.exited)action(()=>api.terminalResize({id:view.id,cols:view.term.cols,rows:view.term.rows}));view.term.focus();});}
+    const view=terminalViews.get(id);if(view&&!view.poppedOut){requestAnimationFrame(()=>{if(!view.exited)view.core.fitAndReport(view.report);else{try{view.fit.fit();}catch{}}view.term.focus();});}
   }
   async function openTerminal({agentId=selected()?.id,hostId,mode='shell',local=false,terminalId,restoring=false}={}){
     if(!agentId&&!hostId&&!local&&!terminalId){toast('Select an agent, or open a machine from Machines.');return;}
-    if(typeof window.Terminal!=='function'||!window.FitAddon){toast('The terminal UI did not load. Reinstall the complete Opaya build rather than moving the executable out of its installation folder.',true);return;}
+    if(typeof window.Terminal!=='function'||!window.FitAddon||!window.OpayaTerminal){toast('The terminal UI did not load. Reinstall the complete Opaya build rather than moving the executable out of its installation folder.',true);return;}
     if(!restoring){closeModal();$('#terminal-panel').hidden=false;}
     const a=local?null:state.agents.find(a=>a.id===agentId),h=state.hosts.find(h=>h.id===hostId);
     const active=terminalViews.get(currentTerminal),size=active&&!active.exited?{cols:active.term.cols,rows:active.term.rows}:{};
@@ -233,14 +234,13 @@
     if(!terminalViews.has(result.id)){
       const element=document.createElement('div');element.className='terminal-view';$('#terminal-views').append(element);
       const archived=!!result.exited;
-      const term=new window.Terminal({cursorBlink:!archived,disableStdin:archived,fontFamily:'"Cascadia Code", "SFMono-Regular", Consolas, monospace',fontSize:13,lineHeight:1.25,scrollback:4000,allowProposedApi:false,theme:{background:'#111315',foreground:'#d9dde0',cursor:'#a7f3c6',selectionBackground:'#3c4f46'}});
-      const fit=new window.FitAddon.FitAddon();term.loadAddon(fit);term.open(element);
-      // OSC 52 must not modify the clipboard. No automatic URL/file open addons.
-      term.parser.registerOscHandler(52,()=>true);
-      const view={id:result.id,agentId:result.agentId||a?.id||'',remote:result.remote,title:result.title||`${a?title(a):h?.name||(local?'This computer':'SSH')} / ${mode}`,term,fit,element,exited:!!result.exited,lastSeq:result.seq||0};terminalViews.set(result.id,view);
+      const core=window.OpayaTerminal.create(element,{archived,windowsBuild:result.windowsBuild||0,light:theme==='light',onSearch:()=>openTerminalSearch()}),{term,fit}=core;
+      const report=(cols,rows)=>action(()=>api.terminalResize({id:result.id,cols,rows}));
+      const view={id:result.id,agentId:result.agentId||a?.id||'',remote:result.remote,title:result.title||`${a?title(a):h?.name||(local?'This computer':'SSH')} / ${mode}`,term,fit,core,report,element,exited:!!result.exited,lastSeq:result.seq||0};terminalViews.set(result.id,view);
       if(!archived)term.onData(data=>action(()=>api.terminalWrite({id:result.id,data})));
-      let timer;const observer=new ResizeObserver(()=>{clearTimeout(timer);timer=setTimeout(()=>{if(element.hidden||view.poppedOut||view.exited||$('#terminal-panel').hidden)return;fit.fit();action(()=>api.terminalResize({id:result.id,cols:term.cols,rows:term.rows}));},80);});observer.observe(element);view.observer=observer;
-      if(result.buffer)term.write(result.buffer);
+      let timer;const observer=new ResizeObserver(()=>{clearTimeout(timer);timer=setTimeout(()=>{if(element.hidden||view.poppedOut||view.exited||$('#terminal-panel').hidden)return;core.fitAndReport(report);},60);});observer.observe(element);view.observer=observer;
+      // Reattaching replays saved output drawn at another size. Nudge the size once so full-screen programs repaint.
+      if(result.buffer)term.write(result.buffer,()=>{if(!archived&&(result.mode==='agent'||result.buffer.includes('\x1b[?1049h'))){requestAnimationFrame(()=>{if(!core.fitAndReport(report))return;});setTimeout(()=>{if(view.exited)return;report(term.cols,Math.max(5,term.rows-1));setTimeout(()=>report(term.cols,term.rows),120);},250);}});
       if(archived)term.write('\r\n\x1b[90m[Saved output from a closed session. Open New shell to reconnect.]\x1b[0m\r\n');
       for(const event of terminalPending.get(result.id)||[])terminalEvent(event);terminalPending.delete(result.id);
     }
@@ -264,6 +264,7 @@
     if(name==='toggle-group'){toggleGroup(button.dataset.group);return;}
     if(name==='diagnostics'){openDiagnostics(id);return;}
     if(name==='skills'){openSkills(id);return;}
+    if(name==='updates'){openUpdates();return;}
     if(name==='projects-toggle'){toggleProjects();return;}
     if(name==='project-focus'){projectsExpanded.add(id);toggleProjects(true);return;}
     if(name==='mcp-manage'){openMcpManager();return;}
@@ -296,6 +297,8 @@
     if(name==='starter'){const input=$('#message-input');if(input){input.value=button.dataset.text;drafts.set(draftKey(),input.value);if(api.saveDraft)save(api.saveDraft({agentId:selected().id,conversationId:currentConversation()?.id||'',text:input.value}));input.focus();}return;}
     if(name==='terminal-hide'){$('#terminal-panel').hidden=true;saveView();return;}
     if(name==='terminal-tab'){activateTerminal(id);saveView();return;}
+    if(name==='terminal-tab-close'){action(()=>closeTerminalTab(id));return;}
+    if(name==='terminal-search'){openTerminalSearch();return;}
     action(async()=>{
       if(name==='select'||name==='switch-select'){overview=false;opayaView=false;playgroundView=false;closeModal();await api.select({id});render();saveView();}
       else if(name==='connect-all')await connectAll();
@@ -340,6 +343,19 @@
     if(/^[1-9]$/.test(event.key)&&state.agents[Number(event.key)-1]){event.preventDefault();overview=false;opayaView=false;playgroundView=false;action(()=>api.select({id:state.agents[Number(event.key)-1].id}));}
   });
   if(!api){$('#content').innerHTML='<div class="runtime-missing"><h1>Open Opaya as a desktop app.</h1><p>This workspace needs its native bridge to discover agents, use SSH and open terminals.</p><code>npm install &amp;&amp; npm start</code></div>';return;}
+  // Scrollback search (Ctrl+F in a terminal, or the search button).
+  function openTerminalSearch(){
+    const view=terminalViews.get(currentTerminal);if(!view?.core?.search)return;const bar=$('#terminal-search');bar.hidden=false;const input=$('#terminal-search-input');input.focus();input.select();
+  }
+  function closeTerminalSearch(){const bar=$('#terminal-search');if(!bar||bar.hidden)return;bar.hidden=true;terminalViews.get(currentTerminal)?.core?.search?.clearDecorations?.();terminalViews.get(currentTerminal)?.term.focus();}
+  function findInTerminal(back=false){
+    const view=terminalViews.get(currentTerminal),q=$('#terminal-search-input').value;if(!view?.core?.search||!q)return;
+    const opts={caseSensitive:false,decorations:{matchBackground:'#3d5a47',activeMatchBackground:'#b5f5cf',matchOverviewRuler:'#3d5a47',activeMatchColorOverviewRuler:'#b5f5cf'}};
+    const found=back?view.core.search.findPrevious(q,opts):view.core.search.findNext(q,opts);$('#terminal-search').classList.toggle('missing',!found);
+  }
+  $('#terminal-search-input')?.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();findInTerminal(event.shiftKey);}else if(event.key==='Escape'){event.preventDefault();closeTerminalSearch();}});
+  $('#terminal-search-input')?.addEventListener('input',()=>findInTerminal());
+  $('#terminal-search')?.addEventListener('click',event=>{const b=event.target.closest('[data-find]');if(!b)return;if(b.dataset.find==='close')closeTerminalSearch();else findInTerminal(b.dataset.find==='prev');});
   async function closeTerminalTab(id){
     const view=terminalViews.get(id);if(!view||view.closing)return;view.closing=true;
     try{await api.terminalClose({id});const ids=[...terminalViews.keys()],index=ids.indexOf(id);view.observer.disconnect();view.term.dispose();view.element.remove();terminalViews.delete(id);activateTerminal(currentTerminal===id?(ids[index+1]||ids[index-1]||''):currentTerminal);saveView();}finally{view.closing=false;}
@@ -980,14 +996,43 @@
     openMenu(event.clientX,event.clientY,projectMenu(p),p.name,el);
   });
   document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==='p'&&!$('#app-dialog')){event.preventDefault();toggleProjects();}});
+  // ---- Updates: check GitHub releases, download, verify and install in place ------------------------------------
+  let update={status:'idle'};
+  function renderUpdate(){
+    const chip=$('#status-update');if(chip){const show=['available','downloading','ready'].includes(update.status);chip.hidden=!show;chip.textContent=update.status==='downloading'?`Downloading update ${update.progress||0}%`:update.status==='ready'?'Restart to update':`Update ${update.latest?.version||''} available`;chip.classList.toggle('ready',update.status==='ready');}
+    const body=$('#update-body');if(!body)return;
+    const u=update,l=u.latest,busy=['checking','downloading'].includes(u.status);
+    const line={idle:'Not checked yet.',checking:'Checking GitHub releases...',current:`You have the latest version${u.checkedAt?` (checked ${new Date(u.checkedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})})`:''}.`,available:`Opaya ${l?.version} is available.`,downloading:`Downloading Opaya ${l?.version}...`,ready:`Opaya ${l?.version} is downloaded and verified.`,error:u.error||'Update failed.',unsupported:u.error||'Updates are not available on this system.'}[u.status]||'';
+    body.innerHTML=`<div class="update-versions"><div><small>Installed</small><strong>${esc(u.current||'')}</strong></div>${l?`<div><small>Latest</small><strong>${esc(l.version)}</strong></div>`:''}</div>
+      <p class="update-line ${u.status==='error'?'error':''}">${esc(line)}</p>
+      ${u.status==='downloading'?`<div class="update-progress" role="progressbar" aria-valuenow="${u.progress||0}" aria-valuemin="0" aria-valuemax="100"><span style="width:${u.progress||0}%"></span></div>`:''}
+      ${l&&['available','downloading','ready'].includes(u.status)&&l.notes?`<div class="update-notes">${esc(l.notes)}</div>`:''}
+      <p class="field-help">Downloads come from this app's GitHub releases and are checked against the release's SHA-256 list before anything installs.${state.platform==='darwin'?' On macOS, Opaya must be in Applications.':''}</p>
+      <div class="modal-footer"><div>${l?.url?`<button type="button" class="text-button" data-update="page">Release page</button>`:''}</div><div>
+        <button type="button" class="secondary" data-update="check" ${busy?'disabled':''}>Check again</button>
+        ${u.status==='available'?'<button type="button" class="primary" data-update="download">Download update</button>':''}
+        ${u.status==='ready'?'<button type="button" class="primary" data-update="install">Restart and update</button>':''}
+      </div></div>`;
+  }
+  function openUpdates(){
+    modal('Updates','Get new Opaya versions without reinstalling.',`<div id="update-body"></div>`);renderUpdate();
+    $('#update-body').addEventListener('click',event=>{const b=event.target.closest('[data-update]');if(!b)return;const act=b.dataset.update;
+      if(act==='check')action(()=>api.updateCheck());
+      else if(act==='download')action(()=>api.updateDownload());
+      else if(act==='install')action(async()=>{modalBusy=false;await api.updateInstall();});
+      else if(act==='page'&&update.latest?.url)action(()=>api.openLink({url:update.latest.url}));});
+    if(['idle','error','current'].includes(update.status)&&(!update.checkedAt||Date.now()-update.checkedAt>60000))action(()=>api.updateCheck());
+  }
+  api.onUpdate?.(value=>{const was=update.status;update=value||{status:'idle'};renderUpdate();if(was!=='available'&&update.status==='available'&&!$('#app-dialog'))toast(`Opaya ${update.latest?.version} is available. Click the notice in the status bar to update.`);});
+  api.updateState?.().then(value=>{update=value||update;renderUpdate();}).catch(()=>{});
   const panel=$('#terminal-panel'),grip=document.createElement('div');
   grip.className='terminal-resize-grip';grip.tabIndex=0;grip.role='separator';grip.setAttribute('aria-label','Resize terminal');grip.setAttribute('aria-orientation','horizontal');grip.title='Drag to resize terminal';panel.prepend(grip);
   const setHeight=h=>{panel.style.height=Math.max(180,Math.min(window.innerHeight-140,h))+'px';};
   grip.addEventListener('pointerdown',e=>{const y=e.clientY,height=panel.offsetHeight;grip.setPointerCapture(e.pointerId);const move=event=>setHeight(height+y-event.clientY);grip.addEventListener('pointermove',move);grip.addEventListener('lostpointercapture',()=>grip.removeEventListener('pointermove',move),{once:true});});
   grip.addEventListener('keydown',e=>{if(['ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();setHeight(panel.offsetHeight+(e.key==='ArrowUp'?32:-32));}});
-  const expand=document.createElement('button');expand.className='icon-button';expand.innerHTML='&#8597;';expand.title='Expand / restore terminal';expand.setAttribute('aria-label',expand.title);let savedHeight=0;
+  const expand=document.createElement('button');expand.type='button';expand.className='term-icon';expand.innerHTML='<span class="term-expand-glyph" aria-hidden="true"></span>';expand.title='Expand / restore terminal';expand.setAttribute('aria-label',expand.title);let savedHeight=0;
   expand.onclick=()=>{if(savedHeight){setHeight(savedHeight);savedHeight=0;}else{savedHeight=panel.offsetHeight;setHeight(window.innerHeight-140);}};
-  $('.terminal-toolbar>div').prepend(expand);
+  $('.terminal-actions [data-action="terminal-hide"]').before(expand);
   const approvalQueue=[];let approvalVisible=false;
   function showApproval(){
     if(approvalVisible||!approvalQueue.length)return;approvalVisible=true;const request=approvalQueue.shift(),dialog=document.createElement('dialog');dialog.className='approval-dialog';

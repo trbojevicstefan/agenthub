@@ -1,4 +1,26 @@
-# Opaya 0.7.0 - Projects panel with git
+# Opaya 0.8.0 - Terminal rebuilt, updates inside the app
+
+- **In-app updates**: Opaya checks GitHub for a new version shortly after it starts and every six hours. When one is out, a notice appears in the status bar; click it, then **Download update** and **Restart and update**. The download is checked against the release's SHA-256 list first.
+  - Windows installs silently into the same folder and opens Opaya again.
+  - macOS replaces Opaya.app, keeping the old copy until the new one is in place.
+  - You can also check any time from Settings > Updates. This version has to be installed by hand once; after that, updates happen inside Opaya.
+- **No more duplicate lines in the terminal**:
+  - On Windows, xterm now runs in ConPTY mode, so it no longer rewraps lines Windows has already wrapped.
+  - Unicode 11 character widths keep emoji and symbols in agent status bars aligned.
+  - Opaya tells the program about a resize only when the size actually changes.
+  - Reopening a running agent CLI makes it redraw the screen cleanly.
+- **Sharper and faster**: GPU (WebGL) rendering with a fallback, a tuned color palette for dark and light themes, 10,000 lines of scrollback and a better monospace font stack.
+- **Compact toolbar**:
+  - One slim row: session tabs (close with the x or a middle click) on the left and small icon buttons on the right: Shell, CLI, Search, Pop out, End, Expand and Hide.
+  - The large Detach and End session buttons are gone.
+- **Search** the terminal output with Ctrl+F or the search button (Enter for next, Shift+Enter for previous).
+- **Copy and paste**:
+  - Ctrl+C copies when text is selected and interrupts otherwise; Ctrl+V or Ctrl+Shift+V pastes, and Ctrl+Shift+C copies.
+  - Right-click copies the selection, or pastes when nothing is selected.
+- **Links**: Ctrl+click (Cmd+click on macOS) opens web links from the terminal.
+- The popped-out terminal window gets all of the above.
+
+## Earlier: 0.7.0 - Projects panel with git
 
 - **Projects panel** on the right. Open or close it with the folder button in the top bar or Ctrl/Cmd + Shift + P; it takes no space while closed, and Opaya remembers whether it was open.
 - **A project is a folder** on this computer or a saved machine, plus the agents that work in it. Add an existing folder (with suggestions from your agents' working folders) or clone a repository.

@@ -307,3 +307,31 @@
 :where(body[data-theme="light"]) .crumb-project:hover{border-color:#a6bcae}
 :where(body[data-theme="light"]) .segmented{background:#dee4e3;border:1px solid #d1d8d7}
 :where(body[data-theme="light"]) .segmented button.selected{background:#cfd9d4}
+:where(body[data-theme="light"]) .terminal-toolbar{background:#e6e9eb;border-bottom:1px solid #d4dadd}
+:where(body[data-theme="light"]) .terminal-tab>button[data-action="terminal-tab"]{color:#445054}
+:where(body[data-theme="light"]) .terminal-tab-dot{background:#badec9}
+:where(body[data-theme="light"]) .terminal-tab.archived .terminal-tab-dot{background:#cacdce}
+:where(body[data-theme="light"]) .terminal-tab-close{color:#6f7d82}
+:where(body[data-theme="light"]) .terminal-tab-close:hover{background:#c8d0d3;color:#0f1314}
+:where(body[data-theme="light"]) .terminal-tab:hover{background:#dce1e4}
+:where(body[data-theme="light"]) .terminal-tab.selected{background:#eaecee}
+:where(body[data-theme="light"]) .terminal-tab.selected>button[data-action="terminal-tab"]{color:#0c1112}
+:where(body[data-theme="light"]) .terminal-tabs-empty{color:#445054}
+:where(body[data-theme="light"]) .term-btn{color:#343e42}
+:where(body[data-theme="light"]) .term-btn:hover{background:#d5dcdf;border-color:#c9d1d5;color:#0c1112}
+:where(body[data-theme="light"]) .term-icon{color:#3e494c}
+:where(body[data-theme="light"]) .term-icon:hover{background:#d5dcdf;color:#0c1112}
+:where(body[data-theme="light"]) .term-icon.danger:hover{background:#dcc5c5;color:#33120f}
+:where(body[data-theme="light"]) .term-sep{background:#c8d0d3}
+:where(body[data-theme="light"]) .term-popout-glyph::after{background:#e6e9eb}
+:where(body[data-theme="light"]) .terminal-views{background:#eaecee}
+:where(body[data-theme="light"]) .terminal-search{border:1px solid #c5d1cc;background:#dde3e5}
+:where(body[data-theme="light"]) .terminal-search.missing input{border-color:#cc9995}
+:where(body[data-theme="light"]) .terminal-search button{color:#343e42}
+:where(body[data-theme="light"]) .terminal-search button:hover{background:#cfd9d4;color:#000000}
+:where(body[data-theme="light"]) .terminal-window header{background:#e6e9eb;border-bottom-color:#d4dadd}
+:where(body[data-theme="light"]) .status-update{border:1px solid #aed5be;background:#cae5d8;color:#0e2f1b}
+:where(body[data-theme="light"]) .status-update:hover{background:#bbdecc;color:#000000}
+:where(body[data-theme="light"]) .status-update.ready{background:#b5f5cf;color:#0f2a1a;border-color:#b5f5cf}
+:where(body[data-theme="light"]) .update-progress{background:#cfddd4}
+:where(body[data-theme="light"]) .update-notes{border:1px solid #cdd9d2;background:#e2eae6;color:#242b27}
