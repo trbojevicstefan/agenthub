@@ -46,3 +46,11 @@ test('the Windows update script waits for every Opaya process, installs into the
   assert.match(s,/if \(\$p\.ExitCode -ne 0\) \{[^}]*Start-Process -FilePath \$installer/,'a failed silent install opens the normal installer');
   assert.match(s,/Start-Process -FilePath \$exe/,'Opaya starts again after the install');
 });
+test('Intel Macs get the x64 build from a release that carries both architectures',()=>{
+  const both=release('v0.11.0-mac.40',['Opaya-0.11.0-mac-arm64.zip','Opaya-0.11.0-mac-x64.zip','Opaya-0.11.0-mac-x64.dmg','darwin-SHA256SUMS.txt']);
+  const armOnly=release('v0.12.0-mac.41',['Opaya-0.12.0-mac-arm64.zip','darwin-SHA256SUMS.txt']);
+  assert.equal(pick([both],{platform:'darwin',arch:'x64'}).asset.name,'Opaya-0.11.0-mac-x64.zip');
+  assert.equal(pick([both],{platform:'darwin',arch:'arm64'}).asset.name,'Opaya-0.11.0-mac-arm64.zip');
+  assert.equal(pick([armOnly,both],{platform:'darwin',arch:'x64'}).version,'0.11.0','a newer release without an Intel build is skipped');
+  assert.equal(checksum(`${'a'.repeat(64)}  Opaya-0.11.0-mac-arm64.zip\n${'b'.repeat(64)}  Opaya-0.11.0-mac-x64.zip\n`,'Opaya-0.11.0-mac-x64.zip'),'b'.repeat(64));
+});

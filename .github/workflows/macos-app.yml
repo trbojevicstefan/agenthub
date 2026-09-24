@@ -10,8 +10,21 @@ concurrency:
   cancel-in-progress: false
 jobs:
   macos:
-    runs-on: macos-latest
-    timeout-minutes: 45
+    # Each architecture builds natively: node-pty is compiled for the runner's CPU, and the packaged app is started
+    # there for the restart test. Apple Silicon on macos-latest, Intel on the Intel image.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-latest
+            script: dist:mac
+          - arch: x64
+            runner: macos-15-intel
+            script: dist:mac:x64
+    name: macos (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
     env:
       # No Apple Developer ID yet: electron-builder skips signing and scripts/mac-adhoc-sign.cjs ad-hoc signs instead.
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -42,9 +55,9 @@ jobs:
         run: |
           npm run smoke:restart 2>&1 | tee artifacts/native-dev.txt
           test "${PIPESTATUS[0]}" -eq 0
-      - name: Build macOS DMG and ZIP (Apple Silicon)
+      - name: Build macOS DMG and ZIP (${{ matrix.arch }})
         run: |
-          npm run dist:mac 2>&1 | tee artifacts/macos-build.txt
+          npm run ${{ matrix.script }} 2>&1 | tee artifacts/macos-build.txt
           test "${PIPESTATUS[0]}" -eq 0
           ls -la release
       - name: Verify packaged app and session survival across process exit
@@ -53,39 +66,31 @@ jobs:
         env:
           AGENTHUB_SMOKE_OUTPUT: ${{ github.workspace }}/artifacts/native-packaged
         run: |
-          app="release/mac-arm64/Opaya.app"
+          # electron-builder writes release/mac-arm64 for Apple Silicon and release/mac for Intel.
+          app=$(ls -d release/mac*/Opaya.app | head -1)
           test -d "$app"
           codesign --verify --deep --strict --verbose=2 "$app"
           AGENTHUB_TEST_EXE="$PWD/$app/Contents/MacOS/Opaya" npm run smoke:restart 2>&1 | tee artifacts/native-packaged.txt
           test "${PIPESTATUS[0]}" -eq 0
-      - name: Checksums and build provenance
+      - name: Build provenance
         env:
           SMOKE_DEV: ${{ steps.smoke_dev.outcome }}
           SMOKE_PACKAGED: ${{ steps.smoke_packaged.outcome }}
+          ARCH: ${{ matrix.arch }}
         run: |
-          node scripts/checksums.cjs
-          node -e "const fs=require('fs');fs.writeFileSync('release/BUILDINFO-mac.json',JSON.stringify({version:require('./package.json').version,sourceCommit:process.env.GITHUB_SHA,runUrl:'https://github.com/'+process.env.GITHUB_REPOSITORY+'/actions/runs/'+process.env.GITHUB_RUN_ID,electron:require('electron/package.json').version,signed:'ad-hoc',notarized:false,nativeDevelopment:process.env.SMOKE_DEV,nativePackaged:process.env.SMOKE_PACKAGED},null,2))"
+          node -e "const fs=require('fs');fs.writeFileSync('release/BUILDINFO-mac-'+process.env.ARCH+'.json',JSON.stringify({version:require('./package.json').version,arch:process.env.ARCH,sourceCommit:process.env.GITHUB_SHA,runUrl:'https://github.com/'+process.env.GITHUB_REPOSITORY+'/actions/runs/'+process.env.GITHUB_RUN_ID,electron:require('electron/package.json').version,signed:'ad-hoc',notarized:false,nativeDevelopment:process.env.SMOKE_DEV,nativePackaged:process.env.SMOKE_PACKAGED},null,2))"
       - uses: actions/upload-artifact@v4
         with:
-          name: Opaya-macOS
+          name: Opaya-macOS-build-${{ matrix.arch }}
           path: |
             release/*.dmg
             release/*.zip
-            release/*SHA256SUMS.txt
-            release/BUILDINFO-mac.json
+            release/BUILDINFO-mac-*.json
           if-no-files-found: error
-      - name: Publish unsigned macOS preview release
-        if: github.ref == 'refs/heads/main'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          version=$(node -p "require('./package.json').version")
-          tag="v$version-mac.$GITHUB_RUN_NUMBER"
-          gh release create "$tag" release/*.dmg release/*.zip release/*SHA256SUMS.txt release/BUILDINFO-mac.json --target "$GITHUB_SHA" --prerelease --title "Opaya $version - macOS preview" --notes-file docs/RELEASE_NOTES.md
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: Opaya-macOS-verification
+          name: Opaya-macOS-verification-${{ matrix.arch }}
           path: |
             artifacts/*.txt
             artifacts/native-dev/*.json
@@ -95,3 +100,28 @@ jobs:
             artifacts/**/startup-error.txt
             artifacts/**/service-startup-error.txt
           if-no-files-found: warn
+  # One release with both architectures and a single checksum file, which the in-app updater reads.
+  publish:
+    needs: macos
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: Opaya-macOS-build-*
+          path: release
+          merge-multiple: true
+      - name: Publish unsigned macOS preview release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd release
+          ls -la
+          ls *.zip >/dev/null 2>&1 || { echo 'No macOS build succeeded.'; exit 1; }
+          sha256sum *.dmg *.zip > darwin-SHA256SUMS.txt
+          cat darwin-SHA256SUMS.txt
+          version=$(node -p "require('../package.json').version")
+          tag="v$version-mac.$GITHUB_RUN_NUMBER"
+          { echo "**Downloads:** \`mac-arm64\` = Apple Silicon (M1 and later), \`mac-x64\` = Intel."; echo; cat ../docs/RELEASE_NOTES.md; } > notes.md
+          gh release create "$tag" *.dmg *.zip darwin-SHA256SUMS.txt BUILDINFO-mac-*.json --target "$GITHUB_SHA" --prerelease --title "Opaya $version - macOS preview" --notes-file notes.md

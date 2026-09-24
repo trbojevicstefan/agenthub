@@ -11,7 +11,11 @@ Opaya is a local-first desktop app for your own AI agents: **Hermes, Claude Code
 All builds are on this repository's [Releases](https://github.com/trbojevicstefan/agenthub/releases) page.
 
 - **Windows 10/11 x64:** get **Opaya-…-Setup-x64.exe** from the latest `v…-build.*` release. The build is an unsigned preview, so Windows SmartScreen may ask you to confirm: choose *More info* > *Run anyway*.
-- **macOS (Apple Silicon, M1 and later):** get **Opaya-…-mac-arm64.dmg** from the latest `v…-mac.*` release and drag Opaya to Applications. The build is ad-hoc signed but not notarized, so the first launch needs one approval: right-click Opaya, choose **Open**, or use System Settings > Privacy & Security > **Open Anyway**. There are no Intel Mac builds yet.
+- **macOS:** get the DMG from the latest `v…-mac.*` release and drag Opaya to Applications:
+  - **Opaya-…-mac-arm64.dmg** for Apple Silicon (M1 and later);
+  - **Opaya-…-mac-x64.dmg** for Intel Macs.
+
+  Not sure which one? Apple menu > About This Mac: *Chip* means Apple Silicon, *Processor … Intel* means Intel. The builds are ad-hoc signed but not notarized, so the first launch needs one approval: right-click Opaya, choose **Open**, or use System Settings > Privacy & Security > **Open Anyway**.
 
 **Updates are built in (0.10.1 and later).** Opaya checks this repository's releases and shows **Update available** in the status bar. **Update now** downloads the new version and checks it against the release's SHA-256 checksums. **Install and restart** then replaces the app in place and opens it again. On Windows the update installs silently into the same folder; on macOS the app bundle is swapped. You do not need to uninstall first.
 
@@ -152,13 +156,13 @@ See [compatibility](docs/COMPATIBILITY.md), [security](docs/SECURITY.md) and [ar
 
 - **Requirements:** Node.js 22+.
 - **Commands:** `npm install`, `npm test`, `npm run check`, then `npm start`.
-- **Builds:** `npm run dist:win` builds the Windows installer on Windows, and `npm run dist:mac` builds the macOS app on a Mac. Native dependencies must be rebuilt for the target Electron runtime.
+- **Builds:** `npm run dist:win` builds the Windows installer on Windows, and `npm run dist:mac` (Apple Silicon) and `npm run dist:mac:x64` (Intel) build the macOS app on a Mac of that type. Native dependencies must be rebuilt for the target Electron runtime.
 - **Safe mode:** `npm run start:safe` turns off GPU acceleration but keeps the sandbox.
 - **Light theme:** after changing colors in `ui/style.css`, run `node scripts/generate-light-theme.cjs`.
 
 `npm test` runs offline protocol, security, persistence, clone, transfer and history tests. CI runs the following for every build and publishes the result only if they pass:
 - **Windows:** CI installs the packaged app, then starts two separate UI processes against one session service. The second must find the same service, live terminal, chat and draft.
-- **macOS:** CI runs the same restart check on the packaged Apple Silicon app.
+- **macOS:** CI builds natively on Apple Silicon and on Intel, and runs the same restart check on each packaged app.
 
 Each release includes `SHA256SUMS`, which the in-app updater verifies.
 
