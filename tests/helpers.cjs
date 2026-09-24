@@ -4,7 +4,8 @@ const os=require('node:os');
 const path=require('node:path');
 const {EventEmitter}=require('node:events');
 const {PassThrough}=require('node:stream');
-async function temp(t){const dir=await fs.mkdtemp(path.join(os.tmpdir(),'agenthub-test-'));t.after(()=>fs.rm(dir,{recursive:true,force:true}));return dir;}
+// macOS tmpdir is behind the /var -> /private/var symlink; child processes report the resolved path.
+async function temp(t){const made=await fs.mkdtemp(path.join(os.tmpdir(),'agenthub-test-')),dir=process.platform==='win32'?made:await fs.realpath(made);t.after(()=>fs.rm(dir,{recursive:true,force:true}));return dir;}
 function childMock(handler=()=>{}){
   const child=new EventEmitter();Object.assign(child,{stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),exitCode:null,signalCode:null,frames:[]});
   child.kill=()=>{if(child.exitCode!==null)return;child.exitCode=0;queueMicrotask(()=>child.emit('close',0));};
