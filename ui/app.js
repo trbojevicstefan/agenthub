@@ -57,9 +57,11 @@
       return esc(part).split(/\n\n+/).filter(Boolean).map(p=>`<p>${p.replace(/\*\*([^*\n]+)\*\*/g,'<strong>$1</strong>').replace(/`([^`\n]+)`/g,'<code>$1</code>').replace(/\n/g,'<br>')}</p>`).join('');
     }).join('');
   }
-  function activityMarkup(message,limit=20){
-    const items=(message?.activity||[]).slice(-limit);if(!items.length)return '';
-    if(message.status==='streaming')return `<section class="activity-live"><header><span class="status-dot working"></span><strong>Live activity</strong><small>${items.length} update${items.length===1?'':'s'}</small></header><div>${items.map((t,i)=>`<p class="${i===items.length-1?'current':''}"><span>${i===items.length-1?'&#9656;':'&#10003;'}</span>${esc(t)}</p>`).join('')}</div></section>`;
+  // agentId adds a live line (running time, time since the last update) that updateTurnWatch() refreshes every second.
+  function activityMarkup(message,limit=20,agentId=''){
+    const watch=message?.status==='streaming'&&agentId?`<footer class="turn-watch" data-turn-watch="${esc(agentId)}"></footer>`:'';
+    const items=(message?.activity||[]).slice(-limit);if(!items.length)return watch?`<section class="activity-live solo">${watch}</section>`:'';
+    if(message.status==='streaming')return `<section class="activity-live"><header><span class="status-dot working"></span><strong>Live activity</strong><small>${items.length} update${items.length===1?'':'s'}</small></header><div>${items.map((t,i)=>`<p class="${i===items.length-1?'current':''}"><span>${i===items.length-1?'&#9656;':'&#10003;'}</span>${esc(t)}</p>`).join('')}</div>${watch}</section>`;
     return `<details class="activity-detail"><summary>${esc(items.length+' step'+(items.length===1?'':'s')+': '+items.at(-1))}</summary><div>${items.map(t=>`<p>${esc(t)}</p>`).join('')}</div></details>`;
   }
   function applyState(next) {
@@ -82,6 +84,7 @@
     if(opayaView)renderOpaya();else if(playgroundView)renderPlayground();else if(overview||!a)renderOverview();else renderAgent(a);
     $('#status-left').textContent=playgroundView?'Playground / ask two agents the same question':opayaView?'Opaya Agent / installs, connects and troubleshoots your agents':a&&!overview?`${labels[a.provider]} / ${a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase()} / ${location(a)}`:'One place. All your agents.';
     $('#status-right').textContent=state.agents.some(a=>a.busy)?`${state.agents.filter(a=>a.busy).length} agent working`:(state.service?.persistent?'Sessions protected / safe to close window':'Local workspace / no cloud account');
+    updateTurnWatch();
     if(lastSelected!==state.activeAgentId){lastSelected=state.activeAgentId;if(!$('#terminal-panel').hidden){const match=[...terminalViews.values()].find(v=>v.agentId===state.activeAgentId&&!v.exited);activateTerminal(match?.id||'');}}
   }
   function renderOverview() {
@@ -114,7 +117,7 @@
     // Existing history appears at once; only messages that arrive while this conversation is open animate in.
     if(messageConversation!==conversationKey){const continuing=messageConversation===`${a.id}/`;messageSeen.clear();messageConversation=conversationKey;if(!continuing)messages.forEach((m,i)=>messageSeen.set(m.id||i,-1e9));}
     const list=$('#message-list'),atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<110;
-    list.innerHTML=messages.length?messages.map((m,i)=>`<article class="message ${m.role==='user'?'user-message':'assistant-message'} ${fresh(messageSeen,m.id||i,now,450)?'message-enter':''}"><div class="message-avatar ${m.role==='user'?'you-avatar':esc(a.provider)}">${m.role==='user'?'S':agentIcon(a)}</div><div class="message-body"><div class="message-meta"><strong>${m.role==='user'?'You':esc(title(a))}</strong><time>${esc(new Date(m.createdAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}</time>${m.status==='streaming'?'<span class="stream-label"><span class="status-dot working"></span> Working</span>':''}</div>${activityMarkup(m)}<div class="message-text">${format(m.content)}${m.status==='streaming'&&!m.content?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}</div>${m.error?`<div class="message-error">${esc(m.error)}</div>`:''}</div></article>`).join(''):`<div class="chat-empty">${badge(a,true)}<h2>A direct line to ${esc(title(a))}.</h2><p>${a.transport==='ssh'?'The agent runs on your remote machine. Opaya is the window into it.':'Your agent stays on your computer. Opaya brings the conversation together.'}</p><div class="starter-prompts"><button data-action="starter" data-text="What can you help me with, and which tools do you have?">What can you help me with? <span>&#8599;</span></button><button data-action="starter" data-text="Tell me about your current workspace. Please only inspect it; do not change anything.">Get to know this workspace <span>&#8599;</span></button></div><span class="chat-empty-note">${a.status==='connected'?'Connected and ready for your first message.':'Connect above when you are ready.'}</span></div>`;
+    list.innerHTML=messages.length?messages.map((m,i)=>`<article class="message ${m.role==='user'?'user-message':'assistant-message'} ${fresh(messageSeen,m.id||i,now,450)?'message-enter':''}"><div class="message-avatar ${m.role==='user'?'you-avatar':esc(a.provider)}">${m.role==='user'?'S':agentIcon(a)}</div><div class="message-body"><div class="message-meta"><strong>${m.role==='user'?'You':esc(title(a))}</strong><time>${esc(new Date(m.createdAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}</time>${m.status==='streaming'?'<span class="stream-label"><span class="status-dot working"></span> Working</span>':''}</div>${activityMarkup(m,20,a.id)}<div class="message-text">${format(m.content)}${m.status==='streaming'&&!m.content?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}</div>${m.error?`<div class="message-error">${esc(m.error)}</div>`:''}</div></article>`).join(''):`<div class="chat-empty">${badge(a,true)}<h2>A direct line to ${esc(title(a))}.</h2><p>${a.transport==='ssh'?'The agent runs on your remote machine. Opaya is the window into it.':'Your agent stays on your computer. Opaya brings the conversation together.'}</p><div class="starter-prompts"><button data-action="starter" data-text="What can you help me with, and which tools do you have?">What can you help me with? <span>&#8599;</span></button><button data-action="starter" data-text="Tell me about your current workspace. Please only inspect it; do not change anything.">Get to know this workspace <span>&#8599;</span></button></div><span class="chat-empty-note">${a.status==='connected'?'Connected and ready for your first message.':'Connect above when you are ready.'}</span></div>`;
     if(atBottom||!messages.length)list.scrollTop=list.scrollHeight;
     $('#send-button').disabled=a.status!=='connected'||a.busy||a.protocol==='terminal'||pendingSends.has(a.id);$('#send-button').hidden=!!a.busy;$('#stop-button').hidden=!a.busy;
     const chatModel=currentConversation()?.model;$('#compose-hint').textContent=a.busy?'Agent is working':a.status==='connected'?(chatModel?`${chatModel} (this chat)`:a.model?`${a.model} (default)`:'Uses the agent\'s own settings'):'Connect to start chatting';
@@ -257,6 +260,7 @@
     if(name==='opaya'){overview=false;opayaView=true;playgroundView=false;closeModal();render();saveView();$('#message-input')?.focus();return;}
     if(name==='opaya-config'){openOpayaConfig();return;}
     if(name==='toggle-group'){toggleGroup(button.dataset.group);return;}
+    if(name==='diagnostics'){openDiagnostics(id);return;}
     if(name==='playground'){overview=false;opayaView=false;playgroundView=true;closeModal();render();saveView();$('#message-input')?.focus();return;}
     if(name==='pg-swap'){pgAgents.reverse();render();return;}
     if(name==='tag-filter'){tagFilter=button.dataset.tag===tagFilter?'':button.dataset.tag;renderKey='';render();return;}
@@ -289,6 +293,7 @@
     action(async()=>{
       if(name==='select'||name==='switch-select'){overview=false;opayaView=false;playgroundView=false;closeModal();await api.select({id});render();saveView();}
       else if(name==='connect-all')await connectAll();
+      else if(name==='stop-agent')await api.stop({id});
       else if(name==='pg-connect')await api.connect({id});
       else if(name==='pg-stop'){for(const agentId of pgAgents)if(state.agents.find(a=>a.id===agentId)?.busy)await api.stop({id:agentId});}
       else if(name==='pg-open'){await api.selectConversation({id});overview=false;opayaView=false;playgroundView=false;render();saveView();}
@@ -367,6 +372,7 @@
       {icon:'&#9998;',label:'Rename...',run:()=>renameAgent(a)},
       {icon:'&#9680;',label:'Change icon...',run:()=>openIconPicker(a)},
       {icon:'&#9776;',label:'Group & tags...',run:()=>openGroupTags(a)},
+      {icon:'&#8801;',label:'Connection log...',run:()=>openDiagnostics(id)},
       {icon:'&#8593;',label:'Move up',disabled:index<=0,run:async()=>{await api.reorderAgents({id,direction:'up'});await refresh();}},
       {icon:'&#8595;',label:'Move down',disabled:index>=state.agents.length-1,run:async()=>{await api.reorderAgents({id,direction:'down'});await refresh();}},
       {icon:'&#9881;',label:'Connection settings...',run:()=>openAgentForm(a)},
@@ -663,7 +669,7 @@
       const scroller=col.querySelector('.pg-answer'),atBottom=!scroller||scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight<80;
       col.innerHTML=`<header class="pg-head">${a?badge(a):''}<select class="pg-select" data-side="${side}" aria-label="Agent ${side+1}">${state.agents.map(x=>`<option value="${esc(x.id)}" ${x.id===id?'selected':''} ${x.id===[left,right][1-side]?'disabled':''}>${esc(title(x))}</option>`).join('')}</select>${a?`<span class="status-pill ${esc(a.busy?'connecting':a.status)}">${dot(a)}${status(a)}</span>${a.status!=='connected'&&a.protocol!=='terminal'?`<button class="text-button" data-action="pg-connect" data-id="${esc(a.id)}">Connect</button>`:''}`:''}</header>
         <div class="pg-meta">${a?`${esc(labels[a.provider]||'Agent')} / ${esc(conv&&state.conversations.find(c=>c.id===conv)?.model||a.model||'default model')}`:'Add an agent to compare'}${answer?.content?` <span>&#183;</span> ${answer.content.length.toLocaleString()} characters`:''}${conv?` <button class="text-button" data-action="pg-open" data-id="${esc(conv)}">Open in chat &#8599;</button>`:''}</div>
-        <div class="pg-answer">${error?`<div class="message-error">${esc(error)}</div>`:''}${answer?`${activityMarkup(answer,12)}<div class="message-text">${format(answer.content)}${answer.status==='streaming'&&!answer.content?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}</div>${answer.error?`<div class="message-error">${esc(answer.error)}</div>`:''}`:!error?`<div class="pg-empty">${a?`${badge(a,true)}<p>${esc(title(a))} answers here.</p>`:'<p>Choose an agent.</p>'}</div>`:''}</div>`;
+        <div class="pg-answer">${error?`<div class="message-error">${esc(error)}</div>`:''}${answer?`${activityMarkup(answer,12,id)}<div class="message-text">${format(answer.content)}${answer.status==='streaming'&&!answer.content?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}</div>${answer.error?`<div class="message-error">${esc(answer.error)}</div>`:''}`:!error?`<div class="pg-empty">${a?`${badge(a,true)}<p>${esc(title(a))} answers here.</p>`:'<p>Choose an agent.</p>'}</div>`:''}</div>`;
       const next=col.querySelector('.pg-answer');if(atBottom)next.scrollTop=next.scrollHeight;
     });
     const busy=[left,right].some(id=>state.agents.find(a=>a.id===id)?.busy);
@@ -673,6 +679,44 @@
   async function sendPlayground(){
     const input=$('#message-input'),text=input?.value.trim(),[left,right]=pgAgents;if(!text||!left||!right)return;
     await action(async()=>{await api.playground({agentIds:[left,right],text,keepContext:pgKeep});pgDraft='';input.value='';});
+  }
+  // ---- Live turn watch and connection log -------------------------------------------------------------------------
+  const duration=ms=>{const s=Math.max(0,Math.round(ms/1000));return s<60?`${s}s`:`${Math.floor(s/60)}m ${String(s%60).padStart(2,'0')}s`;};
+  function updateTurnWatch(){
+    const now=Date.now();
+    for(const el of document.querySelectorAll('[data-turn-watch]')){
+      const a=state.agents.find(x=>x.id===el.dataset.turnWatch);
+      if(!a?.busy||!a.turnStartedAt){el.innerHTML='';continue;}
+      const since=now-(a.lastEventAt||a.turnStartedAt),stalled=since>45000;
+      el.classList.toggle('stalled',stalled);
+      const text=stalled?`No update from ${title(a)} for ${duration(since)}${a.lastEvent?` / last: ${a.lastEvent}`:''}`:`Running ${duration(now-a.turnStartedAt)} / last update ${duration(since)} ago`;
+      const html=`<span>${esc(text)}</span><button class="text-button" data-action="diagnostics" data-id="${esc(a.id)}">Connection log</button>${stalled?`<button class="text-button danger-text" data-action="stop-agent" data-id="${esc(a.id)}">Stop</button>`:''}`;
+      if(el.dataset.html!==html){el.innerHTML=html;el.dataset.html=html;}
+    }
+  }
+  setInterval(updateTurnWatch,1000);
+  let diagTimer=0;
+  async function openDiagnostics(id){
+    const a=state.agents.find(x=>x.id===id);if(!a)return;clearInterval(diagTimer);
+    const load=async()=>{
+      const d=await api.agentDiagnostics({id});if(!$('#diag-body'))return;
+      const ad=d.adapter,time=t=>new Date(t).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+      const rows=[['Status',`${d.status}${d.error?` / ${d.error}`:''}`],['Protocol',ad?.protocol?.toUpperCase()||d.agent.protocol],['Process',ad?.pid?`PID ${ad.pid}${ad.closed?' (closed)':''}`:'n/a'],
+        ['Current answer',d.turn?`running ${duration(d.turn.runningSeconds*1000)}, last update ${duration(d.turn.secondsSinceLastEvent*1000)} ago`:'idle'],
+        ['Last message from agent',ad?.lastIn?`${time(ad.lastIn)} (${duration(Date.now()-ad.lastIn)} ago)`:'none yet'],
+        ['Waiting for approval',ad?.waitingForApproval?`${ad.waitingForApproval.title} (${duration(ad.waitingForApproval.seconds*1000)})`:'no'],
+        ['Running tools',ad?.runningTools?.length?ad.runningTools.map(t=>`${t.title} (${t.status}, ${duration(t.seconds*1000)})`).join('; '):'none']];
+      $('#diag-body').innerHTML=`<dl class="diag-summary">${rows.map(([k,v])=>`<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>
+        <h3 class="diag-heading">Protocol log <small>newest last, secrets redacted</small></h3><pre class="diag-log">${esc((ad?.entries||[]).slice(-250).map(e=>`${time(e.at)} ${e.direction==='in'?'<-':e.direction==='out'?'->':e.direction==='stderr'?'!!':'--'} ${e.text}`).join('\n')||'No messages recorded yet. Connect the agent and send a message.')}</pre>
+        ${ad?.stderr?`<h3 class="diag-heading">Agent stderr</h3><pre class="diag-log">${esc(ad.stderr.slice(-6000))}</pre>`:''}
+        ${d.hermesLogs?.length?d.hermesLogs.map(l=>`<h3 class="diag-heading">${esc(l.path)} <small>${esc(l.modified||'')}</small></h3><pre class="diag-log">${esc(l.tail)}</pre>`).join(''):d.agent.provider==='hermes'?'<p class="field-help">No Hermes log files found in the Hermes home folder.</p>':''}`;
+      for(const pre of document.querySelectorAll('.diag-log'))pre.scrollTop=pre.scrollHeight;
+    };
+    modal('Connection log',`${title(a)} / live view of what Opaya and the agent exchange`,`<div id="diag-body"><p class="field-help">Loading...</p></div><div class="modal-footer"><div><label class="check-row inline"><input type="checkbox" id="diag-live" checked> Refresh every 2 s</label></div><div><button class="secondary" id="diag-ask">Ask the Opaya Agent</button>${a.busy?`<button class="secondary danger-text" data-action="stop-agent" data-id="${esc(a.id)}">Stop answer</button>`:''}<button class="primary" id="diag-refresh">Refresh</button></div></div>`,true);
+    $('#diag-refresh').onclick=()=>action(load);
+    $('#diag-ask').onclick=()=>{closeModal();overview=false;playgroundView=false;opayaView=true;opayaDraft=`${title(a)} is not answering. Run agent_diagnostics for it and tell me exactly what is wrong and how to fix it.`;renderKey='';render();saveView();};
+    diagTimer=setInterval(()=>{if(!$('#diag-body')){clearInterval(diagTimer);return;}if($('#diag-live')?.checked)load().catch(()=>{});},2000);
+    await action(load);
   }
   const panel=$('#terminal-panel'),grip=document.createElement('div');
   grip.className='terminal-resize-grip';grip.tabIndex=0;grip.role='separator';grip.setAttribute('aria-label','Resize terminal');grip.setAttribute('aria-orientation','horizontal');grip.title='Drag to resize terminal';panel.prepend(grip);

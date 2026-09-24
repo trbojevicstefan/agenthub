@@ -1,6 +1,7 @@
 'use strict';
 const {Tunnel} = require('../tunnel.cjs');
 const {limitedBody} = require('../discovery.cjs');
+const {ConnectionLog} = require('../diagnostics.cjs');
 class SSE {
   constructor(onEvent) { this.buffer=''; this.onEvent=onEvent; }
   feed(chunk) {
@@ -30,7 +31,7 @@ function longRequestDispatcher(){
 // Text from OpenAI-style content, which may be a string or an array of typed parts.
 const textOf=content=>typeof content==='string'?content:Array.isArray(content)?content.map(p=>typeof p==='string'?p:p?.type==='text'||p?.type==='output_text'?String(p.text||''):'').join(''):'';
 class HttpAdapter {
-  constructor({agent,host,token,fetchImpl=fetch}) { this.agent=agent;this.host=host;this.token=token;this.fetch=async(...args)=>{try{return await fetchImpl(...args);}catch(error){if(error.name==='AbortError'||error.name==='TimeoutError')throw error;throw new Error(`Cannot reach ${agent.provider} gateway at ${agent.endpoint}${agent.transport==='ssh'?' on the selected VPS':''}. Check Gateway status, or use the native CLI/ACP connection when its API is disabled.`);}};this.url=agent.endpoint;this.tunnel=null; }
+  constructor({agent,host,token,fetchImpl=fetch}) { this.agent=agent;this.host=host;this.token=token;this.fetch=async(...args)=>{try{return await fetchImpl(...args);}catch(error){if(error.name==='AbortError'||error.name==='TimeoutError')throw error;throw new Error(`Cannot reach ${agent.provider} gateway at ${agent.endpoint}${agent.transport==='ssh'?' on the selected VPS':''}. Check Gateway status, or use the native CLI/ACP connection when its API is disabled.`);}};this.url=agent.endpoint;this.tunnel=null;this.log=new ConnectionLog(); }
   headers() { return {'Content-Type':'application/json',...(this.token?{Authorization:`Bearer ${this.token}`}:{})}; }
   async connect() {
     if(this.agent.transport==='ssh') { this.tunnel=new Tunnel(this.host,this.agent.endpoint);this.url=await this.tunnel.start(); }
@@ -71,7 +72,9 @@ class HttpAdapter {
     if(this.agent.provider==='openclaw') { payload.user=`agenthub:${conversation.id}`;payload.messages=[{role:'user',content:text}]; }
     const headers=this.headers();
     if(this.agent.provider==='hermes'){headers['X-Hermes-Session-Id']=conversation.id;headers['X-Hermes-Session-Key']=`agenthub:${this.agent.id}:${conversation.id}`;}
+    this.log.add('out',`POST ${this.url}/chat/completions model=${payload.model} messages=${payload.messages.length}`);
     const r=await this.fetch(`${this.url}/chat/completions`,{method:'POST',headers:{...headers,Accept:'text/event-stream'},body:JSON.stringify(payload),signal,redirect:'error',dispatcher:longRequestDispatcher()});
+    this.log.add('in',`HTTP ${r.status} ${r.headers.get('content-type')||''}`);
     if(!r.ok) throw new Error(await this.failureFrom(r));
     if(!(r.headers.get('content-type')||'').includes('text/event-stream')) {
       const data=JSON.parse(await limitedBody(r,2*1024*1024));
@@ -84,6 +87,7 @@ class HttpAdapter {
     if(!r.body)throw new Error('API returned an empty stream.');
     let completed=false,ended=false,bytes=0,thinking=false;
     const parser=new SSE((event,raw)=>{
+      this.log.add('in',`${event!=='message'?event+': ':''}${raw.slice(0,300)}`);
       if(raw==='[DONE]'){completed=ended=true;return;}
       let data;try{data=JSON.parse(raw);}catch{throw new Error('Invalid JSON in API event stream.');}
       if(data.error)throw new Error(String(data.error.message||'The agent run failed.'));
@@ -109,6 +113,7 @@ class HttpAdapter {
     }finally{await reader.cancel().catch(()=>{});}
     return {};
   }
+  diagnostics(){return {protocol:'http',endpoint:this.url,...this.log.toJSON()};}
   close(){this.tunnel?.close();}
   async listModels(){
     const r=await this.fetch(`${this.url}/models`,{headers:this.headers(),signal:AbortSignal.timeout(15000),redirect:'error'});

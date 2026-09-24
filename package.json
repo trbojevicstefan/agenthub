@@ -1,6 +1,6 @@
 {
   "name": "agenthub-desktop",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "description": "Opaya. One place. All your agents.",
   "author": "Stefan Trbojevic",
@@ -72,7 +72,12 @@
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
       "runAfterFinish": false,
-      "shortcutName": "Opaya"
+      "shortcutName": "Opaya",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
     },
     "mac": {
       "target": [

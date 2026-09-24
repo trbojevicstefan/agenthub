@@ -53,6 +53,7 @@ const TOOLS=[
   fn('clear_agent_error','Clear a stale connection error on a saved agent.',{agent_id:{type:'string'}},['agent_id']),
   fn('read_terminal','Read the recent output of a terminal, for example an install or diagnostic.',{terminal_id:{type:'string'},max_chars:{type:'integer'}},['terminal_id']),
   fn('read_app_logs','Read Opaya startup diagnostics and every agent connection error.'),
+  fn('agent_diagnostics','Read-only: why an agent is slow or not answering. Returns its status, how long the current answer has run and since the last update, the tools it is running, a pending approval, the last protocol messages between Opaya and the agent, its stderr and, for Hermes, the end of its own log files.',{agent_id:{type:'string'}},['agent_id']),
   fn('run_diagnostic','Run a fixed read-only check in a visible terminal and return its output.',{check:{type:'string',enum:Object.keys(DIAGNOSTICS)},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['check']),
   fn('save_connection','Add or update an agent connection. The user approves it first. Never include API tokens; the user enters tokens in the connection form.',{connection:{type:'object',description:'Fields: id (to update), name, provider (hermes|codex|claude|openclaw|custom), protocol (openai|acp|codex|claude|terminal), transport (http|local|ssh), hostId, endpoint, model, command, args, cwd, hermesHome, displayName, description, note, group (sidebar group name), tags (array of labels).'}},['connection']),
   fn('remove_connection','Remove a saved agent connection and its local chats. The user approves it first.',{agent_id:{type:'string'}},['agent_id']),
@@ -123,7 +124,7 @@ class OpayaAgent{
       'Your job: help install new agents, connect and maintain existing ones, manage SSH machines and keys, and troubleshoot agents that do not work.',
       'Work only through your tools. Check the workspace before changing anything. Prefer the smallest change. Explain briefly what you will do before a change; every change and command is approved by the user in a native dialog, and a declined approval is final.',
       'You cannot edit the app itself, its code or files outside your home folder, and you never see or handle API tokens: ask the user to enter tokens in the connection form.',
-      'For agents that fail: read the connection and error, run diagnostics, check that the endpoint/port or executable exists, reconnect, and only then propose an edited connection. Do not remove connections unless asked.',
+      'When an agent hangs or does not answer, call agent_diagnostics first and explain what it shows: a pending approval, a tool that is still running, stderr errors or Hermes log errors. For agents that fail: read the connection and error, run diagnostics, check that the endpoint/port or executable exists, reconnect, and only then propose an edited connection. Do not remove connections unless asked.',
       'Before installing an agent, check its prerequisites with run_diagnostic versions (on the target machine) and install missing dependencies first, or the essentials bundle when several are missing. On Windows, new tools appear on PATH for terminals opened after the install.',
       'To understand a project or config, use list_directory, read_file and project_info (read-only). After an install finishes, use discover_agents and save_connection to add it. Terminal output may take a while; read it again if it is incomplete.',
       `Platform: ${this.platform}. Saved agents: ${s.agents.length}. Saved machines: ${s.hosts.length}. Your home folder: ${this.home}.`,
@@ -183,7 +184,7 @@ class OpayaAgent{
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.5.1'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.5.2'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
@@ -239,6 +240,7 @@ class OpayaAgent{
       case 'disconnect_agent':{const id=schema.id(args.agent_id);await b.disconnect(id);return {status:b.runtimeFor(id).status};}
       case 'clear_agent_error':return {cleared:b.clearError(schema.id(args.agent_id))};
       case 'read_terminal':return {output:(await this.terminalOutput(schema.id(args.terminal_id))).slice(-Math.min(Math.max(Number(args.max_chars)||4000,200),6000))};
+      case 'agent_diagnostics':{const d=await b.diagnostics(schema.id(args.agent_id));if(d.adapter)d.adapter={...d.adapter,entries:(d.adapter.entries||[]).slice(-60),stderr:String(d.adapter.stderr||'').slice(-3000)};d.hermesLogs=(d.hermesLogs||[]).map(l=>({...l,tail:String(l.tail).slice(-3000)}));return d;}
       case 'read_app_logs':{
         const read=file=>fs.readFile(path.join(this.root,file),'utf8').then(t=>t.slice(-4000)).catch(()=>'');
         return {startup:await read('startup-error.txt'),service:await read('service-startup-error.txt'),agentErrors:b.snapshot().agents.filter(a=>a.error).map(a=>({id:a.id,name:a.name,status:a.status,error:a.error}))};

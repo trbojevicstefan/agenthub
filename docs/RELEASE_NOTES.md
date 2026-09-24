@@ -1,4 +1,12 @@
-# Opaya 0.5.1 - Local Hermes visibility and Codex-powered Opaya Agent
+# Opaya 0.5.2 - Hang diagnostics and the Windows icon
+
+- **Windows icon is back** in the taskbar, window and shortcuts. Every size in the .ico is now a plain bitmap, so Windows always draws it, and the installer and uninstaller use the Opaya icon too.
+- **Long Hermes runs no longer time out**: the 10-minute cap on a local ACP answer is gone. A command or terminal run can take as long as it needs, and Stop still cancels it.
+- **Approvals are visible**: when Hermes asks permission to run a command, the chat shows "Waiting for your approval". "Always allow" requests are answered too.
+- **Live turn watch**: every running answer shows how long it has run and when the agent last sent anything. After 45 seconds of silence it says so and offers Connection log and Stop.
+- **Connection log** (right-click an agent, or the button in a running answer): shows what Opaya and the agent exchanged, the agent's stderr, running tools, pending approvals and the tail of the Hermes log files. It refreshes live and redacts secrets. "Ask the Opaya Agent" hands it to the new `agent_diagnostics` tool.
+
+## Earlier: 0.5.1 - Local Hermes visibility and Codex-powered Opaya Agent
 
 - **Local Hermes live activity**: Hermes ACP thinking, plan and tool updates now appear while it works, with useful status and file/location context instead of a silent spinner.
 - **No cropped working view**: the conversation shell no longer creates a second vertical scrollbar; messages scroll independently while the composer and Stop control remain visible.

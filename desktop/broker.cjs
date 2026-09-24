@@ -2,6 +2,7 @@
 const {randomUUID}=require('node:crypto');
 const schema=require('./schema.cjs');
 const {scanLocal,scanRemote,fingerprint}=require('./discovery.cjs');
+const {hermesLogs}=require('./diagnostics.cjs');
 const {createAdapter}=require('./adapters/index.cjs');
 const {importGatewayToken}=require('./credentials.cjs');
 const {gatewayOperation}=require('./management.cjs');
@@ -31,7 +32,7 @@ class Broker{
   runtimeFor(id){if(!this.runtime.has(id))this.runtime.set(id,{status:'disconnected',error:'',models:[]});return this.runtime.get(id);}
   snapshot(){
     const {agents,hosts,conversations,activeAgentId,activeConversationId}=this.data;
-    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id)};}),hosts,conversations,activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
+    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,conversations,activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
   }
   changed(){if(!this.closing)this.emit(this.snapshot());}
   async persist(){await this.store.write(this.data);this.changed();}
@@ -134,6 +135,16 @@ class Broker{
     this.data.agents.splice(to,0,moved);await this.persist();return true;
   }
   // Connect every saved agent that is not connected yet, in parallel. One failure does not stop the others.
+  // Everything needed to see why an agent is not answering: live turn timing, the adapter's protocol log, stderr and,
+  // for Hermes, the tail of its own log files.
+  async diagnostics(id){
+    const a=this.agent(id),r=this.runtimeFor(id),turn=this.turns.get(id),now=Date.now();
+    const adapter=r.adapter?.diagnostics?.()||null;
+    return {agent:{id:a.id,name:a.name,provider:a.provider,protocol:a.protocol,transport:a.transport,command:a.command,args:a.args,endpoint:a.endpoint,cwd:a.cwd,hermesHome:a.hermesHome},
+      status:r.status,error:r.error||'',
+      turn:turn?{runningSeconds:Math.round((now-(turn.startedAt||now))/1000),secondsSinceLastEvent:Math.round((now-(turn.lastEventAt||turn.startedAt||now))/1000),lastEvent:turn.lastEvent||''}:null,
+      adapter,hermesLogs:a.provider==='hermes'?await hermesLogs(a,a.transport==='ssh'?this.data.hosts.find(h=>h.id===a.hostId):null).catch(()=>[]):[]};
+  }
   async connectAll({ids}={}){
     const targets=this.data.agents.filter(a=>(!ids||ids.includes(a.id))&&a.protocol!=='terminal'&&!['connected','connecting'].includes(this.runtimeFor(a.id).status));
     const results=await Promise.all(targets.map(a=>this.connect(a.id).then(()=>({id:a.id,ok:true}),error=>({id:a.id,ok:false,error:safeError(error)}))));
@@ -208,7 +219,7 @@ class Broker{
     if(r.status!=='connected'||!r.adapter)throw new Error('Connect this agent before sending a message.');
     const adapter=r.adapter,token=this.vault.get(agentId),abort=new AbortController();
     // Reserve BEFORE any asynchronous disk access: IPC calls can arrive together.
-    let finishDone;const turn={abort,done:new Promise(resolve=>{finishDone=resolve;})};
+    let finishDone;const turn={abort,startedAt:Date.now(),done:new Promise(resolve=>{finishDone=resolve;})};
     this.turns.set(agentId,turn);this.changed();
     let c,messages,assistant,timeout,emitTimer,checkpoint;
     try{
@@ -228,7 +239,7 @@ class Broker{
       checkpoint=setInterval(()=>{this.store.writeTranscript(c.id,messages).catch(()=>{assistant.error='Disk checkpoint failed. Keep this window open and export the transcript.';this.changed();});},750);checkpoint.unref?.();
       const onEvent=event=>{
         if(abort.signal.aborted||assistant.status!=='streaming')return;
-        idle();
+        idle();turn.lastEventAt=Date.now();turn.lastEvent=event.type==='activity'?String(event.text||'').slice(0,200):turn.lastEvent;
         if(event.type==='text'){
           if(typeof event.text!=='string')return;
           assistant.content+=event.text;
