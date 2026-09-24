@@ -206,9 +206,9 @@ class Broker{
   // The folder a conversation's agent should work in: its project's folder when the agent runs on that machine.
   conversationCwd(c,a){const p=c.projectId&&(this.data.projects||[]).find(x=>x.id===c.projectId);return p&&projects.fits(a,p)?p.path:'';}
   // ---- Clone and redeploy (Hermes) ------------------------------------------------------------------------------
-  async cloneAgent({id,name,hostId='',runtime='regular',scope='everything',keys=true},progress=()=>{}){
+  async cloneAgent({id,name,hostId='',runtime='regular',scope='everything',keys=true,cron},progress=()=>{}){
     const a=this.agent(id),host=hostId?this.host(hostId):null;
-    const result=await cloner.clone({agent:a,sourceHost:a.transport==='ssh'?this.host(a.hostId):null,host,runtime,scope,keys,name:name||`${a.name}-clone`,progress});
+    const result=await cloner.clone({agent:a,sourceHost:a.transport==='ssh'?this.host(a.hostId):null,host,runtime,scope,keys,cron:cron===undefined?undefined:!!cron,name:name||`${a.name}-clone`,progress});
     progress({step:'save',state:'active',message:'Adding the clone to Opaya'});
     const saved=await this.saveAgent({agent:result.connection},{preapproved:true});
     progress({step:'save',state:'done',message:`${saved.name} added`});

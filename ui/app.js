@@ -1336,7 +1336,7 @@
       action(async()=>{await api.libraryImport({agentId:f.elements.agentId.value,names});closeModal();});};
   }
   // ---- Clone and redeploy (Hermes) --------------------------------------------------------------------------------
-  const CLONE_SCOPES=[['everything','Everything','Config, skills, memory, personality, plugins and cron jobs. No chat history.'],['personality','Skills + personality','Skills, SOUL.md and USER.md (who you are), plus config.'],['skills','Skills','Installed skills and config.'],['memory','Memory','MEMORY.md and USER.md, plus config.']];
+  const CLONE_SCOPES=[['everything','Everything','Config, skills, memory, personality and plugins. No chat history.'],['personality','Skills + personality','Skills, SOUL.md and USER.md (who you are), plus config.'],['skills','Skills','Installed skills and config.'],['memory','Memory','MEMORY.md and USER.md, plus config.']];
   function openClone(a,preset={}){
     if(a.provider!=='hermes'){toast('Cloning is available for Hermes agents.');return;}
     const local=state.hosts.length===0;
@@ -1344,20 +1344,23 @@
       <label>Name of the clone<input name="name" required maxlength="40" value="${esc(preset.name||`${a.name}-clone`.replace(/\s+/g,'-').toLowerCase())}" autocomplete="off"></label>
       <fieldset class="clone-choice"><legend>What to copy</legend>${CLONE_SCOPES.map(([id,label,help])=>`<label class="choice-card"><input type="radio" name="scope" value="${id}" ${(preset.scope||'everything')===id?'checked':''}><span><strong>${label}</strong><small>${help}</small></span></label>`).join('')}</fieldset>
       <label class="check-row inline"><input type="checkbox" name="keys" ${preset.keys===false?'':'checked'}> Include API keys (.env) so the clone works right away</label>
+      <label class="check-row inline clone-cron"><input type="checkbox" name="cron" ${preset.cron??(preset.scope||'everything')==='everything'?'checked':''}> Include cron jobs (scheduled tasks) <small>They will run on both agents, for example posting to Slack twice.</small></label>
       <fieldset class="clone-choice"><legend>Where</legend><div class="clone-where"><label class="choice-card small"><input type="radio" name="hostId" value="" ${!preset.hostId?'checked':''}><span><strong>This computer</strong><small>Local</small></span></label>${state.hosts.map(h=>`<label class="choice-card small"><input type="radio" name="hostId" value="${esc(h.id)}" ${preset.hostId===h.id?'checked':''}><span><strong>${esc(h.name)}</strong><small>Remote / ${esc(h.alias||h.hostname)}</small></span></label>`).join('')}<button type="button" class="choice-card small add" data-action="new-vps"><span><strong>+ New VPS</strong><small>Create a key and connect</small></span></button></div></fieldset>
       <fieldset class="clone-choice"><legend>Run as</legend><div class="clone-where"><label class="choice-card small"><input type="radio" name="runtime" value="regular" ${preset.runtime!=='docker'?'checked':''}><span><strong>Hermes profile</strong><small>Needs Hermes installed there</small></span></label><label class="choice-card small"><input type="radio" name="runtime" value="docker" ${preset.runtime==='docker'?'checked':''}><span><strong>Docker container</strong><small>${esc('nousresearch/hermes-agent')}, auto-restarts</small></span></label></div></fieldset>
       <p class="field-help">Chat history and OAuth logins are not copied. Later, right-click the clone &gt; Redeploy to copy the same parts again.${local?' Add a VPS to clone to a server.':''}</p>
       <div id="clone-status"></div>
       <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Clone</button></div></div></form>`,true);
-    const f=$('#clone-form');
+    const f=$('#clone-form');let cronTouched=preset.cron!==undefined;
+    f.elements.cron.addEventListener('change',()=>{cronTouched=true;});
+    for(const r of f.querySelectorAll('[name="scope"]'))r.addEventListener('change',()=>{if(!cronTouched)f.elements.cron.checked=r.value==='everything';});
     f.onsubmit=event=>{event.preventDefault();const data=Object.fromEntries(new FormData(f));
       // The clone runs as a background job with its own window; this dialog closes right away.
-      action(async()=>{const job=await api.cloneAgent({id:a.id,name:data.name,hostId:data.hostId||'',runtime:data.runtime,scope:data.scope,keys:!!data.keys});closeModal();onJob(job);});
+      action(async()=>{const job=await api.cloneAgent({id:a.id,name:data.name,hostId:data.hostId||'',runtime:data.runtime,scope:data.scope,keys:!!data.keys,cron:!!data.cron});closeModal();onJob(job);});
     };
   }
   async function redeploy(a){
     const src=state.agents.find(x=>x.id===a.clone?.from);if(!src){toast('The source agent of this clone was removed.',true);return;}
-    if(!confirm(`Redeploy ${title(a)} from ${title(src)}?\n\nCopies ${CLONE_SCOPES.find(s=>s[0]===a.clone.scope)?.[1]||a.clone.scope} again over the clone${a.clone.container?' and restarts its container':''}. Chat history on the clone is kept.`))return;
+    if(!confirm(`Redeploy ${title(a)} from ${title(src)}?\n\nCopies ${CLONE_SCOPES.find(s=>s[0]===a.clone.scope)?.[1]||a.clone.scope}${(a.clone.cron??a.clone.scope==='everything')?' (with cron jobs)':' (without cron jobs)'} again over the clone${a.clone.container?' and restarts its container':''}. Chat history on the clone is kept.`))return;
     await action(async()=>{const job=await api.redeployAgent({id:a.id});onJob(job);});
   }
   // ---- New VPS: key, public key for the provider, connection test, save ------------------------------------------
