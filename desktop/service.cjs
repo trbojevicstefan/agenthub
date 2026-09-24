@@ -17,6 +17,7 @@ const skills = require('./skills.cjs');
 const projects = require('./projects.cjs');
 const vps = require('./vps.cjs');
 const moves = require('./transfer.cjs');
+const {condense} = require('./condense.cjs');
 async function start({app, safeStorage}, root) {
   let broker, terminals, listener, opaya, stopping = false;
   const startedAt = new Date().toISOString(), approvals = new Map();
@@ -165,6 +166,13 @@ async function start({app, safeStorage}, root) {
         return result;
       });
     },
+    // Chat history: rename, delete, condense to the essence, and Markdown for sharing.
+    renameConversation:x=>broker.renameConversation(x), deleteConversation:x=>broker.deleteConversation(x.id),
+    condenseConversation:async x=>{const c=broker.conversation(x.id),a=broker.agent(c.agentId),model=opaya.summarizer();
+      return startJob({kind:'condense',route:{from:c.title.slice(0,40),fromWhere:a.name,to:'Essence',toWhere:model||a.name,provider:a.provider},title:'Condensing chat',detail:c.title,steps:[['read','Read the chat'],['condense',model?'Condense with the Opaya model':`Ask ${a.name} to condense`],['save','Save the essence']]},progress=>condense({broker,opaya,id:c.id,progress}));},
+    conversationMarkdown:async x=>{const c=broker.conversation(x.id),a=broker.agent(c.agentId),p=c.projectId&&(broker.data.projects||[]).find(y=>y.id===c.projectId);
+      if(x.essence){if(!c.essence)throw new Error('Condense this chat first.');return `# ${c.title} (essence)\n\nAgent: ${a.name}${p?` / Project: ${p.name}`:''}\n\n${c.essence.text}\n`;}
+      const messages=await broker.messagesOf(c.id);return `# ${c.title}\n\nAgent: ${a.name}${p?` / Project: ${p.name}`:''}\n\n`+messages.filter(m=>m.content).map(m=>`## ${m.role==='user'?'You':a.name}\n\n${m.content}\n`).join('\n');},
     libraryList:()=>library.list().then(list=>list.map(({name,description,category,folder})=>({name,description,category,folder}))),
     libraryImport:async x=>{const a=broker.agent(x.agentId);return startJob({kind:'library',route:{from:a.name,fromWhere:a.transport==='ssh'?broker.host(a.hostId).name:'This computer',to:'Skills library',toWhere:'Opaya',provider:a.provider},title:'Adding skills to the library',detail:`From ${a.name}`,steps:[['source','Read skills'],['copy','Copy into the library']]},progress=>library.importFrom({agent:a,host:a.transport==='ssh'?broker.host(a.hostId):null,names:x.names==='all'?'all':[].concat(x.names||[]).map(String),progress}));},
     libraryInstall:async x=>{

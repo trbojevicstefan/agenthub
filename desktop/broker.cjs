@@ -42,7 +42,7 @@ class Broker{
   runtimeFor(id){if(!this.runtime.has(id))this.runtime.set(id,{status:'disconnected',error:'',models:[]});return this.runtime.get(id);}
   snapshot(){
     const {agents,hosts,conversations,activeAgentId,activeConversationId}=this.data;
-    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',commands:r.adapter?.commands||[],models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,settings:this.data.settings,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations,activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
+    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',commands:r.adapter?.commands||[],models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,settings:this.data.settings,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations:conversations.map(({essence,...c})=>essence?{...c,essence:{by:essence.by,at:essence.at}}:c),activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
   }
   changed(){if(!this.closing)this.emit(this.snapshot());}
   async persist(){await this.store.write(this.data);this.changed();}
@@ -100,7 +100,7 @@ class Broker{
     for(const id of ids){
       try{
         let c=keepContext&&previous?.conversations?.[id]?this.data.conversations.find(x=>x.id===previous.conversations[id]&&x.agentId===id):null;
-        if(!c)c=await this.createConversation(id,{activate:false,title:`Playground: ${text.slice(0,50).replace(/\s+/g,' ')}`});
+        if(!c)c=await this.createConversation(id,{activate:false,kind:'playground',title:`Playground: ${text.slice(0,50).replace(/\s+/g,' ')}`});
         conversations[id]=c.id;
       }catch(error){errors[id]=safeError(error);}
     }
@@ -113,12 +113,26 @@ class Broker{
     if(projectId){const p=this.project(projectId);if(!projects.fits(a,p))throw new Error(`${a.name} runs on a different machine than ${p.name}.`);}
     return this.createConversation(agentId,{projectId});
   }
-  async createConversation(agentId,{activate=true,title='New conversation',projectId=''}={}){
-    if(this.data.conversations.length>=2000)throw new Error('Conversation limit reached. Export and remove old agent connections.');
-    const c={id:randomUUID(),agentId,title,createdAt:new Date().toISOString(),externalSessionId:'',...(projectId?{projectId}:{})};
+  async createConversation(agentId,{activate=true,title='New conversation',projectId='',kind=''}={}){
+    if(this.data.conversations.length>=2000)throw new Error('Conversation limit reached. Delete old chats from History.');
+    const c={id:randomUUID(),agentId,title,createdAt:new Date().toISOString(),externalSessionId:'',...(projectId?{projectId}:{}),...(kind?{kind}:{})};
     this.data.conversations.push(c);this.histories.set(c.id,[]);if(activate){this.data.activeConversationId=c.id;this.data.activeAgentId=agentId;this.data.lastConversation[agentId]=c.id;}await this.persist();return c;
   }
   async selectConversation(id){const c=this.data.conversations.find(c=>c.id===schema.id(id));if(!c)throw new Error('Conversation not found.');this.data.activeAgentId=c.agentId;this.data.activeConversationId=c.id;this.data.lastConversation[c.agentId]=c.id;if(!this.histories.has(c.id))this.histories.set(c.id,await this.store.transcript(c.id));await this.persist();}
+  conversation(id){const c=this.data.conversations.find(c=>c.id===schema.id(id));if(!c)throw new Error('Conversation not found.');return c;}
+  async renameConversation({id,title}){const c=this.conversation(id);c.title=schema.text(title,'title',120).replace(/\s+/g,' ').trim()||c.title;await this.persist();return c;}
+  // Deletes a chat and its transcript. The agent keeps its own session files; Opaya only forgets the chat.
+  async deleteConversation(id){
+    const c=this.conversation(id),turn=this.turns.get(c.agentId);
+    if(turn&&turn.conversationId===c.id)throw new Error('Stop the agent\'s current answer in this chat first.');
+    this.data.conversations=this.data.conversations.filter(x=>x.id!==c.id);this.histories.delete(c.id);delete this.data.drafts[c.id];
+    if(this.data.lastConversation?.[c.agentId]===c.id)delete this.data.lastConversation[c.agentId];
+    if(this.data.activeConversationId===c.id)this.data.activeConversationId=this.data.conversations.filter(x=>x.agentId===c.agentId).at(-1)?.id||'';
+    const pg=this.data.playground;if(pg?.conversations)for(const [k,v] of Object.entries(pg.conversations))if(v===c.id)delete pg.conversations[k];
+    await this.store.deleteTranscript(c.id);await this.persist();return true;
+  }
+  async setEssence(id,essence){const c=this.conversation(id);c.essence={text:String(essence.text||'').slice(0,40000),by:String(essence.by||'').slice(0,120),at:new Date().toISOString()};await this.persist();return c.essence;}
+  async messagesOf(id){const c=this.conversation(id);return this.histories.get(c.id)||await this.store.transcript(c.id);}
   async saveDraft({agentId,conversationId='',text=''}){
     this.agent(agentId);if(typeof text!=='string'||text.length>80000||text.includes('\0'))throw new Error('Invalid draft.');
     if(conversationId&&!this.data.conversations.some(c=>c.id===conversationId&&c.agentId===agentId))throw new Error('Draft conversation does not belong to this agent.');

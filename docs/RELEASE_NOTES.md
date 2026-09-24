@@ -1,3 +1,30 @@
+# Opaya 0.11.0 - Chat history, skill transfer and a skills library
+
+- **Chat history panel**:
+  - Click the clock button next to a chat, press Ctrl/Cmd+Shift+H, or right-click an agent and choose **Chat history**. The panel opens on the right, in place of Projects.
+  - Chats are grouped by day. Tabs show All, Chats, Projects and Playground. You can search them and switch between one agent and all agents.
+  - Project chats carry a blue label with the project name, also in the chat picker (`[project] title`). Playground chats carry a purple label.
+  - Hover a chat to **Condense**, **Share** or **Delete** it. Right-click it to **Rename** it or **View essence**.
+- **Delete chats**: regular, project and playground chats. Opaya deletes the chat and its transcript; the agent's own session files are not touched.
+- **Condense**:
+  - Reads the whole chat and keeps only its essence: goal, key points, decisions and open items.
+  - A warning shows about how many tokens it will use before you start.
+  - If the Opaya Agent has a model API key (DeepSeek, OpenAI, Gemini, OpenRouter and others) or a local model, that model does the work and the agent's session is not touched. Without a key, the chat's own agent condenses it, and its answer also appears in the chat.
+  - The essence is saved with the chat. From it you can **Copy**, **Send to agent** or start a **New chat from essence**.
+- **Share**: Copy as Markdown, Copy essence, Save as Markdown file, or **Send to another agent**, which opens a new chat with the essence or the whole chat ready to send.
+- **Transfer to another agent** (right-click an agent, or the Skills panel):
+  - **Skills**: all of them or the ones you select. They work across Hermes, Claude Code, Codex and OpenClaw, on this computer or a VPS.
+  - **Credentials**: all or selected API keys from a Hermes `.env`. Keys are merged by name into the other agent's `.env`, which stays private (0600). The UI only ever shows key names, never values.
+  - **Tools & MCP servers** the agent uses, and optionally its saved gateway token.
+  - The transfer runs in the progress window.
+- **Skills library**: global skills kept by Opaya.
+  - Add skills from any agent or from a folder.
+  - Install them to one or many agents in one go, or remove them.
+  - Find it in Settings, the workspace menu and the Skills panel.
+- **Fixes**:
+  - A terminal tab of a removed agent can now always be closed.
+  - Fixed a rare hang in cloning when the copy finished very quickly.
+
 # Opaya 0.10.2 - A clone window worth watching
 
 - **Clone and Redeploy run in their own window**:

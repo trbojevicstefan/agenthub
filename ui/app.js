@@ -67,7 +67,7 @@
     render();
   }
   function render() {
-    queueMicrotask(()=>{ensureProjectsToggle();renderProjects();});
+    queueMicrotask(()=>{ensureProjectsToggle();renderProjects();const sel=selected()?.id||'';if(historyOpen&&sel!==historyFollow&&historyAgent&&sel)historyAgent=sel;historyFollow=sel;renderHistory();});
     $('#agent-count').textContent=state.agents.length;
     $('#host-count').textContent=state.hosts.length;
     $('.nav-overview').classList.toggle('selected',overview&&!opayaView&&!playgroundView);$('.nav-playground')?.classList.toggle('selected',playgroundView);$('.nav-opaya').classList.toggle('selected',opayaView);renderOpayaNav();
@@ -99,7 +99,7 @@
     contentKind('conversation');
     $('.topbar-actions').insertAdjacentHTML('beforeend',`${a.protocol!=='terminal'?'<button class="secondary" data-action="models" title="Choose agent model">Models</button>':''}${['hermes','openclaw'].includes(a.provider)?'<button class="secondary" data-action="gateway" title="Gateway status and restart">Gateway</button>':''}`);
     if(renderKey!==JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId])) {
-      $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity">${badge(a,true)}<div><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p><div class="identity-meta">${meta(a)}${a.tags?.length?`<span class="heading-tags">${tagChips(a,6)}</span>`:''}</div></div></div><div class="conversation-controls"><select id="conversation-picker" aria-label="Conversation history" title="Switch between this agent's conversations"></select><button class="icon-button" data-action="new-conversation" title="New conversation (Ctrl + N)" aria-label="New conversation">+</button><button class="icon-button" data-action="export" title="Export this conversation as Markdown" aria-label="Export conversation">&#8595;</button><button id="connect-button" class="secondary" data-action="connect"></button></div></div><div id="connection-banner"></div><div id="message-list" class="message-list"></div><div class="compose-area"><form id="message-form"><textarea id="message-input" placeholder="Message ${esc(title(a))}..." aria-label="Message ${esc(title(a))}" rows="2" maxlength="80000"></textarea><div class="compose-bottom"><div><span class="compose-provider">${esc(labels[a.provider])}</span><span id="compose-hint"></span></div><button type="button" id="stop-button" class="stop-button" data-action="stop" title="Stop this turn" hidden><span>&#9632;</span> Stop</button><button id="send-button" type="submit" class="send-button" title="Send message (Enter)" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption">Enter to send <span>&#183;</span> Shift + Enter for a new line <span>&#183;</span> Conversations stay on this computer</p></div>`;
+      $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity">${badge(a,true)}<div><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p><div class="identity-meta">${meta(a)}${a.tags?.length?`<span class="heading-tags">${tagChips(a,6)}</span>`:''}</div></div></div><div class="conversation-controls"><select id="conversation-picker" aria-label="Conversation history" title="Switch between this agent's conversations"></select><button class="icon-button" data-action="new-conversation" title="New conversation (Ctrl + N)" aria-label="New conversation">+</button><button class="icon-button" data-action="export" title="Export this conversation as Markdown" aria-label="Export conversation">&#8595;</button><button class="icon-button history-button" data-action="history-toggle" title="Chat history (${mod()}Shift+H)" aria-label="Chat history"><span class="history-glyph" aria-hidden="true"></span></button><button id="connect-button" class="secondary" data-action="connect"></button></div></div><div id="connection-banner"></div><div id="message-list" class="message-list"></div><div class="compose-area"><form id="message-form"><textarea id="message-input" placeholder="Message ${esc(title(a))}..." aria-label="Message ${esc(title(a))}" rows="2" maxlength="80000"></textarea><div class="compose-bottom"><div><span class="compose-provider">${esc(labels[a.provider])}</span><span id="compose-hint"></span></div><button type="button" id="stop-button" class="stop-button" data-action="stop" title="Stop this turn" hidden><span>&#9632;</span> Stop</button><button id="send-button" type="submit" class="send-button" title="Send message (Enter)" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption">Enter to send <span>&#183;</span> Shift + Enter for a new line <span>&#183;</span> Conversations stay on this computer</p></div>`;
       if(!String(renderKey).startsWith(`["${a.id}"`))enter($('#content'));
       renderKey=JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId]);$('#message-input').value=drafts.get(draftKey())??state.drafts?.[draftKey()]??'';
       $('#message-input').addEventListener('input',event=>{drafts.set(draftKey(),event.target.value);if(api.saveDraft)save(api.saveDraft({agentId:a.id,conversationId:currentConversation()?.id||'',text:event.target.value}));event.target.style.height='auto';event.target.style.height=Math.min(event.target.scrollHeight,190)+'px';updateSlash();});
@@ -109,7 +109,7 @@
       $('#conversation-picker').addEventListener('change',event=>action(()=>api.selectConversation({id:event.target.value})));
     }
     const convs=state.conversations.filter(c=>c.agentId===a.id).slice().reverse();
-    $('#conversation-picker').innerHTML=convs.length?convs.map(c=>`<option value="${esc(c.id)}" ${c.id===state.activeConversationId?'selected':''}>${esc(c.title)}</option>`).join(''):'<option>New conversation</option>';
+    $('#conversation-picker').innerHTML=convs.length?convs.map(c=>`<option value="${esc(c.id)}" ${c.id===state.activeConversationId?'selected':''}>${esc(chatLabel(c))}</option>`).join(''):'<option>New conversation</option>';
     const connect=$('#connect-button');connect.textContent=a.status==='connected'?'Disconnect':a.status==='connecting'?'Connecting...':'Connect';connect.disabled=a.status==='connecting';
     $('#connection-banner').innerHTML=a.error?`<div class="inline-notice error-notice"><span>!</span><div><strong>Connection needs attention</strong><p>${esc(a.error)}</p><button class="text-button" data-action="edit" data-id="${esc(a.id)}">Edit connection</button><button class="text-button" data-action="terminal">Open terminal</button><button class="text-button" data-action="clear-error" data-id="${esc(a.id)}">Clear error</button></div></div>`:a.protocol==='terminal'?'<div class="inline-notice"><span>&gt;_</span><p>This is a terminal-only agent. Use its native CLI in the integrated terminal.</p></div>':a.status==='disconnected'?'<div class="inline-notice"><span class="local-icon"></span><p>This agent is not connected. Your saved conversations are still here.</p><button class="text-button" data-action="connect">Connect now &#8594;</button></div>':'';
     const c=currentConversation(),messages=c?state.histories[c.id]||[]:[],now=performance.now(),conversationKey=`${a.id}/${c?.id||''}`;
@@ -290,6 +290,7 @@
     if(name==='project-focus'){projectsExpanded.add(id);toggleProjects(true);return;}
     if(name==='mcp-manage'){openMcpManager();return;}
     if(name==='library'){openLibrary();return;}
+    if(name==='history-toggle'){toggleHistory();return;}
     if(name==='transfer'){const a=state.agents.find(x=>x.id===button.dataset.id);if(a)openTransfer(a);return;}
     if(name==='playground'){overview=false;opayaView=false;playgroundView=true;closeModal();render();saveView();$('#message-input')?.focus();return;}
     if(name==='pg-swap'){pgAgents.reverse();render();return;}
@@ -418,6 +419,7 @@
       {icon:'&#9998;',label:'Rename...',run:()=>renameAgent(a)},
       {icon:'&#9680;',label:'Change icon...',run:()=>openIconPicker(a)},
       {icon:'&#9776;',label:'Group & tags...',run:()=>openGroupTags(a)},
+      {icon:'&#9719;',label:'Chat history',hint:`${mod()}Shift+H`,run:()=>toggleHistory(true,id)},
       {icon:'&#10022;',label:'Skills, tools & MCP...',run:()=>openSkills(id)},
       {icon:'&#9635;',label:'Projects...',run:()=>openAgentProjects(a)},
       {icon:'&#8644;',label:'Transfer to another agent...',disabled:state.agents.length<2,run:()=>openTransfer(a)},
@@ -896,7 +898,7 @@
   const fitsProject=(a,p)=>a.command!=='docker'&&(p.hostId?a.transport==='ssh'&&a.hostId===p.hostId:a.transport!=='ssh');
   const ago=iso=>{const s=Math.max(0,(Date.now()-new Date(iso).getTime())/1000);return s<60?'now':s<3600?`${Math.floor(s/60)}m`:s<86400?`${Math.floor(s/3600)}h`:s<604800?`${Math.floor(s/86400)}d`:new Date(iso).toLocaleDateString([],{month:'short',day:'numeric'});};
   const saveProjectsView=()=>saveView();
-  function toggleProjects(force){projectsOpen=force??!projectsOpen;renderProjects();saveProjectsView();if(projectsOpen)refreshProjectGit();}
+  function toggleProjects(force){projectsOpen=force??!projectsOpen;if(projectsOpen&&historyOpen){historyOpen=false;renderHistory();}renderProjects();saveProjectsView();if(projectsOpen)refreshProjectGit();}
   async function loadProjectGit(p){
     const entry=projectGit.get(p.id)||{};if(entry.loading)return;entry.loading=true;projectGit.set(p.id,entry);
     try{const info=await api.projectInfo({id:p.id});projectGit.set(p.id,{info,at:Date.now()});}catch(error){projectGit.set(p.id,{error:error.message,at:Date.now()});}
@@ -933,6 +935,129 @@
       <footer class="projects-footer">Right-click a project for git and GitHub</footer>`;
     if(projectsHtml===html)return;projectsHtml=html;box.innerHTML=html;
     const filter=$('#projects-filter');if(filter)filter.oninput=()=>{projectFilter=filter.value.toLowerCase();const at=filter.selectionStart;renderProjects();const f=$('#projects-filter');f?.focus();f?.setSelectionRange(at,at);};
+  }
+  // ---- Chat history: a right-side panel per agent with project, regular and playground chats ---------------------
+  let historyOpen=false,historyFilter='',historyTab='all',historyAgent='',historyHtml='',historyFollow='';
+  const chatKind=c=>c.projectId?'project':c.kind==='playground'||/^Playground: /.test(c.title||'')?'playground':'chat';
+  const chatChip=c=>{const k=chatKind(c),p=projectOf(c);return k==='project'?`<span class="chat-chip project" title="Project chat: ${esc(p?.name||'removed project')}"><span class="project-folder" aria-hidden="true"></span>${esc(p?.name||'Project')}</span>`:k==='playground'?'<span class="chat-chip playground" title="Playground chat">Playground</span>':'';};
+  const chatLabel=c=>{const p=projectOf(c);return p?`[${p.name}] ${c.title}`:chatKind(c)==='playground'?c.title:c.title;};
+  function toggleHistory(force,agentId){
+    historyOpen=force??!historyOpen;
+    if(historyOpen){historyAgent=agentId??selected()?.id??'';historyFollow=selected()?.id||'';if(projectsOpen){projectsOpen=false;renderProjects();saveProjectsView();}}
+    historyHtml='';renderHistory();
+  }
+  function renderHistory(){
+    const box=$('#history-panel');if(!box)return;
+    box.hidden=!historyOpen;document.body.classList.toggle('history-panel-open',historyOpen);
+    for(const b of document.querySelectorAll('[data-action="history-toggle"]'))b.classList.toggle('selected',historyOpen);
+    if(!historyOpen)return;
+    if(historyAgent&&!state.agents.some(a=>a.id===historyAgent))historyAgent='';
+    const all=state.conversations.filter(c=>!historyAgent||c.agentId===historyAgent).slice().sort((a,b)=>String(b.createdAt).localeCompare(String(a.createdAt)));
+    const counts={all:all.length,chat:0,project:0,playground:0};for(const c of all)counts[chatKind(c)]++;
+    const list=all.filter(c=>(historyTab==='all'||chatKind(c)===historyTab)&&(!historyFilter||`${c.title} ${projectOf(c)?.name||''}`.toLowerCase().includes(historyFilter)));
+    const busyIn=c=>state.agents.find(a=>a.id===c.agentId)?.busy&&state.activeConversationId===c.id;
+    const row=c=>{const a=state.agents.find(x=>x.id===c.agentId);return `<div class="history-row ${c.id===state.activeConversationId&&!overview&&!opayaView&&!playgroundView?'current':''}" data-hist="${esc(c.id)}">
+      <button type="button" class="history-open" data-hist-act="open" title="${esc(c.title)}">${!historyAgent&&a?badge(a):''}<span class="history-text"><span class="history-title">${esc(c.title)}</span><span class="history-meta">${chatChip(c)}${c.essence?`<span class="essence-mark" title="Condensed by ${esc(c.essence.by||'')}">&#10022; Essence</span>`:''}<small>${busyIn(c)?'<span class="status-dot working"></span>':esc(ago(c.createdAt))}</small></span></span></button>
+      <div class="history-actions"><button type="button" class="term-icon" data-hist-act="condense" title="Condense to the essence" aria-label="Condense"><span aria-hidden="true">&#8860;</span></button><button type="button" class="term-icon" data-hist-act="share" title="Share" aria-label="Share"><span aria-hidden="true">&#8599;</span></button><button type="button" class="term-icon danger" data-hist-act="delete" title="Delete chat" aria-label="Delete chat"><span aria-hidden="true">&#10005;</span></button></div></div>`;};
+    const group=(label,items)=>items.length?`<div class="history-group"><div class="history-group-label">${esc(label)}<small>${items.length}</small></div>${items.map(row).join('')}</div>`:'';
+    const buckets=[];const today=new Date();today.setHours(0,0,0,0);const day=86400000;
+    for(const c of list){const t=new Date(c.createdAt).getTime(),label=t>=today.getTime()?'Today':t>=today.getTime()-day?'Yesterday':t>=today.getTime()-6*day?'This week':t>=today.getTime()-29*day?'This month':'Older';let b=buckets.find(x=>x[0]===label);if(!b)buckets.push(b=[label,[]]);b[1].push(c);}
+    const tabs=[['all','All'],['chat','Chats'],['project','Projects'],['playground','Playground']];
+    const html=`<header class="projects-header"><strong>History</strong><small>${all.length||''}</small></header>
+      <div class="history-toolbar"><select id="history-agent" aria-label="Agent"><option value="">All agents</option>${state.agents.map(a=>`<option value="${esc(a.id)}" ${a.id===historyAgent?'selected':''}>${esc(title(a))}</option>`).join('')}</select><button class="icon-button" data-action="history-toggle" title="Close history" aria-label="Close history">&#10005;</button></div>
+      <div class="history-tabs" role="tablist">${tabs.map(([k,l])=>`<button type="button" role="tab" class="${historyTab===k?'selected':''}" data-hist-tab="${k}">${l}${counts[k]?` <small>${counts[k]}</small>`:''}</button>`).join('')}</div>
+      <div class="history-search"><input id="history-filter" placeholder="Search chats..." aria-label="Search chats" value="${esc(historyFilter)}"></div>
+      <div class="history-list">${buckets.map(([l,items])=>group(l,items)).join('')||`<div class="history-empty"><span aria-hidden="true">&#9719;</span><p>${all.length?'No chat matches.':'No chats yet.'}</p></div>`}</div>
+      <footer class="projects-footer">Right-click a chat for more</footer>`;
+    if(historyHtml===html)return;historyHtml=html;box.innerHTML=html;
+    const f=$('#history-filter');f.oninput=()=>{historyFilter=f.value.toLowerCase();const at=f.selectionStart;renderHistory();const n=$('#history-filter');n?.focus();n?.setSelectionRange(at,at);};
+    $('#history-agent').onchange=e=>{historyAgent=e.target.value;renderHistory();};
+  }
+  function historyMenu(c){
+    return [
+      {icon:'&#8599;',label:'Open',run:()=>openProjectChat(c.id)},
+      {icon:'&#9998;',label:'Rename...',run:()=>renameChat(c)},
+      '-',
+      {icon:'&#8860;',label:c.essence?'Condense again...':'Condense...',run:()=>condenseChat(c)},
+      c.essence&&{icon:'&#10022;',label:'View essence',run:()=>openEssence(c.id)},
+      '-',
+      ...shareItems(c),
+      '-',
+      {icon:'&#10005;',label:'Delete chat...',danger:true,run:()=>deleteChat(c)}
+    ];
+  }
+  function shareItems(c){
+    return [
+      {icon:'&#10697;',label:'Copy as Markdown',run:async()=>{await api.clipboardWrite({text:await api.conversationMarkdown({id:c.id})});toast('Chat copied as Markdown.');}},
+      c.essence&&{icon:'&#10022;',label:'Copy essence',run:async()=>{await api.clipboardWrite({text:await api.conversationMarkdown({id:c.id,essence:true})});toast('Essence copied.');}},
+      {icon:'&#8595;',label:'Save as Markdown file...',run:async()=>{if(await api.exportConversation({id:c.id}))toast('Chat saved.');}},
+      {icon:'&#8644;',label:'Send to another agent...',disabled:state.agents.length<2&&!c.essence,run:()=>sendChatTo(c)}
+    ];
+  }
+  document.addEventListener('click',event=>{
+    const tab=event.target.closest('[data-hist-tab]');if(tab){historyTab=tab.dataset.histTab;renderHistory();return;}
+    const b=event.target.closest('[data-hist-act]');if(!b)return;const id=b.closest('[data-hist]')?.dataset.hist,c=state.conversations.find(x=>x.id===id);if(!c)return;
+    const act=b.dataset.histAct;
+    if(act==='open')action(()=>openProjectChat(c.id));
+    else if(act==='condense')condenseChat(c);
+    else if(act==='delete')deleteChat(c);
+    else if(act==='share'){const r=b.getBoundingClientRect();openMenu(r.left-180,r.bottom+4,shareItems(c),'Share',b);}
+  });
+  document.addEventListener('contextmenu',event=>{const r=event.target.closest('#history-panel [data-hist]'),pc=event.target.closest('[data-action="project-open-chat"]');if(!r&&!pc)return;const c=state.conversations.find(x=>x.id===(r?r.dataset.hist:pc.dataset.id));if(!c)return;event.preventDefault();event.stopPropagation();openMenu(event.clientX,event.clientY,historyMenu(c),c.title);},true);
+  function renameChat(c){
+    modal('Rename chat','',`<form id="chat-rename-form"><label class="field"><span>Title</span><input name="title" value="${esc(c.title)}" maxlength="120" autocomplete="off" required></label><div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Rename</button></div></div></form>`);
+    const f=$('#chat-rename-form');f.elements.title.select();
+    f.onsubmit=event=>{event.preventDefault();action(async()=>{await api.renameConversation({id:c.id,title:f.elements.title.value});closeModal();await refresh();});};
+  }
+  async function deleteChat(c){
+    const a=state.agents.find(x=>x.id===c.agentId);
+    if(!confirm(`Delete "${c.title}"?\n\nOpaya deletes this ${chatKind(c)==='project'?'project chat':chatKind(c)==='playground'?'playground chat':'chat'} and its transcript${a?` with ${title(a)}`:''}. This cannot be undone.`))return;
+    await action(async()=>{await api.deleteConversation({id:c.id});await refresh();toast('Chat deleted.');});
+  }
+  // Condense: reads the whole chat and keeps only its essence. Uses the Opaya Agent's model API when it has a key,
+  // otherwise the chat's own agent. Either way it costs tokens, so the user confirms first.
+  async function condenseChat(c){
+    const a=state.agents.find(x=>x.id===c.agentId),o=opaya(),local=['ollama','lmstudio'].includes(o.config?.preset);
+    const model=o.configured&&o.config?.preset!=='codex'&&(o.hasKey||local)?`${o.presets?.[o.config.preset]?.label||'Model API'} / ${o.config.model}`:'';
+    let size=0;try{size=(await api.conversationMarkdown({id:c.id})).length;}catch{}
+    const tokens=Math.round(size/4);
+    modal('Condense chat',c.title,`<div class="condense-body">
+      <div class="condense-warning"><span aria-hidden="true">!</span><div><strong>This uses tokens.</strong><p>Opaya sends the whole chat, about <b>${tokens.toLocaleString()}</b> tokens${size>120000?' (very long chats are trimmed to the start and the latest part)':''}, and keeps only the essence: goal, key points, decisions and open items.</p></div></div>
+      <div class="condense-engine ${model?'model':'agent'}"><strong>${model?`With the Opaya model: ${esc(model)}`:`With ${esc(a?title(a):'the agent')} itself`}</strong><p>${model?'Its API key pays for it. The agent\'s own session is not touched.':`No Opaya model API key is set, so ${esc(a?title(a):'the agent')} condenses its own chat. Its answer also appears in this chat. <button type="button" class="text-button" data-action="opaya-config">Set an Opaya model API key</button>`}</p></div>
+      <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="button" class="primary" id="condense-go">Condense</button></div></div></div>`);
+    $('#condense-go').onclick=()=>action(async()=>{await api.condenseConversation({id:c.id});closeModal();});
+  }
+  async function openEssence(id){
+    const c=state.conversations.find(x=>x.id===id);if(!c)return;
+    let text='';try{text=await api.conversationMarkdown({id,essence:true});}catch(error){toast(error.message,true);return;}
+    const body=text.replace(/^# .*\n\n.*\n\n/,'');
+    modal('Essence',`${c.title}${c.essence?.by?` / condensed by ${c.essence.by}`:''}`,`<div class="essence-body message-content">${format(body)}</div>
+      <div class="modal-footer"><div><button type="button" class="text-button" id="essence-again">Condense again</button></div><div><button type="button" class="secondary" id="essence-copy">Copy</button><button type="button" class="secondary" id="essence-send">Send to agent...</button><button type="button" class="primary" id="essence-new">New chat from essence</button></div></div>`,true);
+    $('#essence-copy').onclick=()=>action(async()=>{await api.clipboardWrite({text});toast('Essence copied.');});
+    $('#essence-again').onclick=()=>condenseChat(c);
+    $('#essence-send').onclick=()=>sendChatTo(c,true);
+    $('#essence-new').onclick=()=>action(()=>startChatWith(c.agentId,essencePrompt(c,body),c.projectId));
+  }
+  const essencePrompt=(c,body)=>`Context from an earlier chat ("${c.title}"):\n\n${body.trim()}\n\n---\n\n`;
+  async function startChatWith(agentId,text,projectId=''){
+    const a=state.agents.find(x=>x.id===agentId),p=projectId&&(state.projects||[]).find(x=>x.id===projectId);
+    const fits=p&&(p.hostId||'')===(a?.transport==='ssh'?a.hostId:'');
+    const c=await api.newConversation({agentId,projectId:fits?projectId:''});
+    closeModal();overview=false;opayaView=false;playgroundView=false;drafts.set(c.id,text);await api.saveDraft({agentId,conversationId:c.id,text});await refresh();
+    const input=$('#message-input');if(input&&currentConversation()?.id===c.id){input.value=text;input.focus();input.setSelectionRange(text.length,text.length);input.dispatchEvent(new Event('input'));}
+  }
+  function sendChatTo(c,essenceOnly=false){
+    const others=state.agents;const a=state.agents.find(x=>x.id===c.agentId);
+    modal('Send to another agent',`Start a chat with the context of "${c.title}".`,`<form id="send-chat-form" class="mcp-form"><label>Agent<select name="agentId">${others.map(x=>`<option value="${esc(x.id)}" ${x.id===others.find(y=>y.id!==c.agentId)?.id?'selected':''}>${esc(title(x))} / ${esc(labels[x.provider]||x.provider)} / ${esc(location(x))}</option>`).join('')}</select></label>
+      <fieldset class="clone-choice"><legend>What to send</legend><div class="clone-where">${c.essence?`<label class="choice-card small"><input type="radio" name="what" value="essence" checked><span><strong>Essence</strong><small>Short, saves tokens</small></span></label>`:''}${essenceOnly?'':`<label class="choice-card small"><input type="radio" name="what" value="full" ${c.essence?'':'checked'}><span><strong>Whole chat</strong><small>Everything ${esc(a?title(a):'')} and you said</small></span></label>`}</div></fieldset>
+      ${c.essence?'':'<p class="field-help">Tip: condense the chat first to send only its essence.</p>'}
+      <p class="field-help">Opaya opens a new chat with the context in the message box. Review it, then send.</p>
+      <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Open chat</button></div></div></form>`);
+    const f=$('#send-chat-form');
+    f.onsubmit=event=>{event.preventDefault();action(async()=>{const what=f.querySelector('[name="what"]:checked')?.value||'essence';
+      let text;if(what==='essence'){text=essencePrompt(c,(await api.conversationMarkdown({id:c.id,essence:true})).replace(/^# .*\n\n.*\n\n/,''));}
+      else{const md=await api.conversationMarkdown({id:c.id});text=`Context from an earlier chat ("${c.title}"):\n\n${md.length>60000?md.slice(-60000):md}\n\n---\n\n`;}
+      await startChatWith(f.elements.agentId.value,text,c.projectId);});};
   }
   function ensureProjectsToggle(){
     const bar=$('#topbar');if(!bar||$('#projects-toggle',bar))return;
@@ -1042,6 +1167,7 @@
     openMenu(event.clientX,event.clientY,projectMenu(p),p.name,el);
   });
   document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==='p'&&!$('#app-dialog')){event.preventDefault();toggleProjects();}});
+  document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==='h'&&!$('#app-dialog')){event.preventDefault();toggleHistory();}});
   // ---- A proactive Opaya Agent, gently: one small card at a time, at most every 20 minutes, each tip once ------------
   let nudgeShownAt=0,nudgeId='';
   function nudgeCandidates(){
@@ -1086,7 +1212,7 @@
     if(!prev&&j.status==='running'){jobShown=j.id;jobMinimized=false;}
     if(prev?.status==='running'&&j.status!=='running'){
       if(j.status==='done'){const r=j.result||{},bits=[r.copied&&`Copied: ${r.copied.join(', ')}`,r.skills&&`${r.skills.length} skill${r.skills.length===1?'':'s'}`,r.keys&&`${r.keys.length} API key${r.keys.length===1?'':'s'}`,r.mcp&&`MCP: ${r.mcp.join(', ')}`,r.token&&'API token'].filter(Boolean);
-        toast(`${j.title.replace(/^Cloning/,'Cloned').replace(/^Redeploying/,'Redeployed').replace(/^Transferring/,'Transferred').replace(/^Installing skills/,'Installed skills').replace(/^Adding skills/,'Added skills')}. ${bits.join(', ')}${bits.length?'.':''}`);if(j.kind!=='library')skillCache.clear();refresh();if(j.kind==='library'&&$('#library-body'))drawLibrary?.();}
+        toast(`${j.title.replace(/^Cloning/,'Cloned').replace(/^Redeploying/,'Redeployed').replace(/^Transferring/,'Transferred').replace(/^Installing skills/,'Installed skills').replace(/^Adding skills/,'Added skills')}. ${bits.join(', ')}${bits.length?'.':''}`);if(j.kind!=='library')skillCache.clear();refresh();if(j.kind==='library'&&$('#library-body'))drawLibrary?.();if(j.kind==='condense'&&j.result?.conversationId)refresh().then(()=>openEssence(j.result.conversationId));}
       else toast(`${j.title} failed: ${j.error}`,true);
     }
     renderJobs();
