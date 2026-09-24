@@ -989,3 +989,5 @@ body[data-theme="light"] .condense-engine.model strong{color:#1f7a47}
 body[data-theme="light"] .history-button.selected{background:#e3f1e7;color:#1f7a47}
 body.frameless.history-panel-open .topbar{padding-right:25px}
 .history-toolbar select{padding:0 8px;line-height:28px}
+.status-update.failed{background:#3a1d1d;border-color:#7a3434;color:#ffc2c2}
+body[data-theme="light"] .status-update.failed{background:#fdeaea;border-color:#e6a3a3;color:#8a1f1f}

@@ -1,7 +1,8 @@
 'use strict';
 // In-app updates from this repository's GitHub releases. Opaya checks the public releases list, downloads the build for
 // this platform, verifies it against the release's SHA256SUMS file and installs it in place:
-// Windows runs the NSIS installer silently into the current folder and starts Opaya again;
+// Windows starts the NSIS installer the way electron-updater does (--updated /S --force-run): the installer closes
+// every running Opaya, installs over the existing installation and starts Opaya again;
 // macOS swaps the .app bundle from the release ZIP and reopens it.
 const fs=require('node:fs');
 const fsp=require('node:fs/promises');
@@ -32,33 +33,26 @@ const safeUrl=u=>typeof u==='string'&&u.startsWith(DOWNLOAD_PREFIX)&&!u.includes
 // The first section of the release notes: this version's headline and bullets.
 function notes(body){const text=String(body||'');const end=text.search(/\n## /);return (end>0?text.slice(0,end):text).trim().slice(0,4000);}
 function checksum(sumsText,name){for(const line of String(sumsText).split(/\r?\n/)){const m=/^([a-f0-9]{64})\s+\*?(.+)$/.exec(line.trim());if(m&&m[2]===name)return m[1];}return '';}
-// Windows: wait until every Opaya process from the install folder has exited (window, session service, helpers), run
-// the installer silently into the same folder, then start Opaya. If the silent install fails, open the normal installer
-// so the user sees why. Everything is logged next to the download.
-function windowsScript({pid,exe,installer,log}){
-  const q=v=>`'${String(v).replace(/'/g,"''")}'`,dir=path.win32.dirname(exe);
-  return [
-    "$ErrorActionPreference = 'Continue'",
-    `$log = ${q(log)}; $exe = ${q(exe)}; $dir = ${q(dir+'\\')}; $installer = ${q(installer)}`,
-    "function Log($m) { Add-Content -LiteralPath $log -Value ((Get-Date -Format s) + ' ' + $m) }",
-    "function Running { Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($dir, [System.StringComparison]::OrdinalIgnoreCase) } }",
-    "Log 'Waiting for Opaya to close'",
-    `Wait-Process -Id ${Number(pid)} -Timeout 60 -ErrorAction SilentlyContinue`,
-    "$deadline = (Get-Date).AddSeconds(30)",
-    "while ((Running) -and (Get-Date) -lt $deadline) { Start-Sleep -Milliseconds 500 }",
-    "$left = Running; if ($left) { Log ('Stopping ' + (($left | ForEach-Object { $_.ProcessName + ':' + $_.Id }) -join ', ')); $left | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2 }",
-    "Log 'Installing'",
-    // NSIS wants /D= last and unquoted, so the arguments go as one string.
-    "$p = Start-Process -FilePath $installer -ArgumentList ('/S /D=' + $dir.TrimEnd('\\')) -Wait -PassThru",
-    "Log ('Installer exit code ' + $p.ExitCode)",
-    "if ($p.ExitCode -ne 0) { Log 'Silent install failed; opening the installer'; Start-Process -FilePath $installer; exit 1 }",
-    "Start-Sleep -Seconds 2",
-    "if (-not (Running)) { Log 'Starting Opaya'; Start-Process -FilePath $exe }",
-    "Log 'Done'"
-  ].join('\r\n')+'\r\n';
-}
 class Updater{
-  constructor({app,fetchImpl=globalThis.fetch,emit=()=>{},platform=process.platform,arch=process.arch}){Object.assign(this,{app,fetch:fetchImpl,emit,platform,arch});this.state={status:'idle',current:app.getVersion()};}
+  constructor({app,fetchImpl=globalThis.fetch,emit=()=>{},platform=process.platform,arch=process.arch,markerFile='',spawnImpl=spawn}){Object.assign(this,{app,fetch:fetchImpl,emit,platform,arch,markerFile,spawn:spawnImpl});this.state={status:'idle',current:app.getVersion()};}
+  // After a restart: did the last update install? If Opaya is still on the old version, say so and keep the installer
+  // at hand, instead of failing silently.
+  async checkPending(){
+    if(!this.markerFile)return null;
+    const marker=await fsp.readFile(this.markerFile,'utf8').then(JSON.parse).catch(()=>null);if(!marker)return null;
+    await fsp.rm(this.markerFile,{force:true}).catch(()=>{});
+    const current=this.state.current;
+    if(compare(current,marker.to)>=0||Date.now()-Number(marker.at||0)>3*24*3600*1000)return null;
+    const installer=marker.installer&&fs.existsSync(marker.installer)?marker.installer:'';
+    return this.set({status:'failed',latest:{version:marker.to,url:marker.url||''},file:installer,error:`Opaya ${marker.to} did not install; you still have ${current}. ${installer?'Run the installer to finish the update.':'Download it again, or install it from the release page.'}`});
+  }
+  async writeMarker(){if(this.markerFile)await fsp.writeFile(this.markerFile,JSON.stringify({from:this.state.current,to:this.state.latest?.version||'',url:this.state.latest?.url||'',installer:this.state.file,at:Date.now()}),{mode:0o600}).catch(()=>{});}
+  // The visible installer, for when the automatic update did not finish. Opaya quits afterwards so it can replace files.
+  async runInstaller(){
+    const file=this.state.file;if(!file||!fs.existsSync(file))throw new Error('The downloaded installer is gone. Check for updates again.');
+    if(this.platform!=='win32')throw new Error('Open the release page to install this version.');
+    this.spawn(file,[],{detached:true,stdio:'ignore'}).unref();return true;
+  }
   set(patch){this.state={...this.state,...patch};this.emit(this.state);return this.state;}
   async check(){
     if(!['win32','darwin'].includes(this.platform))return this.set({status:'unsupported',error:'Automatic updates are available on Windows and macOS.'});
@@ -91,10 +85,9 @@ class Updater{
   // Starts the installer after this process exits. The caller stops the session service and quits.
   async install(){
     const file=this.state.file;if(this.state.status!=='ready'||!file)throw new Error('Download the update first.');
+    await this.writeMarker();
     if(this.platform==='win32'){
-      const scriptFile=path.join(path.dirname(file),'install-update.ps1');
-      await fsp.writeFile(scriptFile,'\ufeff'+windowsScript({pid:process.pid,exe:process.execPath,installer:file,log:path.join(path.dirname(file),'update.log')}),'utf8');
-      spawn('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-WindowStyle','Hidden','-File',scriptFile],{detached:true,stdio:'ignore',windowsHide:true}).unref();
+      this.spawn(file,['--updated','/S','--force-run'],{detached:true,stdio:'ignore'}).unref();
       return true;
     }
     const bundle=process.execPath.slice(0,process.execPath.indexOf('.app/')+4);
@@ -112,4 +105,4 @@ class Updater{
     return true;
   }
 }
-module.exports={Updater,pick,compare,checksum,notes,windowsScript};
+module.exports={Updater,pick,compare,checksum,notes};

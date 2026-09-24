@@ -436,3 +436,4 @@
 :where(body[data-theme="light"]) .condense-warning strong{color:#463914}
 :where(body[data-theme="light"]) .condense-engine{border:1px solid #cbd7cf;background:#e2eae6}
 :where(body[data-theme="light"]) .condense-engine.model strong{color:#144526}
+:where(body[data-theme="light"]) .status-update.failed{background:#e2c5c5;border-color:#cc9595;color:#220a0a}

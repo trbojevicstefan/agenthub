@@ -48,6 +48,7 @@ if(hostMode){
     return !!window&&event.senderFrame===window.webContents.mainFrame&&allowed.includes(frameUrl);
   }
   async function detach(){if(quitting)return;quitting=true;try{await win?.webContents.executeJavaScript('window.agenthubFlush?.()');}catch{}client?.close();tray?.destroy();app.quit();}
+  async function quitForUpdate(){await client?.call('shutdown').catch(()=>{});quitting=true;client?.close();tray?.destroy();app.quit();}
   async function stopService(){
     const result=await dialog.showMessageBox(win,{type:'warning',message:'Stop all sessions and exit?',detail:'This ends local agent processes and local shells. Remote tmux sessions remain on their hosts. Saved conversations and drafts stay on disk. Use Exit window to leave the session service running instead.',buttons:['Keep running','Stop all and exit'],defaultId:0,cancelId:0,noLink:true});
     if(result.response===1){await client.call('shutdown');await detach();}
@@ -137,7 +138,7 @@ if(hostMode){
       for(const method of ['cloneAgent','redeployAgent'])handlers[method]=input=>client.call(method,input,20*60*1000);
       handlers.terminalRename=async input=>{const title=await client.call('terminalRename',input);terminalWindows.get(input.id)?.setTitle(title);return title;};
       // In-app updates. The state goes to every Opaya window; install stops the session service first.
-      const updater=new (require('./updater.cjs').Updater)({app,emit:state=>{for(const w of [win,...terminalWindows.values()])if(w&&!w.isDestroyed())w.webContents.send('hub:update',state);}});
+      const updater=new (require('./updater.cjs').Updater)({app,markerFile:path.join(app.getPath('userData'),'pending-update.json'),emit:state=>{for(const w of [win,...terminalWindows.values()])if(w&&!w.isDestroyed())w.webContents.send('hub:update',state);}});
       Object.assign(handlers,{
         browserPlace:async x=>browser.place(x),browserOpen:async x=>browser.open(x.url),browserNav:async x=>browser.navigate(String(x.action||'')),
         browserPreview:async x=>browser.preview(x.html),browserState:async()=>browser.state(),
@@ -147,7 +148,13 @@ if(hostMode){
         updateInstall:async()=>{
           const result=await dialog.showMessageBox(win,{type:'question',buttons:['Cancel','Restart and update'],defaultId:1,cancelId:0,message:`Install Opaya ${updater.state.latest?.version||''} now?`,detail:'Opaya closes, installs the update and opens again. Local agent processes and local shells end; remote tmux sessions keep running. Saved chats and settings stay.'});
           if(result.response!==1)return false;
-          await updater.install();await client.call('shutdown').catch(()=>{});quitting=true;client?.close();tray?.destroy();app.quit();return true;
+          await updater.install();await quitForUpdate();return true;
+        },
+        // The visible installer, after an automatic update did not finish.
+        updateRunInstaller:async()=>{
+          const result=await dialog.showMessageBox(win,{type:'question',buttons:['Cancel','Open installer'],defaultId:1,cancelId:0,message:`Install Opaya ${updater.state.latest?.version||''} with the installer?`,detail:'Opaya closes so the installer can replace its files. Follow the installer, then open Opaya again.'});
+          if(result.response!==1)return false;
+          await updater.runInstaller();await quitForUpdate();return true;
         },
         // Terminal helpers: text-only clipboard and http(s) links.
         clipboardRead:async()=>clipboard.readText().slice(0,1024*1024),
@@ -185,6 +192,7 @@ if(hostMode){
       win.on('close',event=>{if(quitting)return;event.preventDefault();if(tray){win.hide();}else detach();});
       await win.loadURL(APP_URL);win.show();
       // Look for a new version shortly after start, then every six hours. Only a notice; nothing installs by itself.
+      updater.checkPending().catch(()=>{});
       if(!smoke){setTimeout(()=>updater.check(),20000).unref?.();setInterval(()=>updater.check(),6*60*60*1000).unref?.();}
       if(smoke){try{await require('../scripts/native-smoke.cjs').run({app,win,client});quitting=true;client.close();app.exit(0);}catch(error){await client.call('shutdown').catch(()=>{});quitting=true;throw error;}}
     }).catch(startupFailure);
