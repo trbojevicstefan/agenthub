@@ -68,7 +68,9 @@ function profileOf(agent){
 function frameworkOf(agent){
   if(['hermes','claude','codex','openclaw'].includes(agent.provider))return agent.provider;
   if(agent.provider==='ollama')return /\/\/(127\.0\.0\.1|localhost|\[::1\])[:/]/.test(agent.endpoint||'')||agent.transport==='ssh'?'ollama':'';
-  const bin=path.basename(String(agent.command||'')).replace(/\.(exe|cmd|bat|ps1)$/i,'').toLowerCase();
+  // In a container the program is the one `docker exec` runs, right after the container name.
+  const i=agent.command==='docker'?dockerExecContainerIndex(agent.args||[]):-1;
+  const bin=path.basename(String(i>=0?agent.args[i+1]||'':agent.command||'')).replace(/\.(exe|cmd|bat|ps1)$/i,'').toLowerCase();
   return {gemini:'gemini-cli',opencode:'opencode',goose:'goose',aider:'aider',ollama:'ollama'}[bin]||'';
 }
 // The installation kind decides which update, uninstall and backup apply.
@@ -97,6 +99,17 @@ function updateCommand(agent,{remote,windows=process.platform==='win32'}){
       const run=`docker run -d --name ${q(c)} --restart unless-stopped -v ${q(k.dir+':/opt/data')} ${IMAGE} gateway run`;
       return {title:`Update container ${c}`,summary:`Downloads the newest ${IMAGE} image and recreates ${c} with the same data folder.`,after:'Reconnect the agent when the container runs again.',
         command:posix?posixScript([`docker pull ${IMAGE}`,`docker rm -f ${q(c)} >/dev/null`,run,`echo 'Container ${c} runs the new image.'`]):`docker pull ${IMAGE}; docker rm -f ${q(c)}; ${run}`};
+    }
+    // Installed by Opaya with Install agents > Docker: an npm CLI in a Node.js container, or Hermes from its image.
+    const plan=require('./containers.cjs').PLANS[k.framework];
+    if(/^opaya-/.test(c)&&plan?.npm){
+      const cmd=`docker exec ${q(c)} npm install -g ${plan.npm}@latest`;
+      return {title:`Update ${plan.name} in ${c}`,summary:`Updates ${plan.name} inside the container to its latest version.`,after:'Reconnect the agent afterwards.',command:posix?posixScript([cmd]):cmd};
+    }
+    if(/^opaya-/.test(c)&&k.framework==='hermes'&&plan?.image){
+      const dir=`"$HOME/${plan.dir}/${c.replace(/^opaya-/,'')}"`;
+      const lines=[`docker pull ${plan.image} || exit 1`,`docker rm -f ${q(c)} >/dev/null`,`docker run -d --name ${q(c)} --restart unless-stopped -v ${dir}:${plan.mount} -e HERMES_HOME=${plan.mount} --entrypoint sleep ${plan.image} infinity >/dev/null && echo 'Container ${c} runs the newest Hermes image.'`];
+      return {title:`Update container ${c}`,summary:`Downloads the newest ${plan.image} and recreates ${c} with the same data folder.`,after:'Reconnect the agent afterwards.',command:posixScript(lines)};
     }
     const lines=[`img=$(docker inspect -f '{{.Config.Image}}' ${q(c)}) || exit 1`,'docker pull "$img" || exit 1',
       `dir=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' ${q(c)} 2>/dev/null)`,

@@ -139,7 +139,7 @@ if(hostMode){
       // Copying an agent to a VPS can take minutes.
       for(const method of ['cloneAgent','redeployAgent'])handlers[method]=input=>client.call(method,input,20*60*1000);
       // These wait for the user's approval, which can take up to ten minutes.
-      for(const method of ['agentUpdate','agentUpdateAll','agentUninstall','toolUpdate'])handlers[method]=input=>client.call(method,input,11*60*1000);
+      for(const method of ['agentUpdate','agentUpdateAll','agentUninstall','toolUpdate','installFramework'])handlers[method]=input=>client.call(method,input,11*60*1000);
       handlers.terminalRename=async input=>{const title=await client.call('terminalRename',input);terminalWindows.get(input.id)?.setTitle(title);return title;};
       // In-app updates. The state goes to every Opaya window; install stops the session service first.
       const updater=new (require('./updater.cjs').Updater)({app,markerFile:path.join(app.getPath('userData'),'pending-update.json'),emit:state=>{for(const w of [win,...terminalWindows.values()])if(w&&!w.isDestroyed())w.webContents.send('hub:update',state);}});

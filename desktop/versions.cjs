@@ -23,6 +23,7 @@ const TOOLS=[
   {id:'tmux',name:'tmux',bin:'tmux',args:'-V',dependency:true,posixOnly:true},
   {id:'openssh',name:'OpenSSH client',bin:'ssh',args:'-V',dependency:true},
   {id:'gh',name:'GitHub CLI',bin:'gh',latest:{github:'cli/cli'},dependency:true},
+  {id:'docker',name:'Docker',bin:'docker',dependency:true},
   {id:'homebrew',name:'Homebrew',bin:'brew',dependency:true,posixOnly:true}
 ];
 const parse=text=>{const m=/(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(text||''));return m?[Number(m[1]),Number(m[2]),Number(m[3]||0)]:null;};

@@ -21,6 +21,7 @@ const {condense} = require('./condense.cjs');
 const free = require('./free-model.cjs');
 const maintenance = require('./maintenance.cjs');
 const versions = require('./versions.cjs');
+const containers = require('./containers.cjs');
 const {visionOf, SUPPORTED:VISION_MODELS} = require('./vision.cjs');
 async function start({app, safeStorage}, root) {
   let broker, terminals, listener, opaya, stopping = false;
@@ -237,6 +238,31 @@ async function start({app, safeStorage}, root) {
     catch(e){escalate(a,safeError(e),`Opaya updated it (${c.title||'update'}), but it still does not connect.`);}
   }
   broker.onConnectError=(a,error)=>{autoFix(a,error).catch(()=>{});};
+  // An agent installed as a Docker container on a machine: the script runs in a visible terminal (pull, start, install,
+  // then an interactive sign-in), and when it ends Opaya adds the container as an agent and connects it.
+  async function installContainer(host,x){
+    if(!host)throw new Error('Docker installs are for machines added in Machines. On this computer use the regular install.');
+    const p=containers.plan(String(x.id||''),{name:x.name});
+    if(broker.data.agents.some(a=>a.hostId===host.id&&a.command==='docker'&&a.args?.includes(p.container)))throw new Error(`${host.name} already has an agent in container ${p.container}. Choose another name.`);
+    if(!await approve({name:'Opaya'},`Install ${p.framework.name} in a Docker container on ${host.name}?`,`Container ${p.container} (${p.image}), data in ${p.folder}. It restarts with the machine. Afterwards you sign in, and Opaya adds it as an agent.\n\nRuns in a visible terminal:\n\n${p.preview}`))throw new Error('Install cancelled.');
+    return startJob({kind:'install',route:{from:p.framework.name,fromWhere:`Docker / ${p.image}`,to:p.container,toWhere:host.name,toHostId:host.id,provider:p.connection.provider==='custom'?'custom':p.connection.provider},title:`Installing ${p.framework.name} in Docker`,detail:`${host.name} / container ${p.container}`,
+      steps:[['install','Start the container and install'],['signin','Sign in (in the terminal)'],['save','Add to Opaya'],['connect','Connect']]},async progress=>{
+      progress({step:'install',state:'active',message:`Running on ${host.name}. Follow it in the terminal below; the first download can take a few minutes.`});
+      const view=await runInTerminal({label:`Install ${p.framework.name} (Docker)`,key:`docker_${p.container}`.slice(0,60),host,command:`${p.command}; echo "[opaya] finished with exit code $?"`});
+      progress({step:'install',state:'done',message:'Installing. When it is done, sign in in the terminal.'});progress({step:'signin',state:'active',message:'Waiting for the sign-in in the terminal to finish'});
+      const code=await waitForMark(view.id,markCount(view.id),60*60*1000);
+      if(code!==0)throw new Error(containers.EXIT[code]||`The install ended with exit code ${code}. See the terminal.`);
+      progress({step:'signin',state:'done',message:'Done in the terminal'});
+      progress({step:'save',state:'active',message:'Adding the agent to Opaya'});
+      const agent=await broker.saveAgent({agent:{...p.connection,name:String(x.name||'').trim()?`${String(x.name).trim().slice(0,60)}`:p.connection.name,hostId:host.id}});
+      progress({step:'save',state:'done',message:`Added ${agent.name}`});
+      progress({step:'connect',state:'active',message:`Connecting ${agent.name}`});
+      try{await broker.connect(agent.id);progress({step:'connect',state:'done',message:'Connected'});}
+      catch(e){progress({step:'connect',state:'warn',message:`Added, but it did not connect yet: ${safeError(e)}. If you skipped the sign-in, use Run native CLI to sign in, then Connect.`});}
+      versions.cache.clear();checkMachine(host).then(emit).catch(()=>{});
+      return {agent:{id:agent.id,name:agent.name}};
+    });
+  }
   const toolActions={
     toolVersions:async x=>{const host=x.hostId?broker.host(x.hostId):null,m=toolState.machines[machineKey(host)];if(!x.force&&m?.checkedAt&&Date.now()-Date.parse(m.checkedAt)<10*60*1000)return m;const r=await checkMachine(host);emit();return r;},
     toolCheckAll:async()=>{versions.cache.clear();await checkAll({notify:false});return toolState;},
@@ -288,7 +314,11 @@ async function start({app, safeStorage}, root) {
       try{await terminals.end(x.id,host);}catch(error){terminals.close(x.id);emit();return {closed:true,warning:safeError(error)};}
       emit();return true;
     },
-    installFramework:async x=>{const host=x.hostId?broker.host(x.hostId):null;const {framework,command}=catalog.command(String(x.id||''),{remote:!!host});return runInTerminal({label:`Install ${framework.name}`,key:`install_${framework.id}`,host,command});},
+    installFramework:async x=>{
+      const host=x.hostId?broker.host(x.hostId):null;
+      if(x.runtime==='docker')return installContainer(host,x);
+      const {framework,command}=catalog.command(String(x.id||''),{remote:!!host});return runInTerminal({label:`Install ${framework.name}`,key:`install_${framework.id}`,host,command});
+    },
     files:async x=>{
       let host=null,folder=typeof x.path==='string'?x.path:'',fallback=false;
       if(x.agentId){const a=broker.agent(x.agentId);if(a.transport==='ssh')host=broker.host(a.hostId);if(!folder){folder=a.cwd||a.hermesHome||'';fallback=!!folder;}}

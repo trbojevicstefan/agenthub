@@ -1071,3 +1071,14 @@ body[data-theme="light"] .tool-row{border-color:#d9e2da}
 body[data-theme="light"] .tool-row.outdated{background:#fdf7e6;border-color:#ecd89b}
 body[data-theme="light"] .tool-version b{color:#8a6400}
 body[data-theme="light"] :is(.tool-ok,.install-state){color:#1f7a47}
+/* Install on a machine: regular or Docker */
+.runtime-choice{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.runtime-option{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding:16px;border:1px solid #34403a;border-radius:11px;background:#1a211d;text-align:left;white-space:normal}
+.runtime-option:hover:not(:disabled){border-color:#4fae78;background:#1d2822}
+.runtime-option:disabled{opacity:.55;cursor:not-allowed}
+.runtime-option strong{font-size:14px}
+.runtime-option span{font-size:11.5px;color:#a9b7ae;line-height:1.5}
+.runtime-option small{font-size:10.5px;color:var(--faint)}
+body[data-theme="light"] .runtime-option{background:#fff;border-color:#d3ddd6}
+body[data-theme="light"] .runtime-option:hover:not(:disabled){background:#f1f8f3;border-color:#7fc49b}
+body[data-theme="light"] .runtime-option span{color:#4f6157}

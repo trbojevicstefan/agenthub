@@ -1,3 +1,13 @@
+# Opaya 0.14.1 - Install agents on a VPS as a Docker container
+
+- **Regular install or Docker container**: installing an agent on a machine now asks how it should run there.
+  - **Regular install**: the official installer for the SSH user, as before.
+  - **Docker container**: Hermes runs from its official image; Claude Code, Codex, Gemini CLI and OpenCode are installed into a Node.js container. The container is called `opaya-<name>`, restarts with the server and keeps its data in `~/opaya-agents/<name>` (Hermes: `~/opaya-hermes/<name>`), so you can run several side by side.
+  - After the install you sign in right in the terminal (Codex uses a device code that works on a server; Hermes runs its setup), and Opaya **adds the agent and connects it** by itself.
+  - Without Docker on the machine, Opaya says so and offers **Install Docker there** (Docker Engine on Linux, with your user added to the docker group). An image already on the machine is reused instead of downloaded again.
+- **Update and Uninstall know these containers**: Update installs the newest CLI inside the container (Hermes: newest image, same data folder); Uninstall removes the container and keeps its data folder.
+- Discover's Install button on a machine goes through the same choice.
+
 # Opaya 0.14.0 - Update checks, automatic fixes, a steadier browser and no more flicker
 
 - **Update checks every hour**: Opaya checks every agent and CLI (Hermes, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider, Ollama) and tools (Node.js, Python, Git, uv, gh and more) on this computer and on every machine with an agent. When something is out of date you get a note and an "updates available" chip in the status bar; **Updates** lists each machine with **Update**, **Update all here** and **Check now**.

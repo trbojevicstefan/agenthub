@@ -464,3 +464,6 @@
 :where(body[data-theme="light"]) .tool-version b{color:#473b15}
 :where(body[data-theme="light"]) .tool-ok{color:#235c3a}
 :where(body[data-theme="light"]) .install-state{color:#235c3a}
+:where(body[data-theme="light"]) .runtime-option{border:1px solid #c5d0cb;background:#dee5e1}
+:where(body[data-theme="light"]) .runtime-option:hover:not(:disabled){border-color:#7cc099;background:#d7e2dc}
+:where(body[data-theme="light"]) .runtime-option span{color:#343e37}
