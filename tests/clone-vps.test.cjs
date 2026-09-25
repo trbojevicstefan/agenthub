@@ -69,3 +69,12 @@ test('the Opaya Agent keeps separate chat sessions and migrates the old single h
   await agent.deleteSession(first);assert.equal(agent.describe().sessions.length,1);assert.equal(agent.messages[0].content,'Second chat');
   const again=new OpayaAgent({root,vault:{has:()=>false},broker:null,terminals:null,approve:async()=>true,emit:()=>{}});await again.init();assert.equal(again.messages[0].content,'Second chat');
 });
+test('a VPS without Docker or Hermes still passes the connection test',{skip},async t=>{
+  const root=await temp(t),bin=path.join(root,'bin');await fs.mkdir(bin);
+  // A stand-in ssh that runs the remote command locally with no hermes or docker on PATH.
+  await fs.writeFile(path.join(bin,'ssh'),'#!/bin/sh\nfor last; do :; done\nPATH=/usr/bin:/bin HOME=/nonexistent exec /bin/sh -c "$last"\n',{mode:0o755});
+  const old=process.env.PATH;process.env.PATH=`${bin}:${old}`;t.after(()=>{process.env.PATH=old;});
+  const vps=require('../desktop/vps.cjs');
+  const r=await vps.test({name:'dimic',hostname:'203.0.113.10',username:'root',port:22});
+  assert.equal(r.ok,true);assert.equal(r.hermes,false);
+});
