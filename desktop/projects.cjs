@@ -13,7 +13,15 @@ function project(input){
   if(hostId?!path.posix.isAbsolute(folder):!(path.isAbsolute(folder)||path.win32.isAbsolute(folder)))throw new Error(hostId?'A folder on a machine must be an absolute path such as /root/app.':'Choose an absolute folder path.');
   const name=text(input.name,'project name',60,'').trim()||folder.split(/[\\/]/).filter(Boolean).pop()||'Project';
   const agentIds=Array.isArray(input.agentIds)?[...new Set(input.agentIds.map(id))].slice(0,64):[];
-  return {id:input.id?id(input.id):randomUUID(),name,path:folder,hostId,agentIds,createdAt:input.createdAt||new Date().toISOString()};
+  return {id:input.id?id(input.id):randomUUID(),name,path:folder,hostId,agentIds,link:link(input.link),createdAt:input.createdAt||new Date().toISOString()};
+}
+// A copy of a local project on a machine, for remote agents: where it came from and how changes move.
+const SHA=/^[0-9a-f]{7,64}$/;
+function link(input){
+  if(!input||typeof input!=='object'||!['git','github','copy'].includes(input.mode))return null;
+  const b=String(input.branch||'');if(input.mode!=='copy'&&!BRANCH.test(b))return null;
+  return {from:id(input.from),mode:input.mode,branch:input.mode==='copy'?'':b,base:BRANCH.test(String(input.base||''))?input.base:'',origin:typeof input.origin==='string'?input.origin.slice(0,500):'',
+    lastSent:SHA.test(input.lastSent||'')?input.lastSent:'',lastFetched:SHA.test(input.lastFetched||'')?input.lastFetched:'',sentAt:typeof input.sentAt==='string'?input.sentAt.slice(0,40):'',fetchedAt:typeof input.fetchedAt==='string'?input.fetchedAt.slice(0,40):''};
 }
 // An agent can work in a project when it runs on the same machine as the folder. Containers use their own paths.
 const fits=(agent,p)=>agent.command!=='docker'&&(p.hostId?agent.transport==='ssh'&&agent.hostId===p.hostId:agent.transport!=='ssh');

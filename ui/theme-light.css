@@ -489,3 +489,15 @@
 :where(body[data-theme="light"]) .ip-split{background:#c7d3ce}
 :where(body[data-theme="light"]) .ip-cursor{background:#a7f3c6}
 :where(body[data-theme="light"]) .terminal-placeholder small{color:#5f7176}
+:where(body[data-theme="light"]) .remote-step-n{background:#d5e2db;border:1px solid #aed5be;color:#144526}
+:where(body[data-theme="light"]) .remote-method{border:1px solid #cbd6d0;background:#e2e8e5}
+:where(body[data-theme="light"]) .remote-method:has(input:checked){border-color:#7cc099;background:#dae4df}
+:where(body[data-theme="light"]) .remote-method em{background:#d5e5dc;color:#144526;border:1px solid #aed5be}
+:where(body[data-theme="light"]) .remote-method small{color:#343e37}
+:where(body[data-theme="light"]) .remote-method .remote-note{color:#49544e}
+:where(body[data-theme="light"]) .project-link{border:1px solid #cfd9d5;color:#343e37}
+:where(body[data-theme="light"]) .bring-commits,:where(body[data-theme="light"]) .bring-files{border:1px solid #cfd9d5;background:#e5ebe8}
+:where(body[data-theme="light"]) .bring-M{color:#58461a}
+:where(body[data-theme="light"]) .bring-A{color:#1b512d}
+:where(body[data-theme="light"]) .bring-D{color:#4d1b16}
+:where(body[data-theme="light"]) .bring-R{color:#142745}

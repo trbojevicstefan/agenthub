@@ -1,3 +1,14 @@
+# Opaya 0.16.0 - Remote agents on your local projects
+
+- **Let an agent on a machine work on a local project**: Projects > your project > **Let an agent on a machine work on it** (or right-click > Work on it from a machine). Pick the machine and the agent, then how the project gets there:
+  - **Git over SSH** (recommended for git repositories): your current branch goes straight to the machine with git, optionally with your uncommitted changes. Your folder and branch stay exactly as they are. The agent works on its own branch (`opaya/<agent>`). No GitHub needed.
+  - **Through GitHub**: the machine clones your repository (Opaya pushes your unpushed commits first) and the agent pushes its own branch, ready for a pull request. If the machine cannot reach the repository, Opaya opens a GitHub sign-in there.
+  - **Plain copy**: for folders without git. node_modules, virtual environments and build output stay home.
+  - The agent gets its own copy in `~/opaya-projects/<name>`, added as a project on that machine, and a chat with it opens in that folder.
+- **Send and Bring back**: the project shows its copies with **Send** (your latest changes) and **Bring back** (the agent's work).
+  - Bringing back first shows what the agent did: its commits and every changed file. Then you choose: **Apply to my folder** (its changes become uncommitted edits next to your own work), **Merge commits** (when that is clean), **New branch**, or **Full diff**.
+  - Nothing in your folder changes until you choose. Sending never overwrites work the agent did that you have not brought back yet; a plain copy backs up every file it replaces.
+
 # Opaya 0.15.0 - Terminal first, split terminals, and a quieter update note
 
 - **Chat or Terminal**: on first launch Opaya asks how you like to work.

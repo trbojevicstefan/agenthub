@@ -22,6 +22,7 @@ const free = require('./free-model.cjs');
 const maintenance = require('./maintenance.cjs');
 const versions = require('./versions.cjs');
 const containers = require('./containers.cjs');
+const remoteWork = require('./remote-work.cjs');
 const {visionOf, SUPPORTED:VISION_MODELS} = require('./vision.cjs');
 async function start({app, safeStorage}, root) {
   let broker, terminals, listener, opaya, stopping = false;
@@ -264,6 +265,69 @@ async function start({app, safeStorage}, root) {
       return {agent:{id:agent.id,name:agent.name}};
     });
   }
+  // ---- Remote agents on local projects: a linked copy on the machine, and changes moving both ways -----------------
+  const bringResults=new Map(); // remote project id -> last review (ref and base), for Apply / Merge / Branch
+  const linkedFrom=p=>{const l=p.link;if(!l)throw new Error('This project is not a copy of a local project.');const local=broker.project(l.from);if(local.hostId)throw new Error('The original project is not on this computer.');return {local,l,host:broker.host(p.hostId)};};
+  async function saveLink(p,patch){return broker.saveProject({...p,link:{...p.link,...patch}});}
+  const remoteSteps={git:[['prepare','Prepare the copy'],['send','Send your branch']],github:[['push','Push your branch to GitHub'],['prepare','Get it from GitHub']],copy:[['send','Copy the folder']]};
+  const projectRemoteActions={
+    projectRemoteInfo:async x=>{const p=broker.project(x.id);if(p.hostId)throw new Error('Choose a project on this computer.');return remoteWork.inspect(p.path);},
+    // Give a remote agent its own linked copy of a local project.
+    projectRemoteStart:async x=>{
+      const p=broker.project(x.id),host=broker.host(x.hostId),mode=String(x.mode||'');if(p.hostId)throw new Error('Choose a project on this computer.');
+      if(!remoteSteps[mode])throw new Error('Choose how the project gets there.');
+      const agent=x.agentId?broker.agent(x.agentId):null;if(agent&&!projects.fits(agent,{hostId:host.id}))throw new Error(`${agent.name} does not run on ${host.name}.`);
+      if(broker.data.projects.some(q=>q.link?.from===p.id&&q.hostId===host.id))throw new Error(`${p.name} already has a copy on ${host.name}. Use Send my latest changes on it instead.`);
+      const info=await remoteWork.inspect(p.path);
+      if(mode!=='copy'&&!info.git)throw new Error(`${p.name} is not a git repository. Use a plain copy, or run git init in it first.`);
+      if(mode==='github'&&!info.github)throw new Error(`${p.name} has no GitHub remote (origin).`);
+      if(mode!=='copy'&&!info.branch)throw new Error('Check out a branch first (you are on a detached commit).');
+      const branch=`opaya/${remoteWork.slug(agent?agent.name:host.name)}`;
+      return startJob({kind:'project-remote',route:{from:p.name,fromWhere:machineName(),to:`${p.name} copy`,toWhere:host.name,toHostId:host.id,hostId:host.id,provider:agent?.provider||'custom'},title:`Sharing ${p.name} with ${host.name}`,detail:mode==='git'?`Git over SSH / branch ${branch}`:mode==='github'?`Through GitHub / branch ${branch}`:'Plain copy',steps:[['check','Check the machine'],...remoteSteps[mode],['save','Add the project there']]},async progress=>{
+        progress({step:'check',state:'active',message:`Finding a place on ${host.name}`});
+        const dir=`${await remoteWork.remoteHome(host)}/opaya-projects/${remoteWork.slug(p.name)}`;
+        progress({step:'check',state:'done',message:dir});
+        let sent={};
+        if(mode==='git')sent=await remoteWork.sendGit({folder:p.path,host,dir,branch,includeChanges:!!x.includeChanges,first:true,progress});
+        else if(mode==='github')sent=await remoteWork.sendGithub({folder:p.path,host,dir,branch,base:info.branch,origin:info.origin,first:true,progress});
+        else sent=await remoteWork.sendCopy({folder:p.path,host,dir,progress});
+        progress({step:'save',state:'active',message:'Adding the project'});
+        const copy=await broker.saveProject({name:`${p.name} on ${host.name}`.slice(0,60),path:dir,hostId:host.id,agentIds:agent?[agent.id]:[],link:{from:p.id,mode,branch:mode==='copy'?'':branch,base:info.branch,origin:info.origin,lastSent:sent.commit||'',sentAt:new Date().toISOString()}});
+        progress({step:'save',state:'done',message:`${copy.name}${agent?` with ${agent.name}`:''}`});
+        return {projectId:copy.id,agentId:agent?.id||'',dir,branch:mode==='copy'?'':branch,includedChanges:!!sent.included};
+      });
+    },
+    projectRemoteSend:async x=>{
+      const p=broker.project(x.id),{local,l,host}=linkedFrom(p);
+      return startJob({kind:'project-remote',route:{from:local.name,fromWhere:machineName(),to:p.name,toWhere:host.name,hostId:host.id,provider:'custom'},title:`Sending your changes to ${host.name}`,detail:l.mode==='copy'?'Plain copy':`Branch ${l.branch}`,steps:l.mode==='github'?remoteSteps.github:l.mode==='git'?[['prepare','Check the copy'],['send','Send your branch']]:remoteSteps.copy},async progress=>{
+        let sent={};
+        if(l.mode==='git')sent=await remoteWork.sendGit({folder:local.path,host,dir:p.path,branch:l.branch,includeChanges:!!x.includeChanges,first:false,lease:l.lastFetched,progress});
+        else if(l.mode==='github')sent=await remoteWork.sendGithub({folder:local.path,host,dir:p.path,branch:l.branch,base:(await remoteWork.inspect(local.path)).branch||l.base,origin:l.origin,first:false,progress});
+        else sent=await remoteWork.sendCopy({folder:local.path,host,dir:p.path,progress});
+        await saveLink(p,{lastSent:sent.commit||l.lastSent,sentAt:new Date().toISOString()});
+        return {sent:true};
+      });
+    },
+    projectRemoteBring:async x=>{
+      const p=broker.project(x.id),{local,l,host}=linkedFrom(p),agent=p.agentIds.map(id=>broker.data.agents.find(a=>a.id===id)).find(Boolean);
+      const steps=l.mode==='git'?[['save','Save the agent\'s changes'],['fetch','Fetch them']]:l.mode==='github'?[['save','Save the agent\'s changes'],['push','Push to GitHub'],['fetch','Fetch them']]:[['fetch','Copy the folder back'],['apply','Update your folder']];
+      return startJob({kind:'project-bring',route:{from:p.name,fromWhere:host.name,to:local.name,toWhere:machineName(),hostId:host.id,provider:agent?.provider||'custom'},title:`Bringing changes from ${host.name}`,detail:l.mode==='copy'?'Plain copy':`Branch ${l.branch}`,steps},async progress=>{
+        const args={folder:local.path,host,dir:p.path,branch:l.branch,agentName:agent?.name,base:l.lastSent,progress};
+        const result=l.mode==='git'?await remoteWork.bringBackGit(args):l.mode==='github'?await remoteWork.bringBackGithub(args):await remoteWork.bringBackCopy({...args,backupRoot:maintenance.backupDir(broker.data.settings),name:local.name});
+        if(result.ref){bringResults.set(p.id,{ref:result.ref,base:result.base});await saveLink(p,{lastFetched:result.tip,fetchedAt:new Date().toISOString()});}
+        return {projectId:p.id,localProjectId:local.id,mode:l.mode,...result};
+      });
+    },
+    // After reviewing: apply the agent's changes to your folder, merge its commits, put them on a branch, or show the diff.
+    projectRemoteApply:async x=>{
+      const p=broker.project(x.id),{local}=linkedFrom(p),last=bringResults.get(p.id);if(!last)throw new Error('Bring the changes back first.');
+      const windows=process.platform==='win32',patchFile=path.join(require('node:os').tmpdir(),`opaya-${p.id.slice(0,8)}.patch`);
+      const cmds=remoteWork.applyCommands(last,String(x.action||''),{branch:x.branch,patchFile,windows});
+      const command=windows?`Set-Location -LiteralPath '${local.path.replace(/'/g,"''")}'; ${cmds.map((c,i)=>i?`if ($?) { ${c} }`:c).join('; ')}`:`cd -- ${require('./process.cjs').quote(local.path)} && ${cmds.join(' && ')}`;
+      return runInTerminal({label:`${local.name} / changes from ${broker.host(p.hostId).name}`,key:`bring_${p.id}`.slice(0,60),host:null,command});
+    },
+    projectRemoteGithubLogin:async x=>{const host=broker.host(x.hostId);return runInTerminal({label:`GitHub sign-in on ${host.name}`,key:`ghlogin_${host.id}`,host,command:"command -v gh >/dev/null 2>&1 || { echo 'GitHub CLI is not installed here. Install it: Install agents > this machine > GitHub CLI.'; exit 1; }; gh auth login && gh auth setup-git && echo 'Signed in. Go back to Opaya and try again.'"});}
+  };
   const toolActions={
     toolVersions:async x=>{const host=x.hostId?broker.host(x.hostId):null,m=toolState.machines[machineKey(host)];if(!x.force&&m?.checkedAt&&Date.now()-Date.parse(m.checkedAt)<10*60*1000)return m;const r=await checkMachine(host);emit();return r;},
     toolCheckAll:async()=>{versions.cache.clear();await checkAll({notify:false});return toolState;},
@@ -400,7 +464,7 @@ async function start({app, safeStorage}, root) {
       return startJob({kind:'free-model',route:{from:m.label,fromWhere:`Free / ${m.size}`,to:'Opaya Agent',toWhere:'This computer',provider:'ollama'},title:`Setting up ${m.label}`,detail:'Free local model through Ollama. No account and no key.',steps:[['ollama','Install and start Ollama'],['download',`Download ${m.label} (${m.size})`],['connect','Connect the Opaya Agent']]},progress=>free.setupFree({opaya,model,progress}).then(r=>{emit();return r;}));},
     opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}), opayaForgetKey:()=>opaya.forgetKey(),
     opayaSend:x=>opaya.begin(x.text), opayaNewSession:()=>opaya.newSession(), opayaSelectSession:x=>opaya.selectSession(String(x.id||'')), opayaDeleteSession:x=>opaya.deleteSession(String(x.id||'')), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),
-    ...maintenanceActions, ...toolActions,
+    ...maintenanceActions, ...toolActions, ...projectRemoteActions,
     shutdown
   };
   const token = randomBytes(32).toString('hex');
