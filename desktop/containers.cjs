@@ -16,7 +16,7 @@ const PLANS={
   codex:{name:'Codex CLI',npm:'@openai/codex',signIn:"codex login --device-auth || echo 'Sign in later with Run native CLI: codex login --device-auth, or with an API key: printenv OPENAI_API_KEY | codex login --with-api-key'",signInNote:'Codex shows a link and a code: open the link on any device and enter the code to sign in with ChatGPT.',
     connection:c=>({provider:'codex',protocol:'codex',command:'docker',args:['exec','-i','-w','/root',c,'codex'],cwd:'/root'})},
   'gemini-cli':{name:'Gemini CLI',npm:'@google/gemini-cli',signIn:'gemini',signInNote:'Gemini CLI asks how to sign in. Type /quit when you are signed in.',
-    connection:c=>({provider:'custom',protocol:'acp',command:'docker',args:['exec','-i','-w','/root',c,'gemini','--acp'],cwd:'/root',avatar:'lib:gemini-cli'})},
+    connection:c=>({provider:'custom',protocol:'acp',command:'docker',args:['exec','-i','-w','/root',c,'gemini','--acp'],cwd:'/root',avatar:'lib:gemini-cli',surface:'terminal'})},
   opencode:{name:'OpenCode',npm:'opencode-ai',signIn:'opencode auth login',signInNote:'OpenCode asks for a provider and key.',
     connection:c=>({provider:'custom',protocol:'acp',command:'docker',args:['exec','-i','-w','/root',c,'opencode','acp'],cwd:'/root',avatar:'lib:opencode'})}
 };

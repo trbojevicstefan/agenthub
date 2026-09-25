@@ -72,7 +72,7 @@ if gemini:
             flag = "--experimental-acp"
     except Exception:
         pass
-    agents.append({"name": "Gemini CLI", "provider": "custom", "protocol": "acp", "command": gemini, "args": [flag], "cwd": str(home), "avatar": "lib:gemini-cli", "detail": "Chats over ACP (gemini %s). Sign in once by running gemini on this machine." % flag})
+    agents.append({"name": "Gemini CLI", "provider": "custom", "protocol": "acp", "command": gemini, "args": [flag], "cwd": str(home), "avatar": "lib:gemini-cli", "surface": "terminal", "detail": "Opens in its own terminal (gemini %s is available for chat with an API key). Sign in once by running gemini on this machine." % flag})
 opencode = binary("opencode")
 if opencode:
     agents.append({"name": "OpenCode", "provider": "custom", "protocol": "acp", "command": opencode, "args": ["acp"], "cwd": str(home), "avatar": "lib:opencode", "detail": "Chats over ACP (opencode acp). Sign in once with opencode auth login on this machine."})

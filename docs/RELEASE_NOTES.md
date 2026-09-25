@@ -1,3 +1,17 @@
+# Opaya 0.15.0 - Terminal first, split terminals, and a quieter update note
+
+- **Chat or Terminal**: on first launch Opaya asks how you like to work.
+  - **Terminal**: selecting an agent opens its own CLI (Claude Code, Codex, Hermes, Gemini CLI, OpenCode...) filling the window, with tabs and splits. The top bar keeps Chat, Files and Manage one click away. Coming back to an agent brings back its running CLI instead of starting another.
+  - **Chat**: as before.
+  - Switch any time in **Settings > Workspace style**, or per agent: right-click > **Open as terminal** / **Open as chat**. API connections (DeepSeek, OpenAI...) always chat.
+- **Split terminals**: right-click inside any terminal, or the **Split** button, to put terminals side by side.
+  - **Split right** / **Split left** open a new terminal next to the one you clicked: the same agent's shell, this computer, the agent's CLI or any machine.
+  - **Show beside this** puts a running tab next to it; drag the line between terminals to resize; **Close pane** keeps its session running as a tab. The split is remembered when Opaya restarts.
+  - The terminal right-click menu also has Copy, Paste, Select all, Clear, Find, New terminal, Rename, Open in separate window and End session. Shift + right-click still copies or pastes in one click.
+- **Gemini CLI opens in its terminal**: Google no longer lets other apps chat with Gemini Code Assist for individuals ("migrate to Antigravity"). Discover adds Gemini CLI as a terminal agent, and any agent that answers with that message switches to its terminal by itself and tells you. With an API key you can switch it back to chat.
+- **Native CLI for ACP agents**: Run native CLI for Gemini CLI and OpenCode now starts their interactive CLI instead of their chat server.
+- **The updates note appears once per new version**: closing it (or letting it fade) keeps it closed until something newer comes out, also across restarts. Hermes' growing "updates behind" count no longer brings it back every hour.
+
 # Opaya 0.14.1 - Install agents on a VPS as a Docker container
 
 - **Regular install or Docker container**: installing an agent on a machine now asks how it should run there.

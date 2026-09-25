@@ -106,6 +106,8 @@ function agent(input) {
     description: text(input.description, 'description', 500).trim(), icon: text(input.icon, 'icon', 16).trim(),
     avatar: avatar(input.avatar), group: group(input.group), tags: tags(input.tags),
     clone: cloneRecipe(input.clone),
+    // How the agent opens: '' follows Settings, 'chat' or 'terminal' (its native CLI) for this agent only.
+    surface: ['chat', 'terminal'].includes(input.surface) ? input.surface : '',
     pinned: Boolean(input.pinned), itrust: Boolean(input.itrust), browser: Boolean(input.browser), createdAt: input.createdAt || new Date().toISOString()
   };
 }

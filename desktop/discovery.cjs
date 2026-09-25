@@ -119,7 +119,7 @@ async function scanLocal({home = os.homedir(), extraHomes = [], probe = true} = 
   if (gemini) {
     const help = await collect(launch({command: gemini, transport: 'local', cwd: home, args: []}, ['--help']), {timeout: 15000}).catch(error => String(error.message || ''));
     const flag = /--acp\b/.test(help) || !/--experimental-acp/.test(help) ? '--acp' : '--experimental-acp';
-    found.push(candidate({name: 'Gemini CLI', provider: 'custom', protocol: 'acp', transport: 'local', command: gemini, args: [flag], cwd: home, avatar: 'lib:gemini-cli'}, `Chats over ACP (gemini ${flag}). Sign in once by running gemini in Terminal.`));
+    found.push(candidate({name: 'Gemini CLI', provider: 'custom', protocol: 'acp', transport: 'local', command: gemini, args: [flag], cwd: home, avatar: 'lib:gemini-cli', surface: 'terminal'}, `Opens in its own terminal: Google no longer lets other apps chat with Gemini Code Assist for individuals. With an API key, switch it to chat (right-click > Open as chat).`));
   }
   const opencode = binary('opencode');
   if (opencode) found.push(candidate({name: 'OpenCode', provider: 'custom', protocol: 'acp', transport: 'local', command: opencode, args: ['acp'], cwd: home, avatar: 'lib:opencode'}, 'Chats over ACP (opencode acp). Sign in once with opencode auth login in Terminal.'));

@@ -21,6 +21,9 @@ function safeError(error,token=''){
   if(token)value=value.split(token).join('[redacted]');
   return value.replace(/\x1b\[[0-9;]*[A-Za-z]/g,'').replace(/(Bearer\s+)[^\s]+/gi,'$1[redacted]').replace(/\bsk-[A-Za-z0-9_-]{12,}/g,'[redacted]').slice(0,2400);
 }
+// Agents whose vendor no longer accepts connections from other apps (Gemini Code Assist for individuals now points to
+// Antigravity). Their own CLI in a terminal is the way to use them, so Opaya switches them to it.
+const CLIENT_REFUSED=/(client is no longer supported|no longer supported for Gemini Code Assist|migrate to the Antigravity|antigravity\.google)/i;
 class Broker{
   constructor({store,vault,emit,approve,adapterFactory=createAdapter}){
     Object.assign(this,{store,vault,emit,approve,adapterFactory});this.runtime=new Map();this.histories=new Map();this.turns=new Map();this.connecting=new Map();this.scanBusy=false;this.closing=false;
@@ -29,7 +32,7 @@ class Broker{
     await this.vault.load();this.data=await this.store.load();
     this.data.drafts=this.data.drafts||{};this.data.lastConversation=this.data.lastConversation||{};this.data.view=this.data.view||{};
     this.data.agents=this.data.agents.map(a=>schema.agent(a));
-    {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:!!s.itrustOpaya,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false};}
+    {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:!!s.itrustOpaya,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false,interface:['chat','terminal'].includes(s.interface)?s.interface:''};}
     this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
     this.data.mcpServers=(Array.isArray(this.data.mcpServers)?this.data.mcpServers:[]).flatMap(s=>{try{return [mcp.server(s)];}catch{return [];}});this.data.hosts=this.data.hosts.map(h=>schema.host(h));
     this.data.activeAgentId=this.data.agents.some(a=>a.id===this.data.activeAgentId)?this.data.activeAgentId:this.data.agents[0]?.id||'';
@@ -144,7 +147,7 @@ class Broker{
     const key=conversationId||agentId;this.data.drafts[key]=text;await this.store.write(this.data);return true;
   }
   async saveView(input){
-    this.data.view={overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',theme:input.theme==='light'?'light':'dark',projects:!!input.projects,tips:Array.isArray(input.tips)?[...new Set(input.tips.filter(x=>typeof x==='string'&&x.length<=200))].slice(-60):[],lastVersion:typeof input.lastVersion==='string'&&/^\d+\.\d+\.\d+$/.test(input.lastVersion)?input.lastVersion:'',greeted:typeof input.greeted==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(input.greeted)?input.greeted:'',layout:(l=>({terminal:l?.terminal==='right'?'right':'bottom',browser:l?.browser==='bottom'?'bottom':'right',bottomHeight:Math.max(120,Math.min(3000,Number(l?.bottomHeight)||280)),rightWidth:Math.max(240,Math.min(4000,Number(l?.rightWidth)||520))}))(input.layout),projectsOpen:Array.isArray(input.projectsOpen)?[...new Set(input.projectsOpen.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)))].slice(0,50):[]};await this.store.write(this.data);return true;
+    this.data.view={overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',panes:Array.isArray(input.panes)?input.panes.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)).slice(0,8):[],paneSizes:Array.isArray(input.paneSizes)?input.paneSizes.map(Number).filter(x=>Number.isFinite(x)&&x>0&&x<100).slice(0,8):[],theme:input.theme==='light'?'light':'dark',projects:!!input.projects,tips:Array.isArray(input.tips)?[...new Set(input.tips.filter(x=>typeof x==='string'&&x.length<=200))].slice(-300):[],lastVersion:typeof input.lastVersion==='string'&&/^\d+\.\d+\.\d+$/.test(input.lastVersion)?input.lastVersion:'',greeted:typeof input.greeted==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(input.greeted)?input.greeted:'',layout:(l=>({terminal:l?.terminal==='right'?'right':'bottom',browser:l?.browser==='bottom'?'bottom':'right',bottomHeight:Math.max(120,Math.min(3000,Number(l?.bottomHeight)||280)),rightWidth:Math.max(240,Math.min(4000,Number(l?.rightWidth)||520))}))(input.layout),projectsOpen:Array.isArray(input.projectsOpen)?[...new Set(input.projectsOpen.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)))].slice(0,50):[]};await this.store.write(this.data);return true;
   }
   // iTrust: tool requests from this agent (or every agent) are approved without asking. Read at request time.
   isTrusted(id){const a=this.data.agents.find(x=>x.id===id);return !!a&&(this.data.settings?.itrustAll||a.itrust);}
@@ -155,13 +158,15 @@ class Broker{
     // Hourly update checks, and fixing "too old" connection errors by updating automatically. Both on by default.
     if(input.updateChecks!==undefined)next.updateChecks=!!input.updateChecks;
     if(input.autoFix!==undefined)next.autoFix=!!input.autoFix;
+    // Chat or Terminal first. '' until the user chooses on first launch.
+    if(input.interface!==undefined){if(!['chat','terminal'].includes(input.interface))throw new Error('Choose chat or terminal.');next.interface=input.interface;}
     // This computer as shown in Opaya (the sidebar, Machines, backups) and where local backups go.
     if(input.machineName!==undefined)next.machineName=schema.text(input.machineName,'machine name',60).trim();
     if(input.machineNote!==undefined)next.machineNote=schema.text(input.machineNote,'machine note',200).trim();
     if(input.backupDir!==undefined){const dir=schema.text(input.backupDir,'backup folder',2048).trim();if(dir&&!path.isAbsolute(dir))throw new Error('Choose an absolute folder for backups.');next.backupDir=dir;}
     this.data.settings=next;await this.persist();return next;
   }
-  async updateAgentDisplay({id,displayName,pinned,avatar,group,tags,itrust,browser}){
+  async updateAgentDisplay({id,displayName,pinned,avatar,group,tags,itrust,browser,surface}){
     const index=this.data.agents.findIndex(a=>a.id===schema.id(id));if(index<0)throw new Error('Agent not found.');
     const a={...this.data.agents[index]};
     if(displayName!==undefined)a.displayName=schema.text(displayName,'display name',80).trim();
@@ -172,6 +177,7 @@ class Broker{
     if(itrust!==undefined)a.itrust=Boolean(itrust);
     if(browser){const v=visionOf({...a,activeModel:this.runtimeFor(a.id).adapter?.currentModel});if(v.vision===false)throw new Error(`${a.displayName||a.name} cannot use the Opaya browser: ${v.reason} Choose a model that can see images (Models button), then try again.`);}
     if(browser!==undefined)a.browser=Boolean(browser);
+    if(surface!==undefined)a.surface=['chat','terminal'].includes(surface)?surface:'';
     this.data.agents[index]=a;await this.persist();return a;
   }
   // Drag and drop: place an agent before or after another one and optionally move it into a section (group or pinned).
@@ -385,6 +391,7 @@ class Broker{
         }
         if(!emitTimer)emitTimer=setTimeout(()=>{emitTimer=null;this.changed();},40);
       };
+      const refused=()=>{const text=`${assistant.content||''} ${assistant.error||''}`;if(!CLIENT_REFUSED.test(text))return;const a=this.data.agents.find(x=>x.id===agentId);if(!a||a.surface==='terminal')return;a.surface='terminal';this.store.write(this.data).catch(()=>{});this.onClientRefused?.(a,text.trim().slice(0,400));};
       turn.task=Promise.resolve().then(()=>{
         if(abort.signal.aborted)throw new Error('Turn cancelled before it was sent.');
         return adapter.run({text,messages:messages.filter(m=>m!==assistant),conversation:c,cwd:this.conversationCwd(c,this.agent(agentId)),signal:abort.signal,onEvent,onSession:async sessionId=>{c.externalSessionId=sessionId;await this.store.write(this.data);}});
@@ -395,7 +402,7 @@ class Broker{
         clearTimeout(timeout);clearTimeout(emitTimer);clearInterval(checkpoint);
         try{await this.store.writeTranscript(c.id,messages);await this.store.write(this.data);}catch{assistant.error='Could not save the final transcript to disk. Export it before closing.';}
         if(this.turns.get(agentId)===turn)this.turns.delete(agentId);
-        finishDone();this.changed();
+        refused();finishDone();this.changed();
       });
       this.changed();return {conversationId:c.id,messageId:assistant.id};
     }catch(error){
@@ -417,4 +424,4 @@ class Broker{
   }
   async close(){this.closing=true;for(const a of this.data.agents)this.disconnect(a.id);await Promise.allSettled([...this.turns.values()].map(t=>t.done));await this.store.queue;}
 }
-module.exports={Broker,safeError,browserCapable};
+module.exports={Broker,safeError,browserCapable,CLIENT_REFUSED};

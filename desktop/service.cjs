@@ -238,6 +238,7 @@ async function start({app, safeStorage}, root) {
     catch(e){escalate(a,safeError(e),`Opaya updated it (${c.title||'update'}), but it still does not connect.`);}
   }
   broker.onConnectError=(a,error)=>{autoFix(a,error).catch(()=>{});};
+  broker.onClientRefused=(a,text)=>{notice({level:'info',kind:'surface',agentId:a.id,title:`${a.name} opens in its terminal now`,text:`It does not accept chats from other apps anymore ("${text.slice(0,160)}"). Its own CLI still works: Opaya shows it in the terminal. Right-click > Open as chat switches back, for example after you add an API key.`});emit();};
   // An agent installed as a Docker container on a machine: the script runs in a visible terminal (pull, start, install,
   // then an interactive sign-in), and when it ends Opaya adds the container as an agent and connects it.
   async function installContainer(host,x){

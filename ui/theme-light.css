@@ -467,3 +467,25 @@
 :where(body[data-theme="light"]) .runtime-option{border:1px solid #c5d0cb;background:#dee5e1}
 :where(body[data-theme="light"]) .runtime-option:hover:not(:disabled){border-color:#7cc099;background:#d7e2dc}
 :where(body[data-theme="light"]) .runtime-option span{color:#343e37}
+:where(body[data-theme="light"]) .terminal-pane-head{background:#e2e6e8;color:#454f53}
+:where(body[data-theme="light"]) .terminal-pane.focused .terminal-pane-head{background:#dae4e0;color:#121f17}
+:where(body[data-theme="light"]) .pane-btn{color:#454f53}
+:where(body[data-theme="light"]) .pane-btn:hover{background:#cdd5d3;color:#0c1112}
+:where(body[data-theme="light"]) .pane-grip::after{background:#cdd5d3}
+:where(body[data-theme="light"]) .terminal-tab.in-pane>button[data-action="terminal-tab"]{color:#1e2723}
+:where(body[data-theme="light"]) .terminal-tab.in-pane::after{background:#c2d6cb}
+:where(body[data-theme="light"]) .stage-mode{border:1px solid #aed5be;color:#144526;background:#dbeae1}
+:where(body[data-theme="light"]) .interface-option{border:1px solid #c5d0cb;background:#e2e8e5}
+:where(body[data-theme="light"]) .interface-option:hover,:where(body[data-theme="light"]) .interface-option:focus-visible{border-color:#7cc099;background:#dae4df}
+:where(body[data-theme="light"]) .interface-option>span:last-child{color:#343e37}
+:where(body[data-theme="light"]) .interface-preview{border:1px solid #cdd7d3;background:#eaefed}
+:where(body[data-theme="light"]) .ip-bubble{background:#c5d3cc}
+:where(body[data-theme="light"]) .ip-bubble.r{background:#bcdcc9}
+:where(body[data-theme="light"]) .ip-input{border:1px solid #c0d0c8;background:#e3eae6}
+:where(body[data-theme="light"]) .interface-preview.terminal{background:#eef2f1}
+:where(body[data-theme="light"]) .ip-line{background:#bedaca}
+:where(body[data-theme="light"]) .ip-line.w2{background:#c0d8cb}
+:where(body[data-theme="light"]) .ip-line.w3{background:#c0d8cb}
+:where(body[data-theme="light"]) .ip-split{background:#c7d3ce}
+:where(body[data-theme="light"]) .ip-cursor{background:#a7f3c6}
+:where(body[data-theme="light"]) .terminal-placeholder small{color:#5f7176}

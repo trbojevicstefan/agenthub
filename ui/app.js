@@ -17,11 +17,12 @@
   let state = {agents:[],hosts:[],conversations:[],histories:{},secureStorage:false}, overview = true, opayaView = false, playgroundView = false, renderKey = '', initialized = false, theme = 'dark';
   let toastTimer, returnFocus, currentTerminal = '', lastSelected = '', modalBusy = false;
   let manageId = '', manageHtml = '', manageKeyed = {};
+  let stageAgent = ''; // the agent whose CLI the terminal stage last opened
   const pendingWrites = new Set();
   const draftKey = () => currentConversation()?.id || selected()?.id || '';
   const save = promise => { pendingWrites.add(promise); promise.catch(error=>toast(error.message,true)).finally(()=>pendingWrites.delete(promise)); return promise; };
   window.agenthubFlush = () => Promise.allSettled([...pendingWrites]);
-  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,theme,projects:projectsOpen,projectsOpen:[...projectsExpanded],layout,tips:[...tipsSeen].slice(-60),greeted,lastVersion})); };
+  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,panes:panes.filter(Boolean),paneSizes:panes.map((id,i)=>id?paneSizes[i]:0).filter(Boolean),theme,projects:projectsOpen,projectsOpen:[...projectsExpanded],layout,tips:[...tipsSeen].slice(-300),greeted,lastVersion})); };
   const drafts = new Map(), pendingSends = new Set(), terminalViews = new Map(), terminalPending = new Map();
   const selected = () => state.agents.find(a => a.id === state.activeAgentId);
   const currentConversation = () => state.conversations.find(c => c.id === state.activeConversationId && c.agentId === state.activeAgentId);
@@ -42,6 +43,10 @@
   const trusted = a => !!(state.settings?.itrustAll||a?.itrust);
   const dot = a => `<span class="status-dot ${esc(a.busy?'working':a.status||'disconnected')}"></span>`;
   const mod=()=>state.platform==='darwin'?'\u2318':'Ctrl ';
+  // Chat or terminal: how an agent opens. API connections have no CLI, so they always chat; terminal-only agents always
+  // use their CLI; otherwise the agent's own choice, then Settings (asked on first launch).
+  const hasCli=a=>!!a?.command&&!(a.protocol==='openai'&&!['hermes','openclaw'].includes(a.provider));
+  const surfaceOf=a=>!a?'chat':a.protocol==='terminal'?'terminal':!hasCli(a)?'chat':a.surface||state.settings?.interface||'chat';
   // Motion bookkeeping: state updates re-render often, so entrance animations are keyed to first appearance, not to every render.
   let lastVersion='',tipsSeen=new Set(),greeted='',collapsedGroups=new Set(),projectsOpen=false,projectsExpanded=new Set(),layout={terminal:'bottom',browser:'right',bottomHeight:280,rightWidth:520};
   const navSeen=new Map(),messageSeen=new Map();let navHtml='',navSelected='',navSelectedAt=0,messageConversation=null,overviewHtml='';
@@ -68,7 +73,7 @@
   }
   function applyState(next) {
     state=next;document.body.dataset.platform=state.platform;
-    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);projectsOpen=!!state.view?.projects;tipsSeen=new Set(state.view?.tips||[]);greeted=state.view?.greeted||'';lastVersion=state.view?.lastVersion||'';setTimeout(checkNudges,4000);if(state.view?.layout)layout={...layout,...state.view.layout};queueMicrotask(()=>placePanes());projectsExpanded=new Set(state.view?.projectsOpen||[]);if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});$('.search-trigger kbd').textContent=`${mod()}K`;}
+    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);projectsOpen=!!state.view?.projects;tipsSeen=new Set(state.view?.tips||[]);greeted=state.view?.greeted||'';lastVersion=state.view?.lastVersion||'';setTimeout(checkNudges,4000);setTimeout(askInterface,700);if(state.view?.layout)layout={...layout,...state.view.layout};queueMicrotask(()=>placePanes());projectsExpanded=new Set(state.view?.projectsOpen||[]);if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});$('.search-trigger kbd').textContent=`${mod()}K`;}
     render();
   }
   function render() {
@@ -85,7 +90,10 @@
     if(nav!==navHtml){navHtml=nav;$('#agent-list').innerHTML=nav;}
     const a=selected();
     if(overview||opayaView||playgroundView||!a||a.id!==manageId)manageId='';
-    if(opayaView)renderOpaya();else if(playgroundView)renderPlayground();else if(overview||!a)renderOverview();else if(manageId)renderManage(a);else renderAgent(a);
+    const stage=!opayaView&&!playgroundView&&!overview&&!!a&&!manageId&&surfaceOf(a)==='terminal';
+    if(stage!==document.body.classList.contains('terminal-stage')){document.body.classList.toggle('terminal-stage',stage);placePanes();}
+    if(!stage)stageAgent='';
+    if(opayaView)renderOpaya();else if(playgroundView)renderPlayground();else if(overview||!a)renderOverview();else if(manageId)renderManage(a);else if(stage)renderAgentTerminal(a);else renderAgent(a);
     $('#status-left').textContent=playgroundView?'Playground / ask two agents the same question':opayaView?'Opaya Agent / installs, connects and troubleshoots your agents':a&&!overview?`${labels[a.provider]} / ${a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase()} / ${location(a)}`:'One place. All your agents.';
     $('#status-right').textContent=state.agents.some(a=>a.busy)?`${state.agents.filter(a=>a.busy).length} agent working`:(state.service?.persistent?'Sessions protected / safe to close window':'Local workspace / no cloud account');
     updateTurnWatch();renderToolChip();
@@ -99,6 +107,20 @@
     if(entering||html!==overviewHtml){overviewHtml=html;$('#content').innerHTML=html;}
     if(entering)enter($('#content'));
     renderKey='overview';
+  }
+  // Terminal-first: the agent's own CLI fills the main area, with tabs, splits and the terminal right-click menu.
+  // Entering an agent opens (or brings back) its CLI once; after that the user decides what runs where.
+  const stageOpening=new Set();
+  function renderAgentTerminal(a){
+    const chat=a.protocol!=='terminal'&&hasCli(a);
+    $('#topbar').innerHTML=`<div class="breadcrumb">Agents <span>/</span> <strong>${esc(title(a))}</strong> <span class="stage-mode">Terminal</span></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span>${chat?`<button class="subtle" data-action="surface" data-id="${esc(a.id)}" data-surface="chat" title="Open ${esc(title(a))} as a chat instead"><span aria-hidden="true">&#9993;</span> Chat</button>`:''}<button class="subtle" data-action="files-agent" data-id="${esc(a.id)}" title="Browse this agent's folders"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="manage" data-id="${esc(a.id)}" title="Every option for this agent"><span aria-hidden="true">&#9776;</span> Manage</button><button class="icon-button" data-action="edit" data-id="${esc(a.id)}" title="Edit connection settings" aria-label="Connection settings">&#9881;</button></div>`;
+    contentKind('stage');if(renderKey!=='stage:'+a.id){$('#content').innerHTML='';renderKey='stage:'+a.id;}
+    $('#terminal-panel').hidden=false;
+    if(stageAgent===a.id)return;stageAgent=a.id;
+    const mine=[...terminalViews.values()].filter(v=>v.agentId===a.id&&!v.exited),cli=mine.find(v=>v.mode==='agent');
+    if(cli||mine[0]){activateTerminal((cli||mine[0]).id);return;}
+    if(stageOpening.has(a.id))return;stageOpening.add(a.id);
+    openTerminal({agentId:a.id,mode:'agent'}).catch(error=>toast(error.message,true)).finally(()=>stageOpening.delete(a.id));
   }
   function renderAgent(a) {
     const proj=projectOf(currentConversation());$('#topbar').innerHTML=`<div class="breadcrumb">${proj?`<button type="button" class="crumb-project" data-action="project-focus" data-id="${esc(proj.id)}" title="${esc(proj.path)}"><span class="project-folder" aria-hidden="true"></span>${esc(proj.name)}</button>`:'Agents'} <span>/</span> <strong>${esc(title(a))}</strong></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span>${trusted(a)?`<button type="button" class="itrust-pill" data-action="itrust-agent" data-id="${esc(a.id)}" title="iTrust is on: ${esc(title(a))}'s tool requests are approved automatically. Click to change.">iTrust</button>`:''}<button class="subtle" data-action="skills" data-id="${esc(a.id)}" title="Skills, tools and MCP servers"><span aria-hidden="true">&#10022;</span> Skills</button><button class="subtle" data-action="files-agent" data-id="${esc(a.id)}" title="Browse this agent's folders and project"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="terminal" title="Open terminal (Ctrl + backtick)"><span class="terminal-glyph">&gt;_</span> Terminal</button><button class="subtle" data-action="manage" data-id="${esc(a.id)}" title="Every option for this agent: update, back up, clone, uninstall and more"><span aria-hidden="true">&#9776;</span> Manage</button><button class="icon-button" data-action="edit" data-id="${esc(a.id)}" title="Edit connection settings" aria-label="Connection settings">&#9881;</button></div>`;
@@ -226,27 +248,148 @@
   }
   function openSettings(){
     const localCount=state.agents.filter(a=>a.transport!=='ssh').length,remoteCount=state.agents.filter(a=>a.transport==='ssh').length,dockerCount=state.agents.filter(isDocker).length;
-    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section class="itrust-settings"><h3>iTrust mode</h3><p class="settings-copy">Approve tool requests automatically: commands, file edits and other actions agents ask permission for. Works for Hermes and other ACP agents, Codex and Claude Code. Turn it on only for agents you trust with this computer.</p><label class="switch-row"><input type="checkbox" data-setting="itrustAll" ${state.settings?.itrustAll?'checked':''}><span class="switch" aria-hidden="true"></span><span>All agents</span></label><label class="switch-row"><input type="checkbox" data-setting="itrustOpaya" ${state.settings?.itrustOpaya?'checked':''}><span class="switch" aria-hidden="true"></span><span>Opaya Agent <small>(removals still ask)</small></span></label><p class="field-help">Per agent: right-click an agent &gt; Turn on iTrust.</p></section><section><h3>Updates</h3><p class="settings-copy">Installed: Opaya ${esc(update.current||'')}. ${update.status==='available'?`Version ${esc(update.latest?.version||'')} is ready to download.`:'Opaya checks GitHub for new versions.'}</p><button class="secondary" data-action="updates">${update.status==='available'?'Update now':'Check for updates'}</button></section><section><h3>Agents and tools</h3><p class="settings-copy">Opaya checks your agents, CLIs and tools such as Node.js and Python on every machine once an hour and tells you when an update is out.</p><label class="switch-row"><input type="checkbox" data-setting="updateChecks" ${state.settings?.updateChecks!==false?'checked':''}><span class="switch" aria-hidden="true"></span><span>Check for updates every hour</span></label><label class="switch-row"><input type="checkbox" data-setting="autoFix" ${state.settings?.autoFix!==false?'checked':''}><span class="switch" aria-hidden="true"></span><span>Fix "version too old" errors automatically <small>(update, reconnect, then ask the Opaya Agent)</small></span></label><button class="secondary" data-action="tool-updates">See updates</button></section><section><h3>Skills library</h3><p class="settings-copy">Global skills kept by Opaya. Install them to any agent, local or on a VPS.</p><button class="secondary" data-action="library">Open skills library</button></section><section><h3>MCP servers</h3><p class="settings-copy">${(state.mcpServers||[]).length} saved. Tools such as GitHub, a browser or a database that Opaya passes to Hermes (ACP) and Claude Code.</p><button class="secondary" data-action="mcp-manage">Manage MCP servers</button></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
+    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section class="settings-wide"><h3>Workspace style</h3><p class="settings-copy">How agents open when you select them. Each agent can differ: right-click it &gt; Open as chat / Open as terminal. API connections always chat.</p><div class="theme-options"><button class="theme-option ${(state.settings?.interface||'chat')==='chat'?'selected':''}" data-action="interface" data-value="chat"><span class="interface-preview chat mini" aria-hidden="true"><i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-input"></i></span><strong>Chat</strong><small>Conversations, history and projects</small></button><button class="theme-option ${state.settings?.interface==='terminal'?'selected':''}" data-action="interface" data-value="terminal"><span class="interface-preview terminal mini" aria-hidden="true"><i class="ip-line"></i><i class="ip-line w2"></i><i class="ip-cursor"></i></span><strong>Terminal</strong><small>Each agent's own CLI, full size</small></button></div></section><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section class="itrust-settings"><h3>iTrust mode</h3><p class="settings-copy">Approve tool requests automatically: commands, file edits and other actions agents ask permission for. Works for Hermes and other ACP agents, Codex and Claude Code. Turn it on only for agents you trust with this computer.</p><label class="switch-row"><input type="checkbox" data-setting="itrustAll" ${state.settings?.itrustAll?'checked':''}><span class="switch" aria-hidden="true"></span><span>All agents</span></label><label class="switch-row"><input type="checkbox" data-setting="itrustOpaya" ${state.settings?.itrustOpaya?'checked':''}><span class="switch" aria-hidden="true"></span><span>Opaya Agent <small>(removals still ask)</small></span></label><p class="field-help">Per agent: right-click an agent &gt; Turn on iTrust.</p></section><section><h3>Updates</h3><p class="settings-copy">Installed: Opaya ${esc(update.current||'')}. ${update.status==='available'?`Version ${esc(update.latest?.version||'')} is ready to download.`:'Opaya checks GitHub for new versions.'}</p><button class="secondary" data-action="updates">${update.status==='available'?'Update now':'Check for updates'}</button></section><section><h3>Agents and tools</h3><p class="settings-copy">Opaya checks your agents, CLIs and tools such as Node.js and Python on every machine once an hour and tells you when an update is out.</p><label class="switch-row"><input type="checkbox" data-setting="updateChecks" ${state.settings?.updateChecks!==false?'checked':''}><span class="switch" aria-hidden="true"></span><span>Check for updates every hour</span></label><label class="switch-row"><input type="checkbox" data-setting="autoFix" ${state.settings?.autoFix!==false?'checked':''}><span class="switch" aria-hidden="true"></span><span>Fix "version too old" errors automatically <small>(update, reconnect, then ask the Opaya Agent)</small></span></label><button class="secondary" data-action="tool-updates">See updates</button></section><section><h3>Skills library</h3><p class="settings-copy">Global skills kept by Opaya. Install them to any agent, local or on a VPS.</p><button class="secondary" data-action="library">Open skills library</button></section><section><h3>MCP servers</h3><p class="settings-copy">${(state.mcpServers||[]).length} saved. Tools such as GitHub, a browser or a database that Opaya passes to Hermes (ACP) and Claude Code.</p><button class="secondary" data-action="mcp-manage">Manage MCP servers</button></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
   }
   function switcher(){
     modal('Jump to an agent.','Search by name, provider or machine.',`<input id="switcher-search" class="switcher-search" placeholder="Search agents..." aria-label="Search agents"><div id="switcher-list"></div>`);
     const update=()=>{const q=$('#switcher-search').value.toLowerCase();$('#switcher-list').innerHTML=state.agents.filter(a=>`${title(a)} ${description(a)} ${labels[a.provider]} ${location(a)} ${placeText(a)} ${a.group||''} ${(a.tags||[]).join(' ')}`.toLowerCase().includes(q)).map(a=>`<button class="switcher-row" data-action="switch-select" data-id="${esc(a.id)}">${badge(a)}<span><strong>${esc(title(a))}</strong><small>${esc(description(a))}</small></span>${dot(a)}</button>`).join('')||'<p class="field-help">No matching agents. Add a connection to get started.</p>';};
     $('#switcher-search').addEventListener('input',update);update();$('#switcher-search').focus();
   }
-  function activateTerminal(id){
-    currentTerminal=id;
-    for(const view of terminalViews.values())view.element.hidden=view.id!==id;
-    const active=terminalViews.get(id);
-    $('[data-action="terminal-detach"]').disabled=!active||active.poppedOut;
-    $('[data-action="terminal-detach"]').title='Open terminal in a separate window';
-    $('[data-action="terminal-end"]').disabled=!active;
-    $('[data-action="terminal-search"]').disabled=!active;
-    $('#terminal-tabs').innerHTML=[...terminalViews.values()].map(v=>`<div class="terminal-tab ${v.id===id?'selected':''} ${v.exited?'archived':''}"><button type="button" data-action="terminal-tab" data-id="${esc(v.id)}" title="${esc(v.title)}${v.exited?' (saved output)':''}"><span class="terminal-tab-dot" aria-hidden="true"></span><span class="terminal-tab-title">${esc(v.title)}</span></button><button type="button" class="terminal-tab-close" data-action="terminal-tab-close" data-id="${esc(v.id)}" aria-label="Close ${esc(v.title)}" title="Close">&#10005;</button></div>`).join('')||'<span class="terminal-tabs-empty"><span class="terminal-glyph">&gt;_</span> Terminal</span>';
-    if(!active)closeTerminalSearch();
-    let placeholder=$('#terminal-placeholder');if(!placeholder){placeholder=document.createElement('div');placeholder.id='terminal-placeholder';placeholder.className='terminal-placeholder';placeholder.textContent='Open a shell or launch the native agent CLI. Switching agents keeps existing terminal sessions alive.';$('#terminal-views').append(placeholder);}placeholder.hidden=!!id;
-    const view=terminalViews.get(id);if(view&&!view.poppedOut){requestAnimationFrame(()=>{if(!view.exited)view.core.fitAndReport(view.report);else{try{view.fit.fit();}catch{}}view.term.focus();});}
+  // ---- Terminal panes: terminals side by side (split left / right), each with its own session --------------------------
+  // panes: the terminal shown in each pane, left to right; paneSizes: their relative widths. Terminals that are not in a
+  // pane keep running in the background as tabs. activateTerminal(id) shows id in the focused pane, or focuses the pane
+  // that already shows it.
+  let panes=[''],paneSizes=[1],paneFocus=0;
+  const MIN_PANE=240;
+  const maxPanes=()=>Math.max(1,Math.floor(($('#terminal-views')?.clientWidth||960)/MIN_PANE));
+  function paneRoot(){
+    let root=$('#terminal-panes');
+    if(!root){root=document.createElement('div');root.id='terminal-panes';root.className='terminal-panes';$('#terminal-views').prepend(root);
+      root.addEventListener('pointerdown',event=>{const pane=event.target.closest('.terminal-pane');if(!pane||event.target.closest('.pane-grip'))return;const i=Number(pane.dataset.index);if(i!==paneFocus){paneFocus=i;currentTerminal=panes[i]||'';markPanes();}},true);
+      root.addEventListener('click',event=>{const b=event.target.closest('[data-pane-action]');if(!b)return;const i=Number(b.closest('.terminal-pane').dataset.index);if(b.dataset.paneAction==='close')closePane(i);else if(b.dataset.paneAction==='split')action(()=>splitTerminal('right',i));});
+    }
+    return root;
   }
-  async function openTerminal({agentId=selected()?.id,hostId,mode='shell',local=false,terminalId,restoring=false}={}){
+  function terminalPool(){let pool=$('#terminal-pool');if(!pool){pool=document.createElement('div');pool.id='terminal-pool';pool.hidden=true;$('#terminal-views').append(pool);}return pool;}
+  function normalizePanes(){
+    panes=panes.map(id=>terminalViews.has(id)&&!terminalViews.get(id).poppedOut?id:'');
+    // Several panes never show the same terminal, and empty panes go away while others remain.
+    panes=panes.map((id,i)=>id&&panes.indexOf(id)!==i?'':id);
+    if(panes.length>1){const keep=panes.map((id,i)=>[id,paneSizes[i]||1]).filter(([id])=>id);if(keep.length){paneFocus=Math.max(0,keep.findIndex(([id])=>id===panes[paneFocus]));panes=keep.map(k=>k[0]);paneSizes=keep.map(k=>k[1]);}else{panes=[''];paneSizes=[1];}}
+    if(!panes.length){panes=[''];paneSizes=[1];}
+    paneSizes=panes.map((_,i)=>paneSizes[i]>0?paneSizes[i]:1);paneFocus=Math.min(Math.max(0,paneFocus),panes.length-1);
+  }
+  function markPanes(){
+    const root=paneRoot();for(const el of root.querySelectorAll('.terminal-pane'))el.classList.toggle('focused',Number(el.dataset.index)===paneFocus&&panes.length>1);
+    for(const tab of document.querySelectorAll('#terminal-tabs .terminal-tab')){const id=tab.querySelector('[data-action="terminal-tab"]')?.dataset.id;tab.classList.toggle('selected',id===currentTerminal);tab.classList.toggle('in-pane',!!id&&id!==currentTerminal&&panes.includes(id));}
+    const active=terminalViews.get(currentTerminal);
+    $('[data-action="terminal-detach"]').disabled=!active||active.poppedOut;$('[data-action="terminal-end"]').disabled=!active;$('[data-action="terminal-search"]').disabled=!active;
+  }
+  function renderPanes(){
+    normalizePanes();
+    const root=paneRoot(),pool=terminalPool();
+    // Reuse pane elements, so terminals are only moved when they change place (moving restarts nothing, but costs a fit).
+    while(root.children.length>panes.length*2-1)root.lastElementChild.remove();
+    panes.forEach((id,i)=>{
+      let pane=root.children[i*2];
+      if(!pane){if(i>0){const grip=document.createElement('div');grip.className='pane-grip';grip.setAttribute('role','separator');grip.setAttribute('aria-orientation','vertical');grip.setAttribute('aria-label','Resize terminals');root.append(grip);}
+        pane=document.createElement('section');pane.className='terminal-pane';pane.innerHTML='<header class="terminal-pane-head"><span class="pane-title"></span><button type="button" class="pane-btn" data-pane-action="split" title="Split right" aria-label="Split right"><span class="split-glyph" aria-hidden="true"></span></button><button type="button" class="pane-btn" data-pane-action="close" title="Close pane (the session keeps running as a tab)" aria-label="Close pane">&#10005;</button></header><div class="terminal-pane-body"></div>';root.append(pane);}
+      pane.dataset.index=i;pane.style.flex=`${paneSizes[i]} 1 0`;
+      const view=terminalViews.get(id),body=pane.querySelector('.terminal-pane-body');
+      pane.querySelector('.pane-title').textContent=view?view.title+(view.exited?' (saved output)':''):'';
+      if(view){if(view.element.parentElement!==body){body.replaceChildren(view.element);}view.element.hidden=false;}
+      else if(!body.querySelector('.terminal-placeholder')){const ph=document.createElement('div');ph.className='terminal-placeholder';ph.innerHTML='<div><p>No session here. Every other session keeps running in its tab.</p><div class="placeholder-actions"><button type="button" class="secondary" data-action="terminal-cli"><span class="term-play" aria-hidden="true"></span> Agent CLI</button><button type="button" class="secondary" data-action="terminal-shell">+ Shell</button></div><small>Right-click a terminal to split it left or right.</small></div>';body.replaceChildren(ph);}
+    });
+    root.classList.toggle('split',panes.length>1);
+    for(const view of terminalViews.values())if(!panes.includes(view.id)&&view.element.parentElement!==pool){view.element.hidden=true;pool.append(view.element);}
+    markPanes();
+    for(const id of panes){const view=terminalViews.get(id);if(view&&!view.poppedOut)requestAnimationFrame(()=>{if(!view.exited)view.core.fitAndReport(view.report);else{try{view.fit.fit();}catch{}}});}
+  }
+  function activateTerminal(id){
+    if(id&&terminalViews.has(id)){const at=panes.indexOf(id);if(at>=0)paneFocus=at;else panes[paneFocus]=id;}
+    else if(!id)panes[paneFocus]='';
+    renderPanes();currentTerminal=panes[paneFocus]||'';
+    $('#terminal-tabs').innerHTML=[...terminalViews.values()].map(v=>`<div class="terminal-tab ${v.exited?'archived':''}"><button type="button" data-action="terminal-tab" data-id="${esc(v.id)}" title="${esc(v.title)}${v.exited?' (saved output)':''}"><span class="terminal-tab-dot" aria-hidden="true"></span><span class="terminal-tab-title">${esc(v.title)}</span></button><button type="button" class="terminal-tab-close" data-action="terminal-tab-close" data-id="${esc(v.id)}" aria-label="Close ${esc(v.title)}" title="Close">&#10005;</button></div>`).join('')||'<span class="terminal-tabs-empty"><span class="terminal-glyph">&gt;_</span> Terminal</span>';
+    markPanes();
+    const active=terminalViews.get(currentTerminal);if(!active)closeTerminalSearch();
+    if(active&&!active.poppedOut)requestAnimationFrame(()=>active.term.focus());
+  }
+  // Put `id` in a new pane left or right of pane `index`. Returns false when there is no room.
+  function insertPane(id,dir,index=paneFocus){
+    normalizePanes();
+    const from=panes.indexOf(id);if(from>=0&&panes.length===1)return true;
+    if(from<0&&panes.length>=maxPanes()){toast('No room for another terminal side by side. Close a pane or widen the window.');return false;}
+    if(from>=0){panes.splice(from,1);const [size]=paneSizes.splice(from,1);if(from<index)index--;paneSizes[Math.min(index,paneSizes.length-1)]+=size;}
+    if(!panes.length){panes=[''];paneSizes=[1];index=0;}
+    const at=dir==='left'?index:index+1,share=(paneSizes[index]||1)/2;
+    if(panes[index]===''){panes[index]=id;paneFocus=index;return true;}
+    paneSizes[index]=share;panes.splice(at,0,id);paneSizes.splice(at,0,share);paneFocus=at;return true;
+  }
+  // Where a new terminal next to `view` opens: the same agent, the same machine, or this computer.
+  function terminalTarget(view){
+    const id=view?.agentId||'';
+    if(state.agents.some(a=>a.id===id))return {agentId:id};
+    if(id.startsWith('host_')&&state.hosts.some(h=>h.id===id.slice(5)))return {hostId:id.slice(5)};
+    return {local:true};
+  }
+  async function splitTerminal(dir,index=paneFocus,target){
+    if(!target&&maxPanes()<=panes.filter(Boolean).length){toast('No room for another terminal side by side. Close a pane or widen the window.');return;}
+    await openTerminal({...(target||terminalTarget(terminalViews.get(panes[index]))),split:{dir,index}});
+  }
+  function showInSplit(id,dir,index=paneFocus){if(insertPane(id,dir,index))activateTerminal(id);saveView();}
+  function closePane(i){
+    normalizePanes();if(panes.length<2)return;
+    const [size]=paneSizes.splice(i,1);panes.splice(i,1);paneSizes[Math.max(0,i-1)]+=size;
+    paneFocus=Math.max(0,Math.min(paneFocus>=i?paneFocus-1:paneFocus,panes.length-1));
+    activateTerminal(panes[paneFocus]);saveView();
+  }
+  // Drag the grip between two panes to share their width.
+  document.addEventListener('pointerdown',event=>{
+    const grip=event.target.closest('#terminal-panes .pane-grip');if(!grip)return;event.preventDefault();
+    const left=grip.previousElementSibling,right=grip.nextElementSibling,i=Number(left.dataset.index),j=Number(right.dataset.index);
+    const total=left.offsetWidth+right.offsetWidth,share=paneSizes[i]+paneSizes[j],start=event.clientX,startLeft=left.offsetWidth;
+    grip.setPointerCapture(event.pointerId);document.body.classList.add('pane-resizing');
+    const move=e=>{const w=Math.max(MIN_PANE*0.75,Math.min(total-MIN_PANE*0.75,startLeft+e.clientX-start));paneSizes[i]=share*w/total;paneSizes[j]=share-paneSizes[i];left.style.flex=`${paneSizes[i]} 1 0`;right.style.flex=`${paneSizes[j]} 1 0`;};
+    grip.addEventListener('pointermove',move);
+    grip.addEventListener('lostpointercapture',()=>{grip.removeEventListener('pointermove',move);document.body.classList.remove('pane-resizing');renderPanes();saveView();},{once:true});
+  });
+  // Right-click inside a terminal: clipboard, split, new terminals and the session. Shift + right-click keeps the
+  // quick copy-or-paste.
+  function terminalContextMenu(event,view){
+    const pane=event.target.closest('.terminal-pane'),index=pane?Number(pane.dataset.index):paneFocus;
+    if(pane&&index!==paneFocus){paneFocus=index;currentTerminal=panes[index]||'';markPanes();}
+    const hidden=[...terminalViews.values()].filter(v=>!panes.includes(v.id)&&!v.poppedOut),agent=state.agents.find(a=>a.id===view?.agentId);
+    const newTerminal=(where,split)=>[
+      view&&{icon:'&gt;_',label:`Shell: ${view.title.replace(/ \/ (shell|agent)$/,'')}`,run:()=>split?splitTerminal(split,index):openTerminal(terminalTarget(view))},
+      {icon:'&#9635;',label:`Shell: ${localName()}`,run:()=>split?splitTerminal(split,index,{local:true}):openTerminal({local:true})},
+      agent&&{icon:'&#10095;',label:`${title(agent)} CLI`,run:()=>split?splitTerminal(split,index,{agentId:agent.id,mode:'agent'}):openTerminal({agentId:agent.id,mode:'agent'})},
+      ...state.hosts.map(h=>({icon:'&#9635;',label:`Shell: ${h.name}`,run:()=>split?splitTerminal(split,index,{hostId:h.id}):openTerminal({hostId:h.id})}))
+    ];
+    const items=[
+      view&&{icon:'&#10697;',label:'Copy',hint:`${mod()}Shift+C`,disabled:!view.term.hasSelection(),run:()=>{view.core.copy();view.term.clearSelection();}},
+      view&&!view.exited&&{icon:'&#8615;',label:'Paste',hint:`${mod()}V`,run:()=>view.core.paste()},
+      view&&{icon:'&#9633;',label:'Select all',run:()=>view.term.selectAll()},
+      view&&{icon:'&#8634;',label:'Clear',run:()=>view.term.clear()},
+      view&&{icon:'&#9906;',label:'Find...',hint:`${mod()}F`,run:()=>openTerminalSearch()},
+      '-',
+      {icon:'&#9707;',label:'Split right',submenu:newTerminal('right','right')},
+      {icon:'&#9706;',label:'Split left',submenu:newTerminal('left','left')},
+      hidden.length&&{icon:'&#9776;',label:'Show beside this',submenu:hidden.map(v=>({icon:'&gt;_',label:v.title,run:()=>showInSplit(v.id,'right',index)}))},
+      {icon:'+',label:'New terminal',submenu:newTerminal()},
+      '-',
+      view&&{icon:'&#9998;',label:'Rename...',run:()=>renameTerminal(view.id)},
+      view&&!view.exited&&{icon:'&#10697;',label:'Open in separate window',run:()=>popoutTerminal(view.id)},
+      panes.length>1&&{icon:'&#9645;',label:'Close pane (keeps running)',run:()=>closePane(index)},
+      view&&{icon:'&#10005;',label:view.exited?'Close saved output':'End session',danger:!view.exited,run:()=>closeTerminalTab(view.id)}
+    ];
+    openMenu(event.clientX,event.clientY,items,view?view.title:'Terminal',pane);
+  }
+  $('#terminal-views').addEventListener('contextmenu',event=>{
+    if(event.target.closest('.terminal-pane-head'))return;
+    const pane=event.target.closest('.terminal-pane');if(!pane)return;event.preventDefault();event.stopPropagation();
+    terminalContextMenu(event,terminalViews.get(panes[Number(pane.dataset.index)]));
+  });
+  async function openTerminal({agentId=selected()?.id,hostId,mode='shell',local=false,terminalId,restoring=false,split=null}={}){
     if(!agentId&&!hostId&&!local&&!terminalId){toast('Select an agent, or open a machine from Machines.');return;}
     if(typeof window.Terminal!=='function'||!window.FitAddon||!window.OpayaTerminal){toast('The terminal UI did not load. Reinstall the complete Opaya build rather than moving the executable out of its installation folder.',true);return;}
     if(!restoring){closeModal();$('#terminal-panel').hidden=false;}
@@ -256,9 +399,9 @@
     if(!terminalViews.has(result.id)){
       const element=document.createElement('div');element.className='terminal-view';$('#terminal-views').append(element);
       const archived=!!result.exited;
-      const core=window.OpayaTerminal.create(element,{archived,windowsBuild:result.windowsBuild||0,light:theme==='light',onSearch:()=>openTerminalSearch()}),{term,fit}=core;
+      const core=window.OpayaTerminal.create(element,{archived,windowsBuild:result.windowsBuild||0,light:theme==='light',onSearch:()=>openTerminalSearch(),onContextMenu:event=>terminalContextMenu(event,terminalViews.get(result.id))}),{term,fit}=core;
       const report=(cols,rows)=>action(()=>api.terminalResize({id:result.id,cols,rows}));
-      const view={id:result.id,agentId:result.agentId||a?.id||'',remote:result.remote,title:result.title||`${a?title(a):h?.name||(local?'This computer':'SSH')} / ${mode}`,term,fit,core,report,element,exited:!!result.exited,lastSeq:result.seq||0};terminalViews.set(result.id,view);
+      const view={id:result.id,agentId:result.agentId||a?.id||'',mode:result.mode||mode,remote:result.remote,title:result.title||`${a?title(a):h?.name||(local?'This computer':'SSH')} / ${mode}`,term,fit,core,report,element,exited:!!result.exited,lastSeq:result.seq||0};terminalViews.set(result.id,view);
       if(!archived)term.onData(data=>action(()=>api.terminalWrite({id:result.id,data})));
       let timer;const observer=new ResizeObserver(()=>{clearTimeout(timer);timer=setTimeout(()=>{if(element.hidden||view.poppedOut||view.exited||$('#terminal-panel').hidden)return;core.fitAndReport(report);},60);});observer.observe(element);view.observer=observer;
       // Reattaching replays saved output drawn at another size. Nudge the size once so full-screen programs repaint.
@@ -266,7 +409,9 @@
       if(archived)term.write('\r\n\x1b[90m[Saved output from a closed session. Open New shell to reconnect.]\x1b[0m\r\n');
       for(const event of terminalPending.get(result.id)||[])terminalEvent(event);terminalPending.delete(result.id);
     }
+    if(split)insertPane(result.id,split.dir,split.index);
     activateTerminal(result.id);if(!restoring)saveView();
+    return result.id;
   }
   function terminalEvent(event){
     if(event.type==='opened'){if(terminalViews.has(event.id)){$('#terminal-panel').hidden=false;activateTerminal(event.id);}else action(()=>openTerminal({terminalId:event.id}));return;}
@@ -329,6 +474,8 @@
     if(name==='agent-menu'){const a=state.agents.find(a=>a.id===id);if(a){const r=button.getBoundingClientRect();openMenu(r.left,r.bottom+4,agentMenu(a),title(a),button.closest('[data-agent-id]'));}return;}
     if(name==='hosts'){openHosts();return;}
     if(name==='manage'){openManage(id);return;}
+    if(name==='surface'){const a=state.agents.find(x=>x.id===id);if(a)action(()=>setSurface(a,button.dataset.surface));return;}
+    if(name==='interface'){action(()=>chooseInterface(button.dataset.value,button.closest('#interface-chooser')?'first':'settings'));return;}
     if(name==='manage-run'){const item=manageKeyed[button.dataset.key];if(item&&!item.disabled)action(()=>item.run());return;}
     if(name==='local-machine'){openLocalMachine();return;}
     if(name==='update-all'){action(updateAll);return;}
@@ -349,6 +496,7 @@
     if(name==='terminal-tab'){activateTerminal(id);saveView();return;}
     if(name==='terminal-tab-close'){action(()=>closeTerminalTab(id));return;}
     if(name==='terminal-search'){openTerminalSearch();return;}
+    if(name==='terminal-split'){action(()=>panes.filter(Boolean).length?splitTerminal('right'):openTerminal({...(selected()&&!overview?{agentId:selected().id}:{local:true})}));return;}
     action(async()=>{
       if(name==='select'||name==='switch-select'){overview=false;opayaView=false;playgroundView=false;manageId='';closeModal();await api.select({id});render();saveView();}
       else if(name==='connect-all')await connectAll();
@@ -409,13 +557,13 @@
   async function closeTerminalTab(id){
     const view=terminalViews.get(id);if(!view||view.closing)return;view.closing=true;
     // The tab goes away even if the service could not end the session (for example its agent was removed).
-    try{try{const r=await api.terminalClose({id});if(r?.warning)toast(`Tab closed. ${r.warning}`,true);}catch(error){toast(`Tab closed. ${error.message}`,true);}const ids=[...terminalViews.keys()],index=ids.indexOf(id);view.observer.disconnect();view.term.dispose();view.element.remove();terminalViews.delete(id);activateTerminal(currentTerminal===id?(ids[index+1]||ids[index-1]||''):currentTerminal);saveView();}finally{view.closing=false;}
+    try{try{const r=await api.terminalClose({id});if(r?.warning)toast(`Tab closed. ${r.warning}`,true);}catch(error){toast(`Tab closed. ${error.message}`,true);}const ids=[...terminalViews.keys()].filter(x=>x!==id&&!panes.includes(x)),at=panes.indexOf(id);view.observer.disconnect();view.term.dispose();view.element.remove();terminalViews.delete(id);if(at>=0){if(panes.length>1){panes.splice(at,1);const [size]=paneSizes.splice(at,1);paneSizes[Math.max(0,at-1)]+=size;paneFocus=Math.min(paneFocus>at?paneFocus-1:paneFocus,panes.length-1);}else panes[at]=ids.at(-1)||'';}activateTerminal(panes[paneFocus]);saveView();}finally{view.closing=false;}
   }
   $('#terminal-tabs').addEventListener('mousedown',event=>{if(event.button===1)event.preventDefault();});
   $('#terminal-tabs').addEventListener('auxclick',event=>{const tab=event.target.closest('[data-action="terminal-tab"]');if(event.button===1&&tab){event.preventDefault();action(()=>closeTerminalTab(tab.dataset.id));}});
   async function popoutTerminal(id){
     const view=terminalViews.get(id);if(!view)return;view.poppedOut=true;view.term.options.disableStdin=true;
-    try{await api.terminalPopout({id});if(currentTerminal===id)$('#terminal-panel').hidden=true;}catch(error){view.poppedOut=false;view.term.options.disableStdin=view.exited;throw error;}
+    try{await api.terminalPopout({id});if(panes.filter(x=>x&&x!==id).length)activateTerminal(panes.find(x=>x&&x!==id));else if(currentTerminal===id)$('#terminal-panel').hidden=true;}catch(error){view.poppedOut=false;view.term.options.disableStdin=view.exited;throw error;}
   }
   function renameTerminal(id){
     const view=terminalViews.get(id);if(!view)return;
@@ -434,7 +582,8 @@
     const id=a.id,index=state.agents.findIndex(x=>x.id===id),connected=a.status==='connected',cap=a.install||{};
     const source=a.clone&&state.agents.find(x=>x.id===a.clone.from);
     return {
-      open:{icon:'&#8599;',label:'Open chat',run:()=>selectAgent(id)},
+      open:{icon:'&#8599;',label:surfaceOf(a)==='terminal'?'Open terminal':'Open chat',run:()=>selectAgent(id)},
+      surface:a.protocol!=='terminal'&&hasCli(a)&&(surfaceOf(a)==='terminal'?{icon:'&#9993;',label:'Open as chat',run:()=>setSurface(a,'chat')}:{icon:'&gt;_',label:'Open as terminal',run:()=>setSurface(a,'terminal')}),
       newChat:{icon:'+',label:'New conversation',hint:`${mod()}N`,run:async()=>{await selectAgent(id);await api.newConversation({agentId:id});}},
       connect:a.busy?{icon:'&#9632;',label:'Stop current turn',run:()=>api.stop({id})}:{icon:connected?'&#9675;':'&#9679;',label:connected?'Disconnect':a.status==='connecting'?'Connecting...':'Connect',disabled:a.status==='connecting',run:()=>connected?api.disconnect({id}):api.connect({id})},
       clearError:a.error&&{icon:'!',label:'Clear connection error',run:async()=>{await api.clearError({id});await refresh();}},
@@ -472,7 +621,7 @@
   function agentMenu(a){
     const x=agentActions(a);
     return [
-      x.open,x.newChat,x.connect,x.clearError,
+      x.open,x.surface,x.newChat,x.connect,x.clearError,
       '-',
       x.manage,x.history,
       '-',
@@ -483,6 +632,27 @@
       '-',
       x.settings,x.remove
     ];
+  }
+  // ---- Chat or terminal ---------------------------------------------------------------------------------------------
+  async function setSurface(a,surface){
+    await api.updateAgentDisplay({id:a.id,surface:surface===(state.settings?.interface||'chat')?'':surface});await refresh();
+    stageAgent='';if(state.activeAgentId!==a.id)await selectAgent(a.id);else render();
+    toast(surface==='terminal'?`${title(a)} opens in its terminal.`:`${title(a)} opens as a chat.`);
+  }
+  async function chooseInterface(value,from){
+    await api.saveSettings({interface:value});await refresh();stageAgent='';
+    if(from==='first'){closeModal();toast(value==='terminal'?'Terminal first: agents open in their own CLI. Change it any time in Settings.':'Chat first: agents open as chats. Change it any time in Settings.');}
+    else openSettings();
+    render();
+  }
+  // First launch: ask once how the user likes to work. Existing workspaces are asked too, once.
+  function askInterface(){
+    if(state.settings?.interface||$('#app-dialog')||!initialized)return;
+    const card=(value,titleText,text,preview)=>`<button type="button" class="interface-option" data-action="interface" data-value="${value}"><span class="interface-preview ${value}" aria-hidden="true">${preview}</span><strong>${titleText}</strong><span>${text}</span></button>`;
+    modal('How do you like to work?','Pick one now; switch any time in Settings, or per agent from its right-click menu.',`<div id="interface-chooser" class="interface-choice">
+      ${card('chat','Chat','Conversations with every agent in one clean window: history, projects, models, files and the Opaya browser. Terminals are one click away.','<i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-bubble l short"></i><i class="ip-input"></i>')}
+      ${card('terminal','Terminal','Each agent opens in its own CLI, full size: Claude Code, Codex, Hermes and the rest exactly as in your terminal, with tabs and splits. Chat stays available per agent.','<i class="ip-line"></i><i class="ip-line w2"></i><i class="ip-line w3"></i><i class="ip-split"></i><i class="ip-cursor"></i>')}
+    </div>`,true);
   }
   // ---- Maintenance: update, back up, uninstall --------------------------------------------------------------------
   const installInfo=new Map(),backupLists=new Map();
@@ -583,6 +753,9 @@
     const view=terminalViews.get(id);if(!view)return [];
     return [
       {icon:'&#9998;',label:'Rename...',run:()=>renameTerminal(id)},
+      {icon:'&#9707;',label:'Show on the right',disabled:panes.includes(id)&&panes.length===1,run:()=>showInSplit(id,'right')},
+      {icon:'&#9706;',label:'Show on the left',disabled:panes.includes(id)&&panes.length===1,run:()=>showInSplit(id,'left')},
+      panes.length>1&&panes.includes(id)&&{icon:'&#9645;',label:'Close pane (keeps running)',run:()=>closePane(panes.indexOf(id))},
       {icon:'&#10697;',label:'Open in separate window',disabled:view.exited,run:()=>{activateTerminal(id);return popoutTerminal(id);}},
       '-',
       {icon:'&#10005;',label:view.exited?'Close saved output':'End session',danger:!view.exited,run:()=>closeTerminalTab(id)}
@@ -753,6 +926,7 @@
   const versionText=i=>`${i.installed}${i.outdated&&i.latest?` &#8594; <b>${esc(i.latest)}</b>`:''}${i.note?` <small>(${esc(i.note)})</small>`:''}`;
   function openToolUpdates(){
     const machines=toolMachines(),out=outdatedTools();
+    for(const i of out)tipsSeen.add(`upd:${i.hostId||'local'}/${i.id}/${i.latest||'git'}`);saveView();if($('#opaya-nudge')&&String(nudgeId).startsWith('upd:'))$('#opaya-nudge').remove();
     const rows=m=>(m.items||[]).map(i=>`<div class="tool-row ${i.outdated?'outdated':''}"><span class="tool-name">${esc(i.name)}${i.dependency?' <small>dependency</small>':''}</span><span class="tool-version">${versionText(i)}</span>${i.outdated?`<button type="button" class="secondary" data-action="tool-update" data-id="${esc(i.id)}" data-host="${esc(m.hostId||'')}">Update</button>`:`<span class="tool-ok">${i.latest?'Up to date':'Installed'}</span>`}</div>`).join('')||'<p class="field-help">Nothing found yet.</p>';
     modal('Updates',out.length?`${out.length} update${out.length===1?'':'s'} available`:'Everything checked is up to date',`${machines.length?machines.map(m=>`<section class="tool-machine"><h3>${esc(m.name)} <small>${m.checkedAt?`checked ${esc(new Date(m.checkedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}`:''}</small>${(m.items||[]).some(i=>i.outdated)?`<button type="button" class="primary" data-action="tool-update" data-id="outdated" data-host="${esc(m.hostId||'')}">Update all here</button>`:''}</h3>${m.error?`<p class="field-help">Could not check: ${esc(m.error)}</p>`:''}${rows(m)}</section>`).join(''):'<p class="field-help">Opaya checks this computer and every machine with an agent once an hour.</p>'}
       <div class="modal-footer"><span>Checked every hour. Change this in Settings.</span><button type="button" class="secondary" data-action="tool-check" ${state.toolUpdates?.checking?'disabled':''}>${state.toolUpdates?.checking?'Checking...':'Check now'}</button></div>`,true);
@@ -764,6 +938,7 @@
   // Notices from the service: update checks, automatic fixes, and fixes that need the user.
   api.onNotice?.(n=>{
     if(n.kind==='updates'){renderToolChip();return;}
+    if(n.kind==='surface'){stageAgent='';refresh().catch(()=>{});}
     if(n.level!=='error'){toast(n.text?`${n.title}. ${n.text}`:n.title);return;}
     document.getElementById('opaya-nudge')?.remove();
     const card=document.createElement('div');card.id='opaya-nudge';card.className='opaya-nudge urgent-notice';card.setAttribute('role','alert');
@@ -1431,8 +1606,12 @@
     if(!state.hosts.length&&state.agents.length>=2)out.push({id:'tip:vps',text:'Want an agent running around the clock? Add a new VPS: I create the SSH key and check the connection.',actions:[['New VPS',()=>openNewVps()]]});
     const browserable=state.agents.find(a=>browserCapable(a)&&!a.browser&&a.vision?.vision);if(browserable)out.push({id:'tip:browser',text:`${title(browserable)} can browse the web with you watching. Right-click it > Give Opaya browser.`,actions:[]});
     if(!(state.projects||[]).length&&state.agents.some(a=>a.cwd))out.push({id:'tip:projects',text:'Keep folders, their agents, chats and git together in Projects. Press Ctrl+Shift+P.',actions:[['Open Projects',()=>toggleProjects(true)]]});
-    const outdated=outdatedTools();
-    if(outdated.length)out.push({id:`updates:${outdated.map(i=>`${i.hostId}/${i.id}/${i.latest||i.note}`).sort().join(',')}`,urgent:true,text:`Update${outdated.length===1?'':'s'} available: ${outdated.slice(0,3).map(i=>`${i.name} ${i.installed}${i.latest?` to ${i.latest}`:''}${state.hosts.length?` on ${i.machine}`:''}`).join(', ')}${outdated.length>3?` and ${outdated.length-3} more`:''}. You should update.`,actions:[['See updates',()=>openToolUpdates()]]});
+    // Updates: each outdated tool is announced once per new version. Closing the note (or letting it fade) dismisses
+    // those versions; the note comes back only when something newer appears. Hermes counts commits behind, which grow
+    // every hour, so it is keyed without the count.
+    const updateKey=i=>`upd:${i.hostId||'local'}/${i.id}/${i.latest||'git'}`;
+    const fresh=outdatedTools().filter(i=>!tipsSeen.has(updateKey(i)));
+    if(fresh.length)out.unshift({id:updateKey(fresh[0]),keys:fresh.map(updateKey),text:`Update${fresh.length===1?'':'s'} available: ${fresh.slice(0,3).map(i=>`${i.name} ${i.installed}${i.latest?` to ${i.latest}`:''}${state.hosts.length?` on ${i.machine}`:''}`).join(', ')}${fresh.length>3?` and ${fresh.length-3} more`:''}. You should update.`,actions:[['See updates',()=>openToolUpdates()]]});
     return out.filter(n=>!tipsSeen.has(n.id));
   }
   function checkNudges(){
@@ -1441,7 +1620,7 @@
     nudgeShownAt=Date.now();nudgeId=n.id;if(n.greet)greeted=n.greet;
     const card=document.createElement('div');card.id='opaya-nudge';card.className='opaya-nudge';card.setAttribute('role','status');
     card.innerHTML=`<span class="opaya-mark small" aria-hidden="true"><img src="assets/opaya-logo.png" alt=""><i></i></span><div><strong>Opaya</strong><p>${esc(n.text)}</p>${n.actions.length?`<div class="nudge-actions">${n.actions.map((x,i)=>`<button type="button" class="text-button" data-nudge="${i}">${esc(x[0])}</button>`).join('')}</div>`:''}</div><button type="button" class="icon-button" data-nudge="close" aria-label="Dismiss">&#10005;</button>`;
-    const close=()=>{tipsSeen.add(n.id);saveView();card.classList.add('leaving');setTimeout(()=>card.remove(),220);};
+    const close=()=>{tipsSeen.add(n.id);for(const k of n.keys||[])tipsSeen.add(k);saveView();card.classList.add('leaving');setTimeout(()=>card.remove(),220);};
     card.addEventListener('click',e=>{const b=e.target.closest('[data-nudge]');if(!b)return;if(b.dataset.nudge!=='close')n.actions[Number(b.dataset.nudge)]?.[1]();close();});
     document.body.append(card);if(!n.urgent)setTimeout(()=>{if(card.isConnected)close();},30000);
   }
@@ -1716,7 +1895,9 @@
   const saveLayout=()=>saveView();
   const clampBottom=h=>Math.max(160,Math.min(window.innerHeight-200,h)),clampRight=w=>Math.max(300,Math.min(window.innerWidth-560,w));
   function placePanes(){
-    for(const name of ['terminal','browser']){const pane=$(`[data-pane="${name}"].dock-pane`),dock=$(`#dock-${layout[name]==='right'?'right':'bottom'} .dock-panes`);if(pane&&pane.parentElement!==dock)dock.append(pane);}
+    const stage=document.body.classList.contains('terminal-stage');
+    for(const name of ['terminal','browser']){const where=name==='terminal'&&stage?'bottom':layout[name];const pane=$(`[data-pane="${name}"].dock-pane`),dock=$(`#dock-${where==='right'?'right':'bottom'} .dock-panes`);if(pane&&pane.parentElement!==dock)dock.append(pane);}
+    for(const v of terminalViews.values())if(!v.element.hidden&&!v.exited)requestAnimationFrame(()=>v.core?.fitAndReport(v.report));
     syncDocks();
   }
   function syncDocks(){
@@ -1798,6 +1979,9 @@
     const initial=await api.snapshot();applyState(initial);
     for(const t of initial.terminals||[])await openTerminal({terminalId:t.id,restoring:true});
     $('#terminal-panel').hidden=!initial.view?.terminalVisible;
-    if(initial.view?.terminalId&&terminalViews.has(initial.view.terminalId))activateTerminal(initial.view.terminalId);
+    // The split as it was: panes whose sessions still exist, with their widths.
+    const saved=(initial.view?.panes||[]).map((id,i)=>[id,initial.view?.paneSizes?.[i]||1]).filter(([id])=>terminalViews.has(id));
+    if(saved.length){panes=saved.map(x=>x[0]);paneSizes=saved.map(x=>x[1]);paneFocus=Math.max(0,panes.indexOf(initial.view?.terminalId));activateTerminal(panes[paneFocus]);}
+    else if(initial.view?.terminalId&&terminalViews.has(initial.view.terminalId))activateTerminal(initial.view.terminalId);
   });
 })();

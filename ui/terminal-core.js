@@ -13,7 +13,7 @@
     black:'#1d2a23',red:'#c0392b',green:'#1f7a45',yellow:'#9a6a10',blue:'#2458b8',magenta:'#8a3fb3',cyan:'#137c8b',white:'#6b7a70',
     brightBlack:'#56695d',brightRed:'#d9534a',brightGreen:'#2b9a5a',brightYellow:'#b58318',brightBlue:'#3a6fd0',brightMagenta:'#a257c9',brightCyan:'#1a93a4',brightWhite:'#1d2a23'};
   const isMac=/Mac/.test(navigator.platform);
-  function create(element,{archived=false,windowsBuild=0,light=false,api=window.agenthub,onSearch}={}){
+  function create(element,{archived=false,windowsBuild=0,light=false,api=window.agenthub,onSearch,onContextMenu}={}){
     const options={cursorBlink:!archived,disableStdin:archived,allowProposedApi:true,
       fontFamily:'"Cascadia Mono", "Cascadia Code", "SF Mono", "SFMono-Regular", Menlo, Consolas, "DejaVu Sans Mono", monospace',
       fontSize:13,lineHeight:1.12,letterSpacing:0,scrollback:10000,smoothScrollDuration:0,minimumContrastRatio:1,
@@ -44,8 +44,9 @@
     // paste command): handled here once, with the text from the event, so the terminal never ignores or doubles it.
     element.addEventListener('paste',event=>{event.preventDefault();event.stopImmediatePropagation();if(archived)return;
       const text=event.clipboardData?.getData('text/plain');if(text)term.paste(text.slice(0,1024*1024));else paste();},true);
-    // Right click: copy the selection, or paste when nothing is selected (like Windows Terminal).
-    element.addEventListener('contextmenu',event=>{event.preventDefault();event.stopPropagation();if(!copy())paste();else term.clearSelection();});
+    // Right click: the app's menu when it has one; otherwise, and with Shift, copy the selection or paste when nothing is
+    // selected (like Windows Terminal).
+    element.addEventListener('contextmenu',event=>{event.preventDefault();event.stopPropagation();if(onContextMenu&&!event.shiftKey){onContextMenu(event);return;}if(!copy())paste();else term.clearSelection();});
     let last='';
     // Fit to the element, then tell the PTY only when the size really changed; extra resizes make TUIs redraw.
     function fitAndReport(report){
