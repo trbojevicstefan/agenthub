@@ -1,3 +1,7 @@
+# Opaya 0.12.2 - Add a VPS that has no Hermes yet
+
+- **Add a new VPS** no longer fails with "Process exited with code 1" on a server without Hermes. The connection was fine, but the last step of the check (is Hermes installed?) returned 1 and Opaya read that as a failed connection. A fresh VPS now passes: Opaya shows Docker and Hermes as "not installed" and lets you save the machine, then install Hermes from Install agents or clone an agent to it.
+
 # Opaya 0.12.1 - Models and skills for every agent
 
 - **Model selector**:

@@ -26,7 +26,8 @@ async function test(host){
   const ssh=findExecutable('ssh',environment());if(!ssh)throw new Error('OpenSSH client is not installed.');
   const args=sshArgs(host).map(a=>a==='StrictHostKeyChecking=yes'?'StrictHostKeyChecking=accept-new':a);
   try{
-    const out=await collect(spawn(ssh,[...args,'-T',target(host),'echo OPAYA_OK; uname -sm 2>/dev/null; command -v docker >/dev/null && echo docker; command -v hermes >/dev/null || [ -x "$HOME/.local/bin/hermes" ] && echo hermes'],{env:environment(),windowsHide:true,stdio:['pipe','pipe','pipe']}),{timeout:25000});
+    // The probe always exits 0: a server without Docker or Hermes is still a good connection.
+    const out=await collect(spawn(ssh,[...args,'-T',target(host),'echo OPAYA_OK; uname -sm 2>/dev/null; command -v docker >/dev/null && echo docker; if command -v hermes >/dev/null 2>&1 || [ -x "$HOME/.local/bin/hermes" ]; then echo hermes; fi; exit 0'],{env:environment(),windowsHide:true,stdio:['pipe','pipe','pipe']}),{timeout:25000});
     const lines=out.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
     if(!lines.includes('OPAYA_OK'))throw new Error('Unexpected answer from the server.');
     return {ok:true,system:lines.find(l=>l!=='OPAYA_OK'&&l!=='docker'&&l!=='hermes')||'',docker:lines.includes('docker'),hermes:lines.includes('hermes')};
