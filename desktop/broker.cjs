@@ -391,7 +391,7 @@ class Broker{
         }
         if(!emitTimer)emitTimer=setTimeout(()=>{emitTimer=null;this.changed();},40);
       };
-      const refused=()=>{const text=`${assistant.content||''} ${assistant.error||''}`;if(!CLIENT_REFUSED.test(text))return;const a=this.data.agents.find(x=>x.id===agentId);if(!a||a.surface==='terminal')return;a.surface='terminal';this.store.write(this.data).catch(()=>{});this.onClientRefused?.(a,text.trim().slice(0,400));};
+      const refused=()=>{const text=`${assistant.content||''} ${assistant.error||''}`;if(!CLIENT_REFUSED.test(text))return;const a=this.data.agents.find(x=>x.id===agentId);if(!a||a.surface==='terminal')return;a.surface='terminal';this.onClientRefused?.(a,text.trim().slice(0,400));}; // saved with the turn below
       turn.task=Promise.resolve().then(()=>{
         if(abort.signal.aborted)throw new Error('Turn cancelled before it was sent.');
         return adapter.run({text,messages:messages.filter(m=>m!==assistant),conversation:c,cwd:this.conversationCwd(c,this.agent(agentId)),signal:abort.signal,onEvent,onSession:async sessionId=>{c.externalSessionId=sessionId;await this.store.write(this.data);}});
@@ -399,10 +399,10 @@ class Broker{
         if(abort.signal.aborted){assistant.status='cancelled';assistant.error=turn.reason||'Stopped. The answer so far is kept and the agent stays connected.';}else assistant.status='done';
         if(result?.externalSessionId)c.externalSessionId=result.externalSessionId;
       }).catch(error=>{assistant.status=abort.signal.aborted?'cancelled':'error';assistant.error=abort.signal.aborted?(turn.reason||'Stopped. The answer so far is kept and the agent stays connected.'):safeError(error,token);}).finally(async()=>{
-        clearTimeout(timeout);clearTimeout(emitTimer);clearInterval(checkpoint);
+        clearTimeout(timeout);clearTimeout(emitTimer);clearInterval(checkpoint);refused();
         try{await this.store.writeTranscript(c.id,messages);await this.store.write(this.data);}catch{assistant.error='Could not save the final transcript to disk. Export it before closing.';}
         if(this.turns.get(agentId)===turn)this.turns.delete(agentId);
-        refused();finishDone();this.changed();
+        finishDone();this.changed();
       });
       this.changed();return {conversationId:c.id,messageId:assistant.id};
     }catch(error){
