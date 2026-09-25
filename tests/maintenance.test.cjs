@@ -90,6 +90,6 @@ test('this computer keeps its Opaya name, note and backup folder across restarts
   await assert.rejects(()=>b.saveSettings({machineName:'x'.repeat(61)}),/machine name/);
   await b.close();
   const again=await make();
-  assert.deepEqual({...again.data.settings},{itrustAll:false,itrustOpaya:false,machineName:'Studio Mac',machineNote:'Office',backupDir:dir});
+  assert.deepEqual({...again.data.settings},{itrustAll:false,itrustOpaya:false,machineName:'Studio Mac',machineNote:'Office',backupDir:dir,updateChecks:true,autoFix:true});
   assert.equal(m.backupDir(again.data.settings),dir);await again.close();
 });

@@ -1050,3 +1050,24 @@ body[data-theme="light"] .primary.danger-button{background:#c9533f;border-color:
 body[data-theme="light"] .backup-dest code{background:#f2f6f3;border-color:#d3ddd6}
 .maintenance-form .switch-row{margin:10px 0}
 .maintenance-form .switch-row small{color:#8a9a92}
+/* Updates: agents and tools per machine */
+.status-tools{background:#2a2414;border-color:#6b5a2a;color:#f2d98c}
+.tool-machine{margin-bottom:16px}
+.tool-machine h3{display:flex;align-items:center;gap:10px;margin:0 0 8px;font-size:13px}
+.tool-machine h3 small{font-weight:400;color:var(--faint);font-size:10px}
+.tool-machine h3 button{margin-left:auto}
+.tool-row{display:flex;align-items:center;gap:12px;padding:7px 10px;border:1px solid #2a352f;border-radius:8px;margin-bottom:5px;font-size:12px}
+.tool-row.outdated{border-color:#6b5a2a;background:#231f14}
+.tool-name{flex:1;min-width:0}
+.tool-name small{color:var(--faint);font-size:10px;margin-left:4px}
+.tool-version{font-family:"Cascadia Code","SFMono-Regular",Consolas,monospace;font-size:11px;color:#a9b7ae}
+.tool-version b{color:#f2d98c}
+.tool-ok{font-size:10.5px;color:#7fcf9f;min-width:70px;text-align:right}
+.install-card-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:auto}
+.install-state{font-size:11px;color:#7fcf9f}
+.opaya-nudge .notice-error{white-space:pre-wrap;max-height:180px;overflow:auto;font-size:11px}
+body[data-theme="light"] .status-tools{background:#fbf3dc;border-color:#e3cf8f;color:#7a5a00}
+body[data-theme="light"] .tool-row{border-color:#d9e2da}
+body[data-theme="light"] .tool-row.outdated{background:#fdf7e6;border-color:#ecd89b}
+body[data-theme="light"] .tool-version b{color:#8a6400}
+body[data-theme="light"] :is(.tool-ok,.install-state){color:#1f7a47}

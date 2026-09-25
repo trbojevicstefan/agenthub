@@ -23,7 +23,7 @@ async function service(){
 }
 function text(value){
   const {image,...rest}=value||{};const lines=[`URL: ${rest.url||''}`,`Title: ${rest.title||''}`];
-  if(rest.error)lines.push(`Error: ${rest.error}`);if(rest.clicked)lines.push(`Clicked: ${rest.clicked}`);if(rest.typed)lines.push('Typed.');
+  if(rest.error)lines.push(`Error: ${rest.error}`);if(rest.dialog)lines.push(rest.dialog);if(rest.clicked)lines.push(`Clicked: ${rest.clicked}`);if(rest.typed)lines.push('Typed.');
   if(rest.text)lines.push('',rest.text);
   if(rest.inputs?.length)lines.push('','Form fields:',...rest.inputs.map(i=>`- ${i.tag}${i.type?`[${i.type}]`:''}${i.id?` #${i.id}`:''}${i.name?` name=${i.name}`:''} ${i.label}`));
   if(rest.links?.length)lines.push('','Links:',...rest.links.map(l=>`- ${l.text}: ${l.href}`));

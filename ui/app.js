@@ -88,7 +88,7 @@
     if(opayaView)renderOpaya();else if(playgroundView)renderPlayground();else if(overview||!a)renderOverview();else if(manageId)renderManage(a);else renderAgent(a);
     $('#status-left').textContent=playgroundView?'Playground / ask two agents the same question':opayaView?'Opaya Agent / installs, connects and troubleshoots your agents':a&&!overview?`${labels[a.provider]} / ${a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase()} / ${location(a)}`:'One place. All your agents.';
     $('#status-right').textContent=state.agents.some(a=>a.busy)?`${state.agents.filter(a=>a.busy).length} agent working`:(state.service?.persistent?'Sessions protected / safe to close window':'Local workspace / no cloud account');
-    updateTurnWatch();
+    updateTurnWatch();renderToolChip();
     if(lastSelected!==state.activeAgentId){lastSelected=state.activeAgentId;if(!$('#terminal-panel').hidden){const match=[...terminalViews.values()].find(v=>v.agentId===state.activeAgentId&&!v.exited);activateTerminal(match?.id||'');}}
   }
   function renderOverview() {
@@ -155,7 +155,7 @@
       const fresh=items.map((a,i)=>({a,i})).filter(x=>!x.a.existingId),added=items.map((a,i)=>({a,i})).filter(x=>x.a.existingId);
       // Frameworks from the catalog that were not found on this machine.
       const found=new Set(items.flatMap(a=>[a.provider,String(a.command||'').split(/[\\/]/).pop().replace(/\.(exe|cmd)$/i,'')]));
-      const missing=(state.frameworks||[]).filter(f=>f.kind==='agent'&&!f.runtime&&(host?f.remote:f.local)&&!found.has(f.provider==='custom'?f.command:f.provider)&&!found.has(f.id));
+      const missing=(state.frameworks||[]).filter(f=>f.kind==='agent'&&!f.runtime&&(host?f.remote:f.local)&&!found.has(f.provider==='custom'?f.command:f.provider)&&!found.has(f.id)&&!toolFor(host?.id,f.id));
       const row=({a,i})=>`<div class="discovery-row">${badge(a)}<div><strong>${esc(a.name)}</strong><p>${esc(a.detail)}</p><div class="discovery-meta">${meta(a)}</div><code>${esc(a.hermesHome||a.endpoint||a.command)}</code></div><span class="discovery-state">${esc(a.readiness)}</span><button class="${a.existingId?'subtle':'primary'}" data-action="discovered-add" data-index="${i}">${a.existingId?'Open':'Add'}</button></div>`;
       modal('Discover agents',result.scope||(host?`Agents on ${host.name}`:'Agents on this computer'),`${tabs}
         <section class="discover-group"><h3><span class="discover-dot new"></span>Found, not in Opaya yet <small>${fresh.length}</small></h3>${fresh.length?`<div class="discovery-results">${fresh.map(row).join('')}</div>`:`<p class="field-help">${added.length?'Every agent found here is already in Opaya.':'No agents found in the standard locations. Your agent may be in a custom folder, a container or WSL: add it manually.'}</p>`}</section>
@@ -226,7 +226,7 @@
   }
   function openSettings(){
     const localCount=state.agents.filter(a=>a.transport!=='ssh').length,remoteCount=state.agents.filter(a=>a.transport==='ssh').length,dockerCount=state.agents.filter(isDocker).length;
-    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section class="itrust-settings"><h3>iTrust mode</h3><p class="settings-copy">Approve tool requests automatically: commands, file edits and other actions agents ask permission for. Works for Hermes and other ACP agents, Codex and Claude Code. Turn it on only for agents you trust with this computer.</p><label class="switch-row"><input type="checkbox" data-setting="itrustAll" ${state.settings?.itrustAll?'checked':''}><span class="switch" aria-hidden="true"></span><span>All agents</span></label><label class="switch-row"><input type="checkbox" data-setting="itrustOpaya" ${state.settings?.itrustOpaya?'checked':''}><span class="switch" aria-hidden="true"></span><span>Opaya Agent <small>(removals still ask)</small></span></label><p class="field-help">Per agent: right-click an agent &gt; Turn on iTrust.</p></section><section><h3>Updates</h3><p class="settings-copy">Installed: Opaya ${esc(update.current||'')}. ${update.status==='available'?`Version ${esc(update.latest?.version||'')} is ready to download.`:'Opaya checks GitHub for new versions.'}</p><button class="secondary" data-action="updates">${update.status==='available'?'Update now':'Check for updates'}</button></section><section><h3>Skills library</h3><p class="settings-copy">Global skills kept by Opaya. Install them to any agent, local or on a VPS.</p><button class="secondary" data-action="library">Open skills library</button></section><section><h3>MCP servers</h3><p class="settings-copy">${(state.mcpServers||[]).length} saved. Tools such as GitHub, a browser or a database that Opaya passes to Hermes (ACP) and Claude Code.</p><button class="secondary" data-action="mcp-manage">Manage MCP servers</button></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
+    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section class="itrust-settings"><h3>iTrust mode</h3><p class="settings-copy">Approve tool requests automatically: commands, file edits and other actions agents ask permission for. Works for Hermes and other ACP agents, Codex and Claude Code. Turn it on only for agents you trust with this computer.</p><label class="switch-row"><input type="checkbox" data-setting="itrustAll" ${state.settings?.itrustAll?'checked':''}><span class="switch" aria-hidden="true"></span><span>All agents</span></label><label class="switch-row"><input type="checkbox" data-setting="itrustOpaya" ${state.settings?.itrustOpaya?'checked':''}><span class="switch" aria-hidden="true"></span><span>Opaya Agent <small>(removals still ask)</small></span></label><p class="field-help">Per agent: right-click an agent &gt; Turn on iTrust.</p></section><section><h3>Updates</h3><p class="settings-copy">Installed: Opaya ${esc(update.current||'')}. ${update.status==='available'?`Version ${esc(update.latest?.version||'')} is ready to download.`:'Opaya checks GitHub for new versions.'}</p><button class="secondary" data-action="updates">${update.status==='available'?'Update now':'Check for updates'}</button></section><section><h3>Agents and tools</h3><p class="settings-copy">Opaya checks your agents, CLIs and tools such as Node.js and Python on every machine once an hour and tells you when an update is out.</p><label class="switch-row"><input type="checkbox" data-setting="updateChecks" ${state.settings?.updateChecks!==false?'checked':''}><span class="switch" aria-hidden="true"></span><span>Check for updates every hour</span></label><label class="switch-row"><input type="checkbox" data-setting="autoFix" ${state.settings?.autoFix!==false?'checked':''}><span class="switch" aria-hidden="true"></span><span>Fix "version too old" errors automatically <small>(update, reconnect, then ask the Opaya Agent)</small></span></label><button class="secondary" data-action="tool-updates">See updates</button></section><section><h3>Skills library</h3><p class="settings-copy">Global skills kept by Opaya. Install them to any agent, local or on a VPS.</p><button class="secondary" data-action="library">Open skills library</button></section><section><h3>MCP servers</h3><p class="settings-copy">${(state.mcpServers||[]).length} saved. Tools such as GitHub, a browser or a database that Opaya passes to Hermes (ACP) and Claude Code.</p><button class="secondary" data-action="mcp-manage">Manage MCP servers</button></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
   }
   function switcher(){
     modal('Jump to an agent.','Search by name, provider or machine.',`<input id="switcher-search" class="switcher-search" placeholder="Search agents..." aria-label="Search agents"><div id="switcher-list"></div>`);
@@ -288,6 +288,9 @@
     if(name==='diagnostics'){openDiagnostics(id);return;}
     if(name==='skills'){openSkills(id);return;}
     if(name==='updates'){openUpdates();return;}
+    if(name==='tool-updates'){openToolUpdates();return;}
+    if(name==='tool-check'){action(async()=>{button.disabled=true;button.textContent='Checking...';await api.toolCheckAll();await refresh();openToolUpdates();});return;}
+    if(name==='tool-update'){action(async()=>{const n=await api.toolUpdate({id,hostId:button.dataset.host||undefined});if(n){closeModal();toast(`${n===1?'Update':`${n} updates`} running in the terminal below. Opaya checks the versions again when ${n===1?'it finishes':'they finish'}.`);}});return;}
     if(name==='dock-move'){moveDock(button.dataset.pane);return;}
     if(name==='new-vps'){openNewVps();return;}
     if(name==='job-restore'){const running=[...jobs.values()].filter(j=>j.status==='running');if(!jobs.has(jobShown))jobShown=(running[0]||[...jobs.values()].at(-1))?.id||'';jobMinimized=false;renderJobs();return;}
@@ -315,6 +318,7 @@
     if(name==='opaya-starter'){const input=$('#message-input');if(input){input.value=button.dataset.text;opayaDraft=input.value;sendOpaya();}return;}
     if(name==='install-catalog'){openInstall(button.dataset.host||'');return;}
     if(name==='install-target'){openInstall(id||'');return;}
+    if(name==='install-recheck'){action(async()=>{button.disabled=true;button.textContent='Checking...';await api.toolVersions({hostId:button.dataset.host||undefined,force:true});await refresh();openInstall(button.dataset.host||'',true);});return;}
     if(name==='install-framework'){confirmInstall(id,button.dataset.host||'');return;}
     if(name==='icon-picker'){const a=state.agents.find(a=>a.id===id);if(a)openIconPicker(a);return;}
     if(name==='overview'){overview=true;opayaView=false;playgroundView=false;render();saveView();return;}
@@ -443,7 +447,12 @@
       skills:{icon:'&#10022;',label:'Skills, tools & MCP...',run:()=>openSkills(id)},
       transfer:{icon:'&#8644;',label:'Transfer to another agent...',disabled:state.agents.length<2,run:()=>openTransfer(a)},
       itrust:{icon:'&#9888;',label:a.itrust?'Turn off iTrust':'Turn on iTrust...',run:()=>toggleAgentTrust(a)},
-      browser:{icon:'&#9711;',label:a.browser?'Take away Opaya browser':'Give Opaya browser',disabled:!browserCapable(a),hint:browserCapable(a)?'':'local only',run:async()=>{await api.updateAgentDisplay({id,browser:!a.browser});await refresh();toast(a.browser?`${title(a)} no longer has the Opaya browser.`:`${title(a)} can use the Opaya browser from its next conversation.`);}},
+      // The browser needs a model that can see images; text-only models (DeepSeek, Qwen3, gpt-oss...) do not get it.
+      browser:{icon:'&#9711;',label:a.browser?'Take away Opaya browser':'Give Opaya browser',disabled:!a.browser&&(!browserCapable(a)||a.vision?.vision===false),hint:!browserCapable(a)?'local only':a.vision?.vision===false?'no vision':a.vision?.vision?'':'model unknown',run:async()=>{
+        await api.updateAgentDisplay({id,browser:!a.browser});await refresh();
+        if(a.browser)toast(`${title(a)} no longer has the Opaya browser.`);
+        else if(a.vision?.vision)toast(`${title(a)} can use the Opaya browser from its next conversation. ${a.vision.reason}`);
+        else toast(`${title(a)} has the Opaya browser from its next conversation. ${a.vision?.reason||''} It works only with models that can see images: ${state.visionModels||'Claude, GPT-4o and later, Gemini'}.`,true);}},
       pin:{icon:a.pinned?'&#9734;':'&#9733;',label:a.pinned?'Unpin':'Pin to top',run:async()=>{await api.updateAgentDisplay({id,pinned:!a.pinned});toast(a.pinned?`${title(a)} unpinned.`:`${title(a)} pinned to the top.`);}},
       rename:{icon:'&#9998;',label:'Rename...',run:()=>renameAgent(a)},
       icon:{icon:'&#9680;',label:'Change icon...',run:()=>openIconPicker(a)},
@@ -552,6 +561,7 @@
         <div><small>Connection</small><strong>${esc(labels[a.provider]||a.provider)} / ${esc(a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase())}</strong><span>${esc(a.model||'Agent\'s own model')}${a.agentVersion?` / ${esc(a.agentVersion)}`:''}</span></div>
         <div><small>Data</small><strong>${esc(info&&info!=='loading'&&info.data?info.data:'--')}</strong><span>${backs?.backups?.length?`${backs.backups.length} backup${backs.backups.length===1?'':'s'}, last ${esc(whenText(backs.backups[0].createdAt))}`:'No local backups'}</span></div>
       </div>
+      ${browserCapable(a)?`<p class="field-help manage-shared">Opaya browser: ${a.vision?.vision===false?'not available. ':a.vision?.vision?'works. ':'maybe. '}${esc(a.vision?.reason||'')}${a.vision?.vision?'':` Works with models that can see images: ${esc(state.visionModels||'')}.`}</p>`:''}
       ${shared.length?`<p class="field-help manage-shared">Shares its ${esc(cap.label)} installation with ${esc(shared.map(title).join(', '))}: updating or uninstalling it affects them too.</p>`:''}
       <div class="manage-grid">
         ${card('Conversations','Chat, history and the projects this agent works in.',['open','newChat','history','projects'])}
@@ -584,6 +594,7 @@
       {icon:'&#10038;',label:'Ask the Opaya Agent',run:()=>{overview=false;opayaView=true;render();saveView();}},
       {icon:'&#9678;',label:'Discover agents',run:()=>discover()},
       {icon:'&#8595;',label:'Install agents...',run:()=>openInstall()},
+      {icon:'&#8679;',label:'Check for updates...',run:()=>openToolUpdates()},
       {icon:'&#8635;',label:'Update all agents...',disabled:!state.agents.some(a=>a.install?.update),run:()=>updateAll()},
       {icon:'+',label:'Add connection...',run:()=>openAdd()},
       {icon:'&#9635;',label:'Machines...',run:()=>openHosts()},
@@ -610,7 +621,9 @@
     window.removeEventListener('blur',dismiss);window.removeEventListener('resize',dismiss);document.removeEventListener('pointerdown',outside,true);document.removeEventListener('scroll',dismiss,true);
     if(restore)previous?.focus?.();
   }
-  const dismiss=event=>{if(event?.type==='scroll'&&event.target instanceof Element&&event.target.closest('.context-menu'))return;closeMenu();},outside=event=>{if(menu&&!menu.element.contains(event.target)&&!menu.child?.element.contains(event.target))closeMenu();};
+  // A scroll closes the menu only when it moves what the menu is attached to: the page, or a panel holding the item
+  // that was right-clicked. Other panels scrolling (a job log, a streaming chat) leave it open.
+  const dismiss=event=>{if(event?.type==='scroll'&&event.target instanceof Element){if(event.target.closest('.context-menu'))return;if(!menu?.owner||!event.target.contains(menu.owner))return;}closeMenu();},outside=event=>{if(menu&&!menu.element.contains(event.target)&&!menu.child?.element.contains(event.target))closeMenu();};
   function buildMenu(list,label){
     const element=document.createElement('div');element.className='context-menu';element.setAttribute('role','menu');if(label)element.setAttribute('aria-label',label);
     element.innerHTML=list.map((item,i)=>item==='-'?'<div class="context-menu-separator" role="separator"></div>':`<button type="button" role="menuitem" data-menu-index="${i}" class="${item.danger?'danger':''} ${item.submenu?'has-submenu':''}" ${item.disabled?'disabled':''} ${item.submenu?'aria-haspopup="menu" aria-expanded="false"':''} style="--i:${i}"><span class="context-menu-icon" aria-hidden="true">${item.icon||''}</span><span class="context-menu-text">${esc(item.label)}</span>${item.hint?`<kbd>${esc(item.hint)}</kbd>`:''}${item.submenu?'<span class="context-menu-chevron" aria-hidden="true">&#8250;</span>':''}</button>`).join('');
@@ -732,13 +745,57 @@
     $('#opaya-test').onclick=()=>action(async()=>{const out=$('#opaya-test-result');out.textContent='Testing...';try{const selected=form.elements.model.value,r=await api.opayaTest(values());out.textContent=r.message;fillModels(r.models,selected); }catch(e){out.textContent=e.message;}});
     form.addEventListener('submit',event=>{event.preventDefault();action(async()=>{await api.opayaSaveConfig(values());closeModal();opayaView=true;overview=false;render();saveView();toast('Opaya Agent is ready.');});});
   }
+  // ---- Update checks: installed agents and tools per machine, with newer versions -----------------------------------
+  const toolMachines=()=>Object.entries(state.toolUpdates?.machines||{}).map(([key,m])=>({key,...m})).sort((a,b)=>a.key==='local'?-1:b.key==='local'?1:a.name.localeCompare(b.name));
+  const outdatedTools=()=>toolMachines().flatMap(m=>(m.items||[]).filter(i=>i.outdated).map(i=>({...i,machine:m.name,hostId:m.hostId})));
+  const toolFor=(hostId,id)=>(state.toolUpdates?.machines?.[hostId||'local']?.items||[]).find(i=>i.id===id);
+  const versionText=i=>`${i.installed}${i.outdated&&i.latest?` &#8594; <b>${esc(i.latest)}</b>`:''}${i.note?` <small>(${esc(i.note)})</small>`:''}`;
+  function openToolUpdates(){
+    const machines=toolMachines(),out=outdatedTools();
+    const rows=m=>(m.items||[]).map(i=>`<div class="tool-row ${i.outdated?'outdated':''}"><span class="tool-name">${esc(i.name)}${i.dependency?' <small>dependency</small>':''}</span><span class="tool-version">${versionText(i)}</span>${i.outdated?`<button type="button" class="secondary" data-action="tool-update" data-id="${esc(i.id)}" data-host="${esc(m.hostId||'')}">Update</button>`:`<span class="tool-ok">${i.latest?'Up to date':'Installed'}</span>`}</div>`).join('')||'<p class="field-help">Nothing found yet.</p>';
+    modal('Updates',out.length?`${out.length} update${out.length===1?'':'s'} available`:'Everything checked is up to date',`${machines.length?machines.map(m=>`<section class="tool-machine"><h3>${esc(m.name)} <small>${m.checkedAt?`checked ${esc(new Date(m.checkedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}`:''}</small>${(m.items||[]).some(i=>i.outdated)?`<button type="button" class="primary" data-action="tool-update" data-id="outdated" data-host="${esc(m.hostId||'')}">Update all here</button>`:''}</h3>${m.error?`<p class="field-help">Could not check: ${esc(m.error)}</p>`:''}${rows(m)}</section>`).join(''):'<p class="field-help">Opaya checks this computer and every machine with an agent once an hour.</p>'}
+      <div class="modal-footer"><span>Checked every hour. Change this in Settings.</span><button type="button" class="secondary" data-action="tool-check" ${state.toolUpdates?.checking?'disabled':''}>${state.toolUpdates?.checking?'Checking...':'Check now'}</button></div>`,true);
+  }
+  function renderToolChip(){
+    const chip=$('#status-tools');if(!chip)return;const n=outdatedTools().length;
+    chip.hidden=!n;if(n)chip.textContent=`${n} update${n===1?'':'s'} available`;
+  }
+  // Notices from the service: update checks, automatic fixes, and fixes that need the user.
+  api.onNotice?.(n=>{
+    if(n.kind==='updates'){renderToolChip();return;}
+    if(n.level!=='error'){toast(n.text?`${n.title}. ${n.text}`:n.title);return;}
+    document.getElementById('opaya-nudge')?.remove();
+    const card=document.createElement('div');card.id='opaya-nudge';card.className='opaya-nudge urgent-notice';card.setAttribute('role','alert');
+    card.innerHTML=`<span class="opaya-mark small" aria-hidden="true"><img src="assets/opaya-logo.png" alt=""><i></i></span><div><strong>${esc(n.title)}</strong><p class="notice-error">${esc(n.text)}</p><div class="nudge-actions"><button type="button" class="text-button" data-notice="copy">Copy error</button>${n.agentId?'<button type="button" class="text-button" data-notice="log">Connection log</button>':''}<button type="button" class="text-button" data-notice="opaya">Opaya Agent</button><button type="button" class="text-button" data-notice="close">Close</button></div></div>`;
+    card.addEventListener('click',e=>{const b=e.target.closest('[data-notice]');if(!b)return;const act=b.dataset.notice;
+      if(act==='copy'){action(()=>api.clipboardWrite({text:`${n.title}\n\n${n.text}`}));toast('Error copied.');return;}
+      if(act==='log')openDiagnostics(n.agentId);
+      if(act==='opaya'){overview=false;playgroundView=false;opayaView=true;render();saveView();}
+      card.classList.add('leaving');setTimeout(()=>card.remove(),220);});
+    document.body.append(card);
+  });
   // ---- Install catalog ----------------------------------------------------------------------------------------
-  function openInstall(hostId=''){
+  function openInstall(hostId='',fetched=false){
     const all=state.frameworks||[],host=state.hosts.find(h=>h.id===hostId);
+    // What is already installed there decides the button: Install, Update, or installed and up to date.
+    if(!fetched)api.toolVersions({hostId:hostId||undefined}).then(async()=>{await refresh();if($('#install-grid-root')?.dataset.host===(hostId||''))openInstall(hostId,true);}).catch(()=>{});
+    const checked=!!state.toolUpdates?.machines?.[hostId||'local']?.checkedAt;
+    const essentials=['node','python','git','uv',...(state.platform==='win32'&&!host?[]:['tmux'])];
+    const actionFor=(f,ok)=>{
+      if(!ok)return `<button class="subtle" disabled title="Not available for this system.">Not on this system</button>`;
+      if(f.kind==='bundle'){
+        const missing=essentials.filter(id=>!toolFor(hostId,id)),old=essentials.map(id=>toolFor(hostId,id)).filter(i=>i?.outdated);
+        if(checked&&!missing.length)return old.length?`<button class="primary" data-action="tool-update" data-id="outdated" data-host="${esc(hostId)}">Update ${old.length}</button>`:'<span class="install-state">All installed</span>';
+        return `<button class="primary" data-action="install-framework" data-id="${esc(f.id)}" data-host="${esc(hostId)}">${checked?`Install ${missing.length} missing`:'Install'}</button>`;
+      }
+      const v=toolFor(hostId,f.id);
+      if(v)return v.outdated?`<button class="primary" data-action="tool-update" data-id="${esc(f.id)}" data-host="${esc(hostId)}" title="${esc(`${v.installed} installed`)}">Update to ${esc(v.latest||'latest')}</button>`:`<span class="install-state" title="${v.latest?'The newest version':'Installed'}">Installed ${esc(v.installed)}</span><button class="subtle" data-action="install-recheck" data-host="${esc(hostId)}">Check for update</button>`;
+      return `<button class="${f.kind==='bundle'?'primary':'secondary'}" data-action="install-framework" data-id="${esc(f.id)}" data-host="${esc(hostId)}">Install</button>`;
+    };
     const card=f=>{const ok=host?f.remote:f.local;const logo=f.icon&&ICONS[f.icon]?iconImg(ICONS[f.icon][1]):f.kind==='dependency'||f.kind==='bundle'?`<span class="dep-glyph">${esc(f.kind==='bundle'?'✦':f.name.slice(0,2))}</span>`:'<span class="mark custom-mark"><i></i></span>';
-      return `<article class="install-card ${ok?'':'unavailable'} ${f.kind}"><div class="install-card-top"><span class="agent-avatar large ${esc(f.provider)} ${f.icon?'':'no-logo'}">${logo}</span><div><h3>${esc(f.name)}</h3>${f.requires?`<small>Requires ${esc(f.requires)}</small>`:f.runtime?'<small>Model runtime</small>':f.kind==='dependency'?'<small>Dependency</small>':''}</div></div><p>${esc(f.description)}</p><button class="${ok?(f.kind==='bundle'?'primary':'secondary'):'subtle'}" data-action="install-framework" data-id="${esc(f.id)}" data-host="${esc(hostId)}" ${ok?'':'disabled title="Not available for this system."'}>${ok?'Install':'Not on this system'}</button></article>`;};
+      return `<article class="install-card ${ok?'':'unavailable'} ${f.kind}"><div class="install-card-top"><span class="agent-avatar large ${esc(f.provider)} ${f.icon?'':'no-logo'}">${logo}</span><div><h3>${esc(f.name)}</h3>${f.requires?`<small>Requires ${esc(f.requires)}</small>`:f.runtime?'<small>Model runtime</small>':f.kind==='dependency'?'<small>Dependency</small>':''}</div></div><p>${esc(f.description)}</p><div class="install-card-actions">${actionFor(f,ok)}</div></article>`;};
     const section=(label,items,note='')=>items.length?`<h3 class="install-section">${label}${note?`<small>${note}</small>`:''}</h3><div class="install-grid">${items.map(card).join('')}</div>`:'';
-    modal('Install an agent.',host?`Installs on ${host.name} over SSH, in a visible terminal.`:'Installs on this computer, in a visible terminal. You see the exact command first.',`<div class="install-target"><span>Install on</span><button class="target-chip ${host?'':'selected'}" data-action="install-target" data-id="">This computer</button>${state.hosts.map(h=>`<button class="target-chip ${h.id===hostId?'selected':''}" data-action="install-target" data-id="${esc(h.id)}">${esc(h.name)}</button>`).join('')}<button class="target-chip add" data-action="hosts">+ Machine</button></div>${section('Start here',all.filter(f=>f.kind==='bundle'),'Installs only what is missing')}${section('Agents',all.filter(f=>f.kind==='agent'))}${section('Dependencies',all.filter(f=>f.kind==='dependency'),'Each one skips itself when already installed')}<div class="modal-note"><span class="status-dot connected"></span> After an install, run Discover to add the agent, or ask the Opaya Agent to check prerequisites and do it for you.</div>`,true);
+    modal('Install an agent.',host?`Installs on ${host.name} over SSH, in a visible terminal.`:'Installs on this computer, in a visible terminal. You see the exact command first.',`<div class="install-target"><span>Install on</span><button class="target-chip ${host?'':'selected'}" data-action="install-target" data-id="">This computer</button>${state.hosts.map(h=>`<button class="target-chip ${h.id===hostId?'selected':''}" data-action="install-target" data-id="${esc(h.id)}">${esc(h.name)}</button>`).join('')}<button class="target-chip add" data-action="hosts">+ Machine</button></div>${section('Start here',all.filter(f=>f.kind==='bundle'),'Installs only what is missing')}${section('Agents',all.filter(f=>f.kind==='agent'))}${section('Dependencies',all.filter(f=>f.kind==='dependency'),'Each one skips itself when already installed')}<div class="modal-note" id="install-grid-root" data-host="${esc(hostId)}"><span class="status-dot ${checked?'connected':'working'}"></span> ${checked?'Installed tools show their version; update them here.':'Checking what is installed...'} After an install, run Discover to add the agent, or ask the Opaya Agent to do it for you.</div>`,true);
   }
   function confirmInstall(id,hostId){
     const f=(state.frameworks||[]).find(f=>f.id===id),host=state.hosts.find(h=>h.id===hostId);if(!f)return;
@@ -1353,8 +1410,10 @@
     if(greeted!==today&&state.agents.length){const on=state.agents.filter(a=>a.status==='connected').length;out.push({id:`greet:${today}`,greet:today,text:`${hour<12?'Good morning':hour<18?'Good afternoon':'Good evening'}! ${state.agents.length} agent${state.agents.length===1?'':'s'} here, ${on} connected.${state.hosts.length?` ${state.hosts.length} machine${state.hosts.length===1?'':'s'} ready.`:''}`,actions:on<state.agents.length?[['Connect all',()=>action(()=>connectAll())]]:[]});}
     if(state.hosts.length>=1&&state.agents.some(a=>a.provider==='hermes')&&!state.agents.some(a=>a.clone))out.push({id:'tip:clone',text:`You have ${state.hosts.length} machine${state.hosts.length===1?'':'s'}. Right-click a Hermes agent > Clone to copy it to a VPS, as a profile or a Docker container.`,actions:[]});
     if(!state.hosts.length&&state.agents.length>=2)out.push({id:'tip:vps',text:'Want an agent running around the clock? Add a new VPS: I create the SSH key and check the connection.',actions:[['New VPS',()=>openNewVps()]]});
-    const browserable=state.agents.find(a=>browserCapable(a)&&!a.browser);if(browserable)out.push({id:'tip:browser',text:`${title(browserable)} can browse the web with you watching. Right-click it > Give Opaya browser.`,actions:[]});
+    const browserable=state.agents.find(a=>browserCapable(a)&&!a.browser&&a.vision?.vision);if(browserable)out.push({id:'tip:browser',text:`${title(browserable)} can browse the web with you watching. Right-click it > Give Opaya browser.`,actions:[]});
     if(!(state.projects||[]).length&&state.agents.some(a=>a.cwd))out.push({id:'tip:projects',text:'Keep folders, their agents, chats and git together in Projects. Press Ctrl+Shift+P.',actions:[['Open Projects',()=>toggleProjects(true)]]});
+    const outdated=outdatedTools();
+    if(outdated.length)out.push({id:`updates:${outdated.map(i=>`${i.hostId}/${i.id}/${i.latest||i.note}`).sort().join(',')}`,urgent:true,text:`Update${outdated.length===1?'':'s'} available: ${outdated.slice(0,3).map(i=>`${i.name} ${i.installed}${i.latest?` to ${i.latest}`:''}${state.hosts.length?` on ${i.machine}`:''}`).join(', ')}${outdated.length>3?` and ${outdated.length-3} more`:''}. You should update.`,actions:[['See updates',()=>openToolUpdates()]]});
     return out.filter(n=>!tipsSeen.has(n.id));
   }
   function checkNudges(){
@@ -1414,14 +1473,39 @@
     const pct=jobPercent(j),rate=j.status==='running'?trackRate(j):0,eta=rate>0&&j.total?(j.total-j.bytes)/rate:NaN,elapsed=((j.finishedAt||Date.now())-j.startedAt)/1000;
     const copying=j.steps.find(s=>s.key==='copy'||s.key==='download')?.state==='active',r=j.route||{};
     const icon=s=>({done:'<span class="job-step-icon done">&#10003;</span>',active:'<span class="job-step-icon active"></span>',error:'<span class="job-step-icon error">&#10005;</span>',warn:'<span class="job-step-icon warn">!</span>',skipped:'<span class="job-step-icon skipped">&#8211;</span>'}[s]||'<span class="job-step-icon"></span>');
-    const html=`<header class="job-head"><div class="job-title"><strong>${esc(j.title)}</strong><small>${esc(j.detail||'')}</small></div><button type="button" class="icon-button" data-job="min" title="Minimize" aria-label="Minimize">&#8211;</button><button type="button" class="icon-button" data-job="close" title="${j.status==='running'?'Hide (keeps running)':'Close'}" aria-label="Close">&#10005;</button></header>
-      <div class="job-route ${j.status}"><div class="job-node"><span class="job-node-icon">${badge({provider:r.provider||'hermes'})}</span><strong>${esc(r.from||'')}</strong><small>${esc(r.fromWhere||'')}</small></div><div class="job-wire ${copying?'flowing':''}"><i></i><i></i><i></i><i></i></div><div class="job-node"><span class="job-node-icon target"><span class="machine-icon"></span></span><strong>${esc(r.to||'')}</strong><small>${esc(r.toWhere||'')}</small></div></div>
-      <div class="job-progress"><div class="job-percent"><span>${pct}<small>%</small></span><em>${j.status==='done'?'Complete':j.status==='error'?'Stopped':copying?`${fmtBytes(j.bytes)} of ${fmtBytes(j.total)}`:esc(j.steps.find(s=>s.state==='active')?.label||'Working')}</em></div><div class="job-bar ${j.status}"><span style="width:${pct}%"></span></div>
-        <div class="job-stats"><span>Speed <b>${copying&&rate>0?fmtBytes(rate)+'/s':'--'}</b></span><span>Left <b>${copying?fmtTime(eta):'--'}</b></span><span>Elapsed <b>${fmtTime(elapsed)}</b></span></div></div>
-      <ol class="job-steps">${j.steps.map(s=>`<li class="${s.state}">${icon(s.state)}<span>${esc(s.label)}</span></li>`).join('')}</ol>
-      <div class="job-log" id="job-log">${j.log.slice(-120).map(l=>`<p class="${esc(l.state||'')}"><time>${new Date(l.at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</time>${esc(l.text)}</p>`).join('')}</div>
-      ${j.status!=='running'?`<footer class="job-foot">${j.status==='error'?`<p class="job-error">${esc(j.error)}</p>${/Hermes is not installed/.test(j.error)?'<button type="button" class="secondary" data-job="install">Install Hermes there</button>':''}`:''}<button type="button" class="text-button" data-job="copy">Copy log</button>${j.status==='done'&&j.result?.agent?`<button type="button" class="primary" data-job="open">Open ${esc(j.result.agent.name)}</button>`:''}${j.status==='done'&&j.result?.file?'<button type="button" class="secondary" data-job="reveal">Show in folder</button>':''}<button type="button" class="secondary" data-job="close">Close</button></footer>`:''}`;
-    if(win.dataset.html!==html){const log=$('#job-log',win),atBottom=!log||log.scrollHeight-log.scrollTop-log.clientHeight<30;win.innerHTML=html;win.dataset.html=html;win.classList.toggle('finished',j.status!=='running');const nl=$('#job-log',win);if(nl&&atBottom)nl.scrollTop=nl.scrollHeight;}
+    const head=`<div class="job-title"><strong>${esc(j.title)}</strong><small>${esc(j.detail||'')}</small></div><button type="button" class="icon-button" data-job="min" title="Minimize" aria-label="Minimize">&#8211;</button><button type="button" class="icon-button" data-job="close" title="${j.status==='running'?'Hide (keeps running)':'Close'}" aria-label="Close">&#10005;</button>`;
+    const route=`<div class="job-node"><span class="job-node-icon">${badge({provider:r.provider||'hermes'})}</span><strong>${esc(r.from||'')}</strong><small>${esc(r.fromWhere||'')}</small></div><div class="job-wire ${copying?'flowing':''}"><i></i><i></i><i></i><i></i></div><div class="job-node"><span class="job-node-icon target"><span class="machine-icon"></span></span><strong>${esc(r.to||'')}</strong><small>${esc(r.toWhere||'')}</small></div>`;
+    const status=j.status==='done'?'Complete':j.status==='error'?'Stopped':copying?`${fmtBytes(j.bytes)} of ${fmtBytes(j.total)}`:j.steps.find(s=>s.state==='active')?.label||'Working';
+    const stats=`<span>Speed <b>${copying&&rate>0?fmtBytes(rate)+'/s':'--'}</b></span><span>Left <b>${copying?fmtTime(eta):'--'}</b></span><span>Elapsed <b>${fmtTime(elapsed)}</b></span>`;
+    const foot=j.status!=='running'?`${j.status==='error'?`<p class="job-error">${esc(j.error)}</p>${/Hermes is not installed/.test(j.error)?'<button type="button" class="secondary" data-job="install">Install Hermes there</button>':''}`:''}<button type="button" class="text-button" data-job="copy">Copy log</button>${j.status==='done'&&j.result?.agent?`<button type="button" class="primary" data-job="open">Open ${esc(j.result.agent.name)}</button>`:''}${j.status==='done'&&j.result?.file?'<button type="button" class="secondary" data-job="reveal">Show in folder</button>':''}<button type="button" class="secondary" data-job="close">Close</button>`:'';
+    // Progress arrives several times a second. Rebuilding the window restarted every animation (flicker), and moving
+    // the log scrolled the page, which closed any open context menu. Build the frame once per job, then change only
+    // the parts that differ; new log lines are appended.
+    if(win.dataset.job!==j.id){
+      win.dataset.job=j.id;win.dataset.log='';
+      win.innerHTML=`<header class="job-head"></header><div class="job-route"></div><div class="job-progress"><div class="job-percent"><span><b class="job-pct"></b><small>%</small></span><em></em></div><div class="job-bar"><span></span></div><div class="job-stats"></div></div><ol class="job-steps"></ol><div class="job-log" id="job-log"></div><footer class="job-foot" hidden></footer>`;
+    }
+    const part=(selector,html)=>{const el=$(selector,win);if(el&&el.dataset.html!==html){el.innerHTML=html;el.dataset.html=html;}return el;};
+    const text=(selector,value)=>{const el=$(selector,win);if(el&&el.textContent!==String(value))el.textContent=value;};
+    win.classList.toggle('finished',j.status!=='running');
+    part('.job-head',head);
+    const routeEl=part('.job-route',route);routeEl.className=`job-route ${j.status}`;
+    text('.job-pct',pct);text('.job-percent em',status);part('.job-stats',stats);
+    const bar=$('.job-bar',win);bar.className=`job-bar ${j.status}`;const fill=$('.job-bar span',win);if(fill.style.width!==pct+'%')fill.style.width=pct+'%';
+    // Steps: change a step only when its state does, so finished steps do not replay their animation.
+    const list=$('.job-steps',win);
+    if(list.children.length!==j.steps.length)list.innerHTML=j.steps.map(()=>'<li><span class="job-step-icon"></span><span></span></li>').join('');
+    j.steps.forEach((step,i)=>{const li=list.children[i];if(li.dataset.state===step.state&&li.dataset.label===step.label)return;li.dataset.state=step.state;li.dataset.label=step.label;li.className=step.state;li.innerHTML=`${icon(step.state)}<span>${esc(step.label)}</span>`;});
+    // Log: append what is new; rebuild only when the job's log was trimmed past what is shown.
+    const log=$('#job-log',win),atBottom=log.scrollHeight-log.scrollTop-log.clientHeight<30,shown=j.log.slice(-120),key=l=>`${l.at}|${l.text}`;
+    const line=l=>`<p class="${esc(l.state||'')}"><time>${new Date(l.at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</time>${esc(l.text)}</p>`;
+    const lastIndex=win.dataset.log?shown.findIndex(l=>key(l)===win.dataset.log):-1;
+    if(win.dataset.log&&lastIndex<0&&shown.length){log.innerHTML=shown.map(line).join('');}
+    else if(lastIndex<shown.length-1)log.insertAdjacentHTML('beforeend',shown.slice(lastIndex+1).map(line).join(''));
+    while(log.children.length>120)log.firstElementChild.remove();
+    win.dataset.log=shown.length?key(shown.at(-1)):'';
+    if(atBottom&&log.scrollHeight-log.clientHeight-log.scrollTop>1)log.scrollTop=log.scrollHeight;
+    const footer=part('.job-foot',foot);footer.hidden=!foot;
   }
   api.onJob?.(onJob);
   api.jobs?.().then(list=>{for(const j of list||[]){jobs.set(j.id,j);if(j.status==='running'){jobShown=j.id;jobMinimized=true;}}renderJobs();}).catch(()=>{});

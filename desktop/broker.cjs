@@ -3,6 +3,7 @@ const {randomUUID}=require('node:crypto');
 const path=require('node:path');
 const schema=require('./schema.cjs');
 const {primeShellPath}=require('./process.cjs');
+const {visionOf}=require('./vision.cjs');
 const {scanLocal,scanRemote,fingerprint}=require('./discovery.cjs');
 const {hermesLogs}=require('./diagnostics.cjs');
 const {createAdapter}=require('./adapters/index.cjs');
@@ -28,7 +29,7 @@ class Broker{
     await this.vault.load();this.data=await this.store.load();
     this.data.drafts=this.data.drafts||{};this.data.lastConversation=this.data.lastConversation||{};this.data.view=this.data.view||{};
     this.data.agents=this.data.agents.map(a=>schema.agent(a));
-    {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:!!s.itrustOpaya,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:''};}
+    {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:!!s.itrustOpaya,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false};}
     this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
     this.data.mcpServers=(Array.isArray(this.data.mcpServers)?this.data.mcpServers:[]).flatMap(s=>{try{return [mcp.server(s)];}catch{return [];}});this.data.hosts=this.data.hosts.map(h=>schema.host(h));
     this.data.activeAgentId=this.data.agents.some(a=>a.id===this.data.activeAgentId)?this.data.activeAgentId:this.data.agents[0]?.id||'';
@@ -46,7 +47,7 @@ class Broker{
   runtimeFor(id){if(!this.runtime.has(id))this.runtime.set(id,{status:'disconnected',error:'',models:[]});return this.runtime.get(id);}
   snapshot(){
     const {agents,hosts,conversations,activeAgentId,activeConversationId}=this.data;
-    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',commands:r.adapter?.commands||[],models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,settings:this.data.settings,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations:conversations.map(({essence,...c})=>essence?{...c,essence:{by:essence.by,at:essence.at}}:c),activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
+    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',activeModel:r.adapter?.currentModel||'',commands:r.adapter?.commands||[],models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,settings:this.data.settings,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations:conversations.map(({essence,...c})=>essence?{...c,essence:{by:essence.by,at:essence.at}}:c),activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
   }
   changed(){if(!this.closing)this.emit(this.snapshot());}
   async persist(){await this.store.write(this.data);this.changed();}
@@ -151,6 +152,9 @@ class Broker{
     const next={...this.data.settings};
     if(input.itrustAll!==undefined)next.itrustAll=!!input.itrustAll;
     if(input.itrustOpaya!==undefined)next.itrustOpaya=!!input.itrustOpaya;
+    // Hourly update checks, and fixing "too old" connection errors by updating automatically. Both on by default.
+    if(input.updateChecks!==undefined)next.updateChecks=!!input.updateChecks;
+    if(input.autoFix!==undefined)next.autoFix=!!input.autoFix;
     // This computer as shown in Opaya (the sidebar, Machines, backups) and where local backups go.
     if(input.machineName!==undefined)next.machineName=schema.text(input.machineName,'machine name',60).trim();
     if(input.machineNote!==undefined)next.machineNote=schema.text(input.machineNote,'machine note',200).trim();
@@ -166,6 +170,7 @@ class Broker{
     if(group!==undefined)a.group=schema.group(group);
     if(tags!==undefined)a.tags=schema.tags(tags);
     if(itrust!==undefined)a.itrust=Boolean(itrust);
+    if(browser){const v=visionOf({...a,activeModel:this.runtimeFor(a.id).adapter?.currentModel});if(v.vision===false)throw new Error(`${a.displayName||a.name} cannot use the Opaya browser: ${v.reason} Choose a model that can see images (Models button), then try again.`);}
     if(browser!==undefined)a.browser=Boolean(browser);
     this.data.agents[index]=a;await this.persist();return a;
   }
@@ -238,7 +243,8 @@ class Broker{
     const list=mcp.acpServers(this.data.mcpServers||[],agentId,id=>this.mcpSecrets(id));
     // Built-in: Opaya's browser pane, for agents on this computer that were given it (right-click > Opaya browser).
     const a=this.data.agents.find(x=>x.id===agentId),b=this.browserBridge;
-    if(a?.browser&&b&&browserCapable(a))list.push({name:'opaya-browser',command:b.command,args:b.args,env:Object.entries(b.env).map(([name,value])=>({name,value}))});
+    // A text-only model cannot use a browser: it would read pages but miss everything shown as pictures.
+    if(a?.browser&&b&&browserCapable(a)&&visionOf({...a,activeModel:this.runtimeFor(a.id).adapter?.currentModel}).vision!==false)list.push({name:'opaya-browser',command:b.command,args:b.args,env:Object.entries(b.env).map(([name,value])=>({name,value}))});
     return list;
   }
   async saveMcpServer({server:input,env,headers}){
@@ -298,7 +304,7 @@ class Broker{
         Object.assign(r,info,{status:'connected'});
         const closed=error=>{if(r.adapter!==adapter||r.generation!==generation)return;r.status='error';r.error=safeError(error,token);this.changed();};
         adapter.rpc?.on('closed',closed);adapter.tunnel?.on('closed',closed);
-      }catch(error){adapter?.close();if(r.generation===generation){r.adapter=null;r.status='error';r.error=safeError(error,token);}throw new Error(safeError(error,token));}
+      }catch(error){adapter?.close();if(r.generation===generation){r.adapter=null;r.status='error';r.error=safeError(error,token);}try{this.onConnectError?.(a,safeError(error,token));}catch{}throw new Error(safeError(error,token));}
       finally{this.changed();}
     })();
     this.connecting.set(id,job);try{return await job;}finally{this.connecting.delete(id);}

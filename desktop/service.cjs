@@ -20,6 +20,8 @@ const moves = require('./transfer.cjs');
 const {condense} = require('./condense.cjs');
 const free = require('./free-model.cjs');
 const maintenance = require('./maintenance.cjs');
+const versions = require('./versions.cjs');
+const {visionOf, SUPPORTED:VISION_MODELS} = require('./vision.cjs');
 async function start({app, safeStorage}, root) {
   let broker, terminals, listener, opaya, stopping = false;
   const startedAt = new Date().toISOString(), approvals = new Map();
@@ -34,7 +36,8 @@ async function start({app, safeStorage}, root) {
   if (old && old.pid !== process.pid && alive(old.pid)) throw new Error('A session service is already running.');
   if (process.platform !== 'win32') await fs.rm(endpoint(root),{force:true});
   const machine = {hostname:require('node:os').hostname(), home:require('node:os').homedir()};
-  function snapshot() { const base=broker.snapshot(); return {...base, agents:base.agents.map(a=>({...a,install:maintenance.capabilities(a)})), machine, opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true}}; }
+  const toolState = {machines:{}, checking:false, notified:''}; // update checks, filled in the background
+  function snapshot() { const base=broker.snapshot(); return {...base, agents:base.agents.map(a=>({...a,install:maintenance.capabilities(a),vision:visionOf(a)})), toolUpdates:{machines:toolState.machines,checking:toolState.checking}, machine, opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, visionModels:VISION_MODELS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true}}; }
   const emit = () => listener?.broadcast('state', snapshot());
   async function approve(agent, title, detail) {
     const socket = [...(listener?.clients || [])].at(-1);
@@ -161,6 +164,93 @@ async function start({app, safeStorage}, root) {
       return startJob({kind:'uninstall',route:{from:a.name,fromWhere:whereName(a),to:'Uninstalled',toWhere:whereName(a),provider:a.provider},title:`Uninstalling ${a.name}`,detail:c.summary,steps},work);
     }
   };
+  // ---- Update checks and automatic fixes -------------------------------------------------------------------------
+  // Every hour: which agents and tools are installed on this computer and on machines with agents, and whether a newer
+  // version exists. The UI tells the user; nothing is updated without them, except the auto-fix below.
+  const machineKey=host=>host?host.id:'local';
+  async function checkMachine(host){
+    const key=machineKey(host),name=host?host.name:machineName();
+    try{toolState.machines[key]={name,hostId:host?.id||'',...await versions.check(host)};}
+    catch(error){toolState.machines[key]={...(toolState.machines[key]||{items:[]}),name,hostId:host?.id||'',checkedAt:new Date().toISOString(),error:safeError(error)};}
+    return toolState.machines[key];
+  }
+  async function checkAll({notify=true}={}){
+    if(toolState.checking)return toolState;toolState.checking=true;emit();
+    try{
+      await checkMachine(null);
+      for(const h of broker.data.hosts)if(broker.data.agents.some(a=>a.hostId===h.id))await checkMachine(h);
+      for(const k of Object.keys(toolState.machines))if(k!=='local'&&!broker.data.hosts.some(h=>h.id===k))delete toolState.machines[k];
+    }finally{toolState.checking=false;}
+    const outdated=Object.values(toolState.machines).flatMap(m=>m.items.filter(i=>i.outdated).map(i=>({...i,machine:m.name})));
+    const signature=outdated.map(i=>`${i.machine}/${i.id}/${i.latest||i.note}`).sort().join(',');
+    if(notify&&signature&&signature!==toolState.notified){
+      toolState.notified=signature;
+      notice({level:'info',kind:'updates',title:`${outdated.length} update${outdated.length===1?'':'s'} available`,text:outdated.slice(0,4).map(i=>`${i.name} ${i.installed}${i.latest?` > ${i.latest}`:''}${i.note?` (${i.note})`:''} on ${i.machine}`).join(', ')+(outdated.length>4?', ...':'')});
+    }
+    emit();return toolState;
+  }
+  const hourly=()=>{if(broker.data.settings?.updateChecks!==false)checkAll().catch(()=>{});};
+  setTimeout(hourly,2*60*1000);setInterval(hourly,60*60*1000);
+  function notice(n){listener?.broadcast('notice',{id:randomUUID(),at:Date.now(),...n});}
+  async function runUpdate({host,label,key,command,timeout=20*60*1000}){
+    const end=!host&&process.platform==='win32'?'; Write-Host "[opaya] finished with exit code $(if ($?) { 0 } else { 1 })"':'; echo "[opaya] finished with exit code $?"';
+    const view=await runInTerminal({label,key,host,command:command+end});
+    return waitForMark(view.id,markCount(view.id),timeout);
+  }
+  // A connection that fails because something is too old: update it, reconnect, and if that does not work hand the
+  // problem to the Opaya Agent; if the Opaya Agent cannot take it, show the user the error. At most once per 30 minutes
+  // per agent, so a failing update never loops.
+  const fixing=new Map(),inFlight=new Map();
+  async function escalate(a,error,detail){
+    const o=opaya;
+    if(o?.configured()&&!o.busy){
+      try{
+        o.begin(`${a.name} (${a.provider}, ${whereName(a)}) does not connect: "${error}". ${detail} Find out why and fix it, then reconnect it. Use your tools; tell me only what I must do myself.`);
+        notice({level:'info',kind:'opaya',title:`The Opaya Agent is looking into ${a.name}`,text:detail,agentId:a.id});
+        const end=Date.now()+15*60*1000;while(o.busy&&Date.now()<end)await new Promise(r=>setTimeout(r,2000));
+        if(!o.error)return;
+        detail+=` The Opaya Agent could not fix it: ${o.error}`;
+      }catch(e){detail+=` The Opaya Agent could not take it: ${safeError(e)}`;}
+    }else if(!o?.configured())detail+=' The Opaya Agent has no model connected, so it could not take over.';
+    notice({level:'error',kind:'fix-failed',title:`${a.name} needs your attention`,text:`${error}\n\n${detail}`,agentId:a.id});
+  }
+  async function autoFix(a,error){
+    const target=versions.fixTarget(error);
+    if(broker.data.settings?.autoFix===false||!target)return;
+    if(fixing.has(a.id)&&Date.now()-fixing.get(a.id)<30*60*1000)return;
+    fixing.set(a.id,Date.now());
+    const host=hostOf(a),remote=!!host;
+    const dep=target==='agent'?'':target; // "requires Node 20": the runtime is too old, not the agent
+    let c;
+    try{c=dep?{...catalog.command(dep,{remote,update:true}),title:`Update ${dep==='node'?'Node.js':'Python'}`}:maintenance.updateCommand(a,{remote});}
+    catch(e){return escalate(a,error,`Opaya could not update it automatically: ${safeError(e)}`);}
+    notice({level:'info',kind:'fixing',title:`Updating ${dep?(dep==='node'?'Node.js':'Python'):a.name} automatically`,text:`${a.name} did not connect: ${error}. ${c.title||'The update'} runs in the terminal; Opaya reconnects when it finishes.`,agentId:a.id});
+    // Agents that share an installation (Hermes profiles) fail together; they share one update run.
+    const runKey=`${host?.id||'local'}|${c.command}`;
+    if(!inFlight.has(runKey))inFlight.set(runKey,runUpdate({host,label:`${c.title||'Update'} (auto-fix)`,key:`autofix_${a.id}`.slice(0,60),command:c.command}).finally(()=>setTimeout(()=>inFlight.delete(runKey),60000)));
+    let code;
+    try{code=await inFlight.get(runKey);}
+    catch(e){return escalate(a,error,`The automatic update did not finish: ${safeError(e)}`);}
+    if(code!==0)return escalate(a,error,`The automatic update (${c.title||'update'}) ended with exit code ${code}; see its terminal.`);
+    versions.cache.clear();checkMachine(host).then(emit).catch(()=>{});
+    try{await broker.connect(a.id);notice({level:'done',kind:'fixed',title:`${a.name} is updated and connected`,text:c.title||'',agentId:a.id});}
+    catch(e){escalate(a,safeError(e),`Opaya updated it (${c.title||'update'}), but it still does not connect.`);}
+  }
+  broker.onConnectError=(a,error)=>{autoFix(a,error).catch(()=>{});};
+  const toolActions={
+    toolVersions:async x=>{const host=x.hostId?broker.host(x.hostId):null,m=toolState.machines[machineKey(host)];if(!x.force&&m?.checkedAt&&Date.now()-Date.parse(m.checkedAt)<10*60*1000)return m;const r=await checkMachine(host);emit();return r;},
+    toolCheckAll:async()=>{versions.cache.clear();await checkAll({notify:false});return toolState;},
+    // Update one tool (agent or dependency) on a machine, or every outdated one after a single approval.
+    toolUpdate:async x=>{
+      const host=x.hostId?broker.host(x.hostId):null,ids=x.id==='outdated'?(toolState.machines[machineKey(host)]?.items||[]).filter(i=>i.outdated).map(i=>i.id):[String(x.id||'')];
+      const list=ids.map(id=>{try{return catalog.command(id,{remote:!!host,update:true});}catch{return null;}}).filter(Boolean);
+      if(!list.length)throw new Error('Nothing to update here.');
+      if(!await approve({name:'Opaya'},list.length===1?`Update ${list[0].framework.name} on ${host?host.name:machineName()}?`:`Install ${list.length} updates on ${host?host.name:machineName()}?`,list.map(c=>`${c.framework.name}:\n${c.command}`).join('\n\n')+'\n\nRuns in a visible terminal.'))throw new Error('Update cancelled.');
+      Promise.all(list.map(c=>runUpdate({host,label:`Update ${c.framework.name}`,key:`update_${c.framework.id}`,command:c.command}).catch(()=>1)))
+        .then(()=>{versions.cache.clear();return checkMachine(host);}).then(emit).catch(()=>{});
+      return list.length;
+    }
+  };
   opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal,trusted:()=>!!broker.data.settings?.itrustOpaya});
   await stage('opaya agent');
   await opaya.init();
@@ -279,7 +369,7 @@ async function start({app, safeStorage}, root) {
       return startJob({kind:'free-model',route:{from:m.label,fromWhere:`Free / ${m.size}`,to:'Opaya Agent',toWhere:'This computer',provider:'ollama'},title:`Setting up ${m.label}`,detail:'Free local model through Ollama. No account and no key.',steps:[['ollama','Install and start Ollama'],['download',`Download ${m.label} (${m.size})`],['connect','Connect the Opaya Agent']]},progress=>free.setupFree({opaya,model,progress}).then(r=>{emit();return r;}));},
     opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}), opayaForgetKey:()=>opaya.forgetKey(),
     opayaSend:x=>opaya.begin(x.text), opayaNewSession:()=>opaya.newSession(), opayaSelectSession:x=>opaya.selectSession(String(x.id||'')), opayaDeleteSession:x=>opaya.deleteSession(String(x.id||'')), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),
-    ...maintenanceActions,
+    ...maintenanceActions, ...toolActions,
     shutdown
   };
   const token = randomBytes(32).toString('hex');

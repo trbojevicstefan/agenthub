@@ -132,6 +132,8 @@ class AcpAdapter {
     const configured=option?flat(option.options):[];
     if(option&&typeof option.id==='string')this.modelConfigId=option.id;
     if(legacy.length||configured.length)this.modelIds=[...new Set([...legacy,...configured])];
+    // The model the session runs now, so Opaya can tell whether it can see images (the Opaya browser needs that).
+    const current=session.models?.currentModelId||option?.currentValue;if(typeof current==='string'&&current)this.currentModel=current.slice(0,200);
   }
   diagnostics(){
     const now=Date.now();

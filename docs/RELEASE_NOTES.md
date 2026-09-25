@@ -1,3 +1,16 @@
+# Opaya 0.14.0 - Update checks, automatic fixes, a steadier browser and no more flicker
+
+- **Update checks every hour**: Opaya checks every agent and CLI (Hermes, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider, Ollama) and tools (Node.js, Python, Git, uv, gh and more) on this computer and on every machine with an agent. When something is out of date you get a note and an "updates available" chip in the status bar; **Updates** lists each machine with **Update**, **Update all here** and **Check now**.
+  - Latest versions come from npm, PyPI, GitHub releases and nodejs.org; Hermes counts how many updates its checkout is behind.
+  - Node.js is only offered a newer version of the line you use, unless that line has reached its end of life.
+- **Install shows what is already there**: installed agents and tools show their version with **Update** or **Check for update** instead of Install. "All essentials" installs only what is missing. Discover no longer lists installed CLIs as missing.
+- **Automatic fixes**: when an agent does not connect because something is too old ("unknown argument", "no longer supported", "requires Node.js 20"...), Opaya updates it (or Node.js / Python) in a visible terminal and reconnects. If that does not work, the Opaya Agent takes over; if it cannot, you get the error with Copy, Connection log and Opaya Agent buttons. Turn it off in Settings > Agents and tools.
+- **Opaya browser no longer gets stuck** on `browser_read` and other actions:
+  - pages that open `alert`, `confirm` or "leave this page?" dialogs blocked every later action; Opaya now answers them and tells the agent;
+  - pages that are still loading or busy are read right away or return a clear error; every action returns within 45 seconds.
+- **The browser is for models that can see images**: Opaya knows which models have vision (Claude, GPT-4o and later, Gemini, Grok, Qwen-VL, Llama 3.2 Vision, Pixtral...) and which do not (DeepSeek, Qwen3, gpt-oss, Codestral...). Text-only models cannot get the browser; the right-click menu and Manage say why, and for unknown models you are told what works.
+- **No more flicker, and right-click works during clones and other jobs**: the progress window updated by rebuilding itself several times a second, restarting its animations, and its log scrolling closed any open context menu. It now changes only what changed, and menus close on scroll only when what they belong to moves.
+
 # Opaya 0.13.2 - Codex CLI, Gemini CLI and OpenCode are found and connect
 
 - **Discover finds CLIs installed with nvm, Volta, fnm, bun, pnpm, asdf or mise.** An app started from the Dock or Start menu does not get your terminal's PATH, so Codex, Gemini CLI and OpenCode installed with npm under a Node version manager were invisible, on macOS especially. Opaya now also reads your login shell's PATH (zsh, bash or fish) and checks those folders, locally and over SSH.

@@ -457,3 +457,10 @@
 :where(body[data-theme="light"]) .uninstall-kind small{color:#49544e}
 :where(body[data-theme="light"]) .host-note{color:#49544e}
 :where(body[data-theme="light"]) .maintenance-form .switch-row small{color:#49544e}
+:where(body[data-theme="light"]) .status-tools{background:#ebe5d5;border-color:#d3c7a4;color:#473b15}
+:where(body[data-theme="light"]) .tool-row{border:1px solid #cfd9d4}
+:where(body[data-theme="light"]) .tool-row.outdated{border-color:#d3c7a4;background:#ebe7dc}
+:where(body[data-theme="light"]) .tool-version{color:#343e37}
+:where(body[data-theme="light"]) .tool-version b{color:#473b15}
+:where(body[data-theme="light"]) .tool-ok{color:#235c3a}
+:where(body[data-theme="light"]) .install-state{color:#235c3a}

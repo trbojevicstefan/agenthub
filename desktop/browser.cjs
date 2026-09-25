@@ -27,7 +27,17 @@ class BrowserPane{
     wc.on('will-redirect',(event,url)=>{if(!allowed(url))event.preventDefault();});
     for(const e of ['did-navigate','did-navigate-in-page','page-title-updated','did-start-loading','did-stop-loading','did-fail-load'])wc.on(e,()=>this.publish());
     this.win.contentView.addChildView(view);view.setVisible(false);this.view=view;
+    this.answerDialogs(wc);
     return view;
+  }
+  // alert(), confirm(), prompt() and "leave this page?" block the page until someone answers, and while they are open
+  // no script runs, so an agent's read or click would wait forever. Answer them through the DevTools protocol.
+  answerDialogs(wc){
+    try{
+      if(!wc.debugger.isAttached())wc.debugger.attach('1.3');
+      wc.debugger.on('message',(_event,method,params)=>{if(method==='Page.javascriptDialogOpening'){this.lastDialog=`${params.type}: ${String(params.message||'').slice(0,200)}`;wc.debugger.sendCommand('Page.handleJavaScriptDialog',{accept:true,promptText:''}).catch(()=>{});}});
+      wc.debugger.sendCommand('Page.enable').catch(()=>{});
+    }catch{} // DevTools already attached: dialogs then wait for the user, and the time limits below still apply
   }
   state(){const wc=this.view&&!this.view.webContents.isDestroyed()?this.view.webContents:null;return {url:wc?.getURL()||'',title:wc?.getTitle()||'',loading:!!wc?.isLoading(),canGoBack:!!wc?.navigationHistory?.canGoBack(),canGoForward:!!wc?.navigationHistory?.canGoForward(),visible:this.visible};}
   publish(){this.emit(this.state());}
@@ -51,11 +61,28 @@ class BrowserPane{
     await new Promise(resolve=>{const t=setTimeout(done,ms);function done(){clearTimeout(t);wc.removeListener('did-stop-loading',done);resolve();}wc.on('did-stop-loading',done);});
   }
   // ---- Agent tools. Scripts are fixed; arguments are passed as JSON, never spliced as code. ------------------------
-  async run(fn,arg){const wc=this.ensure().webContents;return wc.executeJavaScript(`(${fn})(${JSON.stringify(arg??null)})`,true);}
+  // A busy page (a long script, a frozen tab) never answers; give up after `ms` with an error the agent can act on.
+  async run(fn,arg,ms=10000){
+    const wc=this.ensure().webContents;let timer;
+    const limit=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`The page did not respond within ${ms/1000} seconds; it may be busy. Try again, or open it again to reload it.`)),ms);});
+    const code=`(${fn})(${JSON.stringify(arg??null)})`;
+    // Through the DevTools protocol the script runs at once; executeJavaScript waits for a page to finish loading,
+    // which a streaming or slow page never does.
+    const evaluate=wc.debugger.isAttached()?wc.debugger.sendCommand('Runtime.evaluate',{expression:code,returnByValue:true,awaitPromise:true,userGesture:true}).then(r=>{if(r.exceptionDetails)throw new Error(`Page script failed: ${r.exceptionDetails.exception?.description||r.exceptionDetails.text||'error'}`.slice(0,300));return r.result?.value;}):wc.executeJavaScript(code,true);
+    try{return await Promise.race([evaluate,limit]);}finally{clearTimeout(timer);}
+  }
+  // Every agent action returns within 45 seconds, with the page state and an error if it could not finish.
   async tool(op,args={}){
-    this.emit({...this.state(),request:'show',agent:true});
+    this.emit({...this.state(),request:'show',agent:true});this.lastDialog='';let timer;
+    const limit=new Promise(resolve=>{timer=setTimeout(()=>resolve({...this.state(),error:'The browser action took longer than 45 seconds and was stopped. The page may still be loading; try browser_read.'}),45000);});
+    try{
+      const result=await Promise.race([this.action(op,args).catch(error=>({...this.state(),error:String(error?.message||error)})),limit]);
+      return this.lastDialog?{...result,dialog:`Answered a page dialog (${this.lastDialog}).`}:result;
+    }finally{clearTimeout(timer);}
+  }
+  async action(op,args={}){
     switch(op){
-      case 'open':return {...await this.open(args.url),...await this.read({max:args.max||6000})};
+      case 'open':return {...await this.open(args.url),...await this.read({max:args.max||6000,settled:true})};
       case 'read':return this.read(args);
       case 'back':this.navigate('back');await this.settle();return this.state();
       case 'screenshot':{
@@ -89,8 +116,8 @@ class BrowserPane{
       default:throw new Error('Unknown browser action.');
     }
   }
-  async read({max=12000}={}){
-    await this.settle();
+  async read({max=12000,settled=false}={}){
+    if(!settled)await this.settle(8000); // open() already waited for the page
     const page=await this.run(function(a){
       const text=(document.body?.innerText||'').replace(/\n{3,}/g,'\n\n').slice(0,a.max);
       const links=[...document.querySelectorAll('a[href]')].filter(l=>l.innerText.trim()).slice(0,80).map(l=>({text:l.innerText.trim().slice(0,80),href:l.href}));
