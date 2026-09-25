@@ -1,3 +1,10 @@
+# Opaya 0.13.2 - Codex CLI, Gemini CLI and OpenCode are found and connect
+
+- **Discover finds CLIs installed with nvm, Volta, fnm, bun, pnpm, asdf or mise.** An app started from the Dock or Start menu does not get your terminal's PATH, so Codex, Gemini CLI and OpenCode installed with npm under a Node version manager were invisible, on macOS especially. Opaya now also reads your login shell's PATH (zsh, bash or fish) and checks those folders, locally and over SSH.
+- **Gemini CLI and OpenCode are real chat agents.** Discover adds them and Opaya chats with them over ACP (`gemini --acp`, `opencode acp`), with live activity and tool approvals, like Hermes. Older Gemini versions get `--experimental-acp`. Before, they could not be added from Discover at all and showed as not installed.
+- **The Opaya Agent with the Codex CLI** starts Codex from the same paths, and says plainly when Codex is not installed instead of failing to start.
+- **Windows**: npm, pnpm and Yarn launchers (`gemini.cmd`, `opencode.cmd` and others) now start the real program, so Gemini CLI and OpenCode can chat on Windows too. Volta, Scoop, pnpm, bun and nvm-windows folders are searched.
+
 # Opaya 0.13.1 - Collapsed sidebar groups stay visible
 
 - **Collapsing a sidebar group no longer hides it.** The group header now stays with its agent count; click it again to expand. A style meant for lists inside the Transfer and Skills library dialogs also hid collapsed sidebar headers.

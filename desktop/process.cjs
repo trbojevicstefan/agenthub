@@ -25,6 +25,44 @@ function windowsToolDirs() {
   }
   return dirs;
 }
+// Where version managers and installers put CLIs such as codex, gemini and opencode. A GUI app does not get the
+// terminal's PATH (on macOS it starts with /usr/bin:/bin:/usr/sbin:/sbin), so npm tools under nvm, Volta, fnm, bun,
+// pnpm or asdf, and node itself, would be invisible without these.
+const versionSort = (a, b) => b.localeCompare(a, undefined, {numeric: true});
+function subdirs(base, sub) { try { return fs.readdirSync(base).filter(v => /^v?\d/.test(v)).sort(versionSort).map(v => path.join(base, v, sub)); } catch { return []; } }
+function userToolDirs() {
+  const home = os.homedir();
+  if (process.platform === 'win32') {
+    const local = process.env.LOCALAPPDATA || '', registry = windowsRegistryEnv();
+    return [path.join(local, 'Volta', 'bin'), path.join(home, 'scoop', 'shims'), path.join(local, 'pnpm'), path.join(home, '.bun', 'bin'), path.join(home, '.opencode', 'bin'),
+      process.env.NVM_SYMLINK || registry.NVM_SYMLINK || '', process.env.VOLTA_HOME ? path.join(process.env.VOLTA_HOME, 'bin') : ''];
+  }
+  return [path.join(home, '.volta', 'bin'), path.join(home, '.bun', 'bin'), path.join(home, '.opencode', 'bin'), path.join(home, '.deno', 'bin'), path.join(home, '.yarn', 'bin'),
+    path.join(home, '.asdf', 'shims'), path.join(home, '.local', 'share', 'mise', 'shims'), path.join(home, 'Library', 'pnpm'), path.join(home, '.local', 'share', 'pnpm'),
+    path.join(home, '.fnm', 'aliases', 'default', 'bin'), path.join(home, 'Library', 'Application Support', 'fnm', 'aliases', 'default', 'bin'), path.join(home, '.local', 'share', 'fnm', 'aliases', 'default', 'bin'),
+    ...subdirs(path.join(process.env.NVM_DIR || path.join(home, '.nvm'), 'versions', 'node'), 'bin'), '/opt/homebrew/sbin', '/usr/local/sbin'];
+}
+// The PATH of the user's login shell (zsh on macOS), read once in the background: it includes whatever the user's
+// shell profile adds. Nothing from it is executed by Opaya; it only extends where executables are looked up.
+let shellPath = {value: [], at: 0, pending: null};
+function primeShellPath({timeout = 6000} = {}) {
+  if (process.platform === 'win32') return Promise.resolve([]);
+  if (shellPath.pending) return shellPath.pending;
+  if (shellPath.at && Date.now() - shellPath.at < 10 * 60 * 1000) return Promise.resolve(shellPath.value);
+  const shell = /^\/[\w./-]+$/.test(process.env.SHELL || '') ? process.env.SHELL : process.platform === 'darwin' ? '/bin/zsh' : '/bin/sh';
+  const mark = '__OPAYA_PATH__', fish = path.basename(shell) === 'fish';
+  const script = fish ? `printf '\\n${mark}%s${mark}\\n' (string join : $PATH)` : `printf '\\n${mark}%s${mark}\\n' "$PATH"`;
+  shellPath.pending = new Promise(resolve => {
+    let out = '', child;
+    const done = () => { clearTimeout(timer); const m = new RegExp(`${mark}(.*?)${mark}`).exec(out); shellPath = {value: m ? m[1].split(':').filter(d => d.startsWith('/')) : shellPath.value, at: Date.now(), pending: null}; resolve(shellPath.value); };
+    const timer = setTimeout(() => { try { child?.kill('SIGKILL'); } catch {} done(); }, timeout);
+    try { child = spawn(shell, ['-ilc', script], {env: {...process.env, TERM: 'dumb'}, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true}); }
+    catch { done(); return; }
+    child.stdout.setEncoding('utf8'); child.stdout.on('data', chunk => { out = (out + chunk).slice(-65536); });
+    child.on('error', done); child.on('close', done);
+  });
+  return shellPath.pending;
+}
 function environment(extra = {}) {
   const env = {...process.env};
   // Windows environment keys are case-insensitive; avoid passing both Path and PATH.
@@ -35,7 +73,8 @@ function environment(extra = {}) {
     dirs.push(path.join(process.env.APPDATA || '', 'npm'), path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH'), ...windowsToolDirs(), ...windowsRegistryPath().split(';'));
     const registry = windowsRegistryEnv();
     for (const name of REGISTRY_VARS) if (!env[name] && registry[name]) env[name] = registry[name];
-  } else dirs.push('/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin');
+  } else dirs.push(...shellPath.value, '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin');
+  dirs.push(...userToolDirs());
   env.PATH = [...new Set([...(env.PATH || '').split(path.delimiter), ...dirs].filter(Boolean))].join(path.delimiter);
   // Never inherit debugging/runtime injection from an embedding Electron launcher.
   delete env.NODE_OPTIONS; delete env.ELECTRON_RUN_AS_NODE;
@@ -58,10 +97,22 @@ function windowsLaunch(executable, args) {
   if (process.platform !== 'win32' || !/\.(cmd|bat)$/i.test(executable)) return {command: executable, args};
   const dir = path.dirname(executable);
   const name = path.basename(executable, path.extname(executable)).toLowerCase();
-  const entry = name === 'codex' ? path.join(dir, 'node_modules/@openai/codex/bin/codex.js') : name === 'claude' ? path.join(dir, 'node_modules/@anthropic-ai/claude-code/cli.js') : name==='openclaw'?path.join(dir,'node_modules/openclaw/openclaw.mjs'):null;
+  // npm, pnpm and yarn shims end with the real program: "%dp0%\node_modules\@google\gemini-cli\bundle\gemini.js" %*
+  const shim = cmdShimTarget(executable);
+  if (shim && /\.exe$/i.test(shim)) return {command: shim, args};
+  const entry = shim || (name === 'codex' ? path.join(dir, 'node_modules/@openai/codex/bin/codex.js') : name === 'claude' ? path.join(dir, 'node_modules/@anthropic-ai/claude-code/cli.js') : name==='openclaw'?path.join(dir,'node_modules/openclaw/openclaw.mjs'):null);
   const node = findExecutable('node.exe');
   if (entry && fs.existsSync(entry) && node) return {command: node, args: [entry, ...args]};
   throw new Error('This Windows batch launcher is not supported for structured chat. Choose its .exe or a Node entrypoint, or use Terminal.');
+}
+// The program a Windows .cmd shim starts, if it is a Node script or an .exe next to it. Read as text, never run.
+function cmdShimTarget(file) {
+  let text = '';
+  try { if (fs.statSync(file).size > 64 * 1024) return null; text = fs.readFileSync(file, 'utf8'); } catch { return null; }
+  const found = [...text.matchAll(/"%~?dp0%?\\([^"%]+\.(?:js|mjs|cjs|exe))"/gi)].pop();
+  if (!found) return null;
+  const target = path.join(path.dirname(file), ...found[1].split(/[\\/]/));
+  return fs.existsSync(target) ? target : null;
 }
 function dockerExecContainerIndex(args = []) {
   if (args[0] !== 'exec') return -1;
@@ -101,8 +152,10 @@ function sshArgs(host, {interactive = false} = {}) {
   return args;
 }
 function target(host) { return host.alias || host.hostname; }
+// SSH commands run without the login profile, so add where npm tools usually live (nvm, Volta, bun, OpenCode).
+const REMOTE_PATH = 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.npm-global/bin:$HOME/.volta/bin:$HOME/.bun/bin:$HOME/.opencode/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; for d in "$HOME"/.nvm/versions/node/*/bin; do [ -d "$d" ] && PATH="$PATH:$d"; done';
 function remoteCommand(agent, args, {interactive = false} = {}) {
-  const prefix = 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; ';
+  const prefix = REMOTE_PATH + '; ';
   const cwd = agent.command === 'docker' ? '' : agent.cwd ? `cd ${quote(agent.cwd)} && ` : '';
   args = dockerExecArgs(agent, args);
   const home = agent.hermesHome ? `env HERMES_HOME=${quote(agent.hermesHome)} ` : '';
@@ -154,4 +207,4 @@ function collect(child, {timeout = 15000, maxBytes = 1024 * 1024, input = '', si
     if (signal?.aborted) abort();
   });
 }
-module.exports = {quote, environment, findExecutable, windowsLaunch, dockerExecArgs, dockerExecContainerIndex, sshArgs, target, remoteCommand, launch, terminate, collect};
+module.exports = {quote, REMOTE_PATH, environment, primeShellPath, userToolDirs, cmdShimTarget, findExecutable, windowsLaunch, dockerExecArgs, dockerExecContainerIndex, sshArgs, target, remoteCommand, launch, terminate, collect};

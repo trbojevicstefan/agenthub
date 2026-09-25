@@ -46,6 +46,7 @@ async function start({app, safeStorage}, root) {
       approvals.set(id,{socket,finish}); listener.notify(socket,'approval',{id,agent:{name:agent.name},title,detail});
     });
   }
+  require('./process.cjs').primeShellPath(); // read the login shell's PATH in the background (macOS GUI apps lack it)
   broker = new Broker({store:new Store(root),vault:new Vault(root,safeStorage),emit,approve});
   await stage('broker');
   await broker.init();

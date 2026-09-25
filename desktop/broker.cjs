@@ -2,6 +2,7 @@
 const {randomUUID}=require('node:crypto');
 const path=require('node:path');
 const schema=require('./schema.cjs');
+const {primeShellPath}=require('./process.cjs');
 const {scanLocal,scanRemote,fingerprint}=require('./discovery.cjs');
 const {hermesLogs}=require('./diagnostics.cjs');
 const {createAdapter}=require('./adapters/index.cjs');
@@ -288,6 +289,7 @@ class Broker{
     const job=(async()=>{
       r.status='connecting';r.error='';this.changed();
       const generation=(r.generation||0)+1;r.generation=generation;
+      if(a.transport!=='ssh')await primeShellPath(); // local CLIs installed with nvm, Volta or Homebrew
       let adapter,token='';
       try{
         token=this.vault.get(id);adapter=this.adapterFactory({agent:a,host:a.transport==='ssh'?this.host(a.hostId):null,token,approve:this.approve,trusted:()=>this.isTrusted(a.id),mcpServers:()=>this.mcpFor(a.id),onChange:()=>this.changed()});r.adapter=adapter;

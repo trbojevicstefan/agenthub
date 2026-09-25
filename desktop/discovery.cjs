@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const {createHash} = require('node:crypto');
 const {spawn} = require('node:child_process');
-const {findExecutable, environment, sshArgs, target, quote, collect, dockerExecContainerIndex} = require('./process.cjs');
+const {REMOTE_PATH, findExecutable, environment, primeShellPath, launch, sshArgs, target, quote, collect, dockerExecContainerIndex} = require('./process.cjs');
 const schema = require('./schema.cjs');
 function fingerprint(a) {
   const dockerIndex=a.command==='docker'?dockerExecContainerIndex(a.args):-1;
@@ -93,6 +93,7 @@ async function sshConfigHosts(home = os.homedir()) {
   return [...new Map(hosts.map(h => [h.alias, h])).values()];
 }
 async function scanLocal({home = os.homedir(), extraHomes = [], probe = true} = {}) {
+  await primeShellPath(); // the login shell's PATH: nvm, Volta, Homebrew and other installs a GUI app does not see
   const found = [], warnings = [], env = environment();
   const binary = name => findExecutable(name, env);
   const hermesBinary = binary('hermes') || (await fs.stat(path.join(home, '.hermes/hermes-agent/.venv/bin/hermes')).catch(() => null) ? path.join(home,'.hermes/hermes-agent/.venv/bin/hermes') : 'hermes');
@@ -111,8 +112,17 @@ async function scanLocal({home = os.homedir(), extraHomes = [], probe = true} = 
   }
   for (const name of ['codex','claude']) {
     const command = binary(name);
-    if (command) found.push(candidate({name: name === 'codex' ? 'Codex' : 'Claude Code', provider: name, protocol: name, transport: 'local', command, args: [], cwd: home}, 'Uses the CLI login already on this machine.'));
+    if (command) found.push(candidate({name: name === 'codex' ? 'Codex CLI' : 'Claude Code', provider: name, protocol: name, transport: 'local', command, args: [], cwd: home}, 'Uses the CLI login already on this machine.'));
   }
+  // Gemini CLI and OpenCode chat over ACP, like Hermes. Gemini renamed --experimental-acp to --acp; ask which it knows.
+  const gemini = binary('gemini');
+  if (gemini) {
+    const help = await collect(launch({command: gemini, transport: 'local', cwd: home, args: []}, ['--help']), {timeout: 15000}).catch(error => String(error.message || ''));
+    const flag = /--acp\b/.test(help) || !/--experimental-acp/.test(help) ? '--acp' : '--experimental-acp';
+    found.push(candidate({name: 'Gemini CLI', provider: 'custom', protocol: 'acp', transport: 'local', command: gemini, args: [flag], cwd: home, avatar: 'lib:gemini-cli'}, `Chats over ACP (gemini ${flag}). Sign in once by running gemini in Terminal.`));
+  }
+  const opencode = binary('opencode');
+  if (opencode) found.push(candidate({name: 'OpenCode', provider: 'custom', protocol: 'acp', transport: 'local', command: opencode, args: ['acp'], cwd: home, avatar: 'lib:opencode'}, 'Chats over ACP (opencode acp). Sign in once with opencode auth login in Terminal.'));
   const openclaw = binary('openclaw');
   const openclawRoot = path.join(home,'.openclaw');
   if (openclaw || await fs.stat(openclawRoot).catch(() => null)) {
@@ -160,7 +170,7 @@ async function scanRemote(host, {signal} = {}) {
   const ssh = findExecutable('ssh');
   if (!ssh) throw new Error('OpenSSH client is not installed.');
   const script = await fs.readFile(path.join(__dirname, '../scripts/probe.py'), 'utf8');
-  const command = 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; python3 -c ' + quote(script);
+  const command = REMOTE_PATH + '; python3 -c ' + quote(script);
   const child = spawn(ssh, [...sshArgs(host), '-T', target(host), command], {env: environment(), windowsHide: true, detached: process.platform !== 'win32', stdio:['pipe','pipe','pipe']});
   let result;
   try { result = JSON.parse(await collect(child, {timeout:20000, signal})); }

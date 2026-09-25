@@ -9,12 +9,12 @@ const os=require('node:os');
 const path=require('node:path');
 const zlib=require('node:zlib');
 const {spawn}=require('node:child_process');
-const {findExecutable,environment,quote,collect,dockerExecContainerIndex}=require('./process.cjs');
+const {REMOTE_PATH,findExecutable,environment,quote,collect,dockerExecContainerIndex}=require('./process.cjs');
 const {place,shell,run,sourceHome,isLocal,measure,slug}=require('./clone.cjs');
 const catalog=require('./catalog.cjs');
 const {hermesHomes}=require('./diagnostics.cjs');
 
-const PATH_PREFIX='export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"';
+const PATH_PREFIX=REMOTE_PATH;
 // How each framework can be installed. `files` are what the vendor installer puts in place; `data` is the agent's own
 // folder (settings, logins, memory), deleted only when the user asks. Paths are relative to the home folder.
 const TOOLS={

@@ -31,7 +31,8 @@ def binary(name):
     resolved = shutil.which(name)
     if resolved:
         return resolved
-    for folder in [home / ".local/bin", home / ".cargo/bin", home / ".hermes/hermes-agent/.venv/bin", pathlib.Path("/opt/homebrew/bin"), pathlib.Path("/usr/local/bin")]:
+    nvm = sorted((home / ".nvm/versions/node").glob("*/bin"), reverse=True)
+    for folder in [home / ".local/bin", home / ".cargo/bin", home / ".npm-global/bin", home / ".volta/bin", home / ".bun/bin", home / ".opencode/bin", home / ".hermes/hermes-agent/.venv/bin", pathlib.Path("/opt/homebrew/bin"), pathlib.Path("/usr/local/bin"), *nvm]:
         p = folder / name
         if p.is_file() and os.access(p, os.X_OK):
             return str(p)
@@ -57,10 +58,24 @@ for root in homes:
     enabled = meta.get("API_SERVER_ENABLED", "").lower() in ("true", "1", "yes")
     port = valid_port(meta.get("API_SERVER_PORT"), 8642)
     agents.append({"name": "Hermes / " + profile, "provider": "hermes", "protocol": "openai", "command": binary("hermes") or "hermes", "args": [], "cwd": str(home), "hermesHome": str(root), "endpoint": "http://127.0.0.1:%d/v1" % port, "model": "hermes-agent" if profile == "default" else profile, "readiness": "configured" if enabled else "setup", "detail": "Gateway API configured. Enter its API token." if enabled else "Profile found. Enable its gateway API before connecting. Do not launch a second writer against a running profile."})
-for provider, label in [("codex", "Codex"), ("claude", "Claude Code")]:
+for provider, label in [("codex", "Codex CLI"), ("claude", "Claude Code")]:
     command = binary(provider)
     if command:
         agents.append({"name": label, "provider": provider, "protocol": provider, "command": command, "args": [], "cwd": str(home), "detail": "Uses this SSH account's existing CLI login."})
+# Gemini CLI and OpenCode chat over ACP. Older Gemini versions only know --experimental-acp.
+gemini = binary("gemini")
+if gemini:
+    flag = "--acp"
+    try:
+        helptext = subprocess.run([gemini, "--help"], capture_output=True, text=True, timeout=15).stdout
+        if "--acp" not in helptext.replace("--experimental-acp", "") and "--experimental-acp" in helptext:
+            flag = "--experimental-acp"
+    except Exception:
+        pass
+    agents.append({"name": "Gemini CLI", "provider": "custom", "protocol": "acp", "command": gemini, "args": [flag], "cwd": str(home), "avatar": "lib:gemini-cli", "detail": "Chats over ACP (gemini %s). Sign in once by running gemini on this machine." % flag})
+opencode = binary("opencode")
+if opencode:
+    agents.append({"name": "OpenCode", "provider": "custom", "protocol": "acp", "command": opencode, "args": ["acp"], "cwd": str(home), "avatar": "lib:opencode", "detail": "Chats over ACP (opencode acp). Sign in once with opencode auth login on this machine."})
 root = home / ".openclaw"
 if binary("openclaw") or root.is_dir():
     try:

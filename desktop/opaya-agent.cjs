@@ -14,7 +14,7 @@ const catalog=require('./catalog.cjs');
 const files=require('./files.cjs');
 const skills=require('./skills.cjs');
 const {atomicJson,readJson}=require('./store.cjs');
-const {quote,target,launch}=require('./process.cjs');
+const {quote,target,launch,primeShellPath,findExecutable}=require('./process.cjs');
 const {Rpc}=require('./rpc.cjs');
 const {PROVIDERS}=require('./providers.cjs');
 
@@ -95,7 +95,7 @@ const TOOLS=[
   fn('read_app_logs','Read Opaya startup diagnostics and every agent connection error.'),
   fn('agent_diagnostics','Read-only: why an agent is slow or not answering. Returns its status, how long the current answer has run and since the last update, the tools it is running, a pending approval, the last protocol messages between Opaya and the agent, its stderr and, for Hermes, the end of its own log files.',{agent_id:{type:'string'}},['agent_id']),
   fn('run_diagnostic','Run a fixed read-only check in a visible terminal and return its output.',{check:{type:'string',enum:Object.keys(DIAGNOSTICS)},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['check']),
-  fn('save_connection','Add or update an agent connection. The user approves it first. Never include API tokens; the user enters tokens in the connection form.',{connection:{type:'object',description:'Fields: id (to update), name, provider (hermes|codex|claude|openclaw|custom), protocol (openai|acp|codex|claude|terminal), transport (http|local|ssh), hostId, endpoint, model, command, args, cwd, hermesHome, displayName, description, note, group (sidebar group name), tags (array of labels).'}},['connection']),
+  fn('save_connection','Add or update an agent connection. The user approves it first. Never include API tokens; the user enters tokens in the connection form.',{connection:{type:'object',description:'Fields: id (to update), name, provider (hermes|codex|claude|openclaw|custom), protocol (openai|acp|codex|claude|terminal), transport (http|local|ssh), hostId, endpoint, model, command, args, cwd, hermesHome, displayName, description, note, group (sidebar group name), tags (array of labels). Gemini CLI: provider custom, protocol acp, command gemini, args ["--acp"]. OpenCode: provider custom, protocol acp, command opencode, args ["acp"]. Codex CLI: provider codex, protocol codex, command codex. Prefer discover_agents, which fills these in.'}},['connection']),
   fn('remove_connection','Remove a saved agent connection and its local chats. The user approves it first.',{agent_id:{type:'string'}},['agent_id']),
   fn('save_machine','Add or update a saved SSH machine. The user approves it first.',{machine:{type:'object',description:'Fields: id (to update), name, alias, hostname, username, port, identityFile.'}},['machine']),
   fn('remove_machine','Remove a saved SSH machine that no agent uses. The user approves it first.',{machine_id:{type:'string'}},['machine_id']),
@@ -274,10 +274,13 @@ class OpayaAgent{
   dynamicTools(){return TOOLS.map(t=>({type:'function',name:t.function.name,description:t.function.description,inputSchema:t.function.parameters}));}
   async ensureCodex(){
     if(this.codexRpc&&!this.codexRpc.closed)return this.codexRpc;
+    await primeShellPath();
+    if(this.spawnAgent===launch&&!findExecutable('codex'))throw new Error('The Codex CLI was not found on this computer. Install it (Install agents > Codex CLI, or ask with another model), run codex once in Terminal to sign in, then try again.');
+    await fs.mkdir(this.home,{recursive:true}).catch(()=>{});
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.12.2'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.13.2'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
