@@ -1,3 +1,12 @@
+# Opaya 0.17.0 - Share a project with the agents on your servers, one agent at a time
+
+- **One project, no duplicates**: sharing no longer creates a second `<name> on <machine>` project. Remote agents join your local project next to your local ones, marked with ⇆, and their chats live in the same project.
+- **See which agents are on each server, then share with the ones you pick**: Projects > your project > **+ Agent** lists the agents on this computer (they work in your folder directly) and, for every machine, the agents that exist there. Each has its own **Share...**; a machine with no agents in Opaya offers **Find agents there** or **install one**.
+- **Agents in Docker containers can work on your projects too** (for example a Hermes or Claude Code container on your VPS): the copy goes into the container's data folder, so it survives the container being updated, and git runs inside the container. Containers use Git over SSH or a plain copy.
+- **Each agent gets its own copy and its own branch** (`opaya/<agent>`), so two agents on one server never step on each other. Send and Bring back are per agent, on the project card, in the agents list and when you right-click the agent in the project.
+- **Stop sharing**: right-click the agent in the project > Stop sharing, optionally deleting its copy on the server. Your folder is never touched.
+- Projects shared with 0.16.0 are folded into their local project automatically, chats included.
+
 # Opaya 0.16.0 - Remote agents on your local projects
 
 - **Let an agent on a machine work on a local project**: Projects > your project > **Let an agent on a machine work on it** (or right-click > Work on it from a machine). Pick the machine and the agent, then how the project gets there:

@@ -490,6 +490,12 @@
 :where(body[data-theme="light"]) .ip-cursor{background:#a7f3c6}
 :where(body[data-theme="light"]) .terminal-placeholder small{color:#5f7176}
 :where(body[data-theme="light"]) .remote-step-n{background:#d5e2db;border:1px solid #aed5be;color:#144526}
+:where(body[data-theme="light"]) .share-agent{border:1px solid #cfd9d5;background:#e5eae8}
+:where(body[data-theme="light"]) .share-row{border:1px solid #d5dadd}
+:where(body[data-theme="light"]) .share-row.shared{border-color:#aed5be;background:#e3ebe6}
+:where(body[data-theme="light"]) .share-on{color:#144526;border:1px solid #aed5be}
+:where(body[data-theme="light"]) .share-empty{border:1px dashed #cad1d4}
+:where(body[data-theme="light"]) .project-agent-where{color:#144526}
 :where(body[data-theme="light"]) .remote-method{border:1px solid #cbd6d0;background:#e2e8e5}
 :where(body[data-theme="light"]) .remote-method:has(input:checked){border-color:#7cc099;background:#dae4df}
 :where(body[data-theme="light"]) .remote-method em{background:#d5e5dc;color:#144526;border:1px solid #aed5be}

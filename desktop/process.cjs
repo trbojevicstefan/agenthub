@@ -141,6 +141,17 @@ function dockerExecArgs(agent, args = []) {
   if (!hasWorkdir) injected.push('-w', agent.hermesHome);
   return [...before, ...injected, ...after];
 }
+// The agent started in a given folder: `cd` for a normal process, `docker exec -w` for one in a container.
+function inFolder(agent, dir) {
+  if (!dir) return agent;
+  if (agent.command !== 'docker') return {...agent, cwd: dir};
+  const args = [...(agent.args || [])], index = dockerExecContainerIndex(args);
+  if (args[0] !== 'exec' || index < 0) return agent;
+  const w = args.findIndex((arg, i) => i < index && (arg === '-w' || arg === '--workdir'));
+  if (w >= 0) args[w + 1] = dir;
+  else { const eq = args.findIndex((arg, i) => i < index && arg.startsWith('--workdir=')); if (eq >= 0) args[eq] = '--workdir=' + dir; else args.splice(index, 0, '-w', dir); }
+  return {...agent, args};
+}
 function sshArgs(host, {interactive = false} = {}) {
   const args = ['-o', `BatchMode=${interactive ? 'no' : 'yes'}`, '-o', `StrictHostKeyChecking=${interactive ? 'ask' : 'yes'}`, '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-o', 'ForwardAgent=no', '-o', 'ExitOnForwardFailure=yes'];
   // A config alias delegates HostName, User, Port, IdentityFile and ProxyJump to OpenSSH.
@@ -207,4 +218,4 @@ function collect(child, {timeout = 15000, maxBytes = 1024 * 1024, input = '', si
     if (signal?.aborted) abort();
   });
 }
-module.exports = {quote, REMOTE_PATH, environment, primeShellPath, userToolDirs, cmdShimTarget, findExecutable, windowsLaunch, dockerExecArgs, dockerExecContainerIndex, sshArgs, target, remoteCommand, launch, terminate, collect};
+module.exports = {quote, inFolder, REMOTE_PATH, environment, primeShellPath, userToolDirs, cmdShimTarget, findExecutable, windowsLaunch, dockerExecArgs, dockerExecContainerIndex, sshArgs, target, remoteCommand, launch, terminate, collect};

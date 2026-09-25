@@ -72,3 +72,58 @@ test('through a shared remote (GitHub): your branch is pushed, the machine clone
   assert.equal(back.pushedBranch,'opaya/claude');assert.deepEqual(back.files,['A\tb.txt']);assert.equal(back.canMerge,true);
   assert(run(`git ls-remote ${origin}`).includes('refs/heads/opaya/claude'),'the agent branch is on the shared remote, ready for a pull request');
 });
+// A stand-in `docker` on PATH: `exec [-i] [-w dir] <container> cmd...` runs cmd here; `inspect` reports one bind mount.
+async function fakeDocker(t,root,mountDest){
+  const bin=path.join(root,'bin');await fs.mkdir(bin,{recursive:true});
+  await fs.writeFile(path.join(bin,'docker'),`#!/bin/sh\nif [ "$1" = inspect ]; then echo '[{"Type":"volume","Destination":"/var/lib","RW":true},{"Type":"bind","Source":"/srv/box","Destination":"${mountDest}","RW":true}]'; exit 0; fi\nshift\nwhile [ $# -gt 0 ]; do case "$1" in -i|-t|-it) shift;; -w|-e) shift 2;; *) break;; esac; done\nshift\nexec "$@"\n`,{mode:0o755});
+  const old=process.env.PATH;process.env.PATH=`${bin}:${old}`;t.after(()=>{process.env.PATH=old;});
+}
+test('an agent in a container: its copy goes in the container\'s data folder, and git runs inside it',{skip},async t=>{
+  const {root,local,sh}=await repo(t),data=path.join(root,'box-data');await fakeDocker(t,root,data);
+  const dir=await rw.placement({host:null,container:'opaya-box',project:'My App',agent:'Box Hermes'});
+  assert.equal(dir,`${data}/opaya-projects/my-app`,'in the bind mount, so it survives the container being recreated');
+  const sent=await rw.sendGit({folder:local,host:null,container:'opaya-box',dir,branch:'opaya/box-hermes',first:true,progress:quiet});
+  assert.equal(await fs.readFile(path.join(dir,'app.txt'),'utf8'),'hello\n');
+  await fs.writeFile(path.join(dir,'app.txt'),'from the box\n');
+  const back=await rw.bringBackGit({folder:local,host:null,container:'opaya-box',dir,branch:'opaya/box-hermes',agentName:'Box',base:sent.commit,progress:quiet});
+  assert.equal(back.ref,'refs/opaya/opaya-box/opaya/box-hermes');assert.deepEqual(back.files,['M\tapp.txt']);
+  // Plain copy into a container too.
+  await rw.sendCopy({folder:local,host:null,container:'opaya-box',dir:path.join(data,'opaya-projects','plain'),progress:quiet});
+  assert.equal(await fs.readFile(path.join(data,'opaya-projects','plain','app.txt'),'utf8'),'hello\n');
+  await assert.rejects(()=>rw.removeCopy({host:null,container:'opaya-box',dir:data}),/only deletes copies it made/);
+  await rw.removeCopy({host:null,container:'opaya-box',dir:path.join(data,'opaya-projects','plain')});
+  await assert.rejects(()=>fs.access(path.join(data,'opaya-projects','plain')));
+  assert.equal(sh('git status --porcelain'),'','your folder is untouched');
+});
+test('one project: remote agents are listed on it with their own copy, and chats open in that copy',()=>{
+  const {inFolder}=require('../desktop/process.cjs');
+  const p=projects.project({name:'app',path:'/home/me/app',agentIds:['a1'],remotes:[{agentId:'a4',hostId:'h1',container:'opaya-box',dir:'/opt/data/opaya-projects/app',mode:'git',branch:'opaya/box'},{agentId:'a9',mode:'git',branch:'x',dir:'relative'},{agentId:'a8',mode:'copy',dir:'/r/c',container:'bad name;rm'}]});
+  assert.deepEqual(p.remotes.map(r=>r.agentId),['a4'],'invalid copies are dropped');
+  assert.deepEqual(p.agentIds,['a1','a4'],'a shared agent is one of the project\'s agents');
+  const box={id:'a4',command:'docker',transport:'ssh',hostId:'h1',args:['exec','-i','-w','/root','opaya-box','claude']},vps={id:'a3',command:'claude',transport:'ssh',hostId:'h1'};
+  assert.equal(projects.fits(box,p),true);assert.equal(projects.folderFor(box,p),'/opt/data/opaya-projects/app');
+  assert.equal(projects.needsCopy(vps,p),true);assert.equal(projects.needsCopy({id:'a1',command:'hermes',transport:'local'},p),false);
+  assert.equal(projects.needsCopy({id:'d',protocol:'openai',transport:'http'},p),false,'API connections have no files');
+  assert.deepEqual(inFolder(box,'/opt/data/opaya-projects/app').args,['exec','-i','-w','/opt/data/opaya-projects/app','opaya-box','claude']);
+  assert.deepEqual(inFolder({...box,args:['exec','-i','opaya-h','hermes','acp']},'/x').args,['exec','-i','-w','/x','opaya-h','hermes','acp']);
+  assert.equal(inFolder(vps,'/root/opaya-projects/app').cwd,'/root/opaya-projects/app');
+  assert.equal(projects.project({name:'r',path:'/srv/r',hostId:'h1',remotes:p.remotes}).remotes.length,0,'only local projects are shared');
+});
+test('0.16.0 copies ("<name> on <machine>") fold into the local project, with their chats',async t=>{
+  const {Broker}=require('../desktop/broker.cjs');const {Store,Vault}=require('../desktop/store.cjs');const {secure}=require('./helpers.cjs');
+  const root=await temp(t),store=new Store(root),data=await store.load();
+  data.hosts=[{id:'h1',name:'vps',hostname:'vps.example',port:22,username:'root'}];
+  data.agents=[{id:'a3',name:'Claude',provider:'claude',protocol:'claude',transport:'ssh',hostId:'h1',command:'claude',args:[]}];
+  data.projects=[{id:'p1',name:'app',path:'/home/me/app',hostId:'',agentIds:[]},{id:'p2',name:'app on vps',path:'/root/opaya-projects/app',hostId:'h1',agentIds:['a3'],link:{from:'p1',mode:'git',branch:'opaya/claude',base:'main',lastSent:'abc1234'}},{id:'p3',name:'orphan copy',path:'/root/x',hostId:'h1',agentIds:[],link:{from:'p1',mode:'copy'}}];
+  data.conversations=[{id:'c1',agentId:'a3',title:'work',projectId:'p2',createdAt:new Date().toISOString()}];
+  await store.write(data);
+  const b=new Broker({store,vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true});await b.init();t.after(()=>b.close());
+  assert.deepEqual(b.data.projects.map(p=>p.id),['p1','p3'],'the copy with an agent is gone; one without stays a plain project');
+  const p=b.project('p1');assert.deepEqual(p.agentIds,['a3']);
+  assert.deepEqual({agentId:p.remotes[0].agentId,hostId:p.remotes[0].hostId,dir:p.remotes[0].dir,branch:p.remotes[0].branch,lastSent:p.remotes[0].lastSent},{agentId:'a3',hostId:'h1',dir:'/root/opaya-projects/app',branch:'opaya/claude',lastSent:'abc1234'});
+  assert.equal(b.data.conversations[0].projectId,'p1');
+  assert.equal(b.conversationCwd(b.data.conversations[0],b.agent('a3')),'/root/opaya-projects/app');
+  assert.equal(b.project('p3').link,null);
+  // Removing the agent removes its copy from the project too.
+  await b.removeAgent('a3');assert.deepEqual(b.project('p1').remotes,[]);
+});

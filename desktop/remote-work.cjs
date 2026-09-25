@@ -1,5 +1,6 @@
 'use strict';
-// Remote agents working on a local project. The agent gets its own copy on the machine, linked to the local project:
+// Remote agents working on a local project. Each agent gets its own copy where it runs (a machine over SSH, or inside
+// its Docker container), linked to the one local project:
 // - git (direct): the repository goes to the machine over SSH with git itself (your current branch, optionally with
 //   uncommitted work). The agent works on its own branch; bringing changes back fetches that branch for review.
 // - github: the machine clones the GitHub repository; the agent pushes its branch; you fetch it or open a PR.
@@ -23,8 +24,11 @@ function git(cwd,args,{host=null,timeout=10*60*1000}={}){
   return new Promise((resolve,reject)=>execFile(bin,['-C',cwd,...args],{env,timeout,windowsHide:true,maxBuffer:16*1024*1024},(error,stdout,stderr)=>error?reject(new Error(String(stderr||error.message).trim().split('\n').slice(-4).join(' ').slice(0,600))):resolve(String(stdout))));
 }
 const gitUrl=(host,dir)=>host?`ssh://${target(host)}${dir}`:dir;
-const where=host=>({host:host||null,container:''});
-const hostName=host=>host?host.name:'this computer'; // no host: a second folder on this computer (used by tests)
+const where=(host,container='')=>({host:host||null,container:container||''});
+// no host and no container: a second folder on this computer (used by tests)
+const hostName=(host,container='')=>container?`container ${container} on ${host?host.name:'this computer'}`:host?host.name:'this computer';
+// Git runs inside the container: the SSH (or local) side starts git-receive-pack / git-upload-pack through docker exec.
+const pack=(container,kind)=>container?[`--${kind}-pack=docker exec -i ${q(container)} git-${kind}-pack`]:[];
 // What the local folder is: a git repository (branch, uncommitted changes, GitHub origin) or a plain folder.
 async function inspect(folder){
   const info={git:false,branch:'',dirty:0,origin:'',github:false,unpushed:0};
@@ -52,36 +56,54 @@ async function snapshot(folder,includeChanges){
     return {commit,included:true};
   }finally{await fs.rm(index,{force:true});}
 }
-async function remoteHome(host){return (await run(where(host),'printf %s "$HOME"')).trim();}
-async function requireRemoteGit(host){
-  const out=(await run(where(host),'command -v git >/dev/null 2>&1 && echo yes || echo no')).trim();
-  if(out!=='yes')throw new Error(`Git is not installed on ${hostName(host)}. Install it there (Install agents > ${hostName(host)} > Git), then try again.`);
+async function remoteHome(host,container=''){return (await run(where(host,container),'printf %s "$HOME"')).trim();}
+async function requireRemoteGit(host,container=''){
+  const out=(await run(where(host,container),'command -v git >/dev/null 2>&1 && echo yes || echo no')).trim();
+  if(out!=='yes')throw new Error(container?`Git is not installed in container ${container}. Share it as a plain copy instead, or install git in the container.`:`Git is not installed on ${hostName(host)}. Install it there (Install agents > ${hostName(host)} > Git), then try again.`);
+}
+// Where an agent's copy lives, as the agent sees it. On a machine: ~/opaya-projects/<project>-<agent>. In a container: in
+// its data volume (the first writable bind mount, which survives the container being recreated), else its home.
+async function placement({host,container='',project,agent}){
+  const name=`${slug(project)}-${slug(agent)}`.slice(0,70);
+  if(!container)return `${await remoteHome(host)}/opaya-projects/${name}`;
+  const inspectMounts=host?run(where(host),`docker inspect -f '{{json .Mounts}}' ${q(container)}`,60000)
+    :new Promise((resolve,reject)=>{const docker=findExecutable('docker',environment());if(!docker)return reject(new Error('Docker is not installed on this computer.'));execFile(docker,['inspect','-f','{{json .Mounts}}',container],{env:environment(),windowsHide:true,timeout:60000},(e,out,err)=>e?reject(new Error(String(err||e.message).trim())):resolve(String(out)));});
+  const out=await inspectMounts.catch(error=>{throw new Error(`Could not look inside container ${container}: ${error.message}`);});
+  let mounts=[];try{mounts=JSON.parse(out.trim()||'[]')||[];}catch{}
+  const volume=mounts.find(m=>m&&m.Type==='bind'&&m.RW!==false&&typeof m.Destination==='string'&&m.Destination.startsWith('/')&&m.Destination!=='/');
+  const root=volume?volume.Destination.replace(/\/+$/,''):await remoteHome(host,container);
+  return `${root}/opaya-projects/${slug(project)}`;
+}
+// Delete an agent's copy. Only folders Opaya made (under an opaya-projects folder, never that folder itself).
+async function removeCopy({host,container='',dir}){
+  if(!/^\/(?:[^/\0]+\/)*opaya-projects\/[a-z0-9_-]+$/.test(String(dir||'')))throw new Error('Opaya only deletes copies it made.');
+  await run(where(host,container),`rm -rf ${q(dir)}`,5*60*1000);
 }
 // ---- git, direct over SSH --------------------------------------------------------------------------------------
-async function sendGit({folder,host,dir,branch,includeChanges,first,lease='',progress}){
-  await requireRemoteGit(host);
-  progress({step:'prepare',state:'active',message:`Preparing ${dir} on ${hostName(host)}`});
+async function sendGit({folder,host,container='',dir,branch,includeChanges,first,lease='',progress}){
+  await requireRemoteGit(host,container);
+  progress({step:'prepare',state:'active',message:`Preparing ${dir} on ${hostName(host,container)}`});
   // A working repository that accepts pushes to its checked-out branch and updates its files (updateInstead). If the
   // agent left changes there, the push is refused rather than overwriting them.
-  await run(where(host),`mkdir -p ${q(dir)} && cd ${q(dir)} && { [ -d .git ] || { git init -q && git symbolic-ref HEAD ${q('refs/heads/'+branch)}; }; } && git config receive.denyCurrentBranch updateInstead`,60000);
+  await run(where(host,container),`mkdir -p ${q(dir)} && cd ${q(dir)} && { [ -d .git ] || { git init -q && git symbolic-ref HEAD ${q('refs/heads/'+branch)}; }; } && git config receive.denyCurrentBranch updateInstead`,60000);
   progress({step:'prepare',state:'done',message:'Ready'});
   progress({step:'send',state:'active',message:includeChanges?'Sending your branch with uncommitted changes':'Sending your branch'});
   const snap=await snapshot(folder,includeChanges);
   // After you brought the agent's work back, its branch may be replaced, but only if it still ends where it did then
   // (force-with-lease): anything the agent did since stops the send instead of being lost.
-  try{await git(folder,['push',...(lease?[`--force-with-lease=refs/heads/${branch}:${lease}`]:[]),gitUrl(host,dir),`${snap.commit}:refs/heads/${branch}`],{host});}
+  try{await git(folder,['push',...pack(container,'receive'),...(lease?[`--force-with-lease=refs/heads/${branch}:${lease}`]:[]),gitUrl(host,dir),`${snap.commit}:refs/heads/${branch}`],{host});}
   catch(error){
-    if(/non-fast-forward|fetch first|rejected|stale info/i.test(error.message)&&!first)throw new Error(`${hostName(host)} has work you have not brought back yet. Bring changes back first, then send again.`);
-    if(/unstaged changes|working tree|updateInstead/i.test(error.message))throw new Error(`The agent has unsaved changes on ${hostName(host)}. Bring changes back first, then send again.`);
+    if(/non-fast-forward|fetch first|rejected|stale info/i.test(error.message)&&!first)throw new Error(`${hostName(host,container)} has work you have not brought back yet. Bring changes back first, then send again.`);
+    if(/unstaged changes|working tree|updateInstead/i.test(error.message))throw new Error(`The agent has unsaved changes on ${hostName(host,container)}. Bring changes back first, then send again.`);
     throw error;
   }
   progress({step:'send',state:'done',message:snap.included?'Sent, with your uncommitted changes':'Sent'});
   return {commit:snap.commit,included:snap.included};
 }
 // Save what the agent changed on the machine as a commit on its branch, then fetch it here for review.
-async function commitRemote(host,dir,agentName){
-  const msg=`Work by ${agentName||'the agent'} on ${hostName(host)}`.replace(/[^\w .()/-]/g,'');
-  return (await run(where(host),`cd ${q(dir)} && if [ -n "$(git status --porcelain)" ]; then git add -A && git ${AGENT_ID.map(q).join(' ')} commit -q -m ${q(msg)} && echo committed; else echo clean; fi`,120000)).trim();
+async function commitRemote(host,container,dir,agentName){
+  const msg=`Work by ${agentName||'the agent'} on ${hostName(host,container)}`.replace(/[^\w .()/-]/g,'');
+  return (await run(where(host,container),`cd ${q(dir)} && if [ -n "$(git status --porcelain)" ]; then git add -A && git ${AGENT_ID.map(q).join(' ')} commit -q -m ${q(msg)} && echo committed; else echo clean; fi`,120000)).trim();
 }
 // What the agent did: everything on its branch since `base` (what Opaya last sent it, so your own uncommitted work that
 // travelled along is not shown as the agent's). canMerge: its commits can be merged into your branch as they are.
@@ -95,14 +117,14 @@ async function summary(folder,ref,base){
   const canMerge=await git(folder,['merge-base','--is-ancestor',from,head]).then(()=>true,()=>false);
   return {ref,tip,base:from,commits,files,stat,branch,canMerge,upToDate:!files.length};
 }
-async function bringBackGit({folder,host,dir,branch,agentName,base,progress}){
-  await requireRemoteGit(host);
-  progress({step:'save',state:'active',message:`Saving the agent's changes on ${hostName(host)}`});
-  const saved=await commitRemote(host,dir,agentName);
+async function bringBackGit({folder,host,container='',dir,branch,agentName,base,progress}){
+  await requireRemoteGit(host,container);
+  progress({step:'save',state:'active',message:`Saving the agent's changes on ${hostName(host,container)}`});
+  const saved=await commitRemote(host,container,dir,agentName);
   progress({step:'save',state:'done',message:saved==='committed'?'Saved its changes as a commit':'No unsaved changes there'});
   progress({step:'fetch',state:'active',message:'Fetching its branch'});
-  const ref=`refs/opaya/${slug(host?host.name:"local")}/${branch}`;
-  await git(folder,['fetch','--no-tags',gitUrl(host,dir),`+refs/heads/${branch}:${ref}`],{host});
+  const ref=`refs/opaya/${slug(container||(host?host.name:'local'))}/${branch}`;
+  await git(folder,['fetch','--no-tags',...pack(container,'upload'),gitUrl(host,dir),`+refs/heads/${branch}:${ref}`],{host});
   progress({step:'fetch',state:'done',message:'Fetched'});
   return summary(folder,ref,base);
 }
@@ -131,7 +153,7 @@ async function sendGithub({folder,host,dir,branch,base,origin,first,progress}){
 }
 async function bringBackGithub({folder,host,dir,branch,agentName,base,progress}){
   progress({step:'save',state:'active',message:`Saving the agent's changes on ${hostName(host)}`});
-  const saved=await commitRemote(host,dir,agentName);
+  const saved=await commitRemote(host,'',dir,agentName);
   progress({step:'save',state:'done',message:saved==='committed'?'Saved its changes as a commit':'No unsaved changes there'});
   progress({step:'push',state:'active',message:`Pushing ${branch} from ${hostName(host)} to GitHub`});
   try{await run(where(host),`cd ${q(dir)} && GIT_TERMINAL_PROMPT=0 git push -q -u origin ${q(branch)}`,5*60*1000);}
@@ -144,11 +166,11 @@ async function bringBackGithub({folder,host,dir,branch,agentName,base,progress})
 }
 // ---- plain folders ---------------------------------------------------------------------------------------------
 async function topLevel(folder){return (await fs.readdir(folder)).filter(n=>!SKIP.has(n));}
-async function sendCopy({folder,host,dir,progress}){
+async function sendCopy({folder,host,container='',dir,progress}){
   const paths=await topLevel(folder);if(!paths.length)throw new Error('The folder is empty.');
   const size=await measure(where(null),folder,paths);
   progress({step:'send',state:'active',message:`Copying ${size.files} files (${Math.round(size.bytes/1048576*10)/10} MB); skipping ${[...SKIP].slice(0,6).join(', ')}...`,bytes:0,total:size.bytes});
-  const sent=await transfer(where(null),folder,paths,where(host),dir,{onBytes:n=>progress({step:'send',bytes:n,total:size.bytes})});
+  const sent=await transfer(where(null),folder,paths,where(host,container),dir,{onBytes:n=>progress({step:'send',bytes:n,total:size.bytes})});
   progress({step:'send',state:'done',message:`Copied ${Math.round(sent/1048576*10)/10} MB`,bytes:sent,total:Math.max(sent,size.bytes)});
   return {};
 }
@@ -162,12 +184,12 @@ async function walk(root,rel='',out=new Map()){
 const same=async(a,b)=>{try{const [x,y]=await Promise.all([fs.readFile(a),fs.readFile(b)]);return x.equals(y);}catch{return false;}};
 // Copy the machine's version back: new and changed files only (nothing is deleted here). Every local file that gets
 // replaced is saved first under <backups>/projects/<name>/<time>/.
-async function bringBackCopy({folder,host,dir,backupRoot,name,progress}){
+async function bringBackCopy({folder,host,container='',dir,backupRoot,name,progress}){
   const staging=await fs.mkdtemp(path.join(os.tmpdir(),'opaya-bring-'));
   try{
-    progress({step:'fetch',state:'active',message:`Copying ${dir} from ${hostName(host)}`});
-    const entries=(await run(where(host),`cd ${q(dir)} && ls -A`)).split('\n').map(s=>s.trim()).filter(n=>n&&!SKIP.has(n));
-    if(entries.length)await transfer(where(host),dir,entries,where(null),staging);
+    progress({step:'fetch',state:'active',message:`Copying ${dir} from ${hostName(host,container)}`});
+    const entries=(await run(where(host,container),`cd ${q(dir)} && ls -A`)).split('\n').map(s=>s.trim()).filter(n=>n&&!SKIP.has(n));
+    if(entries.length)await transfer(where(host,container),dir,entries,where(null),staging);
     progress({step:'fetch',state:'done',message:'Copied'});
     progress({step:'apply',state:'active',message:'Comparing with your folder'});
     const theirs=await walk(staging),changed=[],added=[];
@@ -192,4 +214,4 @@ function applyCommands(result,action,{branch,patchFile,windows=false}={}){
   if(action==='diff')return [`git --no-pager diff --stat ${base} ${q(ref)}`,`git diff ${base} ${q(ref)}`];
   throw new Error('Unknown action.');
 }
-module.exports={inspect,snapshot,summary,sendGit,bringBackGit,sendGithub,bringBackGithub,sendCopy,bringBackCopy,applyCommands,remoteHome,slug,gitUrl,SKIP};
+module.exports={placement,removeCopy,inspect,snapshot,summary,sendGit,bringBackGit,sendGithub,bringBackGithub,sendCopy,bringBackCopy,applyCommands,remoteHome,slug,gitUrl,SKIP};

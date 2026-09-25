@@ -474,9 +474,8 @@
     if(name==='agent-menu'){const a=state.agents.find(a=>a.id===id);if(a){const r=button.getBoundingClientRect();openMenu(r.left,r.bottom+4,agentMenu(a),title(a),button.closest('[data-agent-id]'));}return;}
     if(name==='hosts'){openHosts();return;}
     if(name==='manage'){openManage(id);return;}
-    if(name==='project-remote'){const p=(state.projects||[]).find(x=>x.id===id);if(p)openRemoteWork(p);return;}
-    if(name==='copy-send'){const p=(state.projects||[]).find(x=>x.id===id);if(p)action(()=>sendToCopy(p));return;}
-    if(name==='copy-bring'){const p=(state.projects||[]).find(x=>x.id===id);if(p)action(()=>bringFromCopy(p));return;}
+    if(name==='project-remote'){const p=(state.projects||[]).find(x=>x.id===id);if(p)openProjectAgents(p);return;}
+    if(name==='copy-send'||name==='copy-bring'){const p=(state.projects||[]).find(x=>x.id===id),a=state.agents.find(x=>x.id===button.dataset.agent);if(p&&a)action(()=>name==='copy-send'?sendToRemote(p,a):bringFromRemote(p,a));return;}
     if(name==='surface'){const a=state.agents.find(x=>x.id===id);if(a)action(()=>setSurface(a,button.dataset.surface));return;}
     if(name==='interface'){action(()=>chooseInterface(button.dataset.value,button.closest('#interface-chooser')?'first':'settings'));return;}
     if(name==='manage-run'){const item=manageKeyed[button.dataset.key];if(item&&!item.disabled)action(()=>item.run());return;}
@@ -1326,7 +1325,9 @@
   let projectFilter='',projectsHtml='';const projectGit=new Map();
   const projectOf=c=>c?.projectId?(state.projects||[]).find(p=>p.id===c.projectId):null;
   const hostName=id=>id?(state.hosts.find(h=>h.id===id)?.name||'Machine'):localName();
-  const fitsProject=(a,p)=>a.command!=='docker'&&(p.hostId?a.transport==='ssh'&&a.hostId===p.hostId:a.transport!=='ssh');
+  // Runs on the same machine as the folder (containers use their own paths); or has its own copy of the project.
+  const fitsHere=(a,p)=>a.command!=='docker'&&(p.hostId?a.transport==='ssh'&&a.hostId===p.hostId:a.transport!=='ssh');
+  const fitsProject=(a,p)=>!!(p.remotes||[]).some(r=>r.agentId===a.id)||fitsHere(a,p);
   const ago=iso=>{const s=Math.max(0,(Date.now()-new Date(iso).getTime())/1000);return s<60?'now':s<3600?`${Math.floor(s/60)}m`:s<86400?`${Math.floor(s/3600)}h`:s<604800?`${Math.floor(s/86400)}d`:new Date(iso).toLocaleDateString([],{month:'short',day:'numeric'});};
   const saveProjectsView=()=>saveView();
   function toggleProjects(force){projectsOpen=force??!projectsOpen;if(projectsOpen&&historyOpen){historyOpen=false;renderHistory();}renderProjects();saveProjectsView();if(projectsOpen)refreshProjectGit();}
@@ -1354,10 +1355,9 @@
         </div>
         ${open?`<div class="project-body">
           <div class="project-path" title="${esc(p.path)}">${esc(hostName(p.hostId))} <span>/</span> ${esc(p.path)}</div>
-          ${p.link?`<div class="project-link">Copy of ${esc((state.projects||[]).find(x=>x.id===p.link.from)?.name||'a local project')}${p.link.branch?` / ${esc(p.link.branch)}`:''} <span><button type="button" class="text-button" data-action="copy-send" data-id="${esc(p.id)}" title="Send your latest changes here">&#8593; Send</button><button type="button" class="text-button" data-action="copy-bring" data-id="${esc(p.id)}" title="Bring the agent's changes back for review">&#8595; Bring back</button></span></div>`:''}
-          ${linkedCopies(p).map(c=>`<div class="project-link">On ${esc(hostName(c.hostId))}${c.link.branch?` / ${esc(c.link.branch)}`:''}${c.link.fetchedAt?` <small>brought back ${esc(ago(c.link.fetchedAt))}</small>`:c.link.sentAt?` <small>sent ${esc(ago(c.link.sentAt))}</small>`:''} <span><button type="button" class="text-button" data-action="copy-send" data-id="${esc(c.id)}">&#8593; Send</button><button type="button" class="text-button" data-action="copy-bring" data-id="${esc(c.id)}">&#8595; Bring back</button></span></div>`).join('')}
-          ${!p.hostId&&!p.link&&state.hosts.length&&!linkedCopies(p).length?`<button type="button" class="text-button project-share" data-action="project-remote" data-id="${esc(p.id)}">&#8599; Let an agent on a machine work on it</button>`:''}
-          <div class="project-agents">${agents.map(a=>`<button type="button" class="project-agent" data-action="project-chat" data-id="${esc(p.id)}" data-agent="${esc(a.id)}" data-pa-agent="${esc(a.id)}" title="New chat with ${esc(title(a))} in ${esc(p.name)}">${badge(a)}<span>${esc(title(a))}</span>${dot(a)}</button>`).join('')}<button type="button" class="project-agent add" data-action="project-add-agent" data-id="${esc(p.id)}" title="Add or remove agents">+ Agent</button></div>
+          ${remoteAgents(p).map(a=>{const r=remoteOf(a,p);return `<div class="project-link" data-pa-agent="${esc(a.id)}"><span class="project-link-who">${esc(title(a))} <small>${esc(agentPlace(a))} / ${remoteState(r)}</small></span><span><button type="button" class="text-button" data-action="copy-send" data-id="${esc(p.id)}" data-agent="${esc(a.id)}" title="Send your latest changes to ${esc(title(a))}">&#8593; Send</button><button type="button" class="text-button" data-action="copy-bring" data-id="${esc(p.id)}" data-agent="${esc(a.id)}" title="Bring ${esc(title(a))}'s changes back for review">&#8595; Bring back</button></span></div>`;}).join('')}
+          ${!p.hostId&&!(p.remotes||[]).length&&state.agents.some(a=>remoteCapable(a,p))?`<button type="button" class="text-button project-share" data-action="project-remote" data-id="${esc(p.id)}">&#8599; Let an agent on a server work on it</button>`:''}
+          <div class="project-agents">${agents.map(a=>`<button type="button" class="project-agent" data-action="project-chat" data-id="${esc(p.id)}" data-agent="${esc(a.id)}" data-pa-agent="${esc(a.id)}" title="New chat with ${esc(title(a))} in ${esc(p.name)}${remoteOf(a,p)?` (its copy ${esc(agentPlace(a))})`:''}">${badge(a)}<span>${esc(title(a))}</span>${remoteOf(a,p)?'<small class="project-agent-where">&#8646;</small>':''}${dot(a)}</button>`).join('')}<button type="button" class="project-agent add" data-action="project-add-agent" data-id="${esc(p.id)}" title="Add or remove agents">+ Agent</button></div>
           <div class="project-chats">${chats.slice(0,8).map(c=>{const a=state.agents.find(x=>x.id===c.agentId);return `<button type="button" class="project-chat ${c.id===state.activeConversationId&&!overview&&!opayaView&&!playgroundView?'selected':''}" data-action="project-open-chat" data-id="${esc(c.id)}">${a?badge(a):''}<span class="project-chat-title">${esc(c.title)}</span>${a?.busy&&state.activeConversationId===c.id?'<span class="status-dot working"></span>':`<small>${esc(ago(c.createdAt))}</small>`}</button>`;}).join('')||`<p class="project-empty">${agents.length?'No chats yet. Pick an agent above to start one.':'Add an agent to start a chat in this folder.'}</p>`}${chats.length>8?`<p class="project-empty">${chats.length-8} older chats in each agent's history.</p>`:''}</div>
           <div class="project-tools"><button type="button" class="text-button" data-action="project-files" data-id="${esc(p.id)}">Files</button><button type="button" class="text-button" data-action="project-terminal" data-id="${esc(p.id)}">&gt;_ Terminal</button><button type="button" class="text-button" data-action="project-git" data-id="${esc(p.id)}">Git</button></div>
         </div>`:''}
@@ -1533,59 +1533,67 @@
   }
   function projectMenu(p){
     const agents=p.agentIds.map(id=>state.agents.find(a=>a.id===id)).filter(Boolean);
-    const copies=linkedCopies(p),source=p.link&&(state.projects||[]).find(x=>x.id===p.link.from);
     return [...agents.slice(0,4).map(a=>({icon:'+',label:`New chat with ${title(a)}`,run:()=>startProjectChat(p,a.id)})),{icon:'&#9786;',label:'Agents...',run:()=>openProjectAgents(p)},'-',
-      !p.hostId&&{icon:'&#8599;',label:'Work on it from a machine...',hint:state.hosts.length?'':'add a machine',run:()=>state.hosts.length?openRemoteWork(p):openHosts()},
-      ...copies.map(c=>({icon:'&#8646;',label:`Copy on ${hostName(c.hostId)}`,submenu:remoteCopyMenu(c)})),
-      ...(p.link?[{icon:'&#8593;',label:'Send my latest changes',run:()=>sendToCopy(p)},{icon:'&#8595;',label:'Bring changes back...',run:()=>bringFromCopy(p)},source&&{icon:'&#9656;',label:`Open ${source.name} (this computer)`,run:()=>{projectsExpanded.add(source.id);toggleProjects(true);}}]:[]),'-',
+      !p.hostId&&{icon:'&#8599;',label:'Share with an agent on a server...',run:()=>openProjectAgents(p)},
+      ...remoteAgents(p).map(a=>({icon:'&#8646;',label:`${title(a)} (${agentPlace(a)})`,submenu:remoteMenu(p,a)})),'-',
       ...gitMenu(p),'-',
       {icon:'&#9656;',label:'Browse files',run:()=>openFiles({hostId:p.hostId||undefined,path:p.path,label:`${p.name} / ${hostName(p.hostId)}`})},
       {icon:'&gt;_',label:'Terminal here',run:()=>projectTerminal(p)},
       {icon:'&#9998;',label:'Edit project...',run:()=>openProjectForm(p)},
       {icon:'&#10005;',label:'Remove project',danger:true,run:async()=>{if(!confirm(`Remove project ${p.name}? Its chats stay with their agents; the folder is not touched.`))return;await api.projectRemove({id:p.id});await refresh();toast('Project removed.');}}];
   }
-  // ---- Remote agents on local projects -------------------------------------------------------------------------------
-  const linkedCopies=p=>(state.projects||[]).filter(x=>x.link?.from===p.id);
-  const remoteCopyMenu=c=>[{icon:'&#8593;',label:'Send my latest changes',run:()=>sendToCopy(c)},{icon:'&#8595;',label:'Bring changes back...',run:()=>bringFromCopy(c)},...c.agentIds.map(id=>state.agents.find(a=>a.id===id)).filter(Boolean).map(a=>({icon:'+',label:`New chat with ${title(a)}`,run:()=>startProjectChat(c,a.id)}))];
-  async function sendToCopy(c){
-    let includeChanges=false;
-    if(c.link?.mode==='git'){const local=(state.projects||[]).find(x=>x.id===c.link.from),info=local&&await api.projectRemoteInfo({id:local.id}).catch(()=>null);if(info?.dirty)includeChanges=confirm(`You have ${info.dirty} uncommitted change${info.dirty===1?'':'s'}. Send them too?\n\nOK sends them along (your folder stays as it is); Cancel sends only your commits.`);}
-    else if(c.link?.mode==='copy'&&!confirm(`Copy your folder to ${hostName(c.hostId)} again? Files there are replaced by yours; bring the agent's changes back first if you have not.`))return;
-    await api.projectRemoteSend({id:c.id,includeChanges});
+  // ---- Remote agents on local projects: one project; each agent on a machine or in a container gets its own copy -----
+  const remoteOf=(a,p)=>(p.remotes||[]).find(r=>r.agentId===a.id)||null;
+  // Agents that can work on this local project through their own copy.
+  const remoteCapable=(a,p)=>!p.hostId&&!fitsHere(a,p)&&a.protocol!=='openai'&&a.transport!=='http'&&a.protocol!=='terminal';
+  const agentPlace=a=>a.command==='docker'?`container on ${hostName(a.transport==='ssh'?a.hostId:'')}`:hostName(a.transport==='ssh'?a.hostId:'');
+  const remoteAgents=p=>(p.remotes||[]).map(r=>state.agents.find(a=>a.id===r.agentId)).filter(Boolean);
+  const remoteState=r=>`${r.mode==='copy'?'plain copy':esc(r.branch)}${r.fetchedAt?` / brought back ${esc(ago(r.fetchedAt))}`:r.sentAt?` / sent ${esc(ago(r.sentAt))}`:''}`;
+  const remoteMenu=(p,a)=>{const r=remoteOf(a,p);return [{icon:'+',label:`New chat in ${p.name}`,run:()=>startProjectChat(p,a.id)},{icon:'&#8593;',label:'Send my latest changes',run:()=>sendToRemote(p,a)},{icon:'&#8595;',label:'Bring changes back...',run:()=>bringFromRemote(p,a)},'-',
+    a.command!=='docker'&&r&&{icon:'&#9656;',label:'Browse its copy',run:()=>openFiles({hostId:a.hostId||undefined,path:r.dir,label:`${p.name} / ${title(a)}`})},
+    {icon:'&#10005;',label:'Stop sharing...',danger:true,run:()=>stopSharing(p,a)}];};
+  async function sendToRemote(p,a){
+    const r=remoteOf(a,p);if(!r)return;let includeChanges=false;
+    if(r.mode==='git'){const info=await api.projectRemoteInfo({id:p.id}).catch(()=>null);if(info?.dirty)includeChanges=confirm(`You have ${info.dirty} uncommitted change${info.dirty===1?'':'s'}. Send them too?\n\nOK sends them along (your folder stays as it is); Cancel sends only your commits.`);}
+    else if(r.mode==='copy'&&!confirm(`Copy your folder to ${title(a)} again? Its files are replaced by yours; bring its changes back first if you have not.`))return;
+    await api.projectRemoteSend({id:p.id,agentId:a.id,includeChanges});
   }
-  async function bringFromCopy(c){await api.projectRemoteBring({id:c.id});}
-  // Guided: which machine and agent, then how the project gets there. Nothing in your folder changes until you choose
-  // to apply the agent's work.
-  async function openRemoteWork(p,step={}){
-    const hosts=state.hosts,hostId=step.hostId||hosts[0]?.id||'',host=hosts.find(h=>h.id===hostId);
-    modal('Work on it from a machine',`${p.name} / ${p.path}`,`<p class="clone-progress"><span class="status-dot working"></span> Looking at ${esc(p.name)}...</p>`);
-    let info;try{info=await api.projectRemoteInfo({id:p.id});}catch(e){modal('Work on it from a machine',p.name,`<div class="inline-notice error-notice">${esc(e.message)}</div>`);return;}
+  async function bringFromRemote(p,a){await api.projectRemoteBring({id:p.id,agentId:a.id});}
+  function stopSharing(p,a){
+    const r=remoteOf(a,p);if(!r)return;
+    modal(`Stop sharing with ${title(a)}?`,`${p.name} / ${agentPlace(a)}`,`<form id="stop-share" class="mcp-form"><p class="field-help">${esc(title(a))} leaves ${esc(p.name)}. Bring its changes back first if you want them; its chats stay in its history.</p>
+      <label class="check-row inline"><input type="checkbox" name="remove"> Also delete its copy <code>${esc(r.dir)}</code></label>
+      <div class="modal-footer"><span></span><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Stop sharing</button></div></div></form>`);
+    $('#stop-share').onsubmit=event=>{event.preventDefault();const deleteCopy=event.target.elements.remove.checked;action(async()=>{closeModal();const res=await api.projectRemoteStop({id:p.id,agentId:a.id,deleteCopy});if(res?.stopped){await refresh();toast(`${title(a)} left ${p.name}${res.deleted?'; its copy was deleted':''}.`);}});};
+  }
+  // Share with one agent: how the project gets to it. Nothing in your folder changes until you apply its work.
+  async function openShare(p,a,step={}){
+    const where=agentPlace(a),inContainer=a.command==='docker',head=`Share ${p.name} with ${title(a)}`;
+    modal(head,where,`<p class="clone-progress"><span class="status-dot working"></span> Looking at ${esc(p.name)}...</p>`);
+    let info;try{info=await api.projectRemoteInfo({id:p.id});}catch(e){modal(head,where,`<div class="inline-notice error-notice">${esc(e.message)}</div>`);return;}
     if(!$('#app-dialog'))return;
-    const agents=state.agents.filter(a=>a.transport==='ssh'&&a.hostId===hostId&&a.command!=='docker'&&a.protocol!=='openai');
-    const existing=linkedCopies(p).find(c=>c.hostId===hostId);
-    const mode=step.mode||(info.git?'git':'copy');
-    const method=(value,titleText,text,ok,note='')=>`<label class="remote-method ${ok?'':'off'}"><input type="radio" name="mode" value="${value}" ${mode===value&&ok?'checked':''} ${ok?'':'disabled'}><span><strong>${titleText}</strong>${value===(info.git?'git':'copy')?' <em>Recommended</em>':''}<small>${text}</small>${note?`<small class="remote-note">${note}</small>`:''}</span></label>`;
-    modal('Work on it from a machine',`${p.name} / ${info.git?`git, branch ${info.branch||'(detached)'}`:'plain folder'}`,`<form id="remote-work-form">
-      <div class="remote-step"><span class="remote-step-n">1</span><div><strong>Where</strong><div class="install-target">${hosts.map(h=>`<button type="button" class="target-chip ${h.id===hostId?'selected':''}" data-remote-host="${esc(h.id)}">${esc(h.name)}</button>`).join('')}</div>
-        <label class="field"><span>Agent</span><select name="agent">${agents.map(a=>`<option value="${esc(a.id)}">${esc(title(a))} (${esc(labels[a.provider]||a.provider)})</option>`).join('')}<option value="">No agent yet: add one later</option></select></label>
-        ${agents.length?'':`<p class="field-help">No agent runs on ${esc(host?.name||'this machine')} yet (containers cannot see its folders). Install one there from Install agents, or continue and add it later.</p>`}
-        ${existing?`<div class="inline-notice"><span>i</span><div><strong>${esc(p.name)} already has a copy on ${esc(host.name)}</strong><p>Use its Send and Bring back buttons in Projects.</p></div></div>`:''}</div></div>
-      <div class="remote-step"><span class="remote-step-n">2</span><div><strong>How it gets there</strong>
-        ${method('git','Git over SSH',`Your branch ${esc(info.branch||'')} goes straight to ${esc(host?.name||'the machine')} with git. The agent works on its own branch; you review what it did and bring it back. No GitHub needed.`,info.git&&!!info.branch,info.dirty?`<label class="check-row inline"><input type="checkbox" name="includeChanges" checked> Include my ${info.dirty} uncommitted change${info.dirty===1?'':'s'} (your folder stays as it is)</label>`:'')}
-        ${method('github','Through GitHub',info.github?`${esc(host?.name||'The machine')} clones ${esc(info.origin)} and the agent pushes its own branch; you fetch it or open a pull request.`:'This project has no GitHub remote (origin).',info.github&&!!info.branch,info.github?`${info.unpushed||!info.upstream?`Opaya pushes your ${info.unpushed?`${info.unpushed} unpushed commit${info.unpushed===1?'':'s'}`:'branch'} first. `:''}${esc(host?.name||'The machine')} needs access to the repository; if it has none, Opaya opens a GitHub sign-in there.`:'')}
-        ${method('copy','Plain copy',`The folder is copied (without node_modules, .venv, build output and the like). Bringing back updates changed and new files, and keeps a backup of every file it replaces.`,true)}
+    const best=info.git&&info.branch?'git':'copy',mode=step.mode||best,machine=hostName(a.transport==='ssh'?a.hostId:'');
+    const method=(value,titleText,text,ok,note='')=>`<label class="remote-method ${ok?'':'off'}"><input type="radio" name="mode" value="${value}" ${mode===value&&ok?'checked':''} ${ok?'':'disabled'}><span><strong>${titleText}</strong>${value===best&&ok?' <em>Recommended</em>':''}<small>${text}</small>${note?`<small class="remote-note">${note}</small>`:''}</span></label>`;
+    const slug=v=>String(v||'').toLowerCase().replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40)||'project';
+    modal(head,`${p.name} / ${info.git?`git, branch ${info.branch||'(detached)'}`:'plain folder'}`,`<form id="remote-work-form">
+      <div class="share-agent">${badge(a)}<div><strong>${esc(title(a))}</strong><small>${esc(labels[a.provider]||a.provider)} / ${esc(where)}</small></div></div>
+      <p class="field-help">${esc(title(a))} runs ${inContainer?'in a container':`on ${esc(machine)}`}, so it cannot see your folder. It gets its own copy of ${esc(p.name)} and joins the project; you send your changes and bring its work back when you want.</p>
+      <div class="remote-step"><span class="remote-step-n">&#8646;</span><div><strong>How the project gets there</strong>
+        ${method('git','Git over SSH',`Your branch ${esc(info.branch||'')} goes straight to ${esc(title(a))} with git. It works on its own branch; you review what it did before anything reaches your folder. No GitHub needed.`,info.git&&!!info.branch,info.dirty?`<label class="check-row inline"><input type="checkbox" name="includeChanges" checked> Include my ${info.dirty} uncommitted change${info.dirty===1?'':'s'} (your folder stays as it is)</label>`:'')}
+        ${method('github','Through GitHub',inContainer?'Agents in a container use Git over SSH or a plain copy.':info.github?`${esc(machine)} clones ${esc(info.origin)} and the agent pushes its own branch; you fetch it or open a pull request.`:'This project has no GitHub remote (origin).',!inContainer&&info.github&&!!info.branch,!inContainer&&info.github?`${info.unpushed||!info.upstream?`Opaya pushes your ${info.unpushed?`${info.unpushed} unpushed commit${info.unpushed===1?'':'s'}`:'branch'} first. `:''}${esc(machine)} needs access to the repository; if it has none, Opaya opens a GitHub sign-in there.`:'')}
+        ${method('copy','Plain copy','The folder is copied (without node_modules, .venv, build output and the like). Bringing back updates changed and new files, and keeps a backup of every file it replaces.',true)}
       </div></div>
-      <p class="field-help remote-where">The agent gets its own copy in ~/opaya-projects/${esc(p.name.toLowerCase().replace(/[^a-z0-9_-]+/g,'-'))} on ${esc(host?.name||'the machine')}. Your folder only changes when you apply its work.</p>
-      <div class="modal-footer"><span></span><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="submit" class="primary" ${existing||!host?'disabled':''}>Share with ${esc(host?.name||'machine')}</button></div></div></form>`,true);
+      <p class="field-help remote-where">Its copy: ${inContainer?`opaya-projects/${esc(slug(p.name))} in the container's data folder`:`~/opaya-projects/${esc(`${slug(p.name)}-${slug(a.name)}`)} on ${esc(machine)}`}.</p>
+      <div class="modal-footer"><button type="button" class="subtle" data-share-back>&#8592; Agents</button><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="submit" class="primary">Share with ${esc(title(a))}</button></div></div></form>`,true);
     const form=$('#remote-work-form');
-    form.addEventListener('click',event=>{const b=event.target.closest('[data-remote-host]');if(b)openRemoteWork(p,{hostId:b.dataset.remoteHost,mode:form.elements.mode.value});});
-    form.addEventListener('submit',event=>{event.preventDefault();const f=event.target;action(async()=>{await api.projectRemoteStart({id:p.id,hostId,agentId:f.elements.agent.value||undefined,mode:f.elements.mode.value,includeChanges:!!f.elements.includeChanges?.checked});closeModal();});});
+    form.querySelector('[data-share-back]').onclick=()=>openProjectAgents(p);
+    form.addEventListener('submit',event=>{event.preventDefault();const f=event.target;action(async()=>{await api.projectRemoteStart({id:p.id,agentId:a.id,mode:f.elements.mode.value,includeChanges:!!f.elements.includeChanges?.checked});closeModal();});});
   }
   // Review what the agent did before anything touches your folder.
   function openBringReview(r){
-    const copy=(state.projects||[]).find(x=>x.id===r.projectId),local=(state.projects||[]).find(x=>x.id===r.localProjectId),where=hostName(copy?.hostId);
+    const local=(state.projects||[]).find(x=>x.id===r.projectId),where=r.agentName||'the agent';
     if(r.mode==='copy'){
-      modal(`Changes from ${where}`,local?.name||'',r.upToDate?'<p class="field-help">Nothing new: your folder already matches the copy.</p>':`<p class="field-help">Your folder is updated: ${r.changed.length} changed and ${r.added.length} new file${r.added.length===1?'':'s'}. Nothing was deleted.</p><div class="bring-files">${[...r.changed.map(f=>['M',f]),...r.added.map(f=>['A',f])].slice(0,200).map(([k,f])=>`<div><b class="bring-${k}">${k}</b> ${esc(f)}</div>`).join('')}</div>${r.backup?`<p class="field-help">Your previous versions are saved in <code>${esc(r.backup)}</code>. <button type="button" class="text-button" data-action="backup-reveal" data-file="${esc(r.backup)}">Show</button></p>`:''}`+'<div class="modal-footer"><span></span><button class="primary" data-action="modal-close">Done</button></div>',true);
+      modal(`Changes from ${where}`,local?.name||'',r.upToDate?'<p class="field-help">Nothing new: your folder already matches its copy.</p>':`<p class="field-help">Your folder is updated: ${r.changed.length} changed and ${r.added.length} new file${r.added.length===1?'':'s'}. Nothing was deleted.</p><div class="bring-files">${[...r.changed.map(f=>['M',f]),...r.added.map(f=>['A',f])].slice(0,200).map(([k,f])=>`<div><b class="bring-${k}">${k}</b> ${esc(f)}</div>`).join('')}</div>${r.backup?`<p class="field-help">Your previous versions are saved in <code>${esc(r.backup)}</code>. <button type="button" class="text-button" data-action="backup-reveal" data-file="${esc(r.backup)}">Show</button></p>`:''}`+'<div class="modal-footer"><span></span><button class="primary" data-action="modal-close">Done</button></div>',true);
       return;
     }
     if(r.upToDate){modal(`Changes from ${where}`,local?.name||'','<p class="field-help">Nothing new from the agent since you last brought changes back.</p><div class="modal-footer"><span></span><button class="primary" data-action="modal-close">Close</button></div>');return;}
@@ -1596,14 +1604,41 @@
       <div class="modal-footer"><div><button type="button" class="subtle" data-bring="diff">Full diff</button><button type="button" class="subtle" data-bring="branch">New branch...</button></div><div>${r.canMerge?'<button type="button" class="secondary" data-bring="merge">Merge commits</button>':''}<button type="button" class="primary" data-bring="apply">Apply to my folder</button></div></div>`,true);
     $('#app-dialog').addEventListener('click',event=>{const b=event.target.closest('[data-bring]');if(!b)return;const act=b.dataset.bring;
       let branch='';if(act==='branch'){branch=prompt('Name for the new branch:',`review/${(r.ref.split('/').pop()||'agent')}`)||'';if(!branch)return;}
-      action(async()=>{await api.projectRemoteApply({id:r.projectId,action:act,branch});closeModal();toast(act==='apply'?'Applying the changes to your folder in the terminal below.':act==='merge'?'Merging in the terminal below.':act==='branch'?`Creating ${branch} in the terminal below.`:'Showing the diff in the terminal below.');});});
+      action(async()=>{await api.projectRemoteApply({id:r.projectId,agentId:r.agentId,action:act,branch});closeModal();toast(act==='apply'?'Applying the changes to your folder in the terminal below.':act==='merge'?'Merging in the terminal below.':act==='branch'?`Creating ${branch} in the terminal below.`:'Showing the diff in the terminal below.');});});
   }
   function agentChecks(p,hostId){
-    return state.agents.filter(a=>a.protocol!=='terminal').map(a=>{const ok=fitsProject(a,{hostId});return `<label class="check-row inline project-agent-check ${ok?'':'off'}" title="${ok?'':'Runs on another machine than this folder'}"><input type="checkbox" name="agent" value="${esc(a.id)}" ${p?.agentIds?.includes(a.id)&&ok?'checked':''} ${ok?'':'disabled'}> ${badge(a)} ${esc(title(a))}</label>`;}).join('')||'<p class="field-help">Add an agent first.</p>';
+    return state.agents.filter(a=>a.protocol!=='terminal').map(a=>{const ok=fitsHere(a,{hostId});return `<label class="check-row inline project-agent-check ${ok?'':'off'}" title="${ok?'':'Runs on another machine than this folder'}"><input type="checkbox" name="agent" value="${esc(a.id)}" ${p?.agentIds?.includes(a.id)&&ok?'checked':''} ${ok?'':'disabled'}> ${badge(a)} ${esc(title(a))}</label>`;}).join('')||'<p class="field-help">Add an agent first.</p>';
   }
-  function openProjectAgents(p){
-    modal('Agents in this project',`${p.name} / ${hostName(p.hostId)}`,`<form id="project-agents" class="mcp-form"><div class="project-agent-grid">${agentChecks(p,p.hostId)}</div><p class="field-help">Chats you start from the project open these agents in ${esc(p.path)}.</p><div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Save</button></div></div></form>`);
-    $('#project-agents').onsubmit=event=>{event.preventDefault();action(async()=>{await api.projectSave({...p,agentIds:[...event.target.querySelectorAll('[name="agent"]:checked')].map(c=>c.value)});closeModal();await refresh();});};
+  // The project's agents: those on this computer work in the folder itself; agents on each machine (and in containers)
+  // are listed from what exists there, and each one is shared with on its own.
+  function openProjectAgents(input){
+    const p=(state.projects||[]).find(x=>x.id===input.id)||input;
+    const save=form=>action(async()=>{const on=[...form.querySelectorAll('[name="agent"]:checked')].map(c=>c.value);await api.projectSave({...p,agentIds:[...new Set([...on,...(p.remotes||[]).map(r=>r.agentId)])]});closeModal();await refresh();});
+    if(p.hostId){
+      modal('Agents in this project',`${p.name} / ${hostName(p.hostId)}`,`<form id="project-agents" class="mcp-form"><div class="project-agent-grid">${agentChecks(p,p.hostId)}</div><p class="field-help">Chats you start from the project open these agents in ${esc(p.path)}.</p><div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Save</button></div></div></form>`);
+      $('#project-agents').onsubmit=event=>{event.preventDefault();save(event.target);};return;
+    }
+    const here=state.agents.filter(a=>a.protocol!=='terminal'&&fitsHere(a,p));
+    const localBoxes=state.agents.filter(a=>a.transport!=='ssh'&&a.command==='docker'&&remoteCapable(a,p));
+    const groups=[...(localBoxes.length?[{id:'',name:`${localName()} / containers`,agents:localBoxes}]:[]),...state.hosts.map(h=>({id:h.id,name:h.name,host:true,agents:state.agents.filter(a=>a.transport==='ssh'&&a.hostId===h.id&&remoteCapable(a,p))}))];
+    const row=a=>{const r=remoteOf(a,p);return `<div class="share-row ${r?'shared':''}">${badge(a)}<div class="share-who"><strong>${esc(title(a))}</strong><small>${a.command==='docker'?'Docker container':esc(labels[a.provider]||a.provider)}${r?` / ${remoteState(r)}`:''}</small></div>${r?`<span class="share-on">Shared</span><div class="share-actions"><button type="button" class="text-button" data-share="send" data-agent="${esc(a.id)}" title="Send your latest changes">&#8593; Send</button><button type="button" class="text-button" data-share="bring" data-agent="${esc(a.id)}" title="Bring its changes back for review">&#8595; Bring back</button><button type="button" class="icon-button" data-share="stop" data-agent="${esc(a.id)}" title="Stop sharing" aria-label="Stop sharing with ${esc(title(a))}">&#10005;</button></div>`:`<button type="button" class="secondary" data-share="start" data-agent="${esc(a.id)}">Share...</button>`}</div>`;};
+    modal('Agents in this project',`${p.name} / ${p.path}`,`<form id="project-agents" class="mcp-form share-form">
+      <section class="share-group"><h3>${esc(localName())}<small>work in your folder directly</small></h3>${here.length?`<div class="project-agent-grid">${here.map(a=>`<label class="check-row inline project-agent-check"><input type="checkbox" name="agent" value="${esc(a.id)}" ${p.agentIds.includes(a.id)?'checked':''}> ${badge(a)} ${esc(title(a))}</label>`).join('')}</div>`:'<p class="field-help">No agent runs on this computer.</p>'}</section>
+      ${groups.map(g=>`<section class="share-group"><h3>${esc(g.name)}<small>${g.agents.length?'each agent works in its own copy':''}</small>${g.host&&g.agents.length?`<button type="button" class="text-button" data-share="find" data-host="${esc(g.id)}" title="Look for agents on ${esc(g.name)}">Find agents</button>`:''}</h3>${g.agents.length?g.agents.map(row).join(''):`<div class="share-empty">No agents on ${esc(g.name)} in Opaya yet. <button type="button" class="text-button" data-share="find" data-host="${esc(g.id)}">Find agents there</button> or <button type="button" class="text-button" data-share="install" data-host="${esc(g.id)}">install one</button>.</div>`}</section>`).join('')}
+      ${state.hosts.length?'':`<p class="field-help">Agents on your servers can work on this project too, each in its own copy. <button type="button" class="text-button" data-share="hosts">Add a machine</button></p>`}
+      <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Save</button></div></div></form>`,true);
+    const form=$('#project-agents');
+    form.onsubmit=event=>{event.preventDefault();save(event.target);};
+    form.addEventListener('click',event=>{
+      const b=event.target.closest('[data-share]');if(!b)return;const a=state.agents.find(x=>x.id===b.dataset.agent),act=b.dataset.share;
+      if(act==='start'&&a)openShare(p,a);
+      else if(act==='send'&&a)action(async()=>{closeModal();await sendToRemote(p,a);});
+      else if(act==='bring'&&a)action(async()=>{closeModal();await bringFromRemote(p,a);});
+      else if(act==='stop'&&a)stopSharing(p,a);
+      else if(act==='find')discover(b.dataset.host);
+      else if(act==='install')openInstall(b.dataset.host);
+      else if(act==='hosts')openHosts();
+    });
   }
   function openProjectForm(p=null,mode='folder'){
     const known=new Set((state.projects||[]).map(x=>`${x.hostId}|${x.path}`));
@@ -1633,9 +1668,12 @@
     });};
   }
   function openAgentProjects(a){
-    const list=(state.projects||[]).filter(p=>fitsProject(a,p));
-    if(!list.length){toast('No project on this agent\'s machine yet. Add one in the Projects panel.');toggleProjects(true);return;}
-    modal('Projects',`${title(a)} works in`,`<form id="agent-projects" class="mcp-form"><div class="project-agent-grid">${list.map(p=>`<label class="check-row inline"><input type="checkbox" name="project" value="${esc(p.id)}" ${p.agentIds.includes(a.id)?'checked':''}> ${esc(p.name)} <small>${esc(p.path)}</small></label>`).join('')}</div><div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Save</button></div></div></form>`);
+    const list=(state.projects||[]).filter(p=>fitsHere(a,p)),shared=(state.projects||[]).filter(p=>remoteOf(a,p)),open=(state.projects||[]).filter(p=>remoteCapable(a,p)&&!remoteOf(a,p));
+    if(!list.length&&!shared.length&&!open.length){toast('No project yet. Add one in the Projects panel.');toggleProjects(true);return;}
+    modal('Projects',`${title(a)} works in`,`<form id="agent-projects" class="mcp-form share-form">${list.length?`<div class="project-agent-grid">${list.map(p=>`<label class="check-row inline"><input type="checkbox" name="project" value="${esc(p.id)}" ${p.agentIds.includes(a.id)?'checked':''}> ${esc(p.name)} <small>${esc(p.path)}</small></label>`).join('')}</div>`:''}
+      ${shared.length||open.length?`<section class="share-group"><h3>Projects on ${esc(localName())}<small>${esc(title(a))} works in its own copy</small></h3>${[...shared,...open].map(p=>{const r=remoteOf(a,p);return `<div class="share-row ${r?'shared':''}"><span class="project-folder" aria-hidden="true"></span><div class="share-who"><strong>${esc(p.name)}</strong><small>${r?remoteState(r):esc(p.path)}</small></div>${r?'<span class="share-on">Shared</span>':`<button type="button" class="secondary" data-share-project="${esc(p.id)}">Share...</button>`}</div>`;}).join('')}</section>`:''}
+      <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Save</button></div></div></form>`,true);
+    $('#agent-projects').addEventListener('click',event=>{const b=event.target.closest('[data-share-project]');const p=b&&(state.projects||[]).find(x=>x.id===b.dataset.shareProject);if(p)openShare(p,a);});
     $('#agent-projects').onsubmit=event=>{event.preventDefault();action(async()=>{const on=new Set([...event.target.querySelectorAll('[name="project"]:checked')].map(c=>c.value));for(const p of list){const has=p.agentIds.includes(a.id);if(on.has(p.id)!==has)await api.projectSave({...p,agentIds:has?p.agentIds.filter(x=>x!==a.id):[...p.agentIds,a.id]});}closeModal();await refresh();});};
   }
   $('#projects-panel').addEventListener('click',event=>{
@@ -1655,7 +1693,7 @@
     const el=event.target.closest('[data-project-id]');if(!el||event.target.closest('input'))return;const p=(state.projects||[]).find(x=>x.id===el.dataset.projectId);if(!p)return;
     event.preventDefault();event.stopPropagation();
     const agent=event.target.closest('[data-pa-agent]');
-    if(agent){const a=state.agents.find(x=>x.id===agent.dataset.paAgent);openMenu(event.clientX,event.clientY,[{icon:'+',label:`New chat in ${p.name}`,run:()=>startProjectChat(p,a.id)},{icon:'&#10005;',label:'Remove from project',danger:true,run:async()=>{await api.projectSave({...p,agentIds:p.agentIds.filter(x=>x!==a.id)});await refresh();}}],title(a));return;}
+    if(agent){const a=state.agents.find(x=>x.id===agent.dataset.paAgent);if(!a)return;if(remoteOf(a,p)){openMenu(event.clientX,event.clientY,remoteMenu(p,a),`${title(a)} / ${agentPlace(a)}`);return;}openMenu(event.clientX,event.clientY,[{icon:'+',label:`New chat in ${p.name}`,run:()=>startProjectChat(p,a.id)},{icon:'&#10005;',label:'Remove from project',danger:true,run:async()=>{await api.projectSave({...p,agentIds:p.agentIds.filter(x=>x!==a.id)});await refresh();}}],title(a));return;}
     openMenu(event.clientX,event.clientY,projectMenu(p),p.name,el);
   });
   document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.shiftKey&&event.key.toLowerCase()==='p'&&!$('#app-dialog')){event.preventDefault();toggleProjects();}});
@@ -1710,7 +1748,7 @@
     if(!prev&&j.status==='running'){jobShown=j.id;jobMinimized=false;}
     if(prev?.status==='running'&&j.status!=='running'){
       if(j.status==='done'){const r=j.result||{},bits=[r.copied&&`Copied: ${r.copied.join(', ')}`,r.skills&&`${r.skills.length} skill${r.skills.length===1?'':'s'}`,r.keys&&`${r.keys.length} API key${r.keys.length===1?'':'s'}`,r.mcp&&`MCP: ${r.mcp.join(', ')}`,r.token&&'API token',r.file&&`saved as ${r.file}`,r.after?.removed&&'connection removed'].filter(Boolean);if(j.kind==='backup'||j.kind==='uninstall'){backupLists.clear();installInfo.clear();}
-        toast(`${j.title.replace(/^Cloning/,'Cloned').replace(/^Redeploying/,'Redeployed').replace(/^Transferring/,'Transferred').replace(/^Installing skills/,'Installed skills').replace(/^Setting up/,'Set up').replace(/^Adding skills/,'Added skills').replace(/^Backing up/,'Backed up').replace(/^Uninstalling/,'Uninstalled')}. ${bits.join(', ')}${bits.length?'.':''}`);if(j.kind!=='library')skillCache.clear();refresh();if(j.kind==='library'&&$('#library-body'))drawLibrary?.();if(j.kind==='free-model'){overview=false;playgroundView=false;opayaView=true;refresh().then(()=>{render();saveView();$('#message-input')?.focus();});}if(j.kind==='condense'&&j.result?.conversationId)refresh().then(()=>openEssence(j.result.conversationId));if(j.kind==='project-bring'&&j.result)refresh().then(()=>openBringReview(j.result));if(j.kind==='project-remote'&&j.result?.projectId)refresh().then(()=>{projectsExpanded.add(j.result.projectId);toggleProjects(true);const c=(state.projects||[]).find(x=>x.id===j.result.projectId);if(c&&j.result.agentId)startProjectChat(c,j.result.agentId);});}
+        toast(`${j.title.replace(/^Cloning/,'Cloned').replace(/^Redeploying/,'Redeployed').replace(/^Transferring/,'Transferred').replace(/^Installing skills/,'Installed skills').replace(/^Setting up/,'Set up').replace(/^Adding skills/,'Added skills').replace(/^Backing up/,'Backed up').replace(/^Uninstalling/,'Uninstalled')}. ${bits.join(', ')}${bits.length?'.':''}`);if(j.kind!=='library')skillCache.clear();refresh();if(j.kind==='library'&&$('#library-body'))drawLibrary?.();if(j.kind==='free-model'){overview=false;playgroundView=false;opayaView=true;refresh().then(()=>{render();saveView();$('#message-input')?.focus();});}if(j.kind==='condense'&&j.result?.conversationId)refresh().then(()=>openEssence(j.result.conversationId));if(j.kind==='project-bring'&&j.result)refresh().then(()=>openBringReview(j.result));if(j.kind==='project-remote'&&j.result?.dir)refresh().then(()=>{projectsExpanded.add(j.result.projectId);toggleProjects(true);const c=(state.projects||[]).find(x=>x.id===j.result.projectId);if(c&&j.result.agentId)startProjectChat(c,j.result.agentId);});}
       else toast(`${j.title} failed: ${j.error}`,true);
     }
     renderJobs();

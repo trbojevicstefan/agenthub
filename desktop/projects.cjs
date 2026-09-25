@@ -13,7 +13,8 @@ function project(input){
   if(hostId?!path.posix.isAbsolute(folder):!(path.isAbsolute(folder)||path.win32.isAbsolute(folder)))throw new Error(hostId?'A folder on a machine must be an absolute path such as /root/app.':'Choose an absolute folder path.');
   const name=text(input.name,'project name',60,'').trim()||folder.split(/[\\/]/).filter(Boolean).pop()||'Project';
   const agentIds=Array.isArray(input.agentIds)?[...new Set(input.agentIds.map(id))].slice(0,64):[];
-  return {id:input.id?id(input.id):randomUUID(),name,path:folder,hostId,agentIds,link:link(input.link),createdAt:input.createdAt||new Date().toISOString()};
+  const remotes=hostId||!Array.isArray(input.remotes)?[]:[...new Map(input.remotes.map(remote).filter(Boolean).map(r=>[r.agentId,r])).values()].slice(0,32);
+  return {id:input.id?id(input.id):randomUUID(),name,path:folder,hostId,agentIds:[...new Set([...agentIds,...remotes.map(r=>r.agentId)])].slice(0,64),remotes,link:link(input.link),createdAt:input.createdAt||new Date().toISOString()};
 }
 // A copy of a local project on a machine, for remote agents: where it came from and how changes move.
 const SHA=/^[0-9a-f]{7,64}$/;
@@ -23,8 +24,25 @@ function link(input){
   return {from:id(input.from),mode:input.mode,branch:input.mode==='copy'?'':b,base:BRANCH.test(String(input.base||''))?input.base:'',origin:typeof input.origin==='string'?input.origin.slice(0,500):'',
     lastSent:SHA.test(input.lastSent||'')?input.lastSent:'',lastFetched:SHA.test(input.lastFetched||'')?input.lastFetched:'',sentAt:typeof input.sentAt==='string'?input.sentAt.slice(0,40):'',fetchedAt:typeof input.fetchedAt==='string'?input.fetchedAt.slice(0,40):''};
 }
-// An agent can work in a project when it runs on the same machine as the folder. Containers use their own paths.
-const fits=(agent,p)=>agent.command!=='docker'&&(p.hostId?agent.transport==='ssh'&&agent.hostId===p.hostId:agent.transport!=='ssh');
+// A remote agent's own copy of a local project: where it is (as the agent sees it) and how changes move.
+function remote(input){
+  if(!input||typeof input!=='object'||!['git','github','copy'].includes(input.mode))return null;
+  try{
+    const dir=String(input.dir||'');if(!path.posix.isAbsolute(dir)||dir.length>1024||/[\0\n]/.test(dir))return null;
+    const container=String(input.container||'');if(container&&!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(container))return null;
+    const l=link({...input,from:input.agentId});if(!l)return null;
+    return {agentId:id(input.agentId),hostId:input.hostId?id(input.hostId):'',container,dir,mode:l.mode,branch:l.branch,base:l.base,origin:l.origin,lastSent:l.lastSent,lastFetched:l.lastFetched,sentAt:l.sentAt,fetchedAt:l.fetchedAt};
+  }catch{return null;}
+}
+const remoteOf=(agent,p)=>(p.remotes||[]).find(r=>r.agentId===agent.id)||null;
+// An agent can work in a project when it runs on the same machine as the folder (containers use their own paths), or
+// when it has its own copy of the project.
+const fits=(agent,p)=>!!remoteOf(agent,p)||agent.command!=='docker'&&(p.hostId?agent.transport==='ssh'&&agent.hostId===p.hostId:agent.transport!=='ssh');
+// The folder the agent works in for this project.
+const folderFor=(agent,p)=>{const r=remoteOf(agent,p);return r?r.dir:fits(agent,p)?p.path:'';};
+// Agents that need their own copy to work on this local project: on another machine or in a container. API-only
+// connections have no files.
+const needsCopy=(agent,p)=>!p.hostId&&!fits({...agent,id:''},p)&&agent.protocol!=='openai'&&agent.transport!=='http';
 const BRANCH=/^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*@\{)(?!.*\.lock$)(?!.*\/$)[A-Za-z0-9._\/-]{1,120}$/;
 function branch(value){const v=String(value||'').trim();if(!BRANCH.test(v))throw new Error('Use a branch name with letters, numbers, ., _, - and /.');return v;}
 function message(value,label='Commit message',max=500){const v=String(value||'').trim();if(!v)throw new Error(`Enter a ${label.toLowerCase()}.`);if(v.length>max||/[\0\r\n]/.test(v))throw new Error(`${label} must be one line under ${max} characters.`);return v;}
@@ -76,4 +94,4 @@ function cloneCommand({url,parent,folder,hostId},{windows=false}={}){
   return {command,path:target,name};
 }
 const actionList=()=>Object.entries(ACTIONS).map(([key,a])=>({key,label:a.label,group:a.group,input:a.input||''}));
-module.exports={project,fits,gitCommand,cloneCommand,actionList,branch,ACTIONS};
+module.exports={project,remote,remoteOf,fits,folderFor,needsCopy,gitCommand,cloneCommand,actionList,branch,ACTIONS};

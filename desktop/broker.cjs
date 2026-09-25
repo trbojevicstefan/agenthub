@@ -34,6 +34,7 @@ class Broker{
     this.data.agents=this.data.agents.map(a=>schema.agent(a));
     {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:!!s.itrustOpaya,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false,interface:['chat','terminal'].includes(s.interface)?s.interface:''};}
     this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
+    this.migrateLinkedCopies();
     this.data.mcpServers=(Array.isArray(this.data.mcpServers)?this.data.mcpServers:[]).flatMap(s=>{try{return [mcp.server(s)];}catch{return [];}});this.data.hosts=this.data.hosts.map(h=>schema.host(h));
     this.data.activeAgentId=this.data.agents.some(a=>a.id===this.data.activeAgentId)?this.data.activeAgentId:this.data.agents[0]?.id||'';
     for(const a of this.data.agents)this.runtime.set(a.id,{status:'disconnected',error:'',models:[]});
@@ -93,7 +94,7 @@ class Broker{
     const conversations=this.data.conversations.filter(c=>c.agentId===id);this.data.conversations=this.data.conversations.filter(c=>c.agentId!==id);
     for(const c of conversations){this.histories.delete(c.id);delete this.data.drafts[c.id];await this.store.deleteTranscript(c.id);}
     delete this.data.drafts[id];delete this.data.lastConversation[id];
-    for(const p of this.data.projects||[])p.agentIds=p.agentIds.filter(x=>x!==id);
+    for(const p of this.data.projects||[]){p.agentIds=p.agentIds.filter(x=>x!==id);p.remotes=(p.remotes||[]).filter(r=>r.agentId!==id);}
     await this.vault.remove(id);this.runtime.delete(id);
     if(this.data.activeAgentId===id){this.data.activeAgentId=this.data.agents[0]?.id||'';this.data.activeConversationId='';}
     await this.persist();return a;
@@ -207,7 +208,7 @@ class Broker{
   async saveProject(input){
     const existing=input?.id?this.data.projects.find(p=>p.id===input.id):null;
     const p=projects.project({...(existing||{}),...input});if(p.hostId)this.host(p.hostId);
-    p.agentIds=p.agentIds.filter(id=>this.data.agents.some(a=>a.id===id));
+    p.agentIds=p.agentIds.filter(id=>this.data.agents.some(a=>a.id===id));p.remotes=p.remotes.filter(r=>p.agentIds.includes(r.agentId));p.link=null;
     if(!existing&&this.data.projects.length>=200)throw new Error('Project limit reached (200).');
     if(this.data.projects.some(x=>x.id!==p.id&&x.path===p.path&&x.hostId===p.hostId))throw new Error('This folder is already a project.');
     this.data.projects=existing?this.data.projects.map(x=>x.id===p.id?p:x):[...this.data.projects,p];
@@ -221,7 +222,24 @@ class Broker{
   async projectInfo(id){const p=this.project(id);return files.browse({op:'project',path:p.path,host:this.projectHost(p)});}
   async projectBranches(id){const p=this.project(id);return files.browse({op:'branches',path:p.path,host:this.projectHost(p)});}
   // The folder a conversation's agent should work in: its project's folder when the agent runs on that machine.
-  conversationCwd(c,a){const p=c.projectId&&(this.data.projects||[]).find(x=>x.id===c.projectId);return p&&projects.fits(a,p)?p.path:'';}
+  conversationCwd(c,a){const p=c.projectId&&(this.data.projects||[]).find(x=>x.id===c.projectId);return p?projects.folderFor(a,p):'';}
+  // Opaya 0.16.0 kept a remote agent's copy as a second project ("<name> on <machine>"). Fold each copy into the local
+  // project it came from: its agents become that project's remote agents and their chats move over. Copies with no
+  // agent, or whose original is gone, stay as ordinary projects on the machine.
+  migrateLinkedCopies(){
+    for(const copy of [...this.data.projects]){
+      const l=copy.link;if(!l)continue;copy.link=null;
+      const local=this.data.projects.find(p=>p.id===l.from&&!p.hostId),agents=copy.agentIds.map(id=>this.data.agents.find(a=>a.id===id)).filter(Boolean);
+      if(!local||!agents.length)continue;
+      for(const a of agents){
+        if((local.remotes||[]).some(r=>r.agentId===a.id))continue;
+        const r=projects.remote({...l,agentId:a.id,hostId:copy.hostId,container:'',dir:copy.path});if(!r)continue;
+        local.remotes=[...(local.remotes||[]),r];if(!local.agentIds.includes(a.id))local.agentIds.push(a.id);
+      }
+      for(const c of this.data.conversations)if(c.projectId===copy.id)c.projectId=local.id;
+      this.data.projects=this.data.projects.filter(p=>p.id!==copy.id);
+    }
+  }
   // ---- Clone and redeploy (Hermes) ------------------------------------------------------------------------------
   async cloneAgent({id,name,hostId='',runtime='regular',scope='everything',keys=true,cron},progress=()=>{}){
     const a=this.agent(id),host=hostId?this.host(hostId):null;
