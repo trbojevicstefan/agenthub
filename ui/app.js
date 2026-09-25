@@ -16,6 +16,7 @@
   const providerIcon = provider => agentLogos[provider]?`<img class="agent-logo ${provider}-logo" src="${agentLogos[provider]}" alt="" draggable="false">`:'<span class="mark custom-mark"><i></i></span>';
   let state = {agents:[],hosts:[],conversations:[],histories:{},secureStorage:false}, overview = true, opayaView = false, playgroundView = false, renderKey = '', initialized = false, theme = 'dark';
   let toastTimer, returnFocus, currentTerminal = '', lastSelected = '', modalBusy = false;
+  let manageId = '', manageHtml = '', manageKeyed = {};
   const pendingWrites = new Set();
   const draftKey = () => currentConversation()?.id || selected()?.id || '';
   const save = promise => { pendingWrites.add(promise); promise.catch(error=>toast(error.message,true)).finally(()=>pendingWrites.delete(promise)); return promise; };
@@ -24,7 +25,11 @@
   const drafts = new Map(), pendingSends = new Set(), terminalViews = new Map(), terminalPending = new Map();
   const selected = () => state.agents.find(a => a.id === state.activeAgentId);
   const currentConversation = () => state.conversations.find(c => c.id === state.activeConversationId && c.agentId === state.activeAgentId);
-  const location = a => a.transport === 'ssh' ? (state.hosts.find(h=>h.id===a.hostId)?.name || 'SSH host') : 'This computer';
+  // This computer can be renamed in Machines; the name shows under each agent in the sidebar.
+  const localName = () => state.settings?.machineName || 'This computer';
+  // An API connection to a provider runs on the provider's server, not on this computer.
+  const apiHost = a => {if(a.transport!=='http'||!a.endpoint)return '';try{const h=new URL(a.endpoint).hostname;return ['127.0.0.1','localhost','[::1]'].includes(h)?'':h;}catch{return '';}};
+  const location = a => a.transport === 'ssh' ? (state.hosts.find(h=>h.id===a.hostId)?.name || 'SSH host') : apiHost(a) || localName();
   const isDocker = a => a?.command === 'docker' || a?.args?.includes?.('docker') || /docker/i.test(`${a?.name||''} ${a?.detail||''}`);
   const environmentLabel = a => isDocker(a) ? 'Docker' : a.transport === 'ssh' ? 'VPS' : 'Local';
   const placeText = a => isDocker(a) ? `${a.transport === 'ssh' ? 'VPS' : 'Local'} Docker` : environmentLabel(a);
@@ -76,10 +81,11 @@
     const groups=[['pinned','PINNED',state.agents.filter(a=>a.pinned)],...customGroups.map(g=>[`group:${g}`,g,state.agents.filter(a=>!a.pinned&&a.group===g)]),['local','ON THIS COMPUTER',state.agents.filter(a=>!a.pinned&&!a.group&&a.transport!=='ssh')],['remote','REMOTE AGENTS',state.agents.filter(a=>!a.pinned&&!a.group&&a.transport==='ssh')]];
     const now=performance.now(),current=overview||opayaView||playgroundView?'':state.activeAgentId||'';let row=0;
     if(current!==navSelected){navSelected=current;navSelectedAt=now;}
-    const nav=groups.filter(g=>g[2].length).map(([key,name,all])=>{const closed=collapsedGroups.has(key),agents=closed?all.filter(a=>a.id===current):all,busy=closed&&all.some(a=>a.busy);return `<button class="sidebar-section-label ${closed?'collapsed':''} ${key.startsWith('group:')?'custom-group':''}" data-action="toggle-group" data-group="${esc(key)}" aria-expanded="${!closed}" title="${closed?'Expand':'Collapse'} ${esc(name)} (right-click for group actions)"><span class="group-chevron" aria-hidden="true">&#9662;</span><span class="group-name">${esc(name)}</span>${busy?'<span class="status-dot working"></span>':''}<span class="group-count">${all.length}</span></button><div class="sidebar-group ${closed?'closed':''}">${agents.map(a=>`<div class="agent-nav-row ${fresh(navSeen,a.id,now,650)?'enter':''}" style="--i:${row++}" data-agent-id="${esc(a.id)}" data-section="${esc(key)}" draggable="true"><button class="agent-nav ${!overview&&!opayaView&&!playgroundView&&a.id===state.activeAgentId?'selected':''} ${a.id===navSelected&&now-navSelectedAt<500?'just-selected':''}" data-action="select" data-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}">${badge(a)}<span class="agent-nav-text"><strong>${esc(title(a))}${trusted(a)?'<span class="itrust-mark" title="iTrust: approved automatically">iT</span>':''}</strong><small>${esc(description(a))}</small></span>${dot(a)}</button></div>`).join('')}</div>`;}).join('')||'<div class="sidebar-empty"><span class="connection-dots"><i></i><i></i><i></i></span>Your agents will<br>feel at home here.</div>';
+    const nav=groups.filter(g=>g[2].length).map(([key,name,all])=>{const closed=collapsedGroups.has(key),agents=closed?all.filter(a=>a.id===current):all,busy=closed&&all.some(a=>a.busy);return `<button class="sidebar-section-label ${closed?'collapsed':''} ${key.startsWith('group:')?'custom-group':''}" data-action="toggle-group" data-group="${esc(key)}" aria-expanded="${!closed}" title="${closed?'Expand':'Collapse'} ${esc(name)} (right-click for group actions)"><span class="group-chevron" aria-hidden="true">&#9662;</span><span class="group-name">${esc(name)}</span>${busy?'<span class="status-dot working"></span>':''}<span class="group-count">${all.length}</span></button><div class="sidebar-group ${closed?'closed':''}">${agents.map(a=>`<div class="agent-nav-row ${fresh(navSeen,a.id,now,650)?'enter':''}" style="--i:${row++}" data-agent-id="${esc(a.id)}" data-section="${esc(key)}" draggable="true"><button class="agent-nav ${!overview&&!opayaView&&!playgroundView&&a.id===state.activeAgentId?'selected':''} ${a.id===navSelected&&now-navSelectedAt<500?'just-selected':''}" data-action="select" data-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}">${badge(a)}<span class="agent-nav-text"><strong>${esc(title(a))}${trusted(a)?'<span class="itrust-mark" title="iTrust: approved automatically">iT</span>':''}</strong><small>${esc(description(a))}</small><small class="agent-nav-host">${esc(location(a))}${isDocker(a)?' / Docker':''}</small></span>${dot(a)}</button></div>`).join('')}</div>`;}).join('')||'<div class="sidebar-empty"><span class="connection-dots"><i></i><i></i><i></i></span>Your agents will<br>feel at home here.</div>';
     if(nav!==navHtml){navHtml=nav;$('#agent-list').innerHTML=nav;}
     const a=selected();
-    if(opayaView)renderOpaya();else if(playgroundView)renderPlayground();else if(overview||!a)renderOverview();else renderAgent(a);
+    if(overview||opayaView||playgroundView||!a||a.id!==manageId)manageId='';
+    if(opayaView)renderOpaya();else if(playgroundView)renderPlayground();else if(overview||!a)renderOverview();else if(manageId)renderManage(a);else renderAgent(a);
     $('#status-left').textContent=playgroundView?'Playground / ask two agents the same question':opayaView?'Opaya Agent / installs, connects and troubleshoots your agents':a&&!overview?`${labels[a.provider]} / ${a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase()} / ${location(a)}`:'One place. All your agents.';
     $('#status-right').textContent=state.agents.some(a=>a.busy)?`${state.agents.filter(a=>a.busy).length} agent working`:(state.service?.persistent?'Sessions protected / safe to close window':'Local workspace / no cloud account');
     updateTurnWatch();
@@ -95,7 +101,7 @@
     renderKey='overview';
   }
   function renderAgent(a) {
-    const proj=projectOf(currentConversation());$('#topbar').innerHTML=`<div class="breadcrumb">${proj?`<button type="button" class="crumb-project" data-action="project-focus" data-id="${esc(proj.id)}" title="${esc(proj.path)}"><span class="project-folder" aria-hidden="true"></span>${esc(proj.name)}</button>`:'Agents'} <span>/</span> <strong>${esc(title(a))}</strong></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span>${trusted(a)?`<button type="button" class="itrust-pill" data-action="itrust-agent" data-id="${esc(a.id)}" title="iTrust is on: ${esc(title(a))}'s tool requests are approved automatically. Click to change.">iTrust</button>`:''}<button class="subtle" data-action="skills" data-id="${esc(a.id)}" title="Skills, tools and MCP servers"><span aria-hidden="true">&#10022;</span> Skills</button><button class="subtle" data-action="files-agent" data-id="${esc(a.id)}" title="Browse this agent's folders and project"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="terminal" title="Open terminal (Ctrl + backtick)"><span class="terminal-glyph">&gt;_</span> Terminal</button><button class="icon-button" data-action="edit" data-id="${esc(a.id)}" title="Edit connection settings" aria-label="Connection settings">&#9881;</button></div>`;
+    const proj=projectOf(currentConversation());$('#topbar').innerHTML=`<div class="breadcrumb">${proj?`<button type="button" class="crumb-project" data-action="project-focus" data-id="${esc(proj.id)}" title="${esc(proj.path)}"><span class="project-folder" aria-hidden="true"></span>${esc(proj.name)}</button>`:'Agents'} <span>/</span> <strong>${esc(title(a))}</strong></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span>${trusted(a)?`<button type="button" class="itrust-pill" data-action="itrust-agent" data-id="${esc(a.id)}" title="iTrust is on: ${esc(title(a))}'s tool requests are approved automatically. Click to change.">iTrust</button>`:''}<button class="subtle" data-action="skills" data-id="${esc(a.id)}" title="Skills, tools and MCP servers"><span aria-hidden="true">&#10022;</span> Skills</button><button class="subtle" data-action="files-agent" data-id="${esc(a.id)}" title="Browse this agent's folders and project"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="terminal" title="Open terminal (Ctrl + backtick)"><span class="terminal-glyph">&gt;_</span> Terminal</button><button class="subtle" data-action="manage" data-id="${esc(a.id)}" title="Every option for this agent: update, back up, clone, uninstall and more"><span aria-hidden="true">&#9776;</span> Manage</button><button class="icon-button" data-action="edit" data-id="${esc(a.id)}" title="Edit connection settings" aria-label="Connection settings">&#9881;</button></div>`;
     contentKind('conversation');
     $('.topbar-actions').insertAdjacentHTML('beforeend',`${a.protocol!=='terminal'?'<button class="secondary" data-action="models" title="Choose agent model">Models</button>':''}${['hermes','openclaw'].includes(a.provider)?'<button class="secondary" data-action="gateway" title="Gateway status and restart">Gateway</button>':''}`);
     if(renderKey!==JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId])) {
@@ -184,10 +190,16 @@
     });
   }
   function openHosts(edit={}){
-    modal('Your machines.','OpenSSH handles your saved keys, ssh-agent, jump hosts and host verification.',`<div class="hosts-header"><span>Local and remote machines</span><div><button class="secondary" data-action="import-hosts">Import ~/.ssh/config aliases</button><button class="primary" data-action="new-vps">+ New VPS</button></div></div>
-      <h3 class="host-section">Local</h3><div class="host-list"><div class="host-row local"><span class="host-symbol"><span class="machine-icon"></span></span><div><strong class="host-name">This computer</strong><code>${esc(state.machine?.hostname||'')} / ${esc({win32:'Windows',darwin:'macOS',linux:'Linux'}[state.platform]||state.platform||'')} / ${state.agents.filter(a=>a.transport!=='ssh').length} agent${state.agents.filter(a=>a.transport!=='ssh').length===1?'':'s'}</code></div><button class="subtle" data-action="local-terminal">&gt;_ Terminal</button><button class="secondary" data-action="discover">Discover agents</button><button class="secondary" data-action="files-local">Files</button><span class="host-spacer"></span></div></div>
+    modal('Your machines.','OpenSSH handles your saved keys, ssh-agent, jump hosts and host verification.',`<div class="hosts-header"><span>Local and remote machines</span><div><button class="subtle" data-action="update-all" title="Update every agent installation on every machine">&#8635; Update all agents</button><button class="secondary" data-action="import-hosts">Import ~/.ssh/config aliases</button><button class="primary" data-action="new-vps">+ New VPS</button></div></div>
+      <h3 class="host-section">Local</h3><div class="host-list"><div class="host-row local"><span class="host-symbol"><span class="machine-icon"></span></span><div><button class="text-button host-name" data-action="local-machine" title="Rename this computer in Opaya">${esc(localName())}</button>${state.settings?.machineNote?`<small class="host-note">${esc(state.settings.machineNote)}</small>`:''}<code>${esc(state.machine?.hostname||'')} / ${esc({win32:'Windows',darwin:'macOS',linux:'Linux'}[state.platform]||state.platform||'')} / ${state.agents.filter(a=>a.transport!=='ssh').length} agent${state.agents.filter(a=>a.transport!=='ssh').length===1?'':'s'}</code></div><button class="subtle" data-action="local-terminal">&gt;_ Terminal</button><button class="secondary" data-action="discover">Discover agents</button><button class="secondary" data-action="files-local">Files</button><button class="icon-button" data-action="local-machine" title="Edit this computer: name, note and backup folder" aria-label="Edit this computer">&#9998;</button></div></div>
       <h3 class="host-section">Remote <small>${state.hosts.length}</small></h3><div class="host-list">${state.hosts.map(h=>`<div class="host-row"><span class="host-symbol"><span class="machine-icon"></span></span><div><button class="text-button host-name" data-action="edit-host" data-id="${esc(h.id)}">${esc(h.name)}</button><code>${esc(h.alias?`ssh ${h.alias}`:`${h.username?h.username+'@':''}${h.hostname}:${h.port}`)}</code></div><button class="subtle" data-action="host-terminal" data-id="${esc(h.id)}" title="Verify this host and open an interactive SSH shell">&gt;_ Terminal</button><button class="secondary" data-action="host-discover" data-id="${esc(h.id)}">Discover agents</button><button class="secondary" data-action="host-files" data-id="${esc(h.id)}">Files</button><button class="icon-button danger-text" data-action="remove-host" data-id="${esc(h.id)}" title="Remove this saved host" aria-label="Remove ${esc(h.name)}">&#10005;</button></div>`).join('')||'<div class="blank-state"><strong>Your servers belong here.</strong><p>Add a new VPS (Opaya makes the SSH key), import the aliases you already use, or add a host below. Importing aliases does not contact those hosts.</p></div>'}</div><details class="advanced-fields" open><summary>${edit.id?'Edit machine':'Add a machine manually'}</summary><form id="host-form">${inputField('address','Quick connect',edit.alias||'','user@server:22, ssh://user@server:2222, or saved-alias')}<p class="field-help">Paste your SSH address. Existing keys and ssh-agent stay on this computer. Or use the individual fields below.</p><div class="form-grid">${inputField('name','Display name',edit.name,'e.g. Hetzner / Production')}${inputField('alias','Existing SSH config alias',edit.alias,'e.g. production')}</div><div class="field-divider">OR CONNECT DIRECTLY</div><div class="form-grid">${inputField('hostname','Hostname or IP',edit.hostname,'203.0.113.10')}${inputField('username','SSH username',edit.username,'ubuntu')}${inputField('port','SSH port',edit.port||22,'22','type="number" min="1" max="65535"')}<div class="path-field">${inputField('identityFile','SSH identity file (optional)',edit.identityFile,'Use ssh-agent / SSH config')}<button type="button" class="secondary" data-action="pick" data-kind="identityFile" data-field-name="identityFile">Browse</button></div></div><p class="field-help">A config alias takes precedence over hostname, username and port. Private keys are never uploaded or copied into Opaya. Encrypted keys should be unlocked in your OS ssh-agent.</p><div class="modal-footer"><span>Only hosts you select are inspected.</span><button type="submit" class="primary">${edit.id?'Update machine':'Save machine'}</button></div></form></details>`,true);
     $('#host-form').addEventListener('submit',async event=>{event.preventDefault();await action(async()=>{await api.saveHost({...edit,...Object.fromEntries(new FormData(event.target))});state=await api.snapshot();render();openHosts();toast('Machine saved.');});});
+  }
+  // This computer: its name in Opaya (sidebar, Machines, backups), a note, and where local backups go.
+  function openLocalMachine(){
+    const st=state.settings||{};
+    modal('This computer',`${state.machine?.hostname||''} / ${({win32:'Windows',darwin:'macOS',linux:'Linux'}[state.platform]||state.platform||'')}`,`<form id="local-machine-form"><div class="form-grid">${inputField('machineName','Name in Opaya',st.machineName||'','This computer','maxlength="60"')}${inputField('machineNote','Note',st.machineNote||'','e.g. Office workstation','maxlength="200"')}</div><p class="field-help">Shown under every local agent in the sidebar, in Machines and in backups. Leave it empty to use "This computer". The system hostname (${esc(state.machine?.hostname||'')}) does not change.</p><div class="path-field">${inputField('backupDir','Backup folder',st.backupDir||'',state.machine?.home?`${state.machine.home}${state.platform==='win32'?'\\':'/'}Opaya Backups`:'Opaya Backups in your home folder')}<button type="button" class="secondary" data-action="pick" data-kind="directory" data-field-name="backupDir">Browse</button></div><p class="field-help">Where "Back up to this computer" saves agents, local or remote. Each agent gets its own subfolder.</p><div class="modal-footer"><button type="button" class="secondary" data-action="hosts">Back</button><button type="submit" class="primary">Save</button></div></form>`);
+    $('#local-machine-form').addEventListener('submit',event=>{event.preventDefault();const f=event.target;action(async()=>{await api.saveSettings({machineName:f.elements.machineName.value,machineNote:f.elements.machineNote.value,backupDir:f.elements.backupDir.value});await refresh();backupLists.clear();openHosts();toast('This computer is saved.');});});
   }
   function openHelp(){
     modal('A little help, right here.','Choose the connection that fits how your agent already runs.',`<div class="help-grid"><section><h3>Hermes already running?</h3><p>Connect to its gateway API, not a second ACP process using the same profile. Each independent profile needs its own API port.</p><pre>API_SERVER_ENABLED=true\nAPI_SERVER_PORT=8642\nAPI_SERVER_KEY=your-long-random-secret</pre><p>Add those settings to that profile's .env and start or restart its gateway yourself. Then Discover and choose Import gateway token.</p><button class="text-button" data-action="docs" data-topic="hermes">Hermes API setup &#8599;</button></section><section><h3>Your first SSH connection</h3><p>Machines &rarr; import your SSH aliases &rarr; Terminal. Verify the host fingerprint against a trusted source. Use Local shell to unlock your key in this computer's ssh-agent, then run Discover agents.</p><p>Unknown or changed host keys block automated connections. Opaya never disables host verification or forwards your SSH agent.</p></section><section><h3>Codex & Claude Code</h3><p>Use the same CLI installation and login you already use. Log in through the integrated terminal if necessary.</p><p>Codex uses its app server. Claude streams its CLI and resumes specific sessions. Claude's interactive approvals remain in its native terminal.</p><button class="text-button" data-action="docs" data-topic="codex">Codex integration &#8599;</button><button class="text-button" data-action="docs" data-topic="claude">Claude CLI &#8599;</button></section><section><h3>OpenClaw & other agents</h3><p>Enable OpenClaw's chatCompletions HTTP endpoint and enter its gateway token. Select an agent with openclaw/agent-id.</p><p>Other agents can use an OpenAI-compatible gateway, ACP executable, or native terminal. Container and WSL installations need an explicit command or endpoint in this release.</p><button class="text-button" data-action="docs" data-topic="openclaw">OpenClaw setup &#8599;</button></section></div><div class="privacy-box"><h3>What stays where</h3><p>Provider credentials and agent memory stay with the agent. Saved gateway tokens use OS encryption; when unavailable, choose memory-only tokens. Chat transcripts are local plaintext files in your OS application-data folder. Terminal scrollback is saved locally. A separate session service keeps live terminals and chat streams running when the window closes. Remote shells use tmux, so they can survive losing this computer's SSH connection. Local processes do not survive a computer reboot; saved history does. No analytics or automatic cloud sync.</p><p>Disconnect and Stop close the local connection. A remote job may continue after a network break; verify its status before resending a task. HTTP gateways enforce their own tool permissions.</p></div><div class="shortcuts"><span><kbd>${mod()}K</kbd> Switch agent</span><span><kbd>${mod()}N</kbd> New conversation</span><span><kbd>${mod()}&#96;</kbd> Terminal</span><span><kbd>Shift Enter</kbd> New line</span><span><kbd>Right-click</kbd> Agent, tab &amp; workspace actions</span></div>`,true);
@@ -311,6 +323,14 @@
     if(name==='edit'){openAgentForm(state.agents.find(a=>a.id===id));return;}
     if(name==='agent-menu'){const a=state.agents.find(a=>a.id===id);if(a){const r=button.getBoundingClientRect();openMenu(r.left,r.bottom+4,agentMenu(a),title(a),button.closest('[data-agent-id]'));}return;}
     if(name==='hosts'){openHosts();return;}
+    if(name==='manage'){openManage(id);return;}
+    if(name==='manage-run'){const item=manageKeyed[button.dataset.key];if(item&&!item.disabled)action(()=>item.run());return;}
+    if(name==='local-machine'){openLocalMachine();return;}
+    if(name==='update-all'){action(updateAll);return;}
+    if(name==='backup-reveal'){action(()=>api.revealBackup({file:button.dataset.file}));return;}
+    if(name==='backup-folder-open'){action(()=>api.revealBackup({folder:true}));return;}
+    if(name==='backup-folder-change'){action(async()=>{const dir=await api.pick({kind:'directory'});if(!dir)return;await api.saveSettings({backupDir:dir});await refresh();backupLists.clear();const code=$('.backup-dest code');if(code)code.textContent=dir;toast('Backups now go to '+dir+'.');});return;}
+    if(name==='backup-delete'){if(!confirm('Delete this backup archive? This cannot be undone.'))return;action(async()=>{await api.backupRemove({file:button.dataset.file});const a=state.agents.find(x=>x.id===id);if(a)await loadBackups(a);toast('Backup deleted.');});return;}
     if(name==='edit-host'){openHosts(state.hosts.find(h=>h.id===id));return;}
     if(name==='settings'){openSettings();return;}
     if(name==='models'){action(openModels);return;}
@@ -325,7 +345,7 @@
     if(name==='terminal-tab-close'){action(()=>closeTerminalTab(id));return;}
     if(name==='terminal-search'){openTerminalSearch();return;}
     action(async()=>{
-      if(name==='select'||name==='switch-select'){overview=false;opayaView=false;playgroundView=false;closeModal();await api.select({id});render();saveView();}
+      if(name==='select'||name==='switch-select'){overview=false;opayaView=false;playgroundView=false;manageId='';closeModal();await api.select({id});render();saveView();}
       else if(name==='connect-all')await connectAll();
       else if(name==='stop-agent')await api.stop({id});
       else if(name==='pg-connect')await api.connect({id});
@@ -403,38 +423,150 @@
     form.addEventListener('submit',event=>{event.preventDefault();const value=form.elements.displayName.value.trim();action(async()=>{await api.updateAgentDisplay({id:a.id,displayName:value===a.name?'':value});closeModal();toast('Agent renamed.');});});
   }
   async function refresh(){state=await api.snapshot();render();}
-  async function selectAgent(id){overview=false;opayaView=false;playgroundView=false;closeModal();await api.select({id});render();saveView();}
+  async function selectAgent(id){overview=false;opayaView=false;playgroundView=false;manageId='';closeModal();await api.select({id});render();saveView();}
+  // Every action for one agent, shared by the right-click menu and the Manage screen.
+  function agentActions(a){
+    const id=a.id,index=state.agents.findIndex(x=>x.id===id),connected=a.status==='connected',cap=a.install||{};
+    const source=a.clone&&state.agents.find(x=>x.id===a.clone.from);
+    return {
+      open:{icon:'&#8599;',label:'Open chat',run:()=>selectAgent(id)},
+      newChat:{icon:'+',label:'New conversation',hint:`${mod()}N`,run:async()=>{await selectAgent(id);await api.newConversation({agentId:id});}},
+      connect:a.busy?{icon:'&#9632;',label:'Stop current turn',run:()=>api.stop({id})}:{icon:connected?'&#9675;':'&#9679;',label:connected?'Disconnect':a.status==='connecting'?'Connecting...':'Connect',disabled:a.status==='connecting',run:()=>connected?api.disconnect({id}):api.connect({id})},
+      clearError:a.error&&{icon:'!',label:'Clear connection error',run:async()=>{await api.clearError({id});await refresh();}},
+      manage:{icon:'&#9881;',label:'Manage...',run:()=>openManage(id)},
+      history:{icon:'&#9719;',label:'Chat history',hint:`${mod()}Shift+H`,run:()=>toggleHistory(true,id)},
+      projects:{icon:'&#9635;',label:'Projects...',run:()=>openAgentProjects(a)},
+      files:{icon:'&#9656;',label:'Browse files',run:()=>openFiles({agentId:id,label:`${title(a)} / ${location(a)}`})},
+      shell:{icon:'&gt;_',label:'Open shell',run:()=>openTerminal({agentId:id})},
+      cli:{icon:'&#10095;',label:'Run native CLI',run:()=>openTerminal({agentId:id,mode:'agent'})},
+      log:{icon:'&#8801;',label:'Connection log...',run:()=>openDiagnostics(id)},
+      skills:{icon:'&#10022;',label:'Skills, tools & MCP...',run:()=>openSkills(id)},
+      transfer:{icon:'&#8644;',label:'Transfer to another agent...',disabled:state.agents.length<2,run:()=>openTransfer(a)},
+      itrust:{icon:'&#9888;',label:a.itrust?'Turn off iTrust':'Turn on iTrust...',run:()=>toggleAgentTrust(a)},
+      browser:{icon:'&#9711;',label:a.browser?'Take away Opaya browser':'Give Opaya browser',disabled:!browserCapable(a),hint:browserCapable(a)?'':'local only',run:async()=>{await api.updateAgentDisplay({id,browser:!a.browser});await refresh();toast(a.browser?`${title(a)} no longer has the Opaya browser.`:`${title(a)} can use the Opaya browser from its next conversation.`);}},
+      pin:{icon:a.pinned?'&#9734;':'&#9733;',label:a.pinned?'Unpin':'Pin to top',run:async()=>{await api.updateAgentDisplay({id,pinned:!a.pinned});toast(a.pinned?`${title(a)} unpinned.`:`${title(a)} pinned to the top.`);}},
+      rename:{icon:'&#9998;',label:'Rename...',run:()=>renameAgent(a)},
+      icon:{icon:'&#9680;',label:'Change icon...',run:()=>openIconPicker(a)},
+      groupTags:{icon:'&#9776;',label:'Group & tags...',run:()=>openGroupTags(a)},
+      moveUp:{icon:'&#8593;',label:'Move up',disabled:index<=0,run:async()=>{await api.reorderAgents({id,direction:'up'});await refresh();}},
+      moveDown:{icon:'&#8595;',label:'Move down',disabled:index>=state.agents.length-1,run:async()=>{await api.reorderAgents({id,direction:'down'});await refresh();}},
+      update:{icon:'&#8635;',label:cap.kind==='docker'?'Update container...':cap.kind==='hermes-profile'?'Update Hermes...':'Update...',disabled:!cap.update,hint:cap.update?'':'nothing to update',run:()=>updateAgent(a)},
+      backup:{icon:'&#8615;',label:'Back up to this computer...',disabled:!cap.backup,run:()=>openBackup(a)},
+      clone:{icon:'&#10697;',label:'Clone...',disabled:a.provider!=='hermes',hint:a.provider==='hermes'?'':'Hermes',run:()=>openClone(a)},
+      redeploy:a.clone&&{icon:'&#8634;',label:`Redeploy from ${title(source||{name:'source'})}`,run:()=>redeploy(a)},
+      uninstall:{icon:'&#10006;',label:cap.kind==='hermes-profile'?'Delete Hermes profile...':cap.kind==='docker'?'Remove container...':'Uninstall...',danger:true,disabled:!cap.uninstall,hint:cap.uninstall?'':'API connection',run:()=>openUninstall(a)},
+      settings:{icon:'&#9881;',label:'Connection settings...',run:()=>openAgentForm(a)},
+      remove:{icon:'&#10005;',label:'Remove connection...',danger:true,run:async()=>{if(await api.removeAgent({id})){closeModal();if(state.activeAgentId===id)overview=true;opayaView=false;playgroundView=false;await refresh();toast('Connection removed.');}}}
+    };
+  }
   function agentMenu(a){
-    const id=a.id,index=state.agents.findIndex(x=>x.id===id),connected=a.status==='connected';
+    const x=agentActions(a);
     return [
-      {icon:'&#8599;',label:'Open',run:()=>selectAgent(id)},
-      {icon:'+',label:'New conversation',hint:`${mod()}N`,run:async()=>{await selectAgent(id);await api.newConversation({agentId:id});}},
-      a.busy?{icon:'&#9632;',label:'Stop current turn',run:()=>api.stop({id})}:{icon:connected?'&#9675;':'&#9679;',label:connected?'Disconnect':a.status==='connecting'?'Connecting...':'Connect',disabled:a.status==='connecting',run:()=>connected?api.disconnect({id}):api.connect({id})},
-      a.error&&{icon:'!',label:'Clear connection error',run:async()=>{await api.clearError({id});await refresh();}},
+      x.open,x.newChat,x.connect,x.clearError,
       '-',
-      {icon:'&#9656;',label:'Browse files',run:()=>openFiles({agentId:id,label:`${title(a)} / ${location(a)}`})},
-      {icon:'&gt;_',label:'Open shell',run:()=>openTerminal({agentId:id})},
-      {icon:'&#10095;',label:'Run native CLI',run:()=>openTerminal({agentId:id,mode:'agent'})},
+      x.manage,x.history,
       '-',
-      {icon:a.pinned?'&#9734;':'&#9733;',label:a.pinned?'Unpin':'Pin to top',run:async()=>{await api.updateAgentDisplay({id,pinned:!a.pinned});toast(a.pinned?`${title(a)} unpinned.`:`${title(a)} pinned to the top.`);}},
-      {icon:'&#9998;',label:'Rename...',run:()=>renameAgent(a)},
-      {icon:'&#9680;',label:'Change icon...',run:()=>openIconPicker(a)},
-      {icon:'&#9776;',label:'Group & tags...',run:()=>openGroupTags(a)},
-      {icon:'&#9719;',label:'Chat history',hint:`${mod()}Shift+H`,run:()=>toggleHistory(true,id)},
-      {icon:'&#10022;',label:'Skills, tools & MCP...',run:()=>openSkills(id)},
-      {icon:'&#9635;',label:'Projects...',run:()=>openAgentProjects(a)},
-      {icon:'&#8644;',label:'Transfer to another agent...',disabled:state.agents.length<2,run:()=>openTransfer(a)},
-      {icon:'&#10697;',label:'Clone...',disabled:a.provider!=='hermes',hint:a.provider==='hermes'?'':'Hermes',run:()=>openClone(a)},
-      a.clone&&{icon:'&#8635;',label:`Redeploy from ${title(state.agents.find(x=>x.id===a.clone.from)||{name:'source'})}`,run:()=>redeploy(a)},
-      {icon:'&#9888;',label:a.itrust?'Turn off iTrust':'Turn on iTrust...',run:()=>toggleAgentTrust(a)},
-      {icon:'&#9711;',label:a.browser?'Take away Opaya browser':'Give Opaya browser',disabled:!browserCapable(a),hint:browserCapable(a)?'':'local only',run:async()=>{await api.updateAgentDisplay({id,browser:!a.browser});await refresh();toast(a.browser?`${title(a)} no longer has the Opaya browser.`:`${title(a)} can use the Opaya browser from its next conversation.`);}},
-      {icon:'&#8801;',label:'Connection log...',run:()=>openDiagnostics(id)},
-      {icon:'&#8593;',label:'Move up',disabled:index<=0,run:async()=>{await api.reorderAgents({id,direction:'up'});await refresh();}},
-      {icon:'&#8595;',label:'Move down',disabled:index>=state.agents.length-1,run:async()=>{await api.reorderAgents({id,direction:'down'});await refresh();}},
-      {icon:'&#9881;',label:'Connection settings...',run:()=>openAgentForm(a)},
+      {icon:'&gt;_',label:'Files & terminal',submenu:[x.files,x.shell,x.cli,'-',x.log]},
+      {icon:'&#10022;',label:'Skills & tools',submenu:[x.skills,x.projects,x.transfer,'-',x.itrust,x.browser]},
+      {icon:'&#9998;',label:'Name & look',submenu:[x.rename,x.icon,x.groupTags,'-',x.pin,x.moveUp,x.moveDown]},
+      {icon:'&#8635;',label:'Maintenance',submenu:[x.update,x.backup,'-',x.clone,x.redeploy,'-',x.uninstall]},
       '-',
-      {icon:'&#10005;',label:'Remove connection...',danger:true,run:async()=>{if(await api.removeAgent({id})){closeModal();if(state.activeAgentId===id)overview=true;opayaView=false;playgroundView=false;await refresh();toast('Connection removed.');}}}
+      x.settings,x.remove
     ];
+  }
+  // ---- Maintenance: update, back up, uninstall --------------------------------------------------------------------
+  const installInfo=new Map(),backupLists=new Map();
+  const fmtSize=n=>!n?'0 B':n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
+  const whenText=iso=>{const d=new Date(iso);return isNaN(d)?'':d.toLocaleString([],{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});};
+  // Other agents that use the same installation on the same machine (Hermes profiles share one Hermes).
+  const sharedWith=a=>a.install?.kind==='docker'||a.install?.kind==='remote-api'?[]:state.agents.filter(b=>b.id!==a.id&&b.transport===a.transport&&(b.hostId||'')===(a.hostId||'')&&b.install?.kind!=='docker'&&b.install?.framework===a.install?.framework);
+  async function loadInstallInfo(a,force=false){
+    if(!force&&installInfo.has(a.id)&&installInfo.get(a.id)!=='loading')return installInfo.get(a.id);
+    installInfo.set(a.id,'loading');if(manageId===a.id)render();
+    try{installInfo.set(a.id,await api.agentInstallInfo({id:a.id}));}catch(e){installInfo.set(a.id,{error:e.message});}
+    if(manageId===a.id)render();return installInfo.get(a.id);
+  }
+  async function loadBackups(a){try{backupLists.set(a.id,await api.agentBackups({id:a.id}));}catch(e){backupLists.set(a.id,{error:e.message,backups:[]});}if(manageId===a.id)render();return backupLists.get(a.id);}
+  async function updateAgent(a){
+    const started=await api.agentUpdate({id:a.id});if(!started)return;
+    toast(`Updating in the terminal below. Reconnect ${title(a)} when it finishes.`);installInfo.delete(a.id);
+  }
+  async function updateAll(){const n=await api.agentUpdateAll();if(n)toast(`${n} update${n===1?'':'s'} started in the terminal. Reconnect your agents when they finish.`);installInfo.clear();}
+  async function openBackup(a){
+    const folder=state.settings?.backupDir||'';
+    modal('Back up to this computer',`${title(a)} / ${location(a)}`,`<form id="backup-form" class="maintenance-form"><p class="field-help">Copies ${esc(title(a))}'s own data (${a.provider==='hermes'?'config, memory, skills, SOUL.md, cron jobs':'settings, instructions, skills'}) into a .tar.gz on ${esc(localName())}. The installation itself is not copied: install it again and restore these files.</p>
+      <label class="switch-row"><input type="checkbox" name="history" checked><span class="switch" aria-hidden="true"></span><span>Chat history and sessions</span></label>
+      <label class="switch-row"><input type="checkbox" name="keys" checked><span class="switch" aria-hidden="true"></span><span>API keys and logins <small>(${a.provider==='hermes'?'.env, auth.json':'credential files'})</small></span></label>
+      <p class="field-help">Archives are readable only by your user account. Keep them private when they include keys.</p>
+      <div class="backup-dest"><span>Saved in</span><code>${esc(folder||'Opaya Backups in your home folder')}</code><button type="button" class="subtle" data-action="backup-folder-change">Change</button><button type="button" class="subtle" data-action="backup-folder-open">Open</button></div>
+      <div class="modal-footer"><span>Progress shows in its own window.</span><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="submit" class="primary">Back up now</button></div></div></form>`);
+    $('#backup-form').addEventListener('submit',event=>{event.preventDefault();const f=event.target;action(async()=>{await api.agentBackup({id:a.id,history:f.elements.history.checked,keys:f.elements.keys.checked});closeModal();backupLists.delete(a.id);});});
+  }
+  async function openUninstall(a){
+    const cap=a.install||{},shared=sharedWith(a),profile=cap.kind==='hermes-profile',docker=cap.kind==='docker';
+    const what=profile?'Delete this Hermes profile':docker?'Remove this container':`Uninstall ${labels[cap.framework]||cap.label||'this agent'}`;
+    modal(what,`${title(a)} / ${location(a)} / ${cap.label||''}`,`<form id="uninstall-form" class="maintenance-form">
+      <div class="uninstall-kind"><span class="status-dot ${installInfo.get(a.id)&&installInfo.get(a.id)!=='loading'?'connected':'working'}"></span><div id="uninstall-detected">Checking how it is installed...</div></div>
+      ${shared.length&&!profile&&!docker?`<div class="inline-notice error-notice"><span>!</span><div><strong>Shared installation</strong><p>${esc(shared.map(title).join(', '))} ${shared.length===1?'uses':'use'} the same ${esc(cap.label)} on ${esc(location(a))} and will stop working too.</p></div></div>`:''}
+      <label class="switch-row"><input type="checkbox" name="backup" ${cap.backup?'checked':'disabled'}><span class="switch" aria-hidden="true"></span><span>Back up to this computer first <small>${cap.backup?'(with history and keys)':'(not available for this agent)'}</small></span></label>
+      ${profile?'<p class="field-help">A profile is its data: deleting it removes its config, memory, skills and sessions. Hermes and other profiles stay.</p>':docker&&!a.clone?.container?'<p class="field-help">Opaya did not create this container, so its volumes and data stay where they are.</p>':`<label class="switch-row"><input type="checkbox" name="data"><span class="switch" aria-hidden="true"></span><span>Also delete its data <small>(${docker?'the container data folder':cap.framework==='hermes'?'the whole Hermes home, every profile':'settings, logins, memory'})</small></span></label>`}
+      <label class="switch-row"><input type="checkbox" name="remove" checked><span class="switch" aria-hidden="true"></span><span>Remove the connection from Opaya when it finishes</span></label>
+      <p class="field-help">This runs on ${esc(location(a))} in a visible terminal, where you answer the uninstaller's questions:</p><pre class="install-command" id="uninstall-command">Loading...</pre>
+      <div class="modal-footer"><span>You confirm the exact command once more.</span><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="submit" class="primary danger-button">${esc(what)}</button></div></div></form>`);
+    const form=$('#uninstall-form'),preview=async()=>{try{const c=await api.agentMaintenanceCommand({id:a.id,action:'uninstall',data:!!form.elements.data?.checked});if($('#uninstall-command'))$('#uninstall-command').textContent=c.preview;}catch(e){if($('#uninstall-command'))$('#uninstall-command').textContent=e.message;}};
+    form.elements.data?.addEventListener('change',preview);preview();
+    loadInstallInfo(a).then(info=>{const box=$('#uninstall-detected');if(box)box.innerHTML=installText(info,a);});
+    form.addEventListener('submit',event=>{event.preventDefault();action(async()=>{const job=await api.agentUninstall({id:a.id,data:!!form.elements.data?.checked,backup:!!form.elements.backup.checked,removeConnection:form.elements.remove.checked});if(job){closeModal();installInfo.delete(a.id);}});});
+  }
+  function installText(info,a){
+    if(!info||info==='loading')return 'Checking how it is installed...';
+    if(info.error&&!info.kind)return `<strong>${esc(a.install?.label||'Unknown')}</strong><small>${esc(info.error)}</small>`;
+    const bits=info.kind==='docker'?[info.image&&`image ${info.image}`,info.state]:[info.methodLabels?.length?`installed with ${info.methodLabels.join(' + ')}`:info.path?'installed':'not found on PATH',info.version];
+    return `<strong>${esc(info.label||a.install?.label||'')}</strong><small>${esc(bits.filter(Boolean).join(' / ')||'')}${info.path?` <code>${esc(info.path)}</code>`:''}</small>`;
+  }
+  // ---- Manage screen: every option for one agent -----------------------------------------------------------------
+  async function openManage(id){
+    const a=state.agents.find(x=>x.id===id);if(!a)return;
+    overview=false;opayaView=false;playgroundView=false;closeModal();closeMenu();
+    // The selection must be in state before rendering, or render() would drop back to the chat.
+    if(state.activeAgentId!==id){await api.select({id});state=await api.snapshot();}
+    manageId=id;render();saveView();
+    loadInstallInfo(a);loadBackups(a);
+  }
+  function renderManage(a){
+    const x=agentActions(a),cap=a.install||{},info=installInfo.get(a.id),backs=backupLists.get(a.id),shared=sharedWith(a);
+    $('#topbar').innerHTML=`<div class="breadcrumb">Agents <span>/</span> ${esc(title(a))} <span>/</span> <strong>Manage</strong></div><div class="topbar-actions"><button class="secondary" data-action="select" data-id="${esc(a.id)}">Open chat</button></div>`;
+    contentKind('overview manage');
+    const btn=(item,cls='secondary')=>item?`<button type="button" class="${item.danger?'danger-button ':''}${cls}" data-action="manage-run" data-key="${esc(item.key)}" ${item.disabled?'disabled':''} ${item.hint?`title="${esc(item.hint)}"`:''}><span class="manage-btn-icon" aria-hidden="true">${item.icon||''}</span>${esc(item.label.replace(/\.\.\.$/,''))}</button>`:'';
+    const keyed=Object.fromEntries(Object.entries(x).filter(([,v])=>v).map(([k,v])=>[k,{...v,key:k}]));
+    if(a.protocol!=='terminal')keyed.models={key:'models',icon:'&#9672;',label:'Choose model',run:()=>openModels()};
+    if(['hermes','openclaw'].includes(a.provider))keyed.gateway={key:'gateway',icon:'&#9889;',label:'Gateway status',run:()=>openGateway()};
+    manageKeyed=keyed;
+    const card=(title,desc,keys,wide='')=>`<section class="manage-card ${wide}"><h3>${esc(title)}</h3><p>${esc(desc)}</p><div class="manage-actions">${keys.map(k=>btn(keyed[k])).join('')}</div></section>`;
+    const backupRows=backs?.backups?.length?`<div class="backup-list">${backs.backups.slice(0,6).map(b=>`<div class="backup-row"><span class="backup-file" title="${esc(b.file)}">${esc(whenText(b.createdAt))}</span><small>${esc(fmtSize(b.bytes))}${b.history===false?' / no history':''}${b.keys===false?' / no keys':''}</small><button type="button" class="text-button" data-action="backup-reveal" data-file="${esc(b.file)}">Show</button><button type="button" class="text-button danger-text" data-action="backup-delete" data-file="${esc(b.file)}" data-id="${esc(a.id)}">Delete</button></div>`).join('')}</div>${backs.backups.length>6?`<p class="field-help">${backs.backups.length-6} older backup${backs.backups.length-6===1?'':'s'} in the folder.</p>`:''}`:`<p class="field-help">${backs?backs.error?esc(backs.error):'No backups yet.':'Loading backups...'}</p>`;
+    const html=`<div class="manage-head"><div class="conversation-identity">${badge(a,true)}<div><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p><div class="identity-meta">${meta(a)}<span class="status-pill">${dot(a)} ${esc(status(a))}</span></div></div></div><div class="manage-head-actions">${btn(keyed.connect,'primary')}${btn(keyed.open)}</div></div>
+      ${a.error?`<div class="inline-notice error-notice"><span>!</span><div><strong>Connection needs attention</strong><p>${esc(a.error)}</p></div></div>`:''}
+      <div class="manage-facts">
+        <div><small>Runs on</small><strong>${esc(location(a))}</strong><span>${esc(placeText(a))}${a.transport==='ssh'?' / over SSH':''}</span></div>
+        <div><small>Installation</small><strong>${esc(cap.label||'Unknown')}</strong><span>${info==='loading'||!info?'Checking...':esc(info.error&&!info.methods?.length?info.error:[info.methodLabels?.join(' + '),info.version,info.image,info.state].filter(Boolean).join(' / ')||'Not detected')}</span></div>
+        <div><small>Connection</small><strong>${esc(labels[a.provider]||a.provider)} / ${esc(a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase())}</strong><span>${esc(a.model||'Agent\'s own model')}${a.agentVersion?` / ${esc(a.agentVersion)}`:''}</span></div>
+        <div><small>Data</small><strong>${esc(info&&info!=='loading'&&info.data?info.data:'--')}</strong><span>${backs?.backups?.length?`${backs.backups.length} backup${backs.backups.length===1?'':'s'}, last ${esc(whenText(backs.backups[0].createdAt))}`:'No local backups'}</span></div>
+      </div>
+      ${shared.length?`<p class="field-help manage-shared">Shares its ${esc(cap.label)} installation with ${esc(shared.map(title).join(', '))}: updating or uninstalling it affects them too.</p>`:''}
+      <div class="manage-grid">
+        ${card('Conversations','Chat, history and the projects this agent works in.',['open','newChat','history','projects'])}
+        ${card('Files & terminal','The agent\'s machine, its native CLI and what Opaya exchanged with it.',['files','shell','cli','log','gateway'])}
+        ${card('Skills & tools','What the agent can do, and what it may do without asking.',['skills','models','transfer','itrust','browser'])}
+        ${card('Name & look','Only changes how it shows in Opaya.',['rename','icon','groupTags','pin','moveUp','moveDown'])}
+        ${card('Maintenance',cap.kind==='remote-api'?'An API connection: the provider runs and updates it.':`${cap.label}. Update, copy or move it, or remove it from ${location(a)}.`,['update','backup','clone','redeploy'])}
+        <section class="manage-card"><h3>Local backups</h3><p>Archives on ${esc(localName())}. <button type="button" class="text-button" data-action="backup-folder-open">Open folder</button></p>${backupRows}</section>
+        ${card('Connection','How Opaya reaches this agent.',['settings','connect','clearError'])}
+        <section class="manage-card danger-zone"><h3>Danger zone</h3><p>Uninstalling removes the agent from ${esc(location(a))}. Removing the connection only removes it from Opaya.</p><div class="manage-actions">${btn(keyed.uninstall)}${btn(keyed.remove)}</div></section>
+      </div>`;
+    const key='manage:'+a.id;
+    if(renderKey!==key||html!==manageHtml){manageHtml=html;$('#content').innerHTML=html;}
+    if(renderKey!==key)enter($('#content'));
+    renderKey=key;
   }
   function terminalMenu(id){
     const view=terminalViews.get(id);if(!view)return [];
@@ -452,6 +584,7 @@
       {icon:'&#10038;',label:'Ask the Opaya Agent',run:()=>{overview=false;opayaView=true;render();saveView();}},
       {icon:'&#9678;',label:'Discover agents',run:()=>discover()},
       {icon:'&#8595;',label:'Install agents...',run:()=>openInstall()},
+      {icon:'&#8635;',label:'Update all agents...',disabled:!state.agents.some(a=>a.install?.update),run:()=>updateAll()},
       {icon:'+',label:'Add connection...',run:()=>openAdd()},
       {icon:'&#9635;',label:'Machines...',run:()=>openHosts()},
       {icon:'&gt;_',label:'Open local terminal',run:()=>openTerminal({local:true})},
@@ -462,33 +595,66 @@
       {icon:'&#9881;',label:'Settings...',run:()=>openSettings()}
     ];
   }
-  let menu=null;
+  // Context menus: one level of submenus (an item with `submenu`). Hover or ArrowRight opens it, ArrowLeft or Escape
+  // goes back to the parent item.
+  let menu=null,submenuTimer=0;
+  const menuItems=items=>items.filter(Boolean).filter((item,i,all)=>item!=='-'||(i>0&&all[i-1]!=='-'&&i<all.length-1));
+  const menuButtons=element=>[...element.querySelectorAll('button:not(:disabled)')];
+  function closeSubmenu(){
+    clearTimeout(submenuTimer);const child=menu?.child;if(!child)return;menu.child=null;
+    child.button.classList.remove('submenu-open');child.button.setAttribute('aria-expanded','false');child.element.remove();
+  }
   function closeMenu(restore=false){
-    if(!menu)return;const {element,previous,owner}=menu;menu=null;owner?.classList.remove('menu-open');
+    if(!menu)return;closeSubmenu();const {element,previous,owner}=menu;menu=null;owner?.classList.remove('menu-open');
     element.classList.add('closing');element.addEventListener('animationend',()=>element.remove(),{once:true});setTimeout(()=>element.remove(),200);
     window.removeEventListener('blur',dismiss);window.removeEventListener('resize',dismiss);document.removeEventListener('pointerdown',outside,true);document.removeEventListener('scroll',dismiss,true);
     if(restore)previous?.focus?.();
   }
-  const dismiss=()=>closeMenu(),outside=event=>{if(menu&&!menu.element.contains(event.target))closeMenu();};
-  function openMenu(x,y,items,label='',owner=null){
-    closeMenu();const list=items.filter(Boolean).filter((item,i,all)=>item!=='-'||(i>0&&all[i-1]!=='-'&&i<all.length-1));if(!list.length)return;
+  const dismiss=event=>{if(event?.type==='scroll'&&event.target instanceof Element&&event.target.closest('.context-menu'))return;closeMenu();},outside=event=>{if(menu&&!menu.element.contains(event.target)&&!menu.child?.element.contains(event.target))closeMenu();};
+  function buildMenu(list,label){
     const element=document.createElement('div');element.className='context-menu';element.setAttribute('role','menu');if(label)element.setAttribute('aria-label',label);
-    element.innerHTML=(label?`<div class="context-menu-label">${esc(label)}</div>`:'')+list.map((item,i)=>item==='-'?'<div class="context-menu-separator" role="separator"></div>':`<button type="button" role="menuitem" data-menu-index="${i}" class="${item.danger?'danger':''}" ${item.disabled?'disabled':''} style="--i:${i}"><span class="context-menu-icon" aria-hidden="true">${item.icon||''}</span><span class="context-menu-text">${esc(item.label)}</span>${item.hint?`<kbd>${esc(item.hint)}</kbd>`:''}</button>`).join('');
+    element.innerHTML=list.map((item,i)=>item==='-'?'<div class="context-menu-separator" role="separator"></div>':`<button type="button" role="menuitem" data-menu-index="${i}" class="${item.danger?'danger':''} ${item.submenu?'has-submenu':''}" ${item.disabled?'disabled':''} ${item.submenu?'aria-haspopup="menu" aria-expanded="false"':''} style="--i:${i}"><span class="context-menu-icon" aria-hidden="true">${item.icon||''}</span><span class="context-menu-text">${esc(item.label)}</span>${item.hint?`<kbd>${esc(item.hint)}</kbd>`:''}${item.submenu?'<span class="context-menu-chevron" aria-hidden="true">&#8250;</span>':''}</button>`).join('');
+    return element;
+  }
+  function openSubmenu(button,item,focus){
+    if(!menu)return;clearTimeout(submenuTimer);
+    if(menu.child?.button===button){if(focus)menuButtons(menu.child.element)[0]?.focus({preventScroll:true});return;}
+    closeSubmenu();const list=menuItems(item.submenu||[]);if(!list.length)return;
+    const element=buildMenu(list,item.label);element.classList.add('submenu');document.body.append(element);
+    const r=button.getBoundingClientRect(),{width,height}=element.getBoundingClientRect(),edge=document.body.classList.contains('frameless')?44:8;
+    const right=r.right+width+4<=innerWidth-8,left=right?r.right+2:Math.max(8,r.left-width-2),top=Math.max(edge,Math.min(r.top-6,innerHeight-height-8));
+    element.style.left=left+'px';element.style.top=top+'px';element.style.transformOrigin=right?'0 0':'100% 0';
+    button.classList.add('submenu-open');button.setAttribute('aria-expanded','true');
+    menu.child={element,button};wireMenu(element,list,true);
+    if(focus)menuButtons(element)[0]?.focus({preventScroll:true});
+  }
+  function wireMenu(element,list,sub){
+    element.addEventListener('click',event=>{const button=event.target.closest('[data-menu-index]');if(!button||button.disabled)return;const item=list[Number(button.dataset.menuIndex)];if(item.submenu){openSubmenu(button,item,true);return;}closeMenu();action(()=>item.run());});
+    element.addEventListener('keydown',event=>{
+      const all=menuButtons(element),at=all.indexOf(document.activeElement),current=all[at],item=current&&list[Number(current.dataset.menuIndex)];
+      if(event.key==='Tab')closeMenu(true);
+      else if(event.key==='ArrowLeft'&&sub){event.preventDefault();const b=menu.child.button;closeSubmenu();b.focus({preventScroll:true});}
+      else if(['ArrowRight','Enter',' '].includes(event.key)&&item?.submenu){event.preventDefault();openSubmenu(current,item,true);}
+      else if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?all.length-1:(at+(event.key==='ArrowDown'?1:-1)+all.length)%all.length;all[next]?.focus();}
+    });
+    element.addEventListener('pointermove',event=>{
+      const button=event.target.closest('button:not(:disabled)');if(!button||!menu)return;if(document.activeElement!==button)button.focus({preventScroll:true});
+      if(sub)return;clearTimeout(submenuTimer);const item=list[Number(button.dataset.menuIndex)];
+      if(item?.submenu){if(menu.child?.button!==button)submenuTimer=setTimeout(()=>{if(menu?.element===element)openSubmenu(button,item,false);},130);}
+      else if(menu.child)submenuTimer=setTimeout(()=>{if(menu?.element===element&&!menu.child?.element.matches(':hover'))closeSubmenu();},260);
+    });
+    element.addEventListener('pointerleave',()=>{if(!sub)clearTimeout(submenuTimer);});
+  }
+  function openMenu(x,y,items,label='',owner=null){
+    closeMenu();const list=menuItems(items);if(!list.length)return;
+    const element=buildMenu(list,'');if(label){element.setAttribute('aria-label',label);element.insertAdjacentHTML('afterbegin',`<div class="context-menu-label">${esc(label)}</div>`);}
     document.body.append(element);
     const edge=document.body.classList.contains('frameless')?44:8;element.style.maxHeight=`${innerHeight-edge-8}px`;const {width,height}=element.getBoundingClientRect(),left=Math.max(8,Math.min(x,innerWidth-width-8)),flip=y+height>innerHeight-8,top=Math.max(edge,flip?y-height:y);
     element.style.left=left+'px';element.style.top=top+'px';element.style.transformOrigin=`${x-left}px ${flip?'100%':'0'}`;
-    menu={element,previous:document.activeElement,owner};owner?.classList.add('menu-open');
-    const buttons=()=>[...element.querySelectorAll('button:not(:disabled)')];
-    element.addEventListener('click',event=>{const button=event.target.closest('[data-menu-index]');if(!button||button.disabled)return;const item=list[Number(button.dataset.menuIndex)];closeMenu();action(()=>item.run());});
-    element.addEventListener('keydown',event=>{
-      const all=buttons(),at=all.indexOf(document.activeElement);
-      if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeMenu(true);}
-      else if(event.key==='Tab')closeMenu(true);
-      else if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const next=event.key==='Home'?0:event.key==='End'?all.length-1:(at+(event.key==='ArrowDown'?1:-1)+all.length)%all.length;all[next]?.focus();}
-    });
-    element.addEventListener('pointermove',event=>{const button=event.target.closest('button:not(:disabled)');if(button&&document.activeElement!==button)button.focus({preventScroll:true});});
+    menu={element,previous:document.activeElement,owner,child:null};owner?.classList.add('menu-open');
+    wireMenu(element,list,false);
     window.addEventListener('blur',dismiss);window.addEventListener('resize',dismiss);document.addEventListener('pointerdown',outside,true);document.addEventListener('scroll',dismiss,true);
-    buttons()[0]?.focus({preventScroll:true});
+    menuButtons(element)[0]?.focus({preventScroll:true});
   }
   document.addEventListener('contextmenu',event=>{
     const target=event.target;
@@ -503,7 +669,7 @@
     if(tab){event.preventDefault();const [x,y]=point(tab);openMenu(x,y,terminalMenu(tab.dataset.id),terminalViews.get(tab.dataset.id)?.title||'Terminal');return;}
     if(target.closest('.sidebar,.content.overview')){event.preventDefault();const [x,y]=point(target);openMenu(x,y,workspaceMenu(),'Workspace');}
   });
-  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&menu){event.preventDefault();closeMenu(true);}},true);
+  document.addEventListener('keydown',event=>{if(event.key!=='Escape'||!menu)return;event.preventDefault();event.stopPropagation();if(menu.child){const b=menu.child.button;closeSubmenu();b.focus({preventScroll:true});}else closeMenu(true);},true);
   // ---- Opaya Agent -------------------------------------------------------------------------------------------
   const opaya=()=>state.opayaAgent||{configured:false,config:{},presets:{},messages:[]};
   const opayaModelLabel=o=>o.config?.model||o.presets?.[o.config?.preset]?.label||'Ready';
@@ -905,7 +1071,7 @@
   // ---- Projects panel: folders, the agents that work in them and their chats, with git actions --------------------
   let projectFilter='',projectsHtml='';const projectGit=new Map();
   const projectOf=c=>c?.projectId?(state.projects||[]).find(p=>p.id===c.projectId):null;
-  const hostName=id=>id?(state.hosts.find(h=>h.id===id)?.name||'Machine'):'This computer';
+  const hostName=id=>id?(state.hosts.find(h=>h.id===id)?.name||'Machine'):localName();
   const fitsProject=(a,p)=>a.command!=='docker'&&(p.hostId?a.transport==='ssh'&&a.hostId===p.hostId:a.transport!=='ssh');
   const ago=iso=>{const s=Math.max(0,(Date.now()-new Date(iso).getTime())/1000);return s<60?'now':s<3600?`${Math.floor(s/60)}m`:s<86400?`${Math.floor(s/3600)}h`:s<604800?`${Math.floor(s/86400)}d`:new Date(iso).toLocaleDateString([],{month:'short',day:'numeric'});};
   const saveProjectsView=()=>saveView();
@@ -1222,8 +1388,8 @@
     const prev=jobs.get(j.id);jobs.set(j.id,j);
     if(!prev&&j.status==='running'){jobShown=j.id;jobMinimized=false;}
     if(prev?.status==='running'&&j.status!=='running'){
-      if(j.status==='done'){const r=j.result||{},bits=[r.copied&&`Copied: ${r.copied.join(', ')}`,r.skills&&`${r.skills.length} skill${r.skills.length===1?'':'s'}`,r.keys&&`${r.keys.length} API key${r.keys.length===1?'':'s'}`,r.mcp&&`MCP: ${r.mcp.join(', ')}`,r.token&&'API token'].filter(Boolean);
-        toast(`${j.title.replace(/^Cloning/,'Cloned').replace(/^Redeploying/,'Redeployed').replace(/^Transferring/,'Transferred').replace(/^Installing skills/,'Installed skills').replace(/^Setting up/,'Set up').replace(/^Adding skills/,'Added skills')}. ${bits.join(', ')}${bits.length?'.':''}`);if(j.kind!=='library')skillCache.clear();refresh();if(j.kind==='library'&&$('#library-body'))drawLibrary?.();if(j.kind==='free-model'){overview=false;playgroundView=false;opayaView=true;refresh().then(()=>{render();saveView();$('#message-input')?.focus();});}if(j.kind==='condense'&&j.result?.conversationId)refresh().then(()=>openEssence(j.result.conversationId));}
+      if(j.status==='done'){const r=j.result||{},bits=[r.copied&&`Copied: ${r.copied.join(', ')}`,r.skills&&`${r.skills.length} skill${r.skills.length===1?'':'s'}`,r.keys&&`${r.keys.length} API key${r.keys.length===1?'':'s'}`,r.mcp&&`MCP: ${r.mcp.join(', ')}`,r.token&&'API token',r.file&&`saved as ${r.file}`,r.after?.removed&&'connection removed'].filter(Boolean);if(j.kind==='backup'||j.kind==='uninstall'){backupLists.clear();installInfo.clear();}
+        toast(`${j.title.replace(/^Cloning/,'Cloned').replace(/^Redeploying/,'Redeployed').replace(/^Transferring/,'Transferred').replace(/^Installing skills/,'Installed skills').replace(/^Setting up/,'Set up').replace(/^Adding skills/,'Added skills').replace(/^Backing up/,'Backed up').replace(/^Uninstalling/,'Uninstalled')}. ${bits.join(', ')}${bits.length?'.':''}`);if(j.kind!=='library')skillCache.clear();refresh();if(j.kind==='library'&&$('#library-body'))drawLibrary?.();if(j.kind==='free-model'){overview=false;playgroundView=false;opayaView=true;refresh().then(()=>{render();saveView();$('#message-input')?.focus();});}if(j.kind==='condense'&&j.result?.conversationId)refresh().then(()=>openEssence(j.result.conversationId));}
       else toast(`${j.title} failed: ${j.error}`,true);
     }
     renderJobs();
@@ -1242,6 +1408,7 @@
         else if(act==='close'){if(job?.status==='running'){jobMinimized=true;}else{api.jobDismiss({id:jobShown}).catch(()=>{});jobs.delete(jobShown);jobShown=[...jobs.values()].find(x=>x.status==='running')?.id||'';}renderJobs();}
         else if(act==='open'&&job?.result?.agent){overview=false;opayaView=false;playgroundView=false;action(async()=>{await api.select({id:job.result.agent.id});await refresh();});jobMinimized=true;renderJobs();}
         else if(act==='install'){action(async()=>{await api.installFramework({id:'hermes',hostId:job?.route?.toHostId||undefined});toast('Installing Hermes in Terminal. Clone again when it finishes.');});}
+        else if(act==='reveal'&&job?.result?.file){action(()=>api.revealBackup({file:job.result.file}));}
         else if(act==='copy'){action(()=>api.clipboardWrite({text:job.log.map(l=>`${new Date(l.at).toLocaleTimeString()} ${l.text}`).join('\n')}));toast('Log copied.');}
       });}
     const pct=jobPercent(j),rate=j.status==='running'?trackRate(j):0,eta=rate>0&&j.total?(j.total-j.bytes)/rate:NaN,elapsed=((j.finishedAt||Date.now())-j.startedAt)/1000;
@@ -1253,7 +1420,7 @@
         <div class="job-stats"><span>Speed <b>${copying&&rate>0?fmtBytes(rate)+'/s':'--'}</b></span><span>Left <b>${copying?fmtTime(eta):'--'}</b></span><span>Elapsed <b>${fmtTime(elapsed)}</b></span></div></div>
       <ol class="job-steps">${j.steps.map(s=>`<li class="${s.state}">${icon(s.state)}<span>${esc(s.label)}</span></li>`).join('')}</ol>
       <div class="job-log" id="job-log">${j.log.slice(-120).map(l=>`<p class="${esc(l.state||'')}"><time>${new Date(l.at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'})}</time>${esc(l.text)}</p>`).join('')}</div>
-      ${j.status!=='running'?`<footer class="job-foot">${j.status==='error'?`<p class="job-error">${esc(j.error)}</p>${/Hermes is not installed/.test(j.error)?'<button type="button" class="secondary" data-job="install">Install Hermes there</button>':''}`:''}<button type="button" class="text-button" data-job="copy">Copy log</button>${j.status==='done'&&j.result?.agent?`<button type="button" class="primary" data-job="open">Open ${esc(j.result.agent.name)}</button>`:''}<button type="button" class="secondary" data-job="close">Close</button></footer>`:''}`;
+      ${j.status!=='running'?`<footer class="job-foot">${j.status==='error'?`<p class="job-error">${esc(j.error)}</p>${/Hermes is not installed/.test(j.error)?'<button type="button" class="secondary" data-job="install">Install Hermes there</button>':''}`:''}<button type="button" class="text-button" data-job="copy">Copy log</button>${j.status==='done'&&j.result?.agent?`<button type="button" class="primary" data-job="open">Open ${esc(j.result.agent.name)}</button>`:''}${j.status==='done'&&j.result?.file?'<button type="button" class="secondary" data-job="reveal">Show in folder</button>':''}<button type="button" class="secondary" data-job="close">Close</button></footer>`:''}`;
     if(win.dataset.html!==html){const log=$('#job-log',win),atBottom=!log||log.scrollHeight-log.scrollTop-log.clientHeight<30;win.innerHTML=html;win.dataset.html=html;win.classList.toggle('finished',j.status!=='running');const nl=$('#job-log',win);if(nl&&atBottom)nl.scrollTop=nl.scrollHeight;}
   }
   api.onJob?.(onJob);

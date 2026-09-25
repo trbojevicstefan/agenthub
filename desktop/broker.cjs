@@ -1,5 +1,6 @@
 'use strict';
 const {randomUUID}=require('node:crypto');
+const path=require('node:path');
 const schema=require('./schema.cjs');
 const {scanLocal,scanRemote,fingerprint}=require('./discovery.cjs');
 const {hermesLogs}=require('./diagnostics.cjs');
@@ -26,7 +27,7 @@ class Broker{
     await this.vault.load();this.data=await this.store.load();
     this.data.drafts=this.data.drafts||{};this.data.lastConversation=this.data.lastConversation||{};this.data.view=this.data.view||{};
     this.data.agents=this.data.agents.map(a=>schema.agent(a));
-    this.data.settings={itrustAll:!!this.data.settings?.itrustAll,itrustOpaya:!!this.data.settings?.itrustOpaya};
+    {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:!!s.itrustOpaya,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:''};}
     this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
     this.data.mcpServers=(Array.isArray(this.data.mcpServers)?this.data.mcpServers:[]).flatMap(s=>{try{return [mcp.server(s)];}catch{return [];}});this.data.hosts=this.data.hosts.map(h=>schema.host(h));
     this.data.activeAgentId=this.data.agents.some(a=>a.id===this.data.activeAgentId)?this.data.activeAgentId:this.data.agents[0]?.id||'';
@@ -149,6 +150,10 @@ class Broker{
     const next={...this.data.settings};
     if(input.itrustAll!==undefined)next.itrustAll=!!input.itrustAll;
     if(input.itrustOpaya!==undefined)next.itrustOpaya=!!input.itrustOpaya;
+    // This computer as shown in Opaya (the sidebar, Machines, backups) and where local backups go.
+    if(input.machineName!==undefined)next.machineName=schema.text(input.machineName,'machine name',60).trim();
+    if(input.machineNote!==undefined)next.machineNote=schema.text(input.machineNote,'machine note',200).trim();
+    if(input.backupDir!==undefined){const dir=schema.text(input.backupDir,'backup folder',2048).trim();if(dir&&!path.isAbsolute(dir))throw new Error('Choose an absolute folder for backups.');next.backupDir=dir;}
     this.data.settings=next;await this.persist();return next;
   }
   async updateAgentDisplay({id,displayName,pinned,avatar,group,tags,itrust,browser}){

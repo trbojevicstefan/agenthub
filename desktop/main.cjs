@@ -131,11 +131,13 @@ if(hostMode){
         pendingApprovals.set(request.id,{key,expires:Date.now()+10*60*1000});win.webContents.send('hub:approval',request);notify('Opaya needs your approval',`${request.agent?.name||'Agent'}: ${request.title}`);
       });
       client.on('closed',()=>{if(!quitting&&!smoke&&!win.isDestroyed())win.webContents.send('hub:service-error','Session service disconnected. Reopen Opaya to reconnect. Saved history has not been deleted.');});
-      const forwards=['opayaFreeModels','opayaFreeSetup','agentEnvKeys','transferStart','renameConversation','deleteConversation','condenseConversation','conversationMarkdown','libraryList','libraryImport','libraryInstall','libraryRemove','libraryAddFolder','jobs','jobDismiss','sshKeyCreate','hostTest','saveSettings','projectSave','projectRemove','projectInfo','projectBranches','projectGit','projectClone','mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaNewSession','opayaSelectSession','opayaDeleteSession','opayaStop','opayaClear','snapshot','saveAgent','reorderAgents','updateAgentDisplay','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
+      const forwards=['agentInstallInfo','agentMaintenanceCommand','agentUpdate','agentUpdateAll','agentBackup','agentBackups','backupRemove','agentUninstall','opayaFreeModels','opayaFreeSetup','agentEnvKeys','transferStart','renameConversation','deleteConversation','condenseConversation','conversationMarkdown','libraryList','libraryImport','libraryInstall','libraryRemove','libraryAddFolder','jobs','jobDismiss','sshKeyCreate','hostTest','saveSettings','projectSave','projectRemove','projectInfo','projectBranches','projectGit','projectClone','mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaNewSession','opayaSelectSession','opayaDeleteSession','opayaStop','opayaClear','snapshot','saveAgent','reorderAgents','updateAgentDisplay','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
       const handlers=Object.fromEntries(forwards.map(method=>[method,input=>client.call(method,input)]));
       for(const method of ['agentModels','selectModel','gateway'])handlers[method]=input=>client.call(method,input);
       // Copying an agent to a VPS can take minutes.
       for(const method of ['cloneAgent','redeployAgent'])handlers[method]=input=>client.call(method,input,20*60*1000);
+      // These wait for the user's approval, which can take up to ten minutes.
+      for(const method of ['agentUpdate','agentUpdateAll','agentUninstall'])handlers[method]=input=>client.call(method,input,11*60*1000);
       handlers.terminalRename=async input=>{const title=await client.call('terminalRename',input);terminalWindows.get(input.id)?.setTitle(title);return title;};
       // In-app updates. The state goes to every Opaya window; install stops the session service first.
       const updater=new (require('./updater.cjs').Updater)({app,markerFile:path.join(app.getPath('userData'),'pending-update.json'),emit:state=>{for(const w of [win,...terminalWindows.values()])if(w&&!w.isDestroyed())w.webContents.send('hub:update',state);}});
@@ -156,6 +158,8 @@ if(hostMode){
           if(result.response!==1)return false;
           await updater.runInstaller();await quitForUpdate();return true;
         },
+        // Local backups: show an archive (or the backup folder) in Finder / Explorer. The service checks the path.
+        revealBackup:async x=>{const p=await client.call('backupPath',x);if(x.folder){await require('node:fs/promises').mkdir(p,{recursive:true});const error=await shell.openPath(p);if(error)throw new Error(error);}else shell.showItemInFolder(p);return true;},
         // Terminal helpers: text-only clipboard and http(s) links.
         clipboardRead:async()=>clipboard.readText().slice(0,1024*1024),
         clipboardWrite:async x=>{if(typeof x.text!=='string'||x.text.length>4*1024*1024)throw new Error('Clipboard text is too large.');clipboard.writeText(x.text);return true;},

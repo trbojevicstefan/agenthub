@@ -19,6 +19,7 @@ const vps = require('./vps.cjs');
 const moves = require('./transfer.cjs');
 const {condense} = require('./condense.cjs');
 const free = require('./free-model.cjs');
+const maintenance = require('./maintenance.cjs');
 async function start({app, safeStorage}, root) {
   let broker, terminals, listener, opaya, stopping = false;
   const startedAt = new Date().toISOString(), approvals = new Map();
@@ -32,8 +33,8 @@ async function start({app, safeStorage}, root) {
   const old = await fs.readFile(descriptor,'utf8').then(JSON.parse).catch(()=>null);
   if (old && old.pid !== process.pid && alive(old.pid)) throw new Error('A session service is already running.');
   if (process.platform !== 'win32') await fs.rm(endpoint(root),{force:true});
-  const machine = {hostname:require('node:os').hostname()};
-  function snapshot() { return {...broker.snapshot(), machine, opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true}}; }
+  const machine = {hostname:require('node:os').hostname(), home:require('node:os').homedir()};
+  function snapshot() { const base=broker.snapshot(); return {...base, agents:base.agents.map(a=>({...a,install:maintenance.capabilities(a)})), machine, opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true}}; }
   const emit = () => listener?.broadcast('state', snapshot());
   async function approve(agent, title, detail) {
     const socket = [...(listener?.clients || [])].at(-1);
@@ -90,6 +91,75 @@ async function start({app, safeStorage}, root) {
     if(!host||reused)terminals.write(view.id,command+'\r');
     listener?.broadcast('terminal',{type:'opened',id:view.id});emit();return view;
   }
+  // Update, uninstall and local backups. Update and uninstall show the exact command for approval and run in a visible
+  // terminal; an uninstall prints an end marker so the job knows when it finished and can then remove the connection.
+  const hostOf=a=>a.transport==='ssh'?broker.host(a.hostId):null;
+  const machineName=()=>broker.data.settings?.machineName||'This computer';
+  const whereName=a=>a.transport==='ssh'?broker.host(a.hostId).name:machineName();
+  const windowsLocal=a=>a.transport!=='ssh'&&process.platform==='win32';
+  const marked=(a,command)=>windowsLocal(a)?`${command}; Write-Host "[opaya] finished with exit code $(if ($?) { 0 } else { 1 })"`:`${command}; echo "[opaya] finished with exit code $?"`;
+  const MARK=/\[opaya\] finished with exit code (\d+)/g;
+  const marks=view=>[...String(view.buffer||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g,'').matchAll(MARK)];
+  const markCount=id=>{try{return marks(terminals.attach(id)).length;}catch{return 0;}};
+  async function waitForMark(id,before,timeout=45*60*1000){
+    const end=Date.now()+timeout;
+    for(;;){
+      let view;try{view=terminals.attach(id);}catch{throw new Error('The uninstall terminal was closed before it finished.');}
+      const found=marks(view);
+      if(found.length>before)return Number(found.at(-1)[1]);
+      if(view.exited)throw new Error('The uninstall terminal ended before the uninstaller finished.');
+      if(Date.now()>end)throw new Error('The uninstaller did not finish within 45 minutes. Check its terminal.');
+      await new Promise(r=>setTimeout(r,1500));
+    }
+  }
+  function backupJob(a,{keys,history},work){
+    return startJob({kind:work?'uninstall':'backup',route:{from:a.name,fromWhere:whereName(a),to:work?'Backed up, then uninstalled':'Local backup',toWhere:machineName(),provider:a.provider},title:work?`Backing up and uninstalling ${a.name}`:`Backing up ${a.name}`,detail:`${history?'With':'Without'} chat history / ${keys?'with':'without'} API keys`,steps:[['source','Find the data'],['select','Choose files'],['copy','Write the archive'],...(work?.steps||[])]},async progress=>{
+      const result=await maintenance.backup({agent:a,host:hostOf(a),dest:maintenance.backupDir(broker.data.settings),keys,history,machine:machineName(),progress});
+      if(work)result.after=await work.run(progress,result);
+      return result;
+    });
+  }
+  const maintenanceActions={
+    agentInstallInfo:async x=>{const a=broker.agent(x.id);const info=await maintenance.detect(a,hostOf(a));return {...info,shared:maintenance.sharing(a,broker.data.agents)};},
+    agentMaintenanceCommand:async x=>{const a=broker.agent(x.id),remote=a.transport==='ssh';return x.action==='uninstall'?maintenance.uninstallCommand(a,{remote,data:!!x.data}):maintenance.updateCommand(a,{remote});},
+    agentUpdate:async x=>{
+      const a=broker.agent(x.id),host=hostOf(a),c=maintenance.updateCommand(a,{remote:!!host});
+      if(!await approve(a,`${c.title} ${host?`on ${host.name}`:`on ${machineName()}`}?`,`${c.summary}\n\nRuns in a visible terminal:\n\n${c.preview}\n\nAfterwards: ${c.after}`))throw new Error('Update cancelled.');
+      return runInTerminal({label:c.title,key:`update_${a.id}`.slice(0,60),host,command:c.command});
+    },
+    // Updates every installation once per machine (and every container), after one approval for the whole list.
+    agentUpdateAll:async()=>{
+      const seen=new Map();
+      for(const a of broker.data.agents){let c;try{c=maintenance.updateCommand(a,{remote:a.transport==='ssh'});}catch{continue;}const key=`${a.transport==='ssh'?a.hostId:'local'}|${c.command}`;if(!seen.has(key))seen.set(key,{a,c});}
+      if(!seen.size)throw new Error('None of your agents has an update Opaya can run.');
+      const list=[...seen.values()];
+      if(!await approve({name:'Opaya'},`Update ${list.length} installation${list.length===1?'':'s'}?`,list.map(({a,c})=>`${c.title} on ${whereName(a)} (${a.name})`).join('\n')+'\n\nEach runs in its own visible terminal.'))throw new Error('Update cancelled.');
+      for(const {a,c} of list)await runInTerminal({label:c.title,key:`update_${a.id}`.slice(0,60),host:hostOf(a),command:c.command});
+      return list.length;
+    },
+    agentBackup:async x=>{const a=broker.agent(x.id);return backupJob(a,{keys:x.keys!==false,history:x.history!==false});},
+    agentBackups:async x=>maintenance.listBackups(broker.agent(x.id),broker.data.settings),
+    backupRemove:async x=>maintenance.removeBackup(x.file,broker.data.settings),
+    backupPath:async x=>x.folder?maintenance.backupDir(broker.data.settings):maintenance.insideBackups(x.file,broker.data.settings),
+    agentUninstall:async x=>{
+      const a=broker.agent(x.id),host=hostOf(a),c=maintenance.uninstallCommand(a,{remote:!!host,data:!!x.data});
+      const shared=maintenance.sharing(a,broker.data.agents).map(id=>broker.data.agents.find(b=>b.id===id)?.name).filter(Boolean);
+      if(!await approve(a,`${c.title} ${host?`on ${host.name}`:`on ${machineName()}`}?`,`${c.summary}${shared.length&&!['hermes-profile','docker'].includes(maintenance.kindOf(a).kind)?`\n\nAlso used by: ${shared.join(', ')}. They stop working too.`:''}${x.backup?'\n\nA local backup is made first; if it fails, nothing is uninstalled.':''}${x.removeConnection?'\n\nAfterwards the connection and its chats are removed from Opaya.':''}\n\nRuns in a visible terminal:\n\n${c.preview}`))throw new Error('Uninstall cancelled.');
+      const steps=[['stop','Disconnect'],['uninstall','Run the uninstaller'],...(x.removeConnection?[['remove','Remove from Opaya']]:[])];
+      const work=async progress=>{
+        progress({step:'stop',state:'active',message:`Disconnecting ${a.name}`});await Promise.resolve(broker.disconnect(a.id)).catch(()=>{});progress({step:'stop',state:'done',message:'Disconnected'});
+        progress({step:'uninstall',state:'active',message:'The uninstaller runs in the terminal below. Answer its questions there.'});
+        const view=await runInTerminal({label:c.title,key:`uninstall_${a.id}`.slice(0,60),host,command:marked(a,c.command)});
+        const code=await waitForMark(view.id,markCount(view.id));
+        if(code!==0)throw new Error(`The uninstaller ended with exit code ${code}. Check its terminal; the connection was kept.`);
+        progress({step:'uninstall',state:'done',message:'Uninstalled'});
+        if(x.removeConnection){progress({step:'remove',state:'active',message:'Removing the connection and its chats from Opaya'});terminals.closeAgent(a.id);await broker.removeAgent(a.id);progress({step:'remove',state:'done',message:'Removed from Opaya'});}
+        return {uninstalled:true,removed:!!x.removeConnection};
+      };
+      if(x.backup)return backupJob(a,{keys:true,history:true},{steps,run:work});
+      return startJob({kind:'uninstall',route:{from:a.name,fromWhere:whereName(a),to:'Uninstalled',toWhere:whereName(a),provider:a.provider},title:`Uninstalling ${a.name}`,detail:c.summary,steps},work);
+    }
+  };
   opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal,trusted:()=>!!broker.data.settings?.itrustOpaya});
   await stage('opaya agent');
   await opaya.init();
@@ -208,6 +278,7 @@ async function start({app, safeStorage}, root) {
       return startJob({kind:'free-model',route:{from:m.label,fromWhere:`Free / ${m.size}`,to:'Opaya Agent',toWhere:'This computer',provider:'ollama'},title:`Setting up ${m.label}`,detail:'Free local model through Ollama. No account and no key.',steps:[['ollama','Install and start Ollama'],['download',`Download ${m.label} (${m.size})`],['connect','Connect the Opaya Agent']]},progress=>free.setupFree({opaya,model,progress}).then(r=>{emit();return r;}));},
     opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}), opayaForgetKey:()=>opaya.forgetKey(),
     opayaSend:x=>opaya.begin(x.text), opayaNewSession:()=>opaya.newSession(), opayaSelectSession:x=>opaya.selectSession(String(x.id||'')), opayaDeleteSession:x=>opaya.deleteSession(String(x.id||'')), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),
+    ...maintenanceActions,
     shutdown
   };
   const token = randomBytes(32).toString('hex');

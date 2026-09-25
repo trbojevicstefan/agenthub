@@ -1,3 +1,21 @@
+# Opaya 0.13.0 - Manage, update, back up and uninstall every agent
+
+- **Manage screen**: right-click an agent > **Manage**, or the **Manage** button above a chat. One screen with everything for that agent:
+  - where it runs, how it is installed (npm, Homebrew, uv, pipx, the official installer, a Hermes profile or a Docker container), its version and how much data it has;
+  - every action, grouped: Conversations, Files & terminal, Skills & tools, Name & look, Maintenance and Connection;
+  - its local backups (Show in folder, Delete) and a danger zone with Uninstall and Remove connection.
+- **Update any agent**: Hermes, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider and Ollama, on this computer or a VPS. Opaya runs the right updater for the installation. A Docker container made by Opaya gets the newest image and is recreated with the same data folder; a Docker Compose container is recreated with Compose.
+  - **Update all agents** (Machines, or right-click the workspace) updates each installation once per machine after one approval.
+- **Uninstall**: Opaya finds how the agent was installed on that machine and removes it the same way, in a visible terminal:
+  - npm, Homebrew, uv, pipx, pip or the vendor's installer; `hermes uninstall` when Hermes has it;
+  - a Hermes profile is deleted as a profile, so Hermes and other profiles stay; a container is removed as a container;
+  - options: back up first, also delete the agent's data, and remove the connection from Opaya when it finishes;
+  - agents that share the installation (Hermes profiles) are named first. Opaya never deletes a home folder.
+- **Back up to this computer**: saves an agent's own data as a `.tar.gz` on this computer, from here, a VPS or inside a container. With or without chat history and API keys; the archive is readable only by your user. Hermes backs up its home without the installation or other profiles; Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode and Goose back up their config folders. A small `.json` next to each archive describes the connection.
+- **Right-click menu, organized**: the agent menu now has submenus: Files & terminal, Skills & tools, Name & look and Maintenance. Hover or press the right arrow to open one, left arrow or Escape to go back.
+- **Machine name in the sidebar**: under each agent's name, in small letters, the machine it runs on (the provider's server for API connections like DeepSeek).
+- **Rename this computer**: Machines > the pencil next to This computer: its name in Opaya, a note, and the folder where backups go. The system hostname does not change.
+
 # Opaya 0.12.2 - Add a VPS that has no Hermes yet
 
 - **Add a new VPS** no longer fails with "Process exited with code 1" on a server without Hermes. The connection was fine, but the last step of the check (is Hermes installed?) returned 1 and Opaya read that as a failed connection. A fresh VPS now passes: Opaya shows Docker and Hermes as "not installed" and lets you save the machine, then install Hermes from Install agents or clone an agent to it.
