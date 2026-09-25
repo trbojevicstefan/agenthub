@@ -1,3 +1,7 @@
+# Opaya 0.13.1 - Collapsed sidebar groups stay visible
+
+- **Collapsing a sidebar group no longer hides it.** The group header now stays with its agent count; click it again to expand. A style meant for lists inside the Transfer and Skills library dialogs also hid collapsed sidebar headers.
+
 # Opaya 0.13.0 - Manage, update, back up and uninstall every agent
 
 - **Manage screen**: right-click an agent > **Manage**, or the **Manage** button above a chat. One screen with everything for that agent:

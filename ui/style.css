@@ -903,7 +903,8 @@ body.job-open .toast{right:480px}
 .transfer-mode label{display:inline-flex!important;align-items:center;height:28px;padding:0 14px;border-radius:7px;color:var(--muted);font-size:12px;cursor:pointer;transition:background .15s,color .15s}
 .transfer-mode label.selected{background:#26302b;color:var(--text)}
 .transfer-mode input{position:absolute;opacity:0;pointer-events:none}
-.collapsed{display:none!important}
+/* Hidden pick lists in dialogs (Transfer, Skills library). Not the sidebar: its collapsed sections keep their header. */
+.modal-body .collapsed{display:none!important}
 .pick-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;max-height:240px;overflow:auto;padding-right:2px}
 .pick-item{display:flex!important;align-items:flex-start;gap:8px;padding:7px 9px;border:1px solid #26312b;border-radius:8px;background:#151d19;cursor:pointer;min-width:0;transition:border-color .15s,background .15s}
 .pick-item:hover{border-color:#3f5a4a}
