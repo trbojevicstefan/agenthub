@@ -54,7 +54,7 @@ test('declined approvals stop changes and installs; unknown tools and bad input 
 test('approved installs run the fixed catalog command in a visible terminal',async t=>{
   const {agent,commands,approvals}=await fixture(t,[call('install_framework',{framework_id:'codex'}),{content:'Installing.'}]);
   agent.begin('install codex');await settle(agent);
-  assert.equal(commands.length,1);assert(commands[0].command.startsWith(catalog.command('codex',{remote:false}).command+'; '));assert.match(commands[0].command,/\[opaya\] finished with exit code/);assert.equal(commands[0].host,null);assert.match(approvals[0].detail,/npm install -g @openai\/codex/);
+  assert.equal(commands.length,1);assert(commands[0].command.startsWith(catalog.command('codex',{remote:false}).command+'; '));assert.match(commands[0].command,/\[opaya\] finished with exit code/);assert.equal(commands[0].host,null);assert.match(approvals[0].detail,/npm(\.cmd)? install -g @openai\/codex/);
 });
 test('notes stay inside the agent home folder and model endpoints follow the same rules as agents',async t=>{
   const {agent,root}=await fixture(t,[call('write_notes',{content:'Hermes runs on vps.'}),{content:'Saved.'}]);
@@ -108,7 +108,7 @@ test('Opaya Agent updates, follows the terminal to the end and answers installer
   const terminals={describe:()=>[],attach:id=>({id,buffer,exited:false}),write:(id,data)=>{writes.push([id,data]);if(data==='\r')buffer+='\nDone.\n[opaya] finished with exit code 0\n';}};
   const agent=new OpayaAgent({root,vault:broker.vault,broker,terminals,approve:async()=>true,emit:()=>{},runInTerminal:async x=>{commands.push(x);buffer='Updating...\nContinue? [Y/n] ';return {id:'t1'};},platform:'linux'});await agent.init();
   const r=await agent.tool('update_framework',{framework_id:'codex'});
-  assert.match(commands[0].command,/^npm install -g @openai\/codex@latest/);assert.match(commands[0].command,/\[opaya\] finished with exit code \$\?"$/);
+  assert.match(commands[0].command,/^npm(\.cmd)? install -g @openai\/codex@latest/);assert.match(commands[0].command,/\[opaya\] finished with exit code \$\?"$/);
   const waited=await agent.tool('wait_for_terminal',{terminal_id:r.terminal_id,seconds:10});assert.equal(waited.question,true);
   await assert.rejects(()=>agent.tool('answer_prompt',{terminal_id:r.terminal_id,answer:'rm -rf /'}),/Unsupported/);
   await assert.rejects(()=>agent.tool('answer_prompt',{terminal_id:'other',answer:'y'}),/terminals you started/);

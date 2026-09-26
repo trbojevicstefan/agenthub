@@ -93,7 +93,10 @@ async function place(staging,root,layout,{platform}){
   return bin;
 }
 // ---- PATH for new terminals and apps -------------------------------------------------------------------------------
-const WINDOWS_PATH_SCRIPT="$add = $env:OPAYA_DIRS -split ';'; $p = [Environment]::GetEnvironmentVariable('Path','User'); $parts = @(); if ($p) { $parts = @($p -split ';' | Where-Object { $_ }) }; $new = @($add) + @($parts | Where-Object { $add -notcontains $_ }); [Environment]::SetEnvironmentVariable('Path', ($new -join ';'), 'User'); if ($env:OPAYA_EXTRA) { ($env:OPAYA_EXTRA | ConvertFrom-Json).PSObject.Properties | ForEach-Object { [Environment]::SetEnvironmentVariable($_.Name, $_.Value, 'User') } }; if ((Get-ExecutionPolicy -Scope CurrentUser) -eq 'Undefined' -and @('Undefined','Restricted','AllSigned') -contains (Get-ExecutionPolicy -Scope LocalMachine)) { Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force }";
+const WINDOWS_PATH_SCRIPT="$add = $env:OPAYA_DIRS -split ';'; $p = [Environment]::GetEnvironmentVariable('Path','User'); $parts = @(); if ($p) { $parts = @($p -split ';' | Where-Object { $_ }) }; $new = @($add) + @($parts | Where-Object { $add -notcontains $_ }); [Environment]::SetEnvironmentVariable('Path', ($new -join ';'), 'User'); if ($env:OPAYA_EXTRA) { ($env:OPAYA_EXTRA | ConvertFrom-Json).PSObject.Properties | ForEach-Object { [Environment]::SetEnvironmentVariable($_.Name, $_.Value, 'User') } }; try { if ((Get-ExecutionPolicy -Scope CurrentUser) -eq 'Undefined' -and @('Undefined','Restricted','AllSigned') -contains (Get-ExecutionPolicy -Scope LocalMachine)) { Set-ExecutionPolicy -Scope CurrentUser RemoteSigned -Force } } catch { Write-Warning ('PowerShell policy unchanged: ' + $_) }";
+// Windows PowerShell 5 started from a PowerShell 7 (or VS Code) session inherits a module path that makes its own
+// modules fail to load; without PSModulePath it rebuilds the right one.
+function psEnv(extra){const env=environment(extra);for(const k of Object.keys(env))if(k.toUpperCase()==='PSMODULEPATH')delete env[k];return env;}
 const BEGIN='# >>> Opaya tools >>>',END='# <<< Opaya tools <<<';
 async function persistPath({platform=process.platform,root=opayaToolsRoot(platform),home=os.homedir(),extra={}}={}){
   const dirs=opayaToolDirs(platform,root);
@@ -102,7 +105,7 @@ async function persistPath({platform=process.platform,root=opayaToolsRoot(platfo
     // launchers need (RemoteSigned for this user only, as npm documents), unless a policy is already set.
     const ps=findExecutable('powershell.exe',environment())||findExecutable('pwsh.exe',environment());if(!ps)throw new Error('PowerShell was not found.');
     const script=WINDOWS_PATH_SCRIPT;
-    await new Promise((resolve,reject)=>execFile(ps,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',script],{env:{...environment(),OPAYA_DIRS:dirs.join(';'),OPAYA_EXTRA:JSON.stringify(extra)},windowsHide:true,timeout:60000},e=>e?reject(e):resolve()));
+    await new Promise((resolve,reject)=>execFile(ps,['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command',script],{env:psEnv({OPAYA_DIRS:dirs.join(';'),OPAYA_EXTRA:JSON.stringify(extra)}),windowsHide:true,timeout:60000},e=>e?reject(e):resolve()));
     resetRegistryEnv();return {dirs};
   }
   const rel=dirs.map(d=>d.startsWith(home+'/')?`$HOME/${d.slice(home.length+1)}`:d);

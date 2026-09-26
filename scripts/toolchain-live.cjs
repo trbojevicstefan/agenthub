@@ -28,7 +28,8 @@ const checks={
   // Windows: the user PATH and PowerShell policy are really written (this runner is thrown away afterwards).
   if(win){
     try{await toolchain.persistPath({root,extra:{OPAYA_LIVE_CHECK:'1'}});
-      const read=c=>execFileSync('powershell.exe',['-NoProfile','-Command',c],{encoding:'utf8'}).trim();
+      const env={...process.env};for(const k of Object.keys(env))if(k.toUpperCase()==='PSMODULEPATH')delete env[k];
+      const read=c=>execFileSync('powershell.exe',['-NoProfile','-Command',c],{encoding:'utf8',env}).trim();
       const userPath=read("[Environment]::GetEnvironmentVariable('Path','User')"),policy=read('Get-ExecutionPolicy -Scope CurrentUser');
       const ok=userPath.split(';')[0]===path.join(root,'node')&&read("[Environment]::GetEnvironmentVariable('OPAYA_LIVE_CHECK','User')")==='1';
       console.log(`${ok?'ok  ':'FAIL'} user PATH starts with Opaya's tools; execution policy for this user: ${policy}`);if(!ok)failed++;
