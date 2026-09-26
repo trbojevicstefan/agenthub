@@ -73,7 +73,7 @@
   }
   function applyState(next) {
     state=next;document.body.dataset.platform=state.platform;
-    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);projectsOpen=!!state.view?.projects;tipsSeen=new Set(state.view?.tips||[]);greeted=state.view?.greeted||'';lastVersion=state.view?.lastVersion||'';setTimeout(checkNudges,4000);setTimeout(askInterface,700);if(state.view?.layout)layout={...layout,...state.view.layout};queueMicrotask(()=>placePanes());projectsExpanded=new Set(state.view?.projectsOpen||[]);if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});$('.search-trigger kbd').textContent=`${mod()}K`;}
+    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya||!state.agents.length&&!state.opayaAgent?.configured;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);projectsOpen=!!state.view?.projects;tipsSeen=new Set(state.view?.tips||[]);greeted=state.view?.greeted||'';lastVersion=state.view?.lastVersion||'';setTimeout(checkNudges,4000);setTimeout(askInterface,700);if(state.view?.layout)layout={...layout,...state.view.layout};queueMicrotask(()=>placePanes());projectsExpanded=new Set(state.view?.projectsOpen||[]);if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});$('.search-trigger kbd').textContent=`${mod()}K`;}
     render();
   }
   function render() {
@@ -429,6 +429,7 @@
     if(name==='opaya'){overview=false;opayaView=true;playgroundView=false;closeModal();render();saveView();$('#message-input')?.focus();return;}
     if(name==='opaya-config'){openOpayaConfig();return;}
     if(name==='opaya-free'){openFreeModel();return;}
+    if(name==='guide-open'){closeModal();startGuide();return;}
     if(name==='toggle-group'){toggleGroup(button.dataset.group);return;}
     if(name==='diagnostics'){openDiagnostics(id);return;}
     if(name==='skills'){openSkills(id);return;}
@@ -650,6 +651,7 @@
   // First launch: ask once how the user likes to work. Existing workspaces are asked too, once.
   function askInterface(){
     if(state.settings?.interface||$('#app-dialog')||!initialized)return;
+    if(!state.agents.length||guideOn()){setTimeout(askInterface,5000);return;}
     const card=(value,titleText,text,preview)=>`<button type="button" class="interface-option" data-action="interface" data-value="${value}"><span class="interface-preview ${value}" aria-hidden="true">${preview}</span><strong>${titleText}</strong><span>${text}</span></button>`;
     modal('How do you like to work?','Pick one now; switch any time in Settings, or per agent from its right-click menu.',`<div id="interface-chooser" class="interface-choice">
       ${card('chat','Chat','Conversations with every agent in one clean window: history, projects, models, files and the Opaya browser. Terminals are one click away.','<i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-bubble l short"></i><i class="ip-input"></i>')}
@@ -869,9 +871,142 @@
     $('.nav-opaya')?.classList.toggle('busy',!!o.busy);
   }
   const OPAYA_STARTERS=[['Why is an agent not connecting?','One of my agents is not working. Check my workspace, find what is wrong and help me fix it.'],['Install Codex on this computer','Install the Codex CLI on this computer and add it to Opaya when it is done.'],['Set up my VPS','Help me add my VPS as a machine, set up an SSH key for it and find the agents running there.'],['What do I have?','Give me a short overview of my agents, their status and my machines.']];
+  // ---- Setup guide: a scripted conversation (no AI model needed) that gets this computer ready. The person picks; Opaya
+  // installs. A model for the Opaya Agent comes first; once it has one, the Opaya Agent finishes the setup.
+  const GUIDE_WAYS=[
+    ['chatgpt','I have ChatGPT','Plus, Pro or a free account. Opaya installs Codex CLI and you sign in once.','codex'],
+    ['claude','I have Claude','A Claude Pro or Max plan. Opaya installs Claude Code and you sign in once.','claude'],
+    ['api','I have an API key','From OpenAI, Anthropic, Google, DeepSeek, Groq, OpenRouter, Mistral or any compatible service.',''],
+    ['none','I have nothing yet','No problem: start with a free model, or set up the tools now and add AI later.','']];
+  const GUIDE_GOALS=[['web','Websites and web apps','Git, Node.js, GitHub CLI'],['python','Python, data and automation','Git, Python, uv'],['agents','Just work with AI agents','Git'],['all','A bit of everything','All of the above']];
+  const GUIDE_AGENTS=[['codex','Codex CLI','ChatGPT'],['claude','Claude Code','Claude'],['gemini-cli','Gemini CLI','Google account'],['opencode','OpenCode','Many models']];
+  const GUIDE_KEYS=['google','groq','openrouter','openai','anthropic','deepseek','mistral','xai','cerebras','ollama-cloud','custom'];
+  let guide=null;const guideDismissed=()=>tipsSeen.has('guide-closed');
+  const guideOn=()=>!!guide;
+  function startGuide(){guide={step:'hello',way:'',goals:new Set(),agents:new Set(),trust:true,facts:null,plan:null,jobId:'',keyPreset:'google',keyError:'',answers:{}};opayaView=true;overview=false;playgroundView=false;render();saveView();
+    api.guideScan().then(f=>{if(guide){guide.facts=f;renderOpaya();}}).catch(e=>{if(guide){guide.facts={error:e.message,tools:{},signedIn:{}};renderOpaya();}});}
+  function closeGuide(){guide=null;if(!tipsSeen.has('guide-closed')){tipsSeen.add('guide-closed');saveView();}opayaCount=-1;renderOpaya();}
+  const gBubble=(html,{you=false,cls=''}={})=>`<article class="message ${you?'user-message':'assistant-message'} guide-msg ${cls}"><div class="message-avatar ${you?'you-avatar':'opaya-avatar'}">${you?'S':'<span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""></span>'}</div><div class="message-body"><div class="message-meta"><strong>${you?'You':'Opaya'}</strong>${you?'':'<span class="guide-tag">setup guide</span>'}</div><div class="message-text">${html}</div></div></article>`;
+  const gAnswer=(text,back)=>gBubble(`${esc(text)} <button type="button" class="text-button guide-change" data-guide="back" data-to="${back}">Change</button>`,{you:true});
+  const gTool=(id,label)=>{const v=guide.facts?.tools?.[id];return `<span class="guide-fact ${v?'ok':''}" title="${v?esc(v):'Not installed yet'}">${v?'&#10003;':'&#8226;'} ${label}</span>`;};
+  function guideFactsHtml(){
+    const f=guide.facts;if(!f)return '<p class="guide-scan"><span class="status-dot working"></span> Looking at this computer...</p>';
+    if(f.error)return `<p class="guide-scan">I could not look at everything (${esc(f.error)}), but we can still go on.</p>`;
+    return `<div class="guide-facts"><span class="guide-fact sys">${esc(f.system)} / ${f.memoryGb} GB memory</span>${gTool('git','Git')}${gTool('node','Node.js')}${gTool('python','Python')}${gTool('codex','Codex CLI')}${gTool('claude','Claude Code')}</div>`;
+  }
+  function guideWayCards(){
+    const f=guide.facts||{};
+    return `<div class="guide-cards">${GUIDE_WAYS.map(([id,t,text,tool])=>{const ready=tool&&f.tools?.[tool],signed=tool&&f.signedIn?.[tool];return `<button type="button" class="guide-card ${guide.way===id?'selected':''}" data-guide="way" data-value="${id}"><span class="guide-card-icon ${id}" aria-hidden="true">${tool?badge({provider:tool}):id==='api'?'&#9919;':'&#10022;'}</span><strong>${t}</strong><span>${text}</span>${signed?'<em class="guide-badge">Already signed in</em>':ready?'<em class="guide-badge">Already installed</em>':''}</button>`;}).join('')}</div>`;
+  }
+  function guideNoneCards(){
+    const ok=guide.facts?.localModelOk!==false;
+    return `<div class="guide-cards two"><button type="button" class="guide-card" data-guide="none" data-value="free"><span class="guide-card-icon" aria-hidden="true">&#8595;</span><strong>Free model on this computer</strong><span>Private and free, no account. About 2.5 GB to download.${ok?'':' This computer has little memory, so it will be slow.'}</span></button>
+      <button type="button" class="guide-card" data-guide="none" data-value="freekey"><span class="guide-card-icon" aria-hidden="true">&#9919;</span><strong>Free key from Google</strong><span>One minute: sign in with a Google account, copy the key, paste it here. Fast and free.</span></button>
+      <button type="button" class="guide-card" data-guide="none" data-value="later"><span class="guide-card-icon" aria-hidden="true">&#8987;</span><strong>Set up the tools now, AI later</strong><span>Opaya installs what you need; you connect AI when you are ready.</span></button></div>`;
+  }
+  function guideKeyForm(){
+    const presets=opaya().presets||{},p=presets[guide.keyPreset]||{};
+    return `<form class="guide-key" data-guide-form="key"><div class="guide-chips">${GUIDE_KEYS.filter(k=>presets[k]).map(k=>`<button type="button" class="marker-chip ${guide.keyPreset===k?'selected':''}" data-guide="key-preset" data-value="${k}">${esc(presets[k].label)}${presets[k].free?' <em class="preset-free">free</em>':''}</button>`).join('')}</div>
+      ${guide.keyPreset==='custom'?'<label class="field"><span>Address (base URL)</span><input name="baseUrl" placeholder="https://.../v1" required></label>':''}
+      <label class="field"><span>Paste your API key</span><input name="apiKey" type="password" autocomplete="off" placeholder="Your key stays in this computer's keychain" required></label>
+      ${p.signup?`<p class="field-help">No key yet? <a href="#" data-action="open-link" data-external="1" data-url="${esc(p.signup)}">Get a free key from ${esc(p.label)} &#8599;</a>, then paste it here.</p>`:''}
+      ${guide.keyError?`<div class="inline-notice error-notice">${esc(guide.keyError)}</div>`:''}
+      <div class="guide-actions"><button type="submit" class="primary">Connect</button></div></form>`;
+  }
+  function guideGoalCards(){
+    return `<div class="guide-cards goals">${GUIDE_GOALS.map(([id,t,tools])=>`<button type="button" class="guide-card small ${guide.goals.has(id)?'selected':''}" data-guide="goal" data-value="${id}" aria-pressed="${guide.goals.has(id)}"><strong>${t}</strong><span>${tools}</span></button>`).join('')}</div>
+      <p class="guide-sub">Also install these AI agents <small>(optional; each works with its own account)</small></p>
+      <div class="guide-chips">${GUIDE_AGENTS.map(([id,t,note])=>{const brain=({chatgpt:'codex',claude:'claude'})[guide.way]===id,has=guide.facts?.tools?.[id];return `<button type="button" class="marker-chip ${guide.agents.has(id)||brain?'selected':''}" data-guide="agent" data-value="${id}" ${brain?'disabled title="Installed as the Opaya Agent\'s brain"':''}>${badge({provider:id==='codex'||id==='claude'?id:'custom',avatar:id==='codex'||id==='claude'?'':`lib:${id}`})} ${t}${has?' <em>installed</em>':''} <small>${note}</small></button>`;}).join('')}</div>
+      <div class="guide-actions"><button type="button" class="primary" data-guide="plan" ${guide.goals.size?'':'disabled'}>Continue</button></div>`;
+  }
+  function guidePlanHtml(){
+    const p=guide.plan;if(!p)return '<p class="guide-scan"><span class="status-dot working"></span> Making a plan...</p>';
+    if(p.error)return `<div class="inline-notice error-notice">${esc(p.error)}</div>`;
+    const model=p.steps.filter(s=>s.phase==='model'),rest=p.steps.filter(s=>s.phase==='rest'),brain=model.length||opaya().configured;
+    const row=(s,i)=>`<li><span class="guide-n">${i+1}</span><div><strong>${esc(s.title)}</strong><small>${esc(s.why)}</small></div></li>`;
+    return `<ol class="guide-plan">${p.steps.map(row).join('')}</ol>
+      ${brain&&rest.length?`<p class="field-help">${model.length?`After step ${model.length}, `:''}the Opaya Agent takes over and installs the rest, checking and fixing anything that goes wrong.</p><label class="check-row inline guide-trust"><input type="checkbox" data-guide="trust" ${guide.trust?'checked':''}> Let it install these without asking me each time</label>`:''}
+      <div class="guide-actions"><button type="button" class="primary" data-guide="start">Start setup</button><span class="guide-note">You approve the plan once. Everything runs in a terminal you can watch.</span></div>`;
+  }
+  function guideRunHtml(){
+    const j=jobs.get(guide.jobId);if(!j)return '<p class="guide-scan"><span class="status-dot working"></span> Starting...</p>';
+    const last=[...(j.log||[])].reverse().find(l=>l.text&&l.text!=='Done.');const warn=last?.state==='warn';
+    const steps=`<ol class="guide-plan live">${j.steps.map((s,i)=>`<li class="${s.state||'pending'}"><span class="guide-n">${s.state==='done'?'&#10003;':s.state==='error'?'!':i+1}</span><div><strong>${esc(s.label)}</strong>${s.state==='active'?`<small>${esc((j.log||[]).filter(l=>l.text).at(-1)?.text||'Working...')}</small>`:''}</div>${s.state==='active'?'<span class="status-dot working"></span>':''}</li>`).join('')}</ol>`;
+    if(j.status==='running')return `${warn?`<div class="guide-callout">&#9888; ${esc(last.text)}</div>`:''}${steps}<p class="field-help">You can watch every step in the <strong>Opaya setup</strong> terminal below.</p>`;
+    if(j.status==='error')return `${steps}<div class="inline-notice error-notice">${esc(j.error)}</div><div class="guide-actions"><button type="button" class="primary" data-guide="start">Try again</button>${opaya().configured?'<button type="button" class="secondary" data-guide="ask-fix">Ask the Opaya Agent to fix it</button>':''}<button type="button" class="secondary" data-guide="script">Continue without AI</button></div>`;
+    if(j.result?.handoff)return `${steps}<p><strong>I have a brain now.</strong> The Opaya Agent is finishing the setup: installing the rest, checking versions and fixing problems. Follow along below.</p><div class="guide-actions"><button type="button" class="primary" data-guide="close">Watch the Opaya Agent</button></div>`;
+    return `${steps}<p><strong>Your computer is ready.</strong>${opaya().configured?'':' When you get an AI account or key, come back here to connect it.'}</p><div class="guide-actions"><button type="button" class="primary" data-guide="projects">Start a project</button>${state.agents.length?`<button type="button" class="secondary" data-guide="chat">Chat with ${esc(title(state.agents[0]))}</button>`:''}<button type="button" class="secondary" data-guide="close">Close the guide</button></div>`;
+  }
+  function guideHtml(){
+    const g=guide,parts=[gBubble(`<p><strong>Hi, I'm Opaya.</strong> I'll get this computer ready for building with AI. You don't need to know anything about code: you choose, I do the work.</p>${guideFactsHtml()}`)];
+    const wayName=GUIDE_WAYS.find(w=>w[0]===g.way)?.[1];
+    parts.push(gBubble(`<p>First: which of these do you have? The AI you already pay for (or a free one) becomes my brain, so I can finish the setup for you and fix anything that goes wrong.</p>${g.step==='hello'||g.step==='way'?guideWayCards():''}`));
+    if(g.step==='hello'||g.step==='way')return parts.join('');
+    parts.push(gAnswer(g.answers.way||wayName,'way'));
+    if(g.way==='none'){
+      parts.push(gBubble(`<p>Here are three ways to start without paying anything:</p>${g.step==='none'?guideNoneCards():''}`));
+      if(g.step==='none')return parts.join('');
+      parts.push(gAnswer(g.answers.none,'none'));
+    }
+    if(g.way==='api'||g.answers.none==='Free key from Google'){
+      parts.push(gBubble(`<p>${g.way==='api'?'Which service is your key from?':'Open the link, sign in with Google, press <em>Create API key</em>, copy it and paste it below.'}</p>${g.step==='key'?guideKeyForm():''}`));
+      if(g.step==='key')return parts.join('');
+      parts.push(gAnswer(g.answers.key||'Connected','key'));
+    }
+    if(g.answers.none==='Free model on this computer'&&g.step==='free'){
+      const fj=[...jobs.values()].reverse().find(j=>j.kind==='free-model');
+      parts.push(gBubble(fj?.status==='error'?`<div class="inline-notice error-notice">${esc(fj.error)}</div><div class="guide-actions"><button type="button" class="primary" data-guide="free">Try again</button></div>`:`<p><span class="status-dot working"></span> Downloading and starting the free model. This takes a few minutes; I'll continue by myself when it is ready.</p>`));
+      return parts.join('');
+    }
+    parts.push(gBubble(`<p>What would you like to make? Pick one or more.</p>${g.step==='goals'?guideGoalCards():''}`));
+    if(g.step==='goals')return parts.join('');
+    parts.push(gAnswer([...g.goals].map(id=>GUIDE_GOALS.find(x=>x[0]===id)?.[1]).join(', ')+(g.agents.size?` + ${[...g.agents].map(id=>GUIDE_AGENTS.find(x=>x[0]===id)?.[1]).join(', ')}`:''),'goals'));
+    parts.push(gBubble(`<p>Here is my plan${g.facts?.system?` for your ${esc(g.facts.system)}`:''}:</p>${g.step==='plan'?guidePlanHtml():guideRunHtml()}`));
+    return parts.join('');
+  }
+  const guideWayOf=()=>guide.way==='none'?(guide.answers.none==='Set up the tools now, AI later'?'none':guide.answers.none==='Free model on this computer'?'free':'api'):guide.way;
+  async function guideMakePlan(){
+    guide.step='plan';guide.plan=null;renderOpaya();
+    try{guide.plan=await api.guidePlan({way:guideWayOf(),goals:[...guide.goals],agents:[...guide.agents]});}catch(e){guide.plan={error:e.message};}
+    renderOpaya();
+  }
+  async function guideStart(scriptOnly=false){
+    const job=await api.guideStart({way:guideWayOf(),goals:[...guide.goals],agents:[...guide.agents],trust:guide.trust,scriptOnly});
+    guide.step='run';guide.jobId=job.id;onJob(job);renderOpaya();
+  }
+  function guideClick(b){
+    const act=b.dataset.guide,v=b.dataset.value,g=guide;if(!g)return;
+    if(act==='way'){g.way=v;g.answers.way=GUIDE_WAYS.find(w=>w[0]===v)[1];g.step=v==='none'?'none':v==='api'?'key':'goals';if(v==='api')g.keyPreset='openai';}
+    else if(act==='none'){g.answers.none=b.querySelector('strong').textContent;if(v==='free'){g.step='free';action(async()=>{await api.opayaFreeSetup({});});}else if(v==='freekey'){g.keyPreset='google';g.step='key';}else g.step='goals';}
+    else if(act==='free'){action(async()=>{await api.opayaFreeSetup({});});}
+    else if(act==='key-preset'){g.keyPreset=v;g.keyError='';}
+    else if(act==='goal'){if(g.goals.has(v))g.goals.delete(v);else{if(v==='all')g.goals.clear();else g.goals.delete('all');g.goals.add(v);}}
+    else if(act==='agent'){if(g.agents.has(v))g.agents.delete(v);else g.agents.add(v);}
+    else if(act==='plan'){guideMakePlan();return;}
+    else if(act==='trust'){g.trust=b.checked;return;}
+    else if(act==='start'){action(()=>guideStart(false));return;}
+    else if(act==='script'){action(()=>guideStart(true));return;}
+    else if(act==='ask-fix'){const j=jobs.get(g.jobId);closeGuide();action(()=>api.opayaSend({text:`The setup guide stopped with this problem: ${j?.error||'unknown'}. Look at the "Opaya setup" terminal, find out what went wrong and fix it, then finish the setup. Explain simply.`}));return;}
+    else if(act==='back'){g.step=b.dataset.to==='way'?'way':b.dataset.to;if(b.dataset.to==='way'){g.way='';g.answers={};}g.plan=null;}
+    else if(act==='close'){closeGuide();return;}
+    else if(act==='projects'){closeGuide();toggleProjects(true);openProjectForm();return;}
+    else if(act==='chat'){const a=state.agents[0];closeGuide();if(a)action(()=>selectAgent(a.id));return;}
+    renderOpaya();
+  }
+  async function guideKeySubmit(form){
+    const g=guide,preset=g.keyPreset,presets=opaya().presets||{},p=presets[preset]||{};g.keyError='';
+    const values={preset,baseUrl:form.elements.baseUrl?.value.trim()||p.baseUrl||'',apiKey:form.elements.apiKey.value.trim(),model:p.model||'',remember:true};
+    const btn=form.querySelector('[type=submit]');btn.disabled=true;btn.textContent='Connecting...';
+    try{
+      const r=await api.opayaTest(values);if(!values.model)values.model=(r.models||[])[0]||'';
+      if(!values.model)throw new Error('Connected, but I could not find a model to use. Choose one in Model settings.');
+      await api.opayaSaveConfig(values);await refresh();g.answers.key=`${p.label||'API'} connected`;g.step='goals';
+    }catch(e){g.keyError=e.message;}
+    renderOpaya();
+  }
   function renderOpaya(){
     const o=opaya(),entering=renderKey!=='opaya';
-    $('#topbar').innerHTML=`<div class="breadcrumb">Opaya <span>/</span> <strong>Opaya Agent</strong></div><div class="topbar-actions"><button type="button" class="itrust-toggle ${state.settings?.itrustOpaya?'on':''}" data-action="opaya-itrust" title="iTrust: let the Opaya Agent act without asking each time (removals still ask)"><span class="itrust-switch" aria-hidden="true"></span>iTrust</button>${o.configured?`<span class="status-pill ${o.busy?'connecting':'connected'}">${o.busy?'<span class="status-dot working"></span>Working':'<span class="status-dot connected"></span>'+esc(opayaModelLabel(o))}</span>`:''}<button class="subtle" data-action="files-local" title="Browse folders on this computer"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="install-catalog" title="Install agent frameworks locally or on a machine"><span class="install-glyph">&#8595;</span> Install agents</button><button class="secondary" data-action="opaya-config" title="Choose the model the Opaya Agent uses">Model settings</button></div>`;
+    $('#topbar').innerHTML=`<div class="breadcrumb">Opaya <span>/</span> <strong>Opaya Agent</strong></div><div class="topbar-actions"><button type="button" class="itrust-toggle ${state.settings?.itrustOpaya?'on':''}" data-action="opaya-itrust" title="iTrust: let the Opaya Agent act without asking each time (removals still ask)"><span class="itrust-switch" aria-hidden="true"></span>iTrust</button>${o.configured?`<span class="status-pill ${o.busy?'connecting':'connected'}">${o.busy?'<span class="status-dot working"></span>Working':'<span class="status-dot connected"></span>'+esc(opayaModelLabel(o))}</span>`:''}<button class="subtle" data-action="files-local" title="Browse folders on this computer"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="install-catalog" title="Install agent frameworks locally or on a machine"><span class="install-glyph">&#8595;</span> Install agents</button><button class="subtle" data-action="guide-open" title="Step-by-step setup of this computer">Setup guide</button><button class="secondary" data-action="opaya-config" title="Choose the model the Opaya Agent uses">Model settings</button></div>`;
     contentKind('conversation opaya-view');
     if(entering){
       $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity"><span class="agent-avatar large opaya-avatar"><span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""><i></i></span></span><div><h1>Opaya Agent</h1><p>Installs, connects, maintains and troubleshoots your agents and machines.</p><div class="identity-meta"><span class="agent-meta"><span class="meta-icon local-mark" aria-hidden="true"></span><span>Lives in Opaya's home folder</span><span class="meta-divider">/</span><span>Changes only with your approval</span></span></div></div></div><div class="conversation-controls"><select id="opaya-sessions" aria-label="Opaya Agent chats" title="Earlier chats with the Opaya Agent"></select><button class="icon-button" data-action="opaya-new" title="New chat" aria-label="New chat">+</button><button class="icon-button" data-action="opaya-delete-session" title="Delete this chat" aria-label="Delete this chat">&#10005;</button></div></div><div id="opaya-banner"></div><div id="opaya-messages" class="message-list"></div><div class="compose-area"><form id="message-form" class="opaya-form"><textarea id="message-input" class="opaya-input" rows="2" maxlength="80000" aria-label="Message the Opaya Agent" placeholder="Ask the Opaya Agent to install, connect or fix an agent..."></textarea><div class="compose-bottom"><div><span class="compose-provider">Opaya Agent</span><span id="compose-hint"></span></div><button type="button" id="opaya-stop" class="stop-button" data-action="opaya-stop" hidden><span>&#9632;</span> Stop</button><button id="opaya-send" type="submit" class="send-button" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption">Every change and command asks for your approval <span>&#183;</span> It never sees your API tokens <span>&#183;</span> It cannot modify the app itself</p></div>`;
@@ -880,10 +1015,20 @@
       input.addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();sendOpaya();}});
       $('#message-form').addEventListener('submit',event=>{event.preventDefault();sendOpaya();});
       $('#opaya-sessions').addEventListener('change',event=>action(async()=>{await api.opayaSelectSession({id:event.target.value});opayaCount=-1;}));
+      $('#opaya-messages').addEventListener('click',event=>{const b=event.target.closest('[data-guide]');if(b&&guide&&!b.disabled)guideClick(b);});
+      $('#opaya-messages').addEventListener('submit',event=>{const f=event.target.closest('[data-guide-form]');if(f&&guide){event.preventDefault();guideKeySubmit(f);}});
       enter($('#content'));opayaCount=-1;
     }
     renderKey='opaya';
     {const sel=$('#opaya-sessions');if(sel){const html=(o.sessions||[]).map(x=>`<option value="${esc(x.id)}" ${x.id===o.sessionId?'selected':''}>${esc(x.title)}</option>`).join('');if(sel.dataset.html!==html){sel.innerHTML=html;sel.dataset.html=html;}sel.disabled=!!o.busy;}}
+    if(guideOn()||!o.configured&&!o.messages.length&&!o.busy&&!guideDismissed()){
+      if(!guide)startGuide();
+      $('#opaya-banner').innerHTML='';const list=$('#opaya-messages'),html=guideHtml();
+      if(list.dataset.guide!==html){const keep=list.querySelector('[name="apiKey"]')?.value||'',atEnd=list.scrollHeight-list.scrollTop-list.clientHeight<140;list.innerHTML=html;list.dataset.guide=html;const k=list.querySelector('[name="apiKey"]');if(k&&keep)k.value=keep;if(atEnd||entering)list.scrollTop=list.scrollHeight;}
+      const send=$('#opaya-send');send.disabled=true;$('#opaya-stop').hidden=true;$('#message-input').disabled=true;$('#compose-hint').textContent=o.configured?'The setup guide is running. Close it to chat.':'Chat opens when the Opaya Agent has a model: the guide gets you one.';
+      return;
+    }
+    $('#opaya-messages').dataset.guide='';
     $('#opaya-banner').innerHTML=!o.configured?`<div class="opaya-setup"><div class="opaya-setup-art" aria-hidden="true"><span class="opaya-mark large"><img src="assets/opaya-logo.png" alt=""><i></i></span></div><div><h2>Connect the Opaya Agent to a model.</h2><p><strong>Start free</strong>: Opaya installs Ollama and a free open model on this computer. No account, no key, nothing to type. Or use the Codex CLI, a free tier (Ollama Cloud, OpenRouter, Groq, Cerebras, Gemini) or any API: DeepSeek, OpenAI, xAI, Mistral, LM Studio or OpenAI-compatible. API keys stay in the OS keychain.</p><ul class="opaya-abilities"><li><strong>Install</strong> Hermes, Claude Code, Codex, OpenClaw and more, here or on a VPS</li><li><strong>Maintain</strong> connections, machines and SSH keys</li><li><strong>Troubleshoot</strong> agents that do not connect or answer</li></ul><div class="opaya-setup-actions"><button class="primary" data-action="opaya-free">Start free &#8594;</button><button class="secondary" data-action="opaya-config">Connect a model</button><button class="secondary" data-action="install-catalog">Install agents without the assistant</button></div></div></div>`:o.error&&!o.busy?`<div class="inline-notice error-notice"><span>!</span><div><strong>The last request failed</strong><p>${esc(o.error)}</p><button class="text-button" data-action="opaya-config">Model settings</button></div></div>`:'';
     const list=$('#opaya-messages'),atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<110,now=performance.now();
     if(opayaCount<0)o.messages.forEach(m=>opayaSeen.set(m.id,-1e9));opayaCount=o.messages.length;
@@ -911,10 +1056,10 @@
   function openOpayaConfig(){
     const o=opaya(),presets=o.presets||{},c=o.config||{},current=Object.hasOwn(presets,c.preset)?c.preset:'codex';
     const initial=presets[current]||{},models=[...new Set([...(initial.models||[]),c.model].filter(Boolean))];
-    modal('Opaya Agent model','Run through the local Codex CLI, or connect an OpenAI-compatible provider. Models are selected from provider results.',`<form id="opaya-config-form"><div class="preset-grid">${Object.entries(presets).map(([id,p])=>`<label class="preset-option"><input type="radio" name="preset" value="${esc(id)}" ${id===current?'checked':''}><span><strong>${esc(p.label)}${p.free?` <em class="preset-free">${esc(p.free)}</em>`:''}</strong><small>${esc(p.kind==='codex'?'Local CLI / no API key':p.baseUrl||'Any /v1 endpoint')}</small>${p.signup?`<a href="#" class="preset-signup" data-action="open-link" data-external="1" data-url="${esc(p.signup)}">Get a free key &#8599;</a>`:''}</span></label>`).join('')}</div><p class="field-help">No account? <button type="button" class="text-button" data-action="opaya-free">Start free with a local model</button>: Opaya installs everything.</p><div class="form-grid"><label class="field" data-opaya-http><span>API base URL</span><input name="baseUrl" value="${esc(c.baseUrl||initial.baseUrl||'')}" placeholder="https://.../v1"></label><label class="field"><span>Model</span><select name="model"><option value="">${current==='codex'?'Use Codex CLI default':'Test connection to load models'}</option>${models.map(m=>`<option value="${esc(m)}" ${m===c.model?'selected':''}>${esc(m)}</option>`).join('')}</select></label></div><label class="field" data-opaya-key><span>API key ${o.hasKey?'<em>stored securely</em>':''}</span><input name="apiKey" type="password" autocomplete="new-password" placeholder="${o.hasKey?'Leave empty to keep the saved key':'Not needed for local providers'}"></label><label class="check-row" data-opaya-key><input type="checkbox" name="remember" ${state.secureStorage?'checked':''}> Remember key with OS encryption <small>${state.secureStorage?'Protected by your OS keychain':'Unavailable here: the key stays in memory only'}</small></label><div class="opaya-boundary"><strong>Safety boundary</strong><p>Codex runs locally in a read-only sandbox. The Opaya Agent can use only Opaya's scoped tools for connections, machines, discovery, diagnostics and vendor installs; every change or command still opens an approval dialog. API tokens are never sent to its tools. Chat and notes live in <code>${esc(o.home||'opaya-agent')}</code>.</p></div><p id="opaya-test-result" class="field-help"></p><div class="modal-footer"><div>${o.hasKey?'<button type="button" class="danger-text" data-action="opaya-forget-key">Forget saved key</button>':''}</div><div><button type="button" class="secondary" id="opaya-test">Test &amp; load models</button><button type="submit" class="primary">Save</button></div></div></form>`,true);
+    modal('Opaya Agent model','Run through Codex CLI or Claude Code on this computer, or connect an OpenAI-compatible provider. Models are selected from provider results.',`<form id="opaya-config-form"><div class="preset-grid">${Object.entries(presets).map(([id,p])=>`<label class="preset-option"><input type="radio" name="preset" value="${esc(id)}" ${id===current?'checked':''}><span><strong>${esc(p.label)}${p.free?` <em class="preset-free">${esc(p.free)}</em>`:''}</strong><small>${esc(p.kind==='codex'||p.kind==='claude'?'Signed-in CLI / no API key':p.baseUrl||'Any /v1 endpoint')}</small>${p.signup?`<a href="#" class="preset-signup" data-action="open-link" data-external="1" data-url="${esc(p.signup)}">Get a free key &#8599;</a>`:''}</span></label>`).join('')}</div><p class="field-help">No account? <button type="button" class="text-button" data-action="opaya-free">Start free with a local model</button>: Opaya installs everything.</p><div class="form-grid"><label class="field" data-opaya-http><span>API base URL</span><input name="baseUrl" value="${esc(c.baseUrl||initial.baseUrl||'')}" placeholder="https://.../v1"></label><label class="field"><span>Model</span><select name="model"><option value="">${current==='codex'?'Use Codex CLI default':'Test connection to load models'}</option>${models.map(m=>`<option value="${esc(m)}" ${m===c.model?'selected':''}>${esc(m)}</option>`).join('')}</select></label></div><label class="field" data-opaya-key><span>API key ${o.hasKey?'<em>stored securely</em>':''}</span><input name="apiKey" type="password" autocomplete="new-password" placeholder="${o.hasKey?'Leave empty to keep the saved key':'Not needed for local providers'}"></label><label class="check-row" data-opaya-key><input type="checkbox" name="remember" ${state.secureStorage?'checked':''}> Remember key with OS encryption <small>${state.secureStorage?'Protected by your OS keychain':'Unavailable here: the key stays in memory only'}</small></label><div class="opaya-boundary"><strong>Safety boundary</strong><p>Codex runs locally in a read-only sandbox. The Opaya Agent can use only Opaya's scoped tools for connections, machines, discovery, diagnostics and vendor installs; every change or command still opens an approval dialog. API tokens are never sent to its tools. Chat and notes live in <code>${esc(o.home||'opaya-agent')}</code>.</p></div><p id="opaya-test-result" class="field-help"></p><div class="modal-footer"><div>${o.hasKey?'<button type="button" class="danger-text" data-action="opaya-forget-key">Forget saved key</button>':''}</div><div><button type="button" class="secondary" id="opaya-test">Test &amp; load models</button><button type="submit" class="primary">Save</button></div></div></form>`,true);
     const form=$('#opaya-config-form');
-    const fillModels=(items,chosen='')=>{const list=[...new Set((items||[]).filter(Boolean))];form.elements.model.innerHTML=`<option value="">${form.elements.preset.value==='codex'?'Use Codex CLI default':'Select a model'}</option>`+list.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('');if(list.includes(chosen))form.elements.model.value=chosen;else if(list.length)form.elements.model.value=list[0];};
-    const syncPreset=(reset=false)=>{const id=form.elements.preset.value,p=presets[id]||{},codex=id==='codex';form.querySelectorAll('[data-opaya-http],[data-opaya-key]').forEach(el=>el.hidden=codex);form.elements.baseUrl.required=!codex;form.elements.model.required=!codex;if(reset){form.elements.baseUrl.value=p.baseUrl||'';fillModels(p.models||[],p.model||'');}};
+    const fillModels=(items,chosen='')=>{const list=[...new Set((items||[]).filter(Boolean))];form.elements.model.innerHTML=`<option value="">${form.elements.preset.value==='codex'?'Use Codex CLI default':form.elements.preset.value==='claude'?'Use Claude Code default':'Select a model'}</option>`+list.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join('');if(list.includes(chosen))form.elements.model.value=chosen;else if(list.length)form.elements.model.value=list[0];};
+    const syncPreset=(reset=false)=>{const id=form.elements.preset.value,p=presets[id]||{},codex=id==='codex'||id==='claude';form.querySelectorAll('[data-opaya-http],[data-opaya-key]').forEach(el=>el.hidden=codex);form.elements.baseUrl.required=!codex;form.elements.model.required=!codex;if(reset){form.elements.baseUrl.value=p.baseUrl||'';fillModels(p.models||[],p.model||'');}};
     form.addEventListener('change',event=>{if(event.target.name==='preset')syncPreset(true);});
     syncPreset(false);
     const values=()=>({preset:form.elements.preset.value,baseUrl:form.elements.baseUrl.value.trim(),model:form.elements.model.value.trim(),apiKey:form.elements.apiKey.value,remember:form.elements.remember.checked});
@@ -1452,7 +1597,7 @@
   // otherwise the chat's own agent. Either way it costs tokens, so the user confirms first.
   async function condenseChat(c){
     const a=state.agents.find(x=>x.id===c.agentId),o=opaya(),local=['ollama','lmstudio'].includes(o.config?.preset);
-    const model=o.configured&&o.config?.preset!=='codex'&&(o.hasKey||local)?`${o.presets?.[o.config.preset]?.label||'Model API'} / ${o.config.model}`:'';
+    const model=o.configured&&!['codex','claude'].includes(o.config?.preset)&&(o.hasKey||local)?`${o.presets?.[o.config.preset]?.label||'Model API'} / ${o.config.model}`:'';
     let size=0;try{size=(await api.conversationMarkdown({id:c.id})).length;}catch{}
     const tokens=Math.round(size/4);
     modal('Condense chat',c.title,`<div class="condense-body">
@@ -1745,7 +1890,9 @@
   }
   function onJob(j){
     const prev=jobs.get(j.id);jobs.set(j.id,j);
-    if(!prev&&j.status==='running'){jobShown=j.id;jobMinimized=false;}
+    if(!prev&&j.status==='running'){jobShown=j.id;jobMinimized=j.kind==='guide'||j.kind==='free-model'&&guideOn();}
+    // The guide shows its own progress, and continues by itself when the free model is ready.
+    if(guide){if(j.kind==='free-model'&&j.status==='done'&&guide.step==='free'){guide.step='goals';refresh().then(()=>renderOpaya());}if(opayaView&&(j.kind==='guide'||j.kind==='free-model'))renderOpaya();}
     if(prev?.status==='running'&&j.status!=='running'){
       if(j.status==='done'){const r=j.result||{},bits=[r.copied&&`Copied: ${r.copied.join(', ')}`,r.skills&&`${r.skills.length} skill${r.skills.length===1?'':'s'}`,r.keys&&`${r.keys.length} API key${r.keys.length===1?'':'s'}`,r.mcp&&`MCP: ${r.mcp.join(', ')}`,r.token&&'API token',r.file&&`saved as ${r.file}`,r.after?.removed&&'connection removed'].filter(Boolean);if(j.kind==='backup'||j.kind==='uninstall'){backupLists.clear();installInfo.clear();}
         toast(`${j.title.replace(/^Cloning/,'Cloned').replace(/^Redeploying/,'Redeployed').replace(/^Transferring/,'Transferred').replace(/^Installing skills/,'Installed skills').replace(/^Setting up/,'Set up').replace(/^Adding skills/,'Added skills').replace(/^Backing up/,'Backed up').replace(/^Uninstalling/,'Uninstalled')}. ${bits.join(', ')}${bits.length?'.':''}`);if(j.kind!=='library')skillCache.clear();refresh();if(j.kind==='library'&&$('#library-body'))drawLibrary?.();if(j.kind==='free-model'){overview=false;playgroundView=false;opayaView=true;refresh().then(()=>{render();saveView();$('#message-input')?.focus();});}if(j.kind==='condense'&&j.result?.conversationId)refresh().then(()=>openEssence(j.result.conversationId));if(j.kind==='project-bring'&&j.result)refresh().then(()=>openBringReview(j.result));if(j.kind==='project-remote'&&j.result?.dir)refresh().then(()=>{projectsExpanded.add(j.result.projectId);toggleProjects(true);const c=(state.projects||[]).find(x=>x.id===j.result.projectId);if(c&&j.result.agentId)startProjectChat(c,j.result.agentId);});}

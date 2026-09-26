@@ -1,3 +1,17 @@
+# Opaya 0.18.0 - A setup guide for people who have never coded
+
+- **Setup guide**: on a fresh install, Opaya opens a guide in the Opaya Agent screen. It needs no AI model: it is a scripted conversation where you pick, and Opaya does the work in a terminal you can watch. Open it any time from the Opaya Agent screen (**Setup guide**).
+  - It looks at the computer first (Mac, Windows or Linux, memory, what is already installed) and never installs something twice.
+  - **Which of these do you have?** ChatGPT, Claude, an API key (OpenAI, Anthropic, Google, DeepSeek, Groq, OpenRouter, Mistral, xAI, Cerebras, Ollama Cloud or any compatible service), or nothing yet: then a free model on this computer, a free key from Google, or the tools now and AI later.
+  - **What would you like to make?** Websites and web apps, Python and automation, just AI agents, or everything; plus optional agents (Codex CLI, Claude Code, Gemini CLI, OpenCode).
+  - **The AI comes first**: with ChatGPT or Claude, Opaya installs Codex CLI or Claude Code (with Node.js or Git first where needed), opens the sign-in, waits until you are signed in, and connects it as the Opaya Agent's brain. The Opaya Agent then installs the rest, checks versions and fixes what went wrong. You approve the plan once; you can let it install the rest without asking each time.
+  - Without an AI, the guide installs everything itself and adds your agents to Opaya.
+  - When a terminal asks for your computer password or a question, the guide says so in plain words. A failed step is retried once; then you can try again, ask the Opaya Agent to fix it, or continue without AI.
+- **Claude Code can be the Opaya Agent's brain** (Model settings > Claude Code), next to Codex CLI and API models. It gets only the Opaya Agent's tools; its own shell, editing and web tools are off, and every change still asks you first.
+- **Anthropic API keys** work for the Opaya Agent. A wrong key now says so plainly, and services without a model list still connect.
+- **Node.js without Homebrew**: on a Mac without Homebrew (and Linux without apt or dnf), Node.js is installed with nvm, with no administrator password.
+- **Checked on every platform**: every install, update, uninstall and sign-in command is checked against the shell it runs in (sh and bash on macOS and Linux, PowerShell's own parser on Windows) with each build.
+
 # Opaya 0.17.0 - Share a project with the agents on your servers, one agent at a time
 
 - **One project, no duplicates**: sharing no longer creates a second `<name> on <machine>` project. Remote agents join your local project next to your local ones, marked with ⇆, and their chats live in the same project.

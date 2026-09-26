@@ -1207,3 +1207,50 @@ body[data-theme="light"] .remote-method em{background:#e3f1e7;color:#1f7a47;bord
 body[data-theme="light"] .project-link{border-color:#d9e2da;color:#4f6157}
 body[data-theme="light"] :is(.bring-commits,.bring-files){background:#f7faf7;border-color:#d9e2da}
 body[data-theme="light"] .bring-M{color:#9a6a10}body[data-theme="light"] .bring-A{color:#1f7a45}body[data-theme="light"] .bring-D{color:#c0392b}body[data-theme="light"] .bring-R{color:#2458b8}
+.guide-msg .message-text{max-width:760px}
+.guide-msg .message-text>p{margin:0 0 10px}
+.guide-tag{font-size:10px;color:#9fe3b8;border:1px solid #2f5a41;border-radius:10px;padding:0 7px;margin-left:6px}
+.guide-scan{color:var(--muted);display:flex;align-items:center;gap:8px}
+.guide-facts{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}
+.guide-fact{font-size:11.5px;padding:3px 10px;border-radius:999px;border:1px solid #30383b;color:var(--muted)}
+.guide-fact.ok{border-color:#2f5a41;color:#9fe3b8}
+.guide-fact.sys{color:var(--text)}
+.guide-cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:6px 0 2px}
+.guide-cards.two{grid-template-columns:repeat(3,minmax(0,1fr))}
+.guide-cards.goals{grid-template-columns:repeat(4,minmax(0,1fr))}
+.guide-card{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:6px;padding:14px 16px;min-height:118px;border:1px solid #2c3a31;border-radius:12px;background:#151d19;text-align:left;font-size:12px;color:var(--muted);position:relative}
+.guide-card.small{min-height:78px}
+.guide-card strong{color:var(--text);font-size:14px}
+.guide-card:hover{border-color:#4f8b69;background:#18231d;transform:translateY(-1px)}
+.guide-card.selected{border-color:#4fae78;background:#1a2a21;box-shadow:0 0 0 1px #4fae78 inset}
+.guide-card-icon{width:34px;height:34px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:#1d2a23;color:#9fe3b8;font-size:17px}
+.guide-card-icon .agent-avatar{width:34px;height:34px}
+.guide-badge{position:absolute;top:10px;right:10px;font-style:normal;font-size:10px;color:#9fe3b8;border:1px solid #2f5a41;border-radius:10px;padding:1px 8px}
+.guide-sub{margin:14px 0 6px !important;font-size:12px;color:var(--text)}
+.guide-sub small{color:var(--faint)}
+.guide-chips{display:flex;flex-wrap:wrap;gap:8px}
+.guide-chips .marker-chip{font-size:12px;padding:6px 12px;display:inline-flex;align-items:center;gap:6px}
+.guide-chips .marker-chip.selected{border-color:#4fae78;background:#1a2a21;color:#d9f5e3}
+.guide-chips .marker-chip small,.guide-chips .marker-chip em{color:var(--faint);font-style:normal}
+.guide-chips .agent-avatar{width:18px;height:18px}
+.guide-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:14px}
+.guide-actions .primary{padding:9px 20px}
+.guide-note{font-size:11px;color:var(--faint)}
+.guide-change{font-size:11px;margin-left:8px}
+.guide-key{display:flex;flex-direction:column;gap:10px;max-width:560px}
+.guide-plan{list-style:none;margin:6px 0;padding:0;display:flex;flex-direction:column;gap:6px}
+.guide-plan li{display:flex;align-items:center;gap:12px;padding:9px 12px;border:1px solid #262c2f;border-radius:9px}
+.guide-plan li>div{flex:1;min-width:0}
+.guide-plan li strong{display:block;font-size:13px;color:var(--text)}
+.guide-plan li small{display:block;color:var(--muted);font-size:11.5px}
+.guide-n{flex:0 0 24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#1d2a23;border:1px solid #2f5a41;color:#9fe3b8;font-size:11px;font-weight:600}
+.guide-plan.live li.done{border-color:#2f5a41}
+.guide-plan.live li.done .guide-n{background:#2f5a41;color:#e6fff0}
+.guide-plan.live li.active{border-color:#4fae78;background:#141c17}
+.guide-plan.live li.error{border-color:#7a3b3b}
+.guide-plan.live li.error .guide-n{background:#5a2b2b;border-color:#7a3b3b;color:#ffd6d6}
+.guide-plan.live li.pending,.guide-plan.live li.skipped{opacity:.6}
+.guide-trust{margin-top:4px}
+.guide-callout{margin:4px 0 10px;padding:10px 12px;border:1px solid #6b5a2a;background:#221d10;color:#f3dc9b;border-radius:9px;font-size:12.5px}
+@media (max-width:900px){.guide-cards,.guide-cards.two,.guide-cards.goals{grid-template-columns:1fr}}
+.message-text .guide-plan{padding-left:0;margin-left:0}

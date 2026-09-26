@@ -20,7 +20,7 @@ test('partial output is checkpointed before completion and is recovered without 
   const root=await temp(t);let context;
   const b=await broker(root,()=>({connect:async()=>({}),close(){},run:ctx=>{context=ctx;return new Promise((resolve,reject)=>ctx.signal.addEventListener('abort',()=>reject(new Error('stopped')),{once:true}));}}));
   t.after(()=>b.close());const a=await b.saveAgent({agent:agent('one')});await b.connect(a.id);const c=await b.send({agentId:a.id,text:'work'});context.onEvent({type:'text',text:'already generated'});
-  await delay(1000);const disk=await b.store.transcript(c.conversationId);assert.equal(disk[1].content,'already generated');assert.equal(disk[1].status,'streaming');
+  let disk=[];for(let i=0;i<100&&disk[1]?.content!=='already generated';i++){await delay(100);disk=await b.store.transcript(c.conversationId);}assert.equal(disk[1].content,'already generated');assert.equal(disk[1].status,'streaming');
   const recoveryRoot=path.join(root,'crash-copy');await fs.mkdir(recoveryRoot);await fs.cp(path.join(root,'workspace.json'),path.join(recoveryRoot,'workspace.json'));await fs.cp(path.join(root,'conversations'),path.join(recoveryRoot,'conversations'),{recursive:true});
   const restored=await broker(recoveryRoot);const recovered=restored.histories.get(c.conversationId)[1];assert.equal(recovered.status,'error');assert.equal(recovered.content,'already generated');assert.equal(restored.turns.size,0);assert.equal((await restored.store.transcript(c.conversationId))[1].status,'error');await restored.close();
 });

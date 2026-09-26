@@ -24,9 +24,10 @@ const maintenance = require('./maintenance.cjs');
 const versions = require('./versions.cjs');
 const containers = require('./containers.cjs');
 const remoteWork = require('./remote-work.cjs');
+const guide = require('./guide.cjs');
 const {visionOf, SUPPORTED:VISION_MODELS} = require('./vision.cjs');
 async function start({app, safeStorage}, root) {
-  let broker, terminals, listener, opaya, stopping = false;
+  let broker, terminals, listener, opaya, stopping = false, setupTrust = false;
   const startedAt = new Date().toISOString(), approvals = new Map();
   const descriptor = path.join(root, 'session-service.json');
   await fs.mkdir(root,{recursive:true,mode:0o700});
@@ -58,6 +59,7 @@ async function start({app, safeStorage}, root) {
   await broker.init();
   // Opaya browser for agents: the MCP bridge gets a token that can only call browserTool, forwarded to the Opaya window.
   const browserToken = randomBytes(32).toString('hex'), browserCalls = new Map();
+  const toolsToken = randomBytes(32).toString('hex');
   broker.browserBridge = {command:process.execPath, args:[path.join(__dirname,'browser-mcp.cjs')], env:{ELECTRON_RUN_AS_NODE:'1',OPAYA_BROWSER_ENDPOINT:endpoint(root),OPAYA_BROWSER_TOKEN:browserToken}};
   function browserTool(input){
     const socket=[...(listener?.clients||[])].at(-1);
@@ -351,6 +353,98 @@ async function start({app, safeStorage}, root) {
     },
     projectRemoteGithubLogin:async x=>{const host=broker.host(x.hostId);return runInTerminal({label:`GitHub sign-in on ${host.name}`,key:`ghlogin_${host.id}`,host,command:"command -v gh >/dev/null 2>&1 || { echo 'GitHub CLI is not installed here. Install it: Install agents > this machine > GitHub CLI.'; exit 1; }; gh auth login && gh auth setup-git && echo 'Signed in. Go back to Opaya and try again.'"});}
   };
+  // ---- Setup guide: plain scripts that get this computer ready, model first, then the Opaya Agent finishes ----------
+  const windowsHere=process.platform==='win32';
+  async function guideFacts(){await require('./process.cjs').primeShellPath();return {...guide.describe({installed:await versions.installed(null).catch(()=>({}))}),machine:machineName(),brain:opaya.configured()?opaya.config.preset:''};}
+  // Run one marked command in the setup terminal and wait for its end line. Password and question prompts are passed
+  // on to the guide so it can tell the person what to do.
+  async function setupRun(step,command,progress,{timeout=45*60*1000}={}){
+    const view=await runInTerminal({label:'Opaya setup',key:'setup',host:null,command:guide.marked(step.id,guide.withPath(command,{windows:windowsHere}),{windows:windowsHere})});
+    const end=Date.now()+timeout;let hinted='';
+    for(;;){
+      await new Promise(r=>setTimeout(r,1200));
+      let v;try{v=terminals.attach(view.id);}catch{throw new Error('The setup terminal was closed.');}
+      const code=guide.markOf(v.buffer,step.id);if(code!==null)return code;
+      if(v.exited)throw new Error('The setup terminal ended.');
+      const p=require('./opaya-agent.cjs').promptState(v.buffer),hint=p.password?'password':p.question?'question':'';
+      if(hint&&hint!==hinted){progress({step:step.id,state:'warn',message:hint==='password'?'The terminal below asks for your computer password (the one you log in with). Click into it, type it (it stays invisible) and press Enter.':'The terminal below asks a question. Usually pressing Enter picks the safe default.'});}
+      hinted=hint;
+      if(Date.now()>end)throw new Error(`${step.title} did not finish within ${Math.round(timeout/60000)} minutes.`);
+    }
+  }
+  async function guideInstall(step,progress){
+    const {command}=catalog.command(step.tool,{remote:false});
+    for(let attempt=1;attempt<=2;attempt++){
+      progress({step:step.id,state:'active',message:attempt===1?`${step.title}: ${step.why}`:'That did not work; trying once more.'});
+      await setupRun({...step,id:`${step.id}-${attempt}`},command,progress);
+      versions.cache.clear();const now=await versions.installed(null).catch(()=>({}));
+      if(Object.hasOwn(now,step.tool)){progress({step:step.id,state:'done',message:`${guide.TOOL_NAMES[step.tool]} ${String(now[step.tool]).slice(0,40)}`});return true;}
+    }
+    progress({step:step.id,state:'error',message:`${step.title} did not work. The terminal below shows why.`});return false;
+  }
+  async function guideSignIn(step,progress){
+    const a=guide.AGENTS[step.tool];progress({step:step.id,state:'active',message:a.signInNote});
+    // Its own terminal: an interactive sign-in (Claude Code opens its app) must not catch the next setup commands.
+    const view=await runInTerminal({label:`Sign in to ${guide.TOOL_NAMES[step.tool]}`,key:`signin_${step.tool}`,host:null,command:guide.withPath(windowsHere?a.signIn.windows:a.signIn.posix,{windows:windowsHere})});
+    const end=Date.now()+30*60*1000;
+    while(!guide.signedIn(step.tool)){if(Date.now()>end)throw new Error(`Sign-in to ${guide.TOOL_NAMES[step.tool]} did not finish within 30 minutes. Start the guide again when you are ready.`);await new Promise(r=>setTimeout(r,2500));}
+    progress({step:step.id,state:'done',message:'Signed in'});
+    setTimeout(()=>{try{terminals.close(view.id);emit();}catch{}},4000);
+  }
+  async function guideBrain(step,progress){
+    progress({step:step.id,state:'active',message:`Connecting the Opaya Agent to ${guide.TOOL_NAMES[step.tool]}`});
+    let last;
+    for(let i=0;i<4;i++){try{const r=await opaya.test({preset:step.tool});await opaya.saveConfig({preset:step.tool,model:''});progress({step:step.id,state:'done',message:r.message});return true;}catch(e){last=e;await new Promise(r=>setTimeout(r,4000));}}
+    progress({step:step.id,state:'error',message:safeError(last)});return false;
+  }
+  async function guideAdd(step,progress){
+    progress({step:step.id,state:'active',message:'Looking for agents on this computer'});
+    const found=await broker.discover({}).catch(()=>({agents:[]}));let added=[];
+    for(const c of found.agents||[]){
+      if(c.existingId||!['codex','claude'].includes(c.provider)&&!/^(gemini|opencode)$/.test(String(c.command||'').split(/[\\/]/).pop().replace(/\.(exe|cmd)$/i,'')))continue;
+      const {existingId,detail,readiness,...agent}=c;try{const saved=await broker.saveAgent({agent},{preapproved:true});added.push(saved.name);}catch{}
+    }
+    progress({step:step.id,state:'done',message:added.length?`Added ${added.join(', ')}`:'Your agents are already in Opaya'});return added;
+  }
+  // Keep the Opaya Agent from asking again for each install while it finishes the setup, when the person chose that.
+  function handOff(text,trust){
+    if(trust)setupTrust=true;opaya.begin(text);
+    const watch=setInterval(()=>{if(!opaya.busy){setupTrust=false;clearInterval(watch);}},2000);watch.unref?.();
+  }
+  const guideActions={
+    guideScan:async()=>guideFacts(),
+    guidePlan:async x=>{const facts=await guideFacts();return {facts,steps:guide.plan({way:String(x.way||''),goals:[].concat(x.goals||[]),agents:[].concat(x.agents||[]),facts})};},
+    guideStart:async x=>{
+      const facts=await guideFacts(),way=String(x.way||''),goals=[].concat(x.goals||[]).map(String),agents=[].concat(x.agents||[]).map(String);
+      let steps=guide.plan({way,goals,agents,facts});
+      const brainReady=()=>opaya.configured();
+      if(x.scriptOnly)steps=steps.filter(s=>s.phase==='rest');
+      const commands=steps.filter(s=>s.kind==='install').map(s=>`${guide.TOOL_NAMES[s.tool]}:\n${catalog.command(s.tool,{remote:false}).command}`);
+      if(!await approve({name:'Opaya'},'Set up this computer?',`${steps.map((s,i)=>`${i+1}. ${s.title}`).join('\n')}\n\nEverything runs in the "Opaya setup" terminal, where you can watch it.${commands.length?`\n\nCommands:\n\n${commands.join('\n\n')}`:''}`))throw new Error('Setup cancelled.');
+      return startJob({kind:'guide',route:{from:'Setup guide',fromWhere:facts.system,to:'Ready to build',toWhere:machineName(),provider:'opaya'},title:'Setting up this computer',detail:[WAYS_LABEL(way),...goals.map(g=>guide.GOALS[g]?.label)].filter(Boolean).join(' / '),steps:steps.map(s=>[s.id,s.title])},async progress=>{
+        const failed=[];
+        for(const step of steps.filter(s=>s.phase==='model')){
+          if(step.kind==='install'&&!await guideInstall(step,progress))throw new Error(`${step.title} did not work, so the AI part cannot start yet. Look at the "Opaya setup" terminal, then press Try again.`);
+          if(step.kind==='signin')await guideSignIn(step,progress);
+          if(step.kind==='brain'&&!await guideBrain(step,progress))throw new Error('The Opaya Agent could not use it yet. Make sure you finished signing in, then press Try again.');
+        }
+        const rest=steps.filter(s=>s.phase==='rest');
+        // With a model, the Opaya Agent finishes: it installs the rest, checks and fixes what went wrong.
+        if(brainReady()&&!x.scriptOnly){
+          progress({message:'The Opaya Agent takes it from here: watch it in the Opaya Agent chat.'});
+          handOff(guide.handoff({steps,facts,goals}),x.trust!==false);
+          return {handoff:true,way,steps:rest.map(s=>s.id)};
+        }
+        for(const step of rest){
+          if(step.kind==='install'&&!await guideInstall(step,progress))failed.push(step.title.replace(/^Install /,''));
+          if(step.kind==='add')await guideAdd(step,progress);
+        }
+        if(failed.length)throw new Error(`Almost done: ${failed.join(', ')} did not install. The "Opaya setup" terminal shows why. Connect a model for the Opaya Agent and it can fix this for you.`);
+        return {handoff:false,way,ready:true};
+      });
+    }
+  };
+  const WAYS_LABEL=way=>guide.WAYS[way]?.label||'';
   const toolActions={
     toolVersions:async x=>{const host=x.hostId?broker.host(x.hostId):null,m=toolState.machines[machineKey(host)];if(!x.force&&m?.checkedAt&&Date.now()-Date.parse(m.checkedAt)<10*60*1000)return m;const r=await checkMachine(host);emit();return r;},
     toolCheckAll:async()=>{versions.cache.clear();await checkAll({notify:false});return toolState;},
@@ -365,7 +459,9 @@ async function start({app, safeStorage}, root) {
       return list.length;
     }
   };
-  opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal,trusted:()=>!!broker.data.settings?.itrustOpaya});
+  opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal,trusted:()=>!!broker.data.settings?.itrustOpaya||setupTrust});
+  // Claude Code as the Opaya Agent's model reaches the Opaya tools through this bridge; its token can only list and call them.
+  opaya.toolBridge = {command:process.execPath, args:[path.join(__dirname,'opaya-tools-mcp.cjs')], env:{ELECTRON_RUN_AS_NODE:'1',OPAYA_TOOLS_ENDPOINT:endpoint(root),OPAYA_TOOLS_TOKEN:toolsToken}};
   await stage('opaya agent');
   await opaya.init();
   // A fresh install: connect the Opaya Agent to a local Ollama model with tools if one already runs (no input needed).
@@ -471,6 +567,8 @@ async function start({app, safeStorage}, root) {
     },
     libraryRemove:x=>library.remove(String(x.name||'')), libraryAddFolder:x=>library.addFolder(String(x.path||'')),
     jobs:async()=>[...jobs.values()], jobDismiss:async x=>jobs.delete(String(x.id||'')),
+    opayaToolList:async()=>require('./opaya-agent.cjs').TOOLS.map(t=>({name:t.function.name,description:t.function.description,parameters:t.function.parameters})),
+    opayaToolCall:async x=>opaya.bridgeCall(String(x?.name||''),x?.args),
     browserTool, browserResult:async x=>{const c=browserCalls.get(x.id);if(!c)return false;clearTimeout(c.timer);browserCalls.delete(x.id);x.ok?c.resolve(x.value):c.reject(new Error(String(x.error||'Browser action failed.')));return true;},
     mcpSave:x=>broker.saveMcpServer(x), mcpRemove:x=>broker.removeMcpServer(x.id), agentMcp:x=>broker.setAgentMcp(x), agentSkills:x=>broker.skills(x.id),
     // Hermes skills: browse the hub or install one with the Hermes CLI in a visible terminal.
@@ -487,11 +585,11 @@ async function start({app, safeStorage}, root) {
       return startJob({kind:'free-model',route:{from:m.label,fromWhere:`Free / ${m.size}`,to:'Opaya Agent',toWhere:'This computer',provider:'ollama'},title:`Setting up ${m.label}`,detail:'Free local model through Ollama. No account and no key.',steps:[['ollama','Install and start Ollama'],['download',`Download ${m.label} (${m.size})`],['connect','Connect the Opaya Agent']]},progress=>free.setupFree({opaya,model,progress}).then(r=>{emit();return r;}));},
     opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}), opayaForgetKey:()=>opaya.forgetKey(),
     opayaSend:x=>opaya.begin(x.text), opayaNewSession:()=>opaya.newSession(), opayaSelectSession:x=>opaya.selectSession(String(x.id||'')), opayaDeleteSession:x=>opaya.deleteSession(String(x.id||'')), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),
-    ...maintenanceActions, ...toolActions, ...projectRemoteActions,
+    ...maintenanceActions, ...toolActions, ...projectRemoteActions, ...guideActions,
     shutdown
   };
   const token = randomBytes(32).toString('hex');
-  listener = server({token,snapshot,scopes:()=>new Map([[browserToken,new Set(['browserTool'])]]),
+  listener = server({token,snapshot,scopes:()=>new Map([[browserToken,new Set(['browserTool'])],[toolsToken,new Set(['opayaToolList','opayaToolCall'])]]),
     dispatch:async (method,input)=>{if(!Object.hasOwn(actions,method))throw new Error('Unsupported desktop action.');try{return await actions[method](input||{});}catch(error){throw new Error(safeError(error));}},
     onApproval:(socket,message)=>{const a=approvals.get(message.id);if(a?.socket===socket)a.finish(message.allow===true);},
     onDetach:socket=>{for(const a of approvals.values())if(a.socket===socket)a.finish(false);}

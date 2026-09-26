@@ -14,12 +14,14 @@ const catalog=require('./catalog.cjs');
 const files=require('./files.cjs');
 const skills=require('./skills.cjs');
 const {atomicJson,readJson}=require('./store.cjs');
-const {quote,target,launch,primeShellPath,findExecutable}=require('./process.cjs');
+const {quote,target,launch,primeShellPath,findExecutable,environment,terminate}=require('./process.cjs');
 const {Rpc}=require('./rpc.cjs');
 const {PROVIDERS}=require('./providers.cjs');
 
 const PRESETS={
   codex:{label:'Codex CLI (this computer)',kind:'codex',baseUrl:'',model:'',models:[]},
+  claude:{label:'Claude Code (this computer)',kind:'claude',baseUrl:'',model:'',models:['sonnet','opus','haiku']},
+  anthropic:{label:'Anthropic (Claude API)',baseUrl:'https://api.anthropic.com/v1',model:'claude-sonnet-5',models:['claude-sonnet-5','claude-opus-5-5','claude-haiku-4-5']},
   deepseek:{label:'DeepSeek',baseUrl:PROVIDERS.deepseek.endpoint,model:'deepseek-v4-pro',models:PROVIDERS.deepseek.models},
   openai:{label:'OpenAI',baseUrl:PROVIDERS.openai.endpoint,model:'',models:[]},
   google:{label:'Google Gemini',baseUrl:PROVIDERS.google.endpoint,model:PROVIDERS.google.models[0],models:PROVIDERS.google.models,free:'Free tier',signup:'https://aistudio.google.com/apikey'},
@@ -117,12 +119,15 @@ const TOOLS=[
   fn('read_notes','Read your notes file in your home folder.'),
   fn('write_notes','Replace your notes file in your home folder (max 20000 characters). Use it to remember setup decisions.',{content:{type:'string'}},['content'])
 ];
+// Chat models that can use tools first; embeddings, audio, image and moderation models last.
+const rankModels=list=>[...list].sort((a,b)=>score(b)-score(a));
+function score(id){const s=String(id).toLowerCase();if(/embed|whisper|tts|audio|realtime|transcri|image|dall-e|moderation|search|babbage|davinci|guard|rerank|vision-preview/.test(s))return -10;return (/gpt-5|gpt-4\.1|claude|gemini-2|deepseek-(chat|v)|qwen3|llama-3\.3|kimi|grok|mistral-(large|medium)/.test(s)?5:0)+(/mini|flash|small|lite|nano|8b|haiku/.test(s)?1:0);}
 const stripAnsi=text=>String(text||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)/g,'').replace(/\r/g,'');
 
 class OpayaAgent{
   constructor({root,vault,broker,terminals,approve,emit,runInTerminal,platform=process.platform,fetchImpl=globalThis.fetch,spawnAgent=launch,trusted=()=>false}){
     Object.assign(this,{home:path.join(root,'opaya-agent'),root,vault,broker,terminals,approve,emit,runInTerminal,platform,fetch:fetchImpl,spawnAgent,trusted});this.ownTerminals=new Set();
-    this.config={preset:'',baseUrl:'',model:''};this.messages=[];this.busy=false;this.status='';this.error='';this.controller=null;this.liveReply=null;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;
+    this.config={preset:'',baseUrl:'',model:''};this.messages=[];this.busy=false;this.status='';this.error='';this.controller=null;this.liveReply=null;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;this.claudeSessionId='';this.claudeChild=null;this.claudeActive=null;this.toolBridge=null;
   }
   async init(){
     await fs.mkdir(this.home,{recursive:true,mode:0o700});
@@ -144,11 +149,11 @@ class OpayaAgent{
     if(!this.messages.length){this.emit();return this.sessionId;}
     await this.persist();const id=randomUUID();
     this.sessions.push({id,title:'New chat',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});if(this.sessions.length>100)this.sessions.splice(0,this.sessions.length-100);
-    this.sessionId=id;this.messages=[];this.error='';this.codexThreadId='';await this.persist();this.emit();return id;
+    this.sessionId=id;this.messages=[];this.error='';this.codexThreadId='';this.claudeSessionId='';await this.persist();this.emit();return id;
   }
   async selectSession(id){
     if(this.busy)throw new Error('Stop the current answer first.');if(!this.sessions.some(x=>x.id===id))throw new Error('Chat not found.');
-    await this.persist();this.sessionId=id;const m=await readJson(path.join(this.home,'sessions',`${id}.json`),[]);this.messages=Array.isArray(m)?m.slice(-200):[];this.error='';this.codexThreadId='';await this.saveIndex();this.emit();return true;
+    await this.persist();this.sessionId=id;const m=await readJson(path.join(this.home,'sessions',`${id}.json`),[]);this.messages=Array.isArray(m)?m.slice(-200):[];this.error='';this.codexThreadId='';this.claudeSessionId='';await this.saveIndex();this.emit();return true;
   }
   async deleteSession(id){
     if(this.busy)throw new Error('Stop the current answer first.');if(!this.sessions.some(x=>x.id===id))throw new Error('Chat not found.');
@@ -157,22 +162,23 @@ class OpayaAgent{
     if(id===this.sessionId){this.sessionId=this.sessions.at(-1).id;const m=await readJson(path.join(this.home,'sessions',`${this.sessionId}.json`),[]);this.messages=Array.isArray(m)?m:[];this.codexThreadId='';}
     await this.saveIndex();this.emit();return true;
   }
-  configured(){return this.config.preset==='codex'||!!(this.config.baseUrl&&this.config.model);}
+  cli(preset=this.config.preset){return preset==='codex'||preset==='claude';}
+  configured(){return this.cli()||!!(this.config.baseUrl&&this.config.model);}
   describe(){
     const shown=this.messages.filter(m=>m.role==='user'||m.summary).slice(-80).map(({id,role,content,activity,createdAt,error})=>({id,role,content:content||'',activity:activity||[],createdAt,error}));
-    return {configured:this.configured(),config:this.config,hasKey:this.config.preset!=='codex'&&this.vault.has(KEY),presets:PRESETS,busy:this.busy,status:this.status,error:this.error,messages:shown,live:this.liveReply?{...this.liveReply}:null,home:this.home,sessionId:this.sessionId,sessions:(this.sessions||[]).slice().reverse().map(({id,title,updatedAt})=>({id,title,updatedAt}))};
+    return {configured:this.configured(),config:this.config,hasKey:!this.cli()&&this.vault.has(KEY),presets:PRESETS,busy:this.busy,status:this.status,error:this.error,messages:shown,live:this.liveReply?{...this.liveReply}:null,home:this.home,sessionId:this.sessionId,sessions:(this.sessions||[]).slice().reverse().map(({id,title,updatedAt})=>({id,title,updatedAt}))};
   }
   async saveConfig({preset='custom',baseUrl,model,apiKey,remember=true}){
     if(!Object.hasOwn(PRESETS,preset))throw new Error('Unknown model provider.');
-    const codex=preset==='codex';
+    const codex=this.cli(preset);
     const config={preset,baseUrl:codex?'':schema.endpoint(baseUrl||PRESETS[preset].baseUrl),model:schema.text(model,'model',256).trim()};
     if(!codex&&!config.model)throw new Error('Choose a model from the provider list.');
     if(!codex&&apiKey!==undefined&&apiKey!=='')await this.vault.set(KEY,schema.text(apiKey,'API key',16000).trim(),Boolean(remember));
-    if(this.config.preset!==config.preset||this.config.model!==config.model||this.config.baseUrl!==config.baseUrl)await this.closeCodex();
+    if(this.config.preset!==config.preset||this.config.model!==config.model||this.config.baseUrl!==config.baseUrl){await this.closeCodex();this.claudeSessionId='';}
     this.config=config;await atomicJson(path.join(this.home,'config.json'),config);this.error='';this.emit();return this.describe();
   }
   async forgetKey(){await this.vault.set(KEY,'',true);this.emit();return true;}
-  headers(candidateKey){const key=candidateKey||(this.vault.has(KEY)?this.vault.get(KEY):'');return {'Content-Type':'application/json',...(key?{Authorization:`Bearer ${key}`}:{}),'X-Title':'Opaya'};}
+  headers(candidateKey,preset=this.config.preset){const key=candidateKey||(this.vault.has(KEY)?this.vault.get(KEY):'');return {'Content-Type':'application/json',...(key?{Authorization:`Bearer ${key}`}:{}),...(key&&preset==='anthropic'?{'x-api-key':key,'anthropic-version':'2023-06-01'}:{}),'X-Title':'Opaya'};}
   async test(candidate={}){
     const preset=candidate.preset||this.config.preset;
     if(preset==='codex'){
@@ -180,16 +186,28 @@ class OpayaAgent{
       const models=(result.data||[]).map(m=>m.model||m.id).filter(m=>typeof m==='string');
       return {ok:true,models,message:`Codex CLI connected. ${models.length} models available.`};
     }
+    if(preset==='claude'){
+      const text=await this.claudeOnce('Reply with the single word OK.',60000);
+      return {ok:true,models:PRESETS.claude.models,message:/\bok\b/i.test(text)?'Claude Code is signed in and answering.':'Claude Code answered.'};
+    }
     const baseUrl=schema.endpoint(candidate.baseUrl||this.config.baseUrl||PRESETS[preset]?.baseUrl);
     if(!baseUrl)throw new Error('Choose a model provider first.');
-    const response=await this.fetch(`${baseUrl}/models`,{headers:this.headers(candidate.apiKey),signal:AbortSignal.timeout(15000)});
+    const response=await this.fetch(`${baseUrl}/models`,{headers:this.headers(candidate.apiKey,preset),signal:AbortSignal.timeout(15000)});
+    if(response.status===401||response.status===403)throw new Error(`The key was not accepted (${response.status}). Copy the whole key again and paste it.`);
+    // Some services have no model list: a one-word request with the chosen model proves the key works.
+    const model=candidate.model||PRESETS[preset]?.model;
+    if(!response.ok&&model){
+      const r=await this.fetch(`${baseUrl}/chat/completions`,{method:'POST',headers:this.headers(candidate.apiKey,preset),signal:AbortSignal.timeout(30000),body:JSON.stringify({model,messages:[{role:'user',content:'Reply with OK.'}],max_tokens:5})});
+      if(!r.ok)throw new Error(`The model API answered ${r.status}. Check the base URL and API key.`);
+      return {ok:true,models:PRESETS[preset]?.models?.length?PRESETS[preset].models:[model],message:'Connected.'};
+    }
     if(!response.ok)throw new Error(`The model API answered ${response.status}. Check the base URL and API key.`);
-    const data=await response.json().catch(()=>({}));const models=(data.data||[]).map(m=>m.id).filter(Boolean).slice(0,200);
+    const data=await response.json().catch(()=>({}));const models=rankModels((data.data||[]).map(m=>m.id).filter(Boolean)).slice(0,200);
     return {ok:true,models,message:models.length?`Connected. ${models.length} models available.`:'Connected.'};
   }
-  async clear(){if(this.busy)throw new Error('Stop the current answer first.');this.messages=[];this.error='';this.codexThreadId='';await this.persist();this.emit();return true;}
+  async clear(){if(this.busy)throw new Error('Stop the current answer first.');this.messages=[];this.error='';this.codexThreadId='';this.claudeSessionId='';await this.persist();this.emit();return true;}
   stop(){
-    this.controller?.abort();const active=this.codexActive,rpc=this.codexRpc;
+    this.controller?.abort();if(this.claudeChild){terminate(this.claudeChild);this.claudeActive?.reject(new Error('Stopped.'));}const active=this.codexActive,rpc=this.codexRpc;
     if(active){this.codexRpc=null;this.codexThreadId='';this.codexActive=null;if(rpc&&!rpc.closed)rpc.close();active.reject(new Error('Stopped.'));}
     return true;
   }
@@ -230,6 +248,7 @@ class OpayaAgent{
     const conversation=[{role:'system',content:this.system()},...context];
     try{
       if(this.config.preset==='codex')await this.runCodex(text,reply);
+      else if(this.config.preset==='claude')await this.runClaude(text,reply);
       else for(let step=0;step<MAX_STEPS;step++){
         const message=await this.complete(conversation);
         const calls=message.tool_calls||[];
@@ -265,7 +284,7 @@ class OpayaAgent{
   }
   // A plain, tool-free completion with the Opaya Agent's own model API, for condensing chats. Needs an API key
   // (or a local model server); the Codex CLI preset is not used for this.
-  summarizer(){if(this.config.preset==='codex'||!this.configured())return null;const local=['ollama','lmstudio'].includes(this.config.preset);return local||this.vault.has(KEY)?`${PRESETS[this.config.preset]?.label||'Model API'} / ${this.config.model}`:null;}
+  summarizer(){if(this.cli()||!this.configured())return null;const local=['ollama','lmstudio'].includes(this.config.preset);return local||this.vault.has(KEY)?`${PRESETS[this.config.preset]?.label||'Model API'} / ${this.config.model}`:null;}
   async summarize(messages,{signal}={}){
     const s=AbortSignal.any([signal||new AbortController().signal,AbortSignal.timeout(5*60*1000)]);
     const response=await this.fetch(`${this.config.baseUrl}/chat/completions`,{method:'POST',headers:this.headers(),signal:s,body:JSON.stringify({model:this.config.model,messages})});
@@ -283,7 +302,7 @@ class OpayaAgent{
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.17.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.18.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
@@ -321,8 +340,69 @@ class OpayaAgent{
       rpc.request('turn/start',{threadId:this.codexThreadId,input:[{type:'text',text}],...(this.config.model?{model:this.config.model}:{})},60000).then(result=>{if(this.codexActive)this.codexActive.turnId=result.turn?.id||this.codexActive.turnId;},finish);
     });
   }
+  // Claude Code as the Opaya Agent's model: `claude -p` in the agent's home folder, with the Opaya tools as an MCP
+  // server (opaya-tools-mcp.cjs, scoped to calling them) and Claude's own shell, edit and web tools turned off.
+  claudeAgent(){return {id:'opaya-local-claude',name:'Local Claude Code',provider:'claude',protocol:'claude',transport:'local',command:'claude',args:[],cwd:this.home,hermesHome:''};}
+  async claudeReady(){
+    await primeShellPath();
+    if(this.spawnAgent===launch&&!findExecutable('claude',environment()))throw new Error('Claude Code was not found on this computer. Install it (Install agents > Claude Code), run claude once in Terminal to sign in, then try again.');
+    await fs.mkdir(this.home,{recursive:true}).catch(()=>{});
+  }
+  claudeSpawn(args){return this.spawnAgent(this.claudeAgent(),args,null,{cwd:this.home,env:environment({MCP_TOOL_TIMEOUT:'900000',MCP_TIMEOUT:'30000'})});}
+  // One plain question without tools, to check that Claude Code is installed and signed in.
+  async claudeOnce(prompt,timeout=60000){
+    await this.claudeReady();
+    const child=this.claudeSpawn(['-p','--output-format','json']);
+    return new Promise((resolve,reject)=>{
+      let out='',err='';const timer=setTimeout(()=>{terminate(child);reject(new Error('Claude Code did not answer in time. Run claude once in Terminal to sign in.'));},timeout);
+      child.stdout.setEncoding('utf8');child.stderr.setEncoding('utf8');child.stdout.on('data',d=>{out+=d;});child.stderr.on('data',d=>{err=(err+d).slice(-2000);});
+      child.on('error',e=>{clearTimeout(timer);reject(e);});
+      child.on('close',code=>{clearTimeout(timer);let r={};try{r=JSON.parse(out.trim().split('\n').pop()||'{}');}catch{}
+        if(code!==0||r.is_error){const msg=String(r.result||err||`Claude Code exited (${code}).`);reject(new Error(/log ?in|login|auth|credential|api key/i.test(msg)?`Claude Code is not signed in yet. Run claude once in Terminal and sign in. (${msg.slice(0,200)})`:msg.slice(0,400)));}
+        else resolve(String(r.result||''));});
+      child.stdin.on('error',()=>{});child.stdin.end(prompt);
+    });
+  }
+  async runClaude(text,reply){
+    await this.claudeReady();
+    if(!this.toolBridge)throw new Error('The Opaya tools are not available. Restart Opaya.');
+    const config=path.join(this.home,'mcp.json');
+    await atomicJson(config,{mcpServers:{opaya:{type:'stdio',command:this.toolBridge.command,args:this.toolBridge.args,env:this.toolBridge.env}}});
+    const args=['-p','--output-format','stream-json','--verbose','--mcp-config',config,'--strict-mcp-config','--allowedTools','mcp__opaya',
+      '--disallowedTools','Bash','Edit','Write','MultiEdit','NotebookEdit','WebFetch','WebSearch','Task','--append-system-prompt',this.system(),
+      ...(this.claudeSessionId?['--resume',this.claudeSessionId]:[]),...(this.config.model?['--model',this.config.model]:[])];
+    const child=this.claudeSpawn(args);this.claudeChild=child;
+    await new Promise((resolve,reject)=>{
+      let buffer='',stderr='',done=false,resultError='',seen=false;
+      const finish=error=>{if(done)return;done=true;clearTimeout(timer);this.claudeActive=null;this.claudeChild=null;error?reject(error):resolve();};
+      this.claudeActive={reply,reject:finish};
+      const timer=setTimeout(()=>{terminate(child);finish(new Error('Claude turn timed out.'));},30*60*1000);timer.unref?.();
+      const parse=line=>{
+        if(!line.trim())return;let e;try{e=JSON.parse(line);}catch{return;}
+        if(e.session_id)this.claudeSessionId=e.session_id;
+        if(e.type==='assistant')for(const c of e.message?.content||[]){
+          if(c.type==='text'&&c.text){reply.content=(reply.content?reply.content+'\n\n':'')+c.text;this.emit();}
+          if(c.type==='tool_use'&&!String(c.name||'').startsWith('mcp__opaya__')){const label=`Claude: ${c.name}`;if(reply.activity.at(-1)!==label){reply.activity.push(label);this.emit();}}
+        }
+        if(e.type==='result'){seen=true;if(e.is_error)resultError=String(e.result||'Claude could not complete this request.');else if(!reply.content&&typeof e.result==='string')reply.content=e.result;}
+      };
+      child.stdout.setEncoding('utf8');child.stderr.setEncoding('utf8');
+      child.stdout.on('data',chunk=>{buffer+=chunk;let i;while((i=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,i);buffer=buffer.slice(i+1);parse(line);}});
+      child.stderr.on('data',c=>{stderr=(stderr+c).slice(-3000);});
+      child.on('error',finish);
+      child.on('close',code=>{if(buffer.trim())parse(buffer);finish(resultError?new Error(resultError):code!==0?new Error(String(stderr||`Claude Code exited (${code}).`).slice(0,600)):!seen?new Error('Claude Code stopped before it finished.'):null);});
+      child.stdin.on('error',()=>{});child.stdin.end(text);
+    });
+  }
+  // A tool call from Claude Code, through the MCP bridge. Only during an active Opaya Agent turn.
+  async bridgeCall(name,args){
+    const active=this.claudeActive;if(!active||!this.busy)throw new Error('The Opaya Agent is not working on a request right now.');
+    if(!TOOLS.some(t=>t.function.name===name))throw new Error('Unknown tool.');
+    this.status=`Using ${name.replace(/_/g,' ')}...`;active.reply.activity.push(this.status.replace('...',''));this.emit();
+    return this.tool(name,args&&typeof args==='object'?args:{});
+  }
   async closeCodex(){const rpc=this.codexRpc,active=this.codexActive;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;if(rpc&&!rpc.closed)rpc.close();active?.reject(new Error('Codex stopped.'));}
-  async close(){await this.closeCodex();}
+  async close(){await this.closeCodex();if(this.claudeChild)terminate(this.claudeChild);}
   host(id){return id?this.broker.host(id):null;}
   // iTrust for the Opaya Agent skips the dialog, except for removals, which always ask.
   async ask(title,detail,{always=false}={}){if(!always&&this.trusted?.()){this.status=`iTrust approved: ${title}`;this.current?.activity?.push(this.status);this.emit();return;}if(!await this.approve({name:'Opaya Agent'},title,detail))throw new Error('The user declined this action.');}
