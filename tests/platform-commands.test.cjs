@@ -25,6 +25,7 @@ function commands(windows){
   }
   for(const [id,a] of Object.entries(guide.AGENTS))if(a.signIn)add(`sign in ${id}`,guide.withPath(windows?a.signIn.windows:a.signIn.posix,{windows}));
   add('guide step',guide.marked('install-node-1',guide.withPath(windows?catalog.FRAMEWORKS.find(f=>f.id==='node').windows:catalog.FRAMEWORKS.find(f=>f.id==='node').posix,{windows}),{windows}));
+  if(windows)add('PATH and execution policy for Opaya tools',require('../desktop/toolchain.cjs').WINDOWS_PATH_SCRIPT);
   if(!windows)for(const id of Object.keys(containers.PLANS))add(`docker ${id}`,containers.plan(id,{name:'test'}).command);
   return out;
 }

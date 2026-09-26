@@ -141,7 +141,7 @@ function posixUninstall(t,{data}){
 }
 function windowsUninstall(t,{data}){
   const w=t.win||{},parts=[];
-  if(t.npm)parts.push(`npm ls -g --depth=0 ${t.npm} *> $null; if ($LASTEXITCODE -eq 0) { 'Installed with npm (${t.npm})'; npm uninstall -g ${t.npm} }`);
+  if(t.npm)parts.push(`npm.cmd ls -g --depth=0 ${t.npm} *> $null; if ($LASTEXITCODE -eq 0) { 'Installed with npm (${t.npm})'; npm.cmd uninstall -g ${t.npm} }`);
   if(w.winget)parts.push(`winget uninstall --id ${w.winget} -e`);
   if(w.pip)parts.push(`py -m pip uninstall -y ${w.pip}`);
   for(const f of w.files||[])parts.push(`$f=Join-Path $env:USERPROFILE '${f}'; if (Test-Path $f) { Remove-Item -Recurse -Force $f; "Removed $f" }`);

@@ -24,7 +24,7 @@ const GOALS={
 };
 // Agents the guide can install, and what each one needs first.
 const AGENTS={
-  codex:{name:'Codex CLI',needs:['node'],signIn:{posix:'codex login',windows:'codex login'},signInNote:'A browser page opens: sign in with your ChatGPT account. When it says you are signed in, come back here.'},
+  codex:{name:'Codex CLI',needs:['node'],signIn:{posix:'codex login',windows:'codex.cmd login'},signInNote:'A browser page opens: sign in with your ChatGPT account. When it says you are signed in, come back here.'},
   claude:{name:'Claude Code',needs:[],needsWindows:['git'],signIn:{posix:'claude',windows:'claude'},signInNote:'Claude Code starts in the terminal below. Pick how to sign in (your Claude account), finish in the browser, then type /exit and press Enter.'},
   'gemini-cli':{name:'Gemini CLI',needs:['node']},
   opencode:{name:'OpenCode',needs:['node']}
@@ -48,7 +48,8 @@ function describe({installed={},platform=process.platform,arch=process.arch,memo
   const os_=platform==='darwin'?'Mac':platform==='win32'?'Windows':'Linux';
   const has=id=>Object.hasOwn(installed,id);
   return {platform,arch,system:`${os_}${platform==='darwin'?arch==='arm64'?' (Apple silicon)':' (Intel)':''}`,memoryGb:Math.round(memory/1e9),
-    tools:Object.fromEntries(Object.keys(TOOL_NAMES).map(id=>[id,has(id)?String(installed[id]).slice(0,60):''])),
+    // Node.js without npm (some Linux packages) cannot install agents: it counts as missing.
+    tools:Object.fromEntries(Object.keys(TOOL_NAMES).map(id=>[id,has(id)&&(id!=='node'||has('npm'))?String(installed[id]).slice(0,60):''])),
     signedIn:{codex:has('codex')&&signedIn('codex',home,env),claude:has('claude')&&signedIn('claude',home,env),'gemini-cli':has('gemini-cli')&&signedIn('gemini-cli',home,env)},
     packageManager:platform==='win32'?'winget':has('homebrew')?'Homebrew':platform==='darwin'?'':'system',
     // A local model needs about 8 GB of memory to be useful.
@@ -88,8 +89,10 @@ function marked(step,command,{windows}){
   return windows?`${command}; Write-Host "[opaya-setup] ${step} exit $(if ($?) { 0 } else { 1 })"`:`${command}; echo "[opaya-setup] ${step} exit $?"`;
 }
 function markOf(buffer,step){const m=[...String(buffer||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g,'').matchAll(new RegExp(`\\[opaya-setup\\] ${step.replace(/[^\w-]/g,'')} exit (\\d+)`,'g'))].pop();return m?Number(m[1]):null;}
-// Tools installed a moment ago are found in the usual places even before the terminal's PATH knows them.
-const POSIX_PATH='export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1';
-const WINDOWS_PATH="$env:Path=[Environment]::GetEnvironmentVariable('Path','Machine')+';'+[Environment]::GetEnvironmentVariable('Path','User')+';'+$env:APPDATA+'\\npm;'+$env:USERPROFILE+'\\.local\\bin'";
-function withPath(command,{windows}){return windows?`${WINDOWS_PATH}; ${command}`:`${POSIX_PATH}; ${command}`;}
+// Tools installed a moment ago (by Opaya itself, nvm or an installer) are found even before the terminal's PATH knows them.
+const {opayaToolDirs}=require('./process.cjs');
+function withPath(command,{windows,dirs=opayaToolDirs(windows?'win32':process.platform==='win32'?'linux':process.platform)}){
+  if(windows)return `$env:Path=(${dirs.map(d=>`'${d.replace(/'/g,"''")}'`).join(',')} -join ';')+';'+[Environment]::GetEnvironmentVariable('Path','User')+';'+[Environment]::GetEnvironmentVariable('Path','Machine')+';'+$env:USERPROFILE+'\\.local\\bin'; ${command}`;
+  return `export PATH="${dirs.map(d=>d.replace(/["\\$`]/g,'\\$&')).join(':')}:$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${command}`;
+}
 module.exports={WAYS,GOALS,AGENTS,TOOL_NAMES,WHY,signedIn,describe,plan,handoff,marked,markOf,withPath};

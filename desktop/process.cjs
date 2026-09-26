@@ -14,6 +14,17 @@ function windowsRegistryEnv() {
   const machine = read('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'), user = read('HKCU\\Environment');
   registryEnv = {values: {...machine, ...user, PATH: [machine.PATH, user.PATH].filter(Boolean).join(';')}, at: Date.now()}; return registryEnv.values;
 }
+function resetRegistryEnv() { registryEnv = {values: {}, at: 0}; }
+// Opaya's own tools (Node.js with npm, Python, uv, GitHub CLI, Git on Windows), installed by toolchain.cjs without
+// administrator rights. They come first on PATH so a Store "python" stub or a broken install never shadows them.
+function opayaToolsRoot(platform = process.platform) {
+  return platform === 'win32' ? path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Opaya', 'tools') : path.join(os.homedir(), '.opaya', 'tools');
+}
+function opayaToolDirs(platform = process.platform, root = opayaToolsRoot(platform)) {
+  const j = platform === 'win32' ? path.win32.join : path.posix.join;
+  return platform === 'win32' ? [j(root, 'node'), j(root, 'python'), j(root, 'python', 'Scripts'), j(root, 'bin'), j(root, 'git', 'cmd'), path.win32.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'), 'npm')]
+    : [j(root, 'node', 'bin'), j(root, 'python', 'bin'), j(root, 'bin')];
+}
 function windowsRegistryPath() { return windowsRegistryEnv().PATH || ''; }
 // Hermes' Windows installer sets these as user variables. Opaya may have started before the install, so read them back.
 const REGISTRY_VARS = ['HERMES_HOME', 'HERMES_GIT_BASH_PATH'];
@@ -75,7 +86,7 @@ function environment(extra = {}) {
     for (const name of REGISTRY_VARS) if (!env[name] && registry[name]) env[name] = registry[name];
   } else dirs.push(...shellPath.value, '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin');
   dirs.push(...userToolDirs());
-  env.PATH = [...new Set([...(env.PATH || '').split(path.delimiter), ...dirs].filter(Boolean))].join(path.delimiter);
+  env.PATH = [...new Set([...opayaToolDirs(), ...(env.PATH || '').split(path.delimiter), ...dirs].filter(Boolean))].join(path.delimiter);
   // Never inherit debugging/runtime injection from an embedding Electron launcher.
   delete env.NODE_OPTIONS; delete env.ELECTRON_RUN_AS_NODE;
   return {...env, ...extra};
@@ -218,4 +229,4 @@ function collect(child, {timeout = 15000, maxBytes = 1024 * 1024, input = '', si
     if (signal?.aborted) abort();
   });
 }
-module.exports = {quote, inFolder, REMOTE_PATH, environment, primeShellPath, userToolDirs, cmdShimTarget, findExecutable, windowsLaunch, dockerExecArgs, dockerExecContainerIndex, sshArgs, target, remoteCommand, launch, terminate, collect};
+module.exports = {quote, inFolder, opayaToolsRoot, opayaToolDirs, resetRegistryEnv, REMOTE_PATH, environment, primeShellPath, userToolDirs, cmdShimTarget, findExecutable, windowsLaunch, dockerExecArgs, dockerExecContainerIndex, sshArgs, target, remoteCommand, launch, terminate, collect};

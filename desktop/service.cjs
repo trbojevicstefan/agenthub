@@ -25,6 +25,7 @@ const versions = require('./versions.cjs');
 const containers = require('./containers.cjs');
 const remoteWork = require('./remote-work.cjs');
 const guide = require('./guide.cjs');
+const toolchain = require('./toolchain.cjs');
 const {visionOf, SUPPORTED:VISION_MODELS} = require('./vision.cjs');
 async function start({app, safeStorage}, root) {
   let broker, terminals, listener, opaya, stopping = false, setupTrust = false;
@@ -353,6 +354,26 @@ async function start({app, safeStorage}, root) {
     },
     projectRemoteGithubLogin:async x=>{const host=broker.host(x.hostId);return runInTerminal({label:`GitHub sign-in on ${host.name}`,key:`ghlogin_${host.id}`,host,command:"command -v gh >/dev/null 2>&1 || { echo 'GitHub CLI is not installed here. Install it: Install agents > this machine > GitHub CLI.'; exit 1; }; gh auth login && gh auth setup-git && echo 'Signed in. Go back to Opaya and try again.'"});}
   };
+  // ---- Built-in installer: Node.js with npm, Python, uv, GitHub CLI and Git, from their official downloads ------------
+  // Used for this computer instead of winget, Homebrew or apt scripts, which fresh computers often cannot run.
+  const builtinHere=id=>toolchain.supports(id)&&(id!=='git'||process.platform!=='linux');
+  const builtinIds=id=>id==='essentials'?['node','python','git','uv'].filter(builtinHere):builtinHere(id)?[id]:[];
+  async function missingOf(ids){versions.cache.clear();await require('./process.cjs').primeShellPath();const have=await versions.installed(null).catch(()=>({}));return ids.filter(id=>!Object.hasOwn(have,id)||id==='node'&&!Object.hasOwn(have,'npm'));}
+  async function builtinStep(id,progress,step=id){
+    progress({step,state:'active',message:`Installing ${toolchain.NAMES[id]} (official download, no administrator password)`});
+    const r=await toolchain.install(id,{progress:e=>progress({step,...e})});
+    versions.cache.clear();emit();progress({step,state:'done',message:`${toolchain.NAMES[id]} ${r.version}`});return r;
+  }
+  // Starts a job and returns it at once; done resolves when it finishes (for the Opaya Agent, which waits for it).
+  function builtinJob(ids){
+    let finish;const done=new Promise(r=>{finish=r;});
+    const job=startJob({kind:'toolchain',route:{from:'Official downloads',fromWhere:'nodejs.org / GitHub',to:ids.map(id=>toolchain.NAMES[id]).join(', '),toWhere:machineName(),provider:'opaya'},title:`Installing ${ids.map(id=>toolchain.NAMES[id].replace(/ \(.*\)$/,'')).join(', ')}`,detail:'Checked against the official checksums; no administrator password',steps:ids.map(id=>[id,toolchain.NAMES[id]])},async progress=>{
+      const missing=await missingOf(ids),out={};
+      try{for(const id of ids){if(!missing.includes(id)){progress({step:id,state:'done',message:'Already installed'});continue;}out[id]=(await builtinStep(id,progress)).version;}finish({installed:out});return {installed:out};}
+      catch(e){finish({error:safeError(e),installed:out});throw e;}
+    });
+    return {job,done};
+  }
   // ---- Setup guide: plain scripts that get this computer ready, model first, then the Opaya Agent finishes ----------
   const windowsHere=process.platform==='win32';
   async function guideFacts(){await require('./process.cjs').primeShellPath();return {...guide.describe({installed:await versions.installed(null).catch(()=>({}))}),machine:machineName(),brain:opaya.configured()?opaya.config.preset:''};}
@@ -373,6 +394,13 @@ async function start({app, safeStorage}, root) {
     }
   }
   async function guideInstall(step,progress){
+    if(builtinHere(step.tool)){
+      for(let attempt=1;attempt<=2;attempt++){
+        try{await builtinStep(step.tool,progress,step.id);return true;}
+        catch(e){progress({step:step.id,state:attempt===1?'warn':'error',message:attempt===1?`${safeError(e)} Trying once more.`:`${step.title} did not work: ${safeError(e)}`});}
+      }
+      return false;
+    }
     const {command}=catalog.command(step.tool,{remote:false});
     for(let attempt=1;attempt<=2;attempt++){
       progress({step:step.id,state:'active',message:attempt===1?`${step.title}: ${step.why}`:'That did not work; trying once more.'});
@@ -421,6 +449,7 @@ async function start({app, safeStorage}, root) {
       if(x.scriptOnly)steps=steps.filter(s=>s.phase==='rest');
       const commands=steps.filter(s=>s.kind==='install').map(s=>`${guide.TOOL_NAMES[s.tool]}:\n${catalog.command(s.tool,{remote:false}).command}`);
       if(!await approve({name:'Opaya'},'Set up this computer?',`${steps.map((s,i)=>`${i+1}. ${s.title}`).join('\n')}\n\nEverything runs in the "Opaya setup" terminal, where you can watch it.${commands.length?`\n\nCommands:\n\n${commands.join('\n\n')}`:''}`))throw new Error('Setup cancelled.');
+      if(process.platform==='win32')await toolchain.persistPath().catch(()=>{});
       return startJob({kind:'guide',route:{from:'Setup guide',fromWhere:facts.system,to:'Ready to build',toWhere:machineName(),provider:'opaya'},title:'Setting up this computer',detail:[WAYS_LABEL(way),...goals.map(g=>guide.GOALS[g]?.label)].filter(Boolean).join(' / '),steps:steps.map(s=>[s.id,s.title])},async progress=>{
         const failed=[];
         for(const step of steps.filter(s=>s.phase==='model')){
@@ -461,6 +490,7 @@ async function start({app, safeStorage}, root) {
   };
   opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal,trusted:()=>!!broker.data.settings?.itrustOpaya||setupTrust});
   // Claude Code as the Opaya Agent's model reaches the Opaya tools through this bridge; its token can only list and call them.
+  opaya.builtinInstall = async id=>{const ids=builtinIds(id);if(!ids.length)return null;const {job,done}=builtinJob(ids);const r=await done;return {job_id:job.id,...r};};
   opaya.toolBridge = {command:process.execPath, args:[path.join(__dirname,'opaya-tools-mcp.cjs')], env:{ELECTRON_RUN_AS_NODE:'1',OPAYA_TOOLS_ENDPOINT:endpoint(root),OPAYA_TOOLS_TOKEN:toolsToken}};
   await stage('opaya agent');
   await opaya.init();
@@ -501,6 +531,7 @@ async function start({app, safeStorage}, root) {
     installFramework:async x=>{
       const host=x.hostId?broker.host(x.hostId):null;
       if(x.runtime==='docker')return installContainer(host,x);
+      if(!host&&builtinIds(String(x.id||'')).length)return builtinJob(builtinIds(String(x.id))).job;
       const {framework,command}=catalog.command(String(x.id||''),{remote:!!host});return runInTerminal({label:`Install ${framework.name}`,key:`install_${framework.id}`,host,command});
     },
     files:async x=>{

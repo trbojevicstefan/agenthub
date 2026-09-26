@@ -10,16 +10,16 @@ const FRAMEWORKS = [
     posix:'curl -fsSL https://claude.ai/install.sh | bash', windows:'irm https://claude.ai/install.ps1 | iex'},
   {id:'codex', name:'Codex CLI', provider:'codex', icon:'codex', description:"OpenAI's coding agent with app-server protocol.",
     docs:'https://developers.openai.com/codex/cli', after:'Run `codex` once to sign in. Discover adds it.', requires:'Node.js 18+',
-    posix:'npm install -g @openai/codex || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g @openai/codex; }', windows:'npm install -g @openai/codex'},
+    posix:'npm install -g @openai/codex || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g @openai/codex; }', windows:'npm.cmd install -g @openai/codex'},
   {id:'openclaw', name:'OpenClaw', provider:'openclaw', icon:'openclaw', description:'Personal agent gateway with an OpenAI-compatible API.',
     docs:'https://docs.openclaw.ai/', after:'Run `openclaw onboard`, then start its gateway. Discover adds it.', requires:'Node.js 22+',
-    posix:'npm install -g openclaw@latest || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g openclaw@latest; }', windows:'npm install -g openclaw@latest'},
+    posix:'npm install -g openclaw@latest || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g openclaw@latest; }', windows:'npm.cmd install -g openclaw@latest'},
   {id:'gemini-cli', name:'Gemini CLI', provider:'custom', icon:'gemini-cli', command:'gemini', description:"Google's open-source terminal agent.",
     docs:'https://github.com/google-gemini/gemini-cli', after:'Run `gemini` once to sign in. Discover adds it; Opaya chats with it over ACP.', requires:'Node.js 20+',
-    posix:'npm install -g @google/gemini-cli || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g @google/gemini-cli; }', windows:'npm install -g @google/gemini-cli'},
+    posix:'npm install -g @google/gemini-cli || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g @google/gemini-cli; }', windows:'npm.cmd install -g @google/gemini-cli'},
   {id:'opencode', name:'OpenCode', provider:'custom', icon:'opencode', command:'opencode', description:'Open-source coding agent for the terminal.',
     docs:'https://opencode.ai/docs/', after:'Run `opencode auth login`. Discover adds it; Opaya chats with it over ACP.', requires:'Node.js 18+',
-    posix:'npm install -g opencode-ai || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g opencode-ai; }', windows:'npm install -g opencode-ai'},
+    posix:'npm install -g opencode-ai || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g opencode-ai; }', windows:'npm.cmd install -g opencode-ai'},
   {id:'goose', name:'Goose', provider:'custom', icon:'goose', command:'goose', description:'Extensible open-source agent from Block.',
     docs:'https://block.github.io/goose/', after:'Run `goose configure`. Add it as a terminal agent.',
     posix:'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash', windows:''},
@@ -28,7 +28,7 @@ const FRAMEWORKS = [
     posix:'python3 -m pip install --user aider-install && aider-install', windows:'py -m pip install aider-install; aider-install'},
   {id:'ollama', name:'Ollama', provider:'custom', icon:'ollama', command:'ollama', runtime:true, description:'Local model runtime. Useful as the Opaya Agent model.',
     docs:'https://ollama.com/download', after:'Run `ollama pull <model>`. Point the Opaya Agent at http://127.0.0.1:11434/v1.',
-    posix:'curl -fsSL https://ollama.com/install.sh | sh', windows:'winget install --id Ollama.Ollama -e'},
+    posix:'if [ "$(uname)" = Darwin ]; then mkdir -p "$HOME/Applications" && curl -fsSL -o /tmp/Ollama-darwin.zip https://ollama.com/download/Ollama-darwin.zip && ditto -x -k /tmp/Ollama-darwin.zip "$HOME/Applications" && open -a "$HOME/Applications/Ollama.app" && echo \'Ollama is installed in your Applications folder.\'; else curl -fsSL https://ollama.com/install.sh | sh; fi', windows:"if (Get-Command winget -ErrorAction SilentlyContinue) { winget install --id Ollama.Ollama -e --accept-source-agreements --accept-package-agreements } else { $ProgressPreference='SilentlyContinue'; Invoke-WebRequest https://ollama.com/download/OllamaSetup.exe -OutFile \"$env:TEMP\\OllamaSetup.exe\" -UseBasicParsing; Start-Process \"$env:TEMP\\OllamaSetup.exe\" -ArgumentList '/VERYSILENT','/NORESTART' -Wait; 'Ollama is installed.' }"},
   // Dependencies agents need. Each command skips what is already installed; the essentials bundle runs them in order.
   {id:'node', kind:'dependency', name:'Node.js LTS', provider:'custom', icon:'', description:'Runtime for Codex, OpenClaw, Gemini CLI and OpenCode (includes npm).', docs:'https://nodejs.org/en/download', after:'Open a new terminal so npm is on PATH.',
     posix:"if command -v node >/dev/null 2>&1; then echo 'node is already installed'; elif command -v brew >/dev/null 2>&1; then brew install node; elif command -v apt-get >/dev/null 2>&1; then curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs; elif command -v dnf >/dev/null 2>&1; then sudo dnf install -y nodejs npm; else echo 'Installing Node.js LTS with nvm (no administrator password needed)'; export NVM_DIR=\"$HOME/.nvm\"; [ \"$(uname)\" = Darwin ] && touch \"$HOME/.zshrc\"; curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash && . \"$NVM_DIR/nvm.sh\" && nvm install --lts && nvm alias default 'lts/*'; fi", windows:"if (-not (Get-Command node -ErrorAction SilentlyContinue)) { winget install --id OpenJS.NodeJS.LTS -e --accept-source-agreements --accept-package-agreements; $env:Path=[Environment]::GetEnvironmentVariable('Path','Machine')+';'+[Environment]::GetEnvironmentVariable('Path','User') } else { 'node is already installed' }"},
@@ -56,10 +56,10 @@ const wingetUp=(bin,wid)=>`if (Get-Command ${bin} -ErrorAction SilentlyContinue)
 const UPDATES={
   hermes:{posix:'hermes update',windows:'hermes update'},
   claude:{posix:'claude update',windows:'claude update'},
-  codex:{posix:npmUp('@openai/codex'),windows:'npm install -g @openai/codex@latest'},
-  openclaw:{posix:npmUp('openclaw'),windows:'npm install -g openclaw@latest'},
-  'gemini-cli':{posix:npmUp('@google/gemini-cli'),windows:'npm install -g @google/gemini-cli@latest'},
-  opencode:{posix:npmUp('opencode-ai'),windows:'npm install -g opencode-ai@latest'},
+  codex:{posix:npmUp('@openai/codex'),windows:'npm.cmd install -g @openai/codex@latest'},
+  openclaw:{posix:npmUp('openclaw'),windows:'npm.cmd install -g openclaw@latest'},
+  'gemini-cli':{posix:npmUp('@google/gemini-cli'),windows:'npm.cmd install -g @google/gemini-cli@latest'},
+  opencode:{posix:npmUp('opencode-ai'),windows:'npm.cmd install -g opencode-ai@latest'},
   goose:{posix:'goose update',windows:''},
   aider:{posix:'aider-install',windows:'aider-install'},
   ollama:{posix:'curl -fsSL https://ollama.com/install.sh | sh',windows:"winget upgrade --id Ollama.Ollama -e --accept-source-agreements --accept-package-agreements"},
@@ -75,7 +75,7 @@ const UPDATES={
 };
 const ESSENTIALS=['node','python','git','uv','tmux'];
 const available=(f,remote)=>remote||process.platform!=='win32'?!!f.posix&&!(f.macOnly&&(remote||process.platform!=='darwin')):!!f.windows;
-function list(){const containers=require('./containers.cjs');return [...FRAMEWORKS.map(({posix,windows,...f})=>({kind:'agent',...f,docker:containers.supported(f.id),local:available({posix,windows,...f},false),remote:available({posix,windows,...f},true),localCommand:process.platform==='win32'?windows:posix,remoteCommand:posix})),
+function list(){const containers=require('./containers.cjs');return [...FRAMEWORKS.map(({posix,windows,...f})=>({kind:'agent',...f,docker:containers.supported(f.id),builtin:require('./toolchain.cjs').supports(f.id)&&(f.id!=='git'||process.platform!=='linux'),local:available({posix,windows,...f},false),remote:available({posix,windows,...f},true),localCommand:process.platform==='win32'?windows:posix,remoteCommand:posix})),
   {id:'essentials',kind:'bundle',name:'All essentials',provider:'custom',icon:'',description:`Installs whatever is missing of ${ESSENTIALS.map(id=>FRAMEWORKS.find(f=>f.id===id)).filter(f=>available(f,false)).map(f=>f.name).join(', ')}.`,after:'Open a new terminal, then install agents.',local:true,remote:true,localCommand:command('essentials',{remote:false}).command,remoteCommand:command('essentials',{remote:true}).command}];}
 function command(id,{remote,update=false}){
   if(update)return updateCommand(id,{remote});

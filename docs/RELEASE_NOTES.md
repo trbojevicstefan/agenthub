@@ -1,3 +1,14 @@
+# Opaya 0.18.1 - Works on a bare computer: no winget, npm or Homebrew needed
+
+- **Opaya brings the basics itself**: Node.js (with npm), Python 3 (with pip), uv, GitHub CLI and, on Windows, Git (with Git Bash for Claude Code) are downloaded by Opaya from their official sources, checked against their published SHA-256 checksums, and installed for your user, with no administrator password. winget, Homebrew, apt and npm are no longer needed to get started. The setup guide, Install agents and the Opaya Agent all use it on this computer.
+  - They go into Opaya's own tools folder (`%LOCALAPPDATA%\Opaya\tools` on Windows, `~/.opaya/tools` on macOS and Linux) and onto your PATH, first, so terminals and agents find them right away.
+  - On Windows, PowerShell is allowed to run npm's and the agents' launchers for your user (RemoteSigned, as npm recommends) when no policy was set; Opaya now calls `npm.cmd` so installs never stop on "running scripts is disabled".
+  - On macOS, Git comes from Apple's developer tools: Opaya opens Apple's install window and continues when it is done.
+  - Downloads use GitHub's plain release links, not its API, so many computers on one network do not run into its hourly limit.
+- **Fixed: tools that only look installed.** The Windows Store "python" shortcut and macOS' git and python3 placeholders were counted as installed, so the guide skipped them. Node.js without npm (some Linux packages) now counts as missing too.
+- **Ollama without winget or Homebrew**: on Windows it falls back to Ollama's own installer; on macOS it installs the app into your Applications folder (its script is Linux-only).
+- **Checked on real machines**: a new build check downloads and runs every built-in tool on Windows, macOS and Linux, installs an npm package with the downloaded Node.js, and on Windows writes the PATH for real.
+
 # Opaya 0.18.0 - A setup guide for people who have never coded
 
 - **Setup guide**: on a fresh install, Opaya opens a guide in the Opaya Agent screen. It needs no AI model: it is a scripted conversation where you pick, and Opaya does the work in a terminal you can watch. Open it any time from the Opaya Agent screen (**Setup guide**).

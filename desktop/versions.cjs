@@ -17,6 +17,7 @@ const TOOLS=[
   {id:'aider',name:'Aider',bin:'aider',latest:{pypi:'aider-chat'}},
   {id:'ollama',name:'Ollama',bin:'ollama',latest:{github:'ollama/ollama'}},
   {id:'node',name:'Node.js',bin:'node',latest:{node:true},dependency:true},
+  {id:'npm',name:'npm',bin:'npm',win:'npm.cmd',dependency:true},
   {id:'python',name:'Python 3',bin:'python3',win:'python',latest:{python:true},dependency:true},
   {id:'git',name:'Git',bin:'git',dependency:true},
   {id:'uv',name:'uv',bin:'uv',latest:{github:'astral-sh/uv'},dependency:true},
@@ -45,7 +46,9 @@ async function installed(host,{timeout=90000}={}){
     out=await collect(spawn(ps,['-NoProfile','-Command',script({windows})],{env:environment(),windowsHide:true,stdio:['pipe','pipe','pipe']}),{timeout});
   }else{if(!host)await primeShellPath();out=await run({host:host||null,container:''},script({windows:false}),timeout);}
   const found={};
-  for(const line of out.split(/\r?\n/)){const m=/^([\w-]+)=(.*)$/.exec(line.trim());if(m)found[m[1]]=m[2].trim().slice(0,200);}
+  // A value without a version number is a stub, not an install: the Windows Store "python" alias, or macOS' git and
+  // python3 that only offer to install Apple's developer tools.
+  for(const line of out.split(/\r?\n/)){const m=/^([\w-]+)=(.*)$/.exec(line.trim());if(m&&(m[1].endsWith('_behind')||/\d+\.\d+/.test(m[2])))found[m[1]]=m[2].trim().slice(0,200);}
   return found;
 }
 // Newest published versions, cached for an hour. Failures leave that tool without a "latest" (never "outdated").

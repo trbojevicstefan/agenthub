@@ -125,8 +125,8 @@ function score(id){const s=String(id).toLowerCase();if(/embed|whisper|tts|audio|
 const stripAnsi=text=>String(text||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)/g,'').replace(/\r/g,'');
 
 class OpayaAgent{
-  constructor({root,vault,broker,terminals,approve,emit,runInTerminal,platform=process.platform,fetchImpl=globalThis.fetch,spawnAgent=launch,trusted=()=>false}){
-    Object.assign(this,{home:path.join(root,'opaya-agent'),root,vault,broker,terminals,approve,emit,runInTerminal,platform,fetch:fetchImpl,spawnAgent,trusted});this.ownTerminals=new Set();
+  constructor({root,vault,broker,terminals,approve,emit,runInTerminal,builtinInstall=null,platform=process.platform,fetchImpl=globalThis.fetch,spawnAgent=launch,trusted=()=>false}){
+    Object.assign(this,{builtinInstall,home:path.join(root,'opaya-agent'),root,vault,broker,terminals,approve,emit,runInTerminal,platform,fetch:fetchImpl,spawnAgent,trusted});this.ownTerminals=new Set();
     this.config={preset:'',baseUrl:'',model:''};this.messages=[];this.busy=false;this.status='';this.error='';this.controller=null;this.liveReply=null;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;this.claudeSessionId='';this.claudeChild=null;this.claudeActive=null;this.toolBridge=null;
   }
   async init(){
@@ -302,7 +302,7 @@ class OpayaAgent{
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.18.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.18.1'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
@@ -456,6 +456,13 @@ class OpayaAgent{
       case 'remove_machine':{const h=b.host(args.machine_id);await this.ask(`Remove machine "${h.name}"?`,'Only the saved machine entry is removed. Nothing changes on the machine.',{always:true});await b.removeHost(h.id);return {removed:h.id};}
       case 'install_framework':case 'update_framework':{
         const update=name==='update_framework',host=this.host(args.machine_id);const {framework,command}=catalog.command(String(args.framework_id||''),{remote:!!host,update});
+        // On this computer, Node.js, Python, uv, GitHub CLI and Git come from Opaya's built-in installer (official
+        // downloads, checksums verified, no administrator password), not from a package manager script.
+        if(!host&&!update&&this.builtinInstall&&['node','python','uv','gh','git','essentials'].includes(framework.id)){
+          await this.ask(`Install ${framework.name} on this computer?`,'Opaya downloads the official build, checks its checksum and installs it for your user (no administrator password), then adds it to your PATH.');
+          const r=await this.builtinInstall(framework.id);
+          if(r)return {...r,finished:true,next:'Open a new terminal (or restart programs) so they see the new PATH. Agents started from Opaya see it right away.'};
+        }
         await this.ask(`${update?'Update':'Install'} ${framework.name} ${host?`on ${host.name}`:'on this computer'}?`,`Runs in a visible terminal:\n\n${command}\n\n${framework.requires&&!update?`Requires ${framework.requires}.\n`:''}Afterwards: ${framework.after}`);
         const view=await this.runOwn({label:`${update?'Update':'Install'} ${framework.name}`,key:`${update?'update':'install'}_${framework.id}`,host,command,marked:true});
         return {terminal_id:view.id,started:true,next:framework.after,hint:'Call wait_for_terminal with this terminal_id to follow it to the end; answer installer questions with answer_prompt.',output:await this.terminalOutput(view.id,4000)};

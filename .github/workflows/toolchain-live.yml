@@ -1,0 +1,25 @@
+name: Built-in installer (live)
+# Downloads and runs the tools Opaya installs by itself on fresh computers, on each platform.
+on:
+  push:
+    branches: [main]
+    paths: ['desktop/toolchain.cjs', 'desktop/process.cjs', 'scripts/toolchain-live.cjs', '.github/workflows/toolchain-live.yml']
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install every built-in tool into a temporary folder and run it
+        run: node scripts/toolchain-live.cjs
