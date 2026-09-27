@@ -4,7 +4,7 @@
 
 Opaya is a local-first desktop app for your own AI agents: **Hermes, Claude Code, Codex, OpenClaw**, and any other CLI or OpenAI-compatible API. It works with agents on this computer, on your VPS machines over SSH, and in Docker containers. Chat with them, watch their terminals, give them a browser, and share skills and tools between them, all from one window. Opaya needs no hosted account, collects no telemetry and sends nothing through a third-party relay.
 
-**Current version: 0.19.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
+**Current version: 0.20.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
 
 ## Download
 
@@ -29,7 +29,7 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 - Every agent gets its own chats, and each chat keeps its exact provider session.
 - **Rich messages:** Markdown, tables, task lists, code blocks with Copy, and HTML/SVG preview.
 - **Slash commands and skills:** type `/` in the message box to run them.
-- **Models** sets an agent's default model, or overrides it for one chat only.
+- **Under the message box:** the model and the reasoning effort for this chat (or make them the agent's default), and a paperclip to attach files. You can also paste or drop files: text files go into the message, images go to models that can see them, and other files reach the agent by path (copied first to a machine or container).
 - **Playground** asks two agents the same question and shows the answers side by side.
 
 ### Chat history (0.11)
@@ -89,8 +89,9 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 - **Add a new VPS:**
   1. Opaya creates an SSH key in `~/.ssh`.
   2. You add the public key in your provider's panel. If you only have a password, Opaya can install the key for you.
-  3. Opaya checks the connection and whether Docker and Hermes are installed there.
-- You can also import `~/.ssh/config` aliases.
+  3. Opaya checks the connection and shows the system, uptime, free disk and memory, and the tools installed there (Docker, Hermes, OpenClaw, Claude Code, Codex, Node.js, Python, Git, tmux).
+- Each machine can be tested (or all of them at once) and has its agents, a terminal, Discover, Install agents, Files, Check versions, Copy SSH command, Edit and Remove.
+- You can also import `~/.ssh/config` aliases, or add a machine by hand with **+ Add manually**.
 
 ### Discover and install agents
 - **Discover** separates installed agents from ones you can still add, and local from remote. Agents you have already added are hidden.
@@ -106,22 +107,25 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 - An **iTrust** label marks agents that have it on.
 
 ### Opaya Agent
-The **Opaya Agent** at the top of the sidebar is a built-in assistant for Opaya itself:
+The **Opaya Agent** is the button at the top of the sidebar, next to **Discover agents**. It is a built-in assistant for Opaya itself:
 - It installs agents, connects and repairs them, manages machines and keys, and runs diagnostics when an agent hangs.
 - It keeps its own chat sessions, and offers a friendly tip now and then when something useful applies.
+- **Give it keys:** paste an API key, token or password into its chat, use the key button next to its message box, or type it into the secure prompt it opens. The value goes straight into Opaya's encrypted vault and the model only gets a reference such as `[secret S1 · OPENAI_API_KEY · sk-p…9f3a]`. It then saves the key where each agent reads it: the `.env` of Hermes or OpenClaw, Claude Code's settings, `codex login`, or an API connection's token, or types it into a password prompt in a terminal.
 
 **Start free**: one click installs Ollama and a free open model (Qwen3 or Llama) on this computer and connects the Opaya Agent. No account, no key. If Ollama already runs with a model that can use tools, it connects by itself. Free tiers with an account are marked in Model settings: Ollama Cloud, OpenRouter `:free` models, Groq, Cerebras, Gemini and Mistral.
 
 Or connect it to any model in **Model settings**: DeepSeek, OpenAI, Google Gemini, OpenRouter, xAI, Groq, Mistral, a local Ollama or LM Studio model, a Hermes gateway, the Codex CLI, or any OpenAI-compatible `/v1` API. The API key is stored with OS encryption.
 
-It acts only through Opaya's own tools, and every change or command asks for your approval unless iTrust is on. It never sees API tokens or secret files, has no general shell or file access, and cannot modify the app.
+It acts only through Opaya's own tools and terminals you can watch, and every change or command asks for your approval unless iTrust is on (removals always ask). Opaya's tools never show it the values of API keys, tokens or secret files, and it cannot modify the app.
 
 ### Everyday comforts
 - Right-click menus everywhere: agents, workspace, terminal tabs, projects and chats.
 - Groups and tags, pinning, drag to reorder, **Connect all**.
 - Official agent logos, an icon library or your own icon.
 - Dark and light themes.
-- System notifications when an approval is waiting or a long job finishes.
+- System notifications while Opaya is not in front: an agent or the Opaya Agent replied, an approval is waiting or a long job finished. Click one to open that chat. Each kind can be turned off in Settings.
+- **Workspace** filters agents by status and place, and each card has Connect, Chat, Terminal, Manage and Fix. **Manage** in the sidebar opens every option for the selected agent.
+- **Settings:** theme, Enter or Ctrl/Cmd+Enter to send, terminal text size and position, start Opaya when you sign in, connect agents at start, notifications, tips and keyboard shortcuts.
 - A **Connection log** for every agent.
 
 ## Persistent by design
