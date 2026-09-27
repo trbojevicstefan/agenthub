@@ -29,3 +29,10 @@ test('vault refuses plaintext Linux fallback and allows RAM-only tokens',async t
 test('concurrent vault updates do not lose encrypted credentials',async t=>{const dir=await temp(t),v=new Vault(dir,secure());await v.load();await Promise.all([v.set('a','one'),v.set('b','two')]);const v2=new Vault(dir,secure());await v2.load();assert.equal(v2.get('a'),'one');assert.equal(v2.get('b'),'two');});
 test('error presentation redacts API credentials',()=>{assert(!safeError(new Error('Bearer value; sk-abcdefghijklmnop TOKEN'),'TOKEN').includes('TOKEN'));assert(!safeError(new Error('Bearer supersecret')).includes('supersecret'));});
 test('agent icons accept only library names or small raster data URLs',()=>{const schema=require('../desktop/schema.cjs');assert.equal(schema.avatar('lib:codex'),'lib:codex');assert.equal(schema.avatar(''),'');assert.equal(schema.avatar('data:image/png;base64,iVBORw0KGgo='),'data:image/png;base64,iVBORw0KGgo=');for(const bad of ['lib:../x','data:image/svg+xml;base64,PHN2Zz4=','javascript:alert(1)','https://example.com/x.png','data:image/png;base64,'+'A'.repeat(200001)])assert.throws(()=>schema.avatar(bad),/icon/);});
+test('OpenClaw gateway token import reads only gateway.auth.token',()=>{
+  const {parseOpenclawToken}=require('../desktop/credentials.cjs');
+  assert.equal(parseOpenclawToken(JSON.stringify({models:{providers:{openai:{apiKey:'sk-secret'}}},gateway:{auth:{token:'gw-token'}}})),'gw-token');
+  assert.throws(()=>parseOpenclawToken(JSON.stringify({models:{apiKey:'sk-secret'}})),/No OpenClaw gateway token/);
+  assert.throws(()=>parseOpenclawToken('{gateway:{auth:{token:"x"}}}'),/not plain JSON/);
+  assert.throws(()=>parseOpenclawToken(JSON.stringify({gateway:{auth:{token:'${OPENCLAW_TOKEN}'}}})),/environment expansion/);
+});

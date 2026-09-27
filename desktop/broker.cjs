@@ -79,7 +79,8 @@ class Broker{
       if(!ok)throw new Error('Agent executable was not approved.');
     }
     if(importToken){
-      const ok=await this.approve(a,'Import this Hermes gateway token?',`Read only API_SERVER_KEY from ${a.hermesHome}/.env${a.transport==='ssh'?' over verified SSH':''}. Provider API keys are not imported. The token stays in Opaya\'s native process and OS-encrypted vault.`);
+      const where=a.transport==='ssh'?' over verified SSH':'';
+      const ok=await this.approve(a,`Import this ${a.provider==='openclaw'?'OpenClaw':'Hermes'} gateway token?`,a.provider==='openclaw'?`Read only gateway.auth.token from ~/.openclaw/openclaw.json${where}. Provider API keys are not imported. The token stays in Opaya\'s native process and OS-encrypted vault.`:`Read only API_SERVER_KEY from ${a.hermesHome}/.env${where}. Provider API keys are not imported. The token stays in Opaya\'s native process and OS-encrypted vault.`);
       if(!ok)throw new Error('Token import cancelled.');
       token=await importGatewayToken(a,a.transport==='ssh'?this.host(a.hostId):null);
     }

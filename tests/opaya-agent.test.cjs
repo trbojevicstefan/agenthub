@@ -122,3 +122,25 @@ test('every framework and dependency has an update command, and the essentials u
   const all=catalog.command('essentials',{remote:true,update:true}).command;for(const bin of ['node','python3','git','uv self update','tmux'])assert(all.includes(bin),bin);
   assert.match(catalog.command('node',{remote:true}).command,/sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs/);
 });
+test('setup_agent runs the fixed onboarding and gateway steps where the agent runs',async t=>{
+  const {agent,broker,commands,approvals}=await fixture(t,[
+    call('setup_agent',{framework_id:'openclaw',step:'sign_in'}),
+    call('setup_agent',{framework_id:'hermes',step:'enable_api',agent_id:'hprofile'}),
+    call('setup_agent',{framework_id:'hermes',step:'start_gateway; rm -rf ~'}),
+    call('setup_agent',{framework_id:'aider',step:'sign_in'}),
+    {content:'Done.'}]);
+  await broker.saveAgent({agent:{id:'hprofile',name:'Hermes work',provider:'hermes',protocol:'acp',transport:'local',command:'hermes',args:[],hermesHome:'/home/me/.hermes/profiles/work'}});
+  commands.length=0;approvals.length=0;
+  agent.begin('finish onboarding');await settle(agent);
+  assert.equal(commands.length,2);
+  assert(commands[0].command.startsWith(catalog.setupCommand('openclaw','sign_in').command+'; '));assert.match(commands[0].command,/\[opaya\] finished with exit code/);
+  assert.match(commands[1].command,/^export HERMES_HOME='\/home\/me\/\.hermes\/profiles\/work'; /);assert.match(commands[1].command,/API_SERVER_ENABLED=true/);
+  assert.match(approvals[0].title,/Sign in to OpenClaw on this computer/);assert.match(approvals[1].title,/gateway API of Hermes Agent/);
+});
+test('gateway tokens are imported only for Hermes and OpenClaw gateway connections',async t=>{
+  const {agent,broker}=await fixture(t,[
+    call('save_connection',{connection:{name:'Claude',provider:'claude',protocol:'claude',transport:'local',command:'claude'},import_gateway_token:true}),
+    {content:'ok'}]);
+  agent.begin('add');await settle(agent);
+  assert.equal(broker.snapshot().agents.length,0);
+});

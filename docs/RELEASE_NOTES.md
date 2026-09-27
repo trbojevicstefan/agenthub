@@ -1,3 +1,9 @@
+# Opaya 0.18.3 - The Opaya Agent finishes every agent's setup, Hermes and OpenClaw included
+
+- **Onboarding by the Opaya Agent**: after installing an agent, the Opaya Agent now runs its own setup wizard in a visible terminal (`hermes setup`, `openclaw onboard`, `codex login`, Claude Code's sign-in, `opencode auth login`, `goose configure`) and picks the menu answers itself. You only type API keys and passwords and finish browser sign-ins. It works on this computer, on your machines and inside Docker agents, and for any Hermes profile.
+- **Hermes and OpenClaw gateways, end to end**: the Opaya Agent turns on the gateway API (for Hermes with a new random key in its `.env`), starts the gateway in the background, adds the agent and imports the gateway token straight into Opaya's encrypted vault after you approve. You no longer copy tokens by hand, and the Opaya Agent never sees them.
+- **Errors lead to the fix**: when an agent fails because its onboarding, sign-in or gateway is unfinished or down, the Opaya Agent checks where it stands and runs the missing step itself.
+
 # Opaya 0.18.2 - The Opaya Agent fixes agent errors, and the chat box keeps your typing
 
 - **The Opaya Agent hears about every agent error**: a gateway that is missing or down, onboarding or sign-in that was never finished, SSH trouble, dropped connections and failed answers now go to the Opaya Agent with a first diagnosis, so it can fix them. Too-old agents are still updated first. One error is handed over at a time, and the same error for the same agent is not sent again right away.

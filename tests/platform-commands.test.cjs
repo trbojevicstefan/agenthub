@@ -25,6 +25,10 @@ function commands(windows){
   for(const [id,a] of Object.entries(guide.AGENTS))if(a.signIn)add(`sign in ${id}`,guide.withPath(windows?a.signIn.windows:a.signIn.posix,{windows}));
   add('guide step',guide.marked('install-node-1',guide.withPath(windows?catalog.FRAMEWORKS.find(f=>f.id==='node').windows:catalog.FRAMEWORKS.find(f=>f.id==='node').posix,{windows}),{windows}));
   if(windows)add('PATH and execution policy for Opaya tools',require('../desktop/toolchain.cjs').WINDOWS_PATH_SCRIPT);
+  for(const [id,steps] of Object.entries(catalog.SETUP))for(const step of Object.keys(steps)){
+    let c;try{c=catalog.setupCommand(id,step,{windows,hermesHome:"/home/me/.hermes/profiles/it's"});}catch{continue;}add(`setup ${id} ${step}`,c.command);
+    if(!windows)add(`setup ${id} ${step} (container)`,catalog.setupCommand(id,step,{container:'opaya-test'}).command);
+  }
   if(!windows)for(const id of Object.keys(containers.PLANS))add(`docker ${id}`,containers.plan(id,{name:'test'}).command);
   return out;
 }
