@@ -38,7 +38,7 @@ class Terminals{
       this.sessions.set(item.id,{...item,process:null,exited:true,restored:true,buffer:String(item.buffer||'').slice(-200000),seq:Number(item.seq)||0});
     }
   }
-  describe(){return [...this.sessions.values()].map(({id,agentId,mode,cwd,title,exited,remote,restored,tmuxSession,seq})=>({id,agentId,mode,cwd:cwd||'',title,exited,remote,restored,tmuxSession,seq}));}
+  describe(){return [...this.sessions.values()].map(({id,agentId,hostId,mode,cwd,title,exited,remote,restored,tmuxSession,seq})=>({id,agentId,hostId:hostId||'',mode,cwd:cwd||'',title,exited,remote,restored,tmuxSession,seq}));}
   hasLive(agentId,mode){return [...this.sessions.values()].some(s=>s.agentId===agentId&&s.mode===mode&&!s.exited);}
   persist(){
     if(!this.root)return Promise.resolve();
@@ -55,10 +55,11 @@ class Terminals{
   // xterm needs the Windows build to match ConPTY's line wrapping; without it resized TUIs draw duplicate lines.
   attach(id){const item=this.sessions.get(id);if(!item)throw new Error('Terminal not found.');const {process,...view}=item;return {...view,windowsBuild:WINDOWS_BUILD};}
   // cwd: a project folder to start in (the agent's CLI or a shell there). One live session per agent, mode and folder.
-  open(agent,host,mode='shell',size={cols:100,rows:28},{cwd='',title=''}={}){
+  // into: an ended session to start again in place (restart).
+  open(agent,host,mode='shell',size={cols:100,rows:28},{cwd='',title='',into=null}={}){
     if(!['shell','agent'].includes(mode))throw new Error('Invalid terminal mode.');
     if(typeof cwd!=='string'||cwd.length>2048||/[\0\r\n]/.test(cwd))throw new Error('Invalid terminal folder.');
-    const previous=[...this.sessions.values()].find(s=>s.agentId===agent.id&&s.mode===mode&&(s.cwd||'')===cwd&&!s.exited);
+    const previous=[...this.sessions.values()].find(s=>s!==into&&s.agentId===agent.id&&s.mode===mode&&(s.cwd||'')===cwd&&!s.exited);
     if(previous)return this.attach(previous.id);
     if([...this.sessions.values()].filter(s=>!s.exited).length>=12)throw new Error('Close an existing terminal before opening another.');
     let pty=this.ptyFactory;
@@ -92,16 +93,23 @@ class Terminals{
       args=process.platform==='win32'?['-NoLogo']:['-l'];
       if(/cmd\.exe$/i.test(command))args=[];
     }
-    const archived=null;
-    const id=randomUUID();
+    const id=into?.id||randomUUID();
     const initial=dimensions(size.cols,size.rows);
     const processPty=pty.spawn(command,args,{name:'xterm-256color',...initial,cwd:dir,env});
-    const buffer=archived?.buffer?archived.buffer+'\r\n\x1b[90m[Saved output above. Reconnecting below.]\x1b[0m\r\n':'';
-    const item={id,agentId:agent.id,mode,cwd,title:title||`${agent.name} / ${mode}`,process:processPty,buffer,seq:archived?.seq||0,exited:false,restored:false,remote:agent.transport==='ssh',tmuxSession:sessionName,...initial};this.sessions.set(id,item);
-    processPty.onData(data=>{item.buffer=(item.buffer+data).slice(-200000);item.seq++;this.emit({id,type:'data',data,seq:item.seq});this.checkpoint();});
-    processPty.onExit(({exitCode})=>{if(item.detaching)return;item.exited=true;item.seq++;this.emit({id,type:'exit',exitCode,seq:item.seq});this.checkpoint();});
+    const fields={process:processPty,exited:false,restored:false,detached:false,detaching:false,remote:agent.transport==='ssh',hostId:host?.id||'',tmuxSession:sessionName,...initial};
+    const item=into?Object.assign(into,fields):{id,agentId:agent.id,mode,cwd,title:title||`${agent.name} / ${mode}`,buffer:'',seq:0,...fields};this.sessions.set(id,item);
+    // A restart keeps the tab and its scrollback; every window learns the session takes input again. The terminal modes the
+    // old program left on are reset first (soft reset, main screen, no mouse reporting): otherwise clicks or a paste could
+    // type escape codes into the new prompt.
+    if(into){const note=`\x1b[!p\x1b[?1047l\x1b[?1000l\x1b[?1006l\r\n\x1b[90m[${sessionName?'Reconnecting':'Started again'}]\x1b[0m\r\n`;item.buffer=(item.buffer+note).slice(-200000);item.seq++;this.emit({id,type:'restarted',seq:item.seq});item.seq++;this.emit({id,type:'data',data:note,seq:item.seq});}
+    // Events from a process this session no longer runs (killed on detach, replaced by a restart) are ignored.
+    processPty.onData(data=>{if(item.process!==processPty)return;item.buffer=(item.buffer+data).slice(-200000);item.seq++;this.emit({id,type:'data',data,seq:item.seq});this.checkpoint();});
+    processPty.onExit(({exitCode})=>{if(item.process!==processPty||item.detaching)return;item.exited=true;item.seq++;this.emit({id,type:'exit',exitCode,seq:item.seq});this.checkpoint();});
     this.checkpoint();return this.attach(id);
   }
+  // An ended session (exited, detached, or saved output from before a restart) starts again in its tab: the agent's CLI
+  // or a shell in the same folder; a remote one reattaches to the same tmux session, which kept running on the host.
+  restart(id,agent,host,size){const s=this.sessions.get(id);if(!s)throw new Error('Terminal not found.');if(!s.exited)return this.attach(id);return this.open(agent,host,s.mode,size,{cwd:s.cwd||'',into:s});}
   cliArgs(agent){ // the interactive CLI: the connection's command without the protocol-server arguments
     if(agent.command==='docker'&&dockerExecContainerIndex(agent.args)>=0){
       const index=dockerExecContainerIndex(agent.args),before=agent.args.slice(1,index).filter(x=>!['-i','-t','-it','-ti','--interactive','--tty'].includes(x));
@@ -116,7 +124,7 @@ class Terminals{
   }
   write(id,data){
     if(typeof data!=='string'||data.length>65536)throw new Error('Terminal input exceeds the safety limit.');
-    const s=this.sessions.get(id);if(!s||s.exited)throw new Error('This is saved terminal output from a closed session. Open a new shell to reconnect.');s.process.write(data);
+    const s=this.sessions.get(id);if(!s||s.exited)throw new Error('This terminal session has ended. Press Enter in it to start it again.');s.process.write(data);
   }
   // The size is kept with the session, so its screen can be rendered as the program drew it (screen.cjs).
   resize(id,cols,rows){const size=dimensions(cols,rows);const s=this.sessions.get(id);if(s&&!s.exited){s.process.resize(size.cols,size.rows);Object.assign(s,size);}}

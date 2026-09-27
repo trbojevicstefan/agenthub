@@ -47,3 +47,15 @@ test('the native CLI is the agent command without its chat-server arguments',()=
   assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'docker',args:['exec','-i','-w','/root','opaya-o','opencode','acp']}),['exec','-it','-w','/root','-e','TERM=xterm-256color','opaya-o','opencode']);
   assert.deepEqual(t.cliArgs({provider:'custom',protocol:'terminal',command:'aider',args:['--model','x']}),['--model','x'],'terminal agents keep their arguments');
 });
+test('terminal input reaches the service in pieces it accepts, and an ended session says how to get a prompt back',()=>{
+  // terminal-core.js is browser code; its helpers need no DOM.
+  const vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');const box={navigator:{platform:'Linux x86_64'}};box.window=box;vm.createContext(box);
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../ui/terminal-core.js'),'utf8'),box);const {chunks,endedNote}=box.OpayaTerminal;
+  const paste='a'.repeat(16383)+'\u{1F600}'+'b'.repeat(200000),parts=chunks(paste);
+  assert.equal(parts.join(''),paste);assert(parts.every(p=>p.length<=65536),'the service refuses writes over 65536 characters');assert(!parts.some(p=>/[\ud800-\udbff]$/.test(p)),'an emoji is never split');
+  assert.deepEqual([...chunks('ls\r')],['ls\r']);assert.deepEqual([...chunks('')],[]);
+  assert.match(endedNote({agentId:'local-shell'},0),/Session ended: 0\. Press Enter to start it again\./);
+  assert.match(endedNote({agentId:'agent-1',remote:true},255),/Press Enter to connect again\./);
+  assert.match(endedNote({agentId:'svc_install_codex_local'},0),/Press Enter for a new shell here\./);
+  assert.match(endedNote({agentId:'local-shell'}),/Saved output from an ended session\./);assert.match(endedNote({remote:true},'detached'),/Session detached\. Press Enter to connect again\./);
+});

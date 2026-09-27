@@ -93,3 +93,47 @@ test('a terminal can start an agent CLI in a project folder, one session per fol
   assert.deepEqual(withWorkdir(['exec','-it','-e','TERM=xterm-256color','box','codex'],'/root/site'),['exec','-it','-e','TERM=xterm-256color','-w','/root/site','box','codex']);
   assert.deepEqual(withWorkdir(['exec','-it','box','sh'],''),['exec','-it','box','sh']);
 });
+// A fake node-pty that remembers each process, so a test can end it or send output from it.
+function fakePty(){const spawned=[];return {spawned,ptyFactory:{spawn:(command,args,options)=>{const p={command,args,options,writes:[],onData(fn){p.data=fn;},onExit(fn){p.exit=fn;},write(s){p.writes.push(s);},resize(){},kill(){p.killed=true;}};spawned.push(p);return p;}}};}
+test('an ended terminal starts again in its tab: same id, output kept, the old process ignored, input works again',async t=>{
+  const root=await temp(t),events=[],{spawned,ptyFactory}=fakePty(),terminals=new Terminals(e=>events.push(e),{root,ptyFactory});
+  const shell={id:'local-shell',name:'This computer',provider:'custom',transport:'local',command:'',args:[],cwd:root};
+  const item=terminals.open(shell,null,'shell',{cols:100,rows:24});spawned[0].data('first run\r\n');spawned[0].exit({exitCode:0});
+  assert.equal(terminals.attach(item.id).exited,true);assert.throws(()=>terminals.write(item.id,'ls\r'),/Press Enter/);
+  const again=terminals.restart(item.id,shell,null,{cols:90,rows:20});
+  assert.equal(again.id,item.id);assert.equal(again.exited,false);assert.equal(spawned.length,2);assert.deepEqual([spawned[1].command,spawned[1].args,spawned[1].options.cwd],[spawned[0].command,spawned[0].args,spawned[0].options.cwd]);
+  assert.deepEqual([again.cols,again.rows],[90,20]);assert.match(again.buffer,/first run[\s\S]*Started again/);
+  const exit=events.find(e=>e.type==='exit'),restarted=events.find(e=>e.type==='restarted');assert(restarted.seq>exit.seq,'windows see the restart after the exit');assert.equal(events.at(-1).type,'data');assert.equal(events.at(-1).seq,again.seq);
+  // The old process's late output and exit do not end or pollute the new session.
+  spawned[0].data('late');spawned[0].exit({exitCode:1});assert.equal(terminals.attach(item.id).exited,false);assert(!terminals.attach(item.id).buffer.includes('late'));
+  terminals.write(item.id,'ls\r');assert.deepEqual(spawned[1].writes,['ls\r']);assert.deepEqual(spawned[0].writes,[]);
+  assert.equal(terminals.restart(item.id,shell,null,{cols:90,rows:20}).id,item.id);assert.equal(spawned.length,2,'a live session is not started twice');
+  // One live session per agent, mode and folder: an ended tab whose twin is already running points to it.
+  spawned[1].exit({exitCode:0});const twin=terminals.open(shell,null,'shell',{cols:100,rows:24});assert.notEqual(twin.id,item.id);
+  assert.equal(terminals.restart(item.id,shell,null,{cols:90,rows:20}).id,twin.id);assert.equal(spawned.length,3);
+  assert.throws(()=>terminals.restart('missing',shell,null,{cols:90,rows:20}),/not found/);
+  await terminals.shutdown();
+});
+test('saved output from before an Opaya restart can be started again in the same tab',async t=>{
+  const root=await temp(t),{spawned,ptyFactory}=fakePty(),first=new Terminals(()=>{},{root,ptyFactory});
+  const shell={id:'local-shell',name:'This computer',provider:'custom',transport:'local',command:'',args:[],cwd:root};
+  const item=first.open(shell,null,'shell',{cols:100,rows:24},{cwd:root,title:'Work'});spawned[0].data('before the restart');await first.shutdown();
+  const next=new Terminals(()=>{},{root,ptyFactory});await next.init();assert.equal(next.attach(item.id).restored,true);
+  const again=next.restart(item.id,shell,null,{cols:100,rows:24});
+  assert.equal(again.id,item.id);assert.equal(again.restored,false);assert.equal(again.exited,false);assert.equal(again.title,'Work');assert.equal(spawned.at(-1).options.cwd,root);assert.match(again.buffer,/before the restart/);
+  await next.shutdown();
+});
+test('a remote terminal whose SSH connection dropped reattaches to the same tmux session',async t=>{
+  // A stand-in ssh on PATH: the terminal only needs to find the client, the fake PTY never runs it.
+  const bin=await temp(t);await fs.writeFile(path.join(bin,'ssh'),'#!/bin/sh\nexit 0\n',{mode:0o755});const old=process.env.PATH;process.env.PATH=bin+path.delimiter+old;t.after(()=>{process.env.PATH=old;});
+  const events=[],{spawned,ptyFactory}=fakePty(),terminals=new Terminals(e=>events.push(e),{ptyFactory});
+  const agent={id:'remote-agent',name:'Remote',provider:'custom',transport:'ssh',hostId:'h1',command:'',args:[],cwd:''},host={id:'h1',alias:'vps'};
+  const item=terminals.open(agent,host,'shell');assert.equal(terminals.describe()[0].hostId,'h1');
+  spawned[0].exit({exitCode:255});assert.equal(terminals.attach(item.id).exited,true);
+  const again=terminals.restart(item.id,agent,host,{cols:100,rows:28});
+  assert.equal(again.id,item.id);assert.deepEqual(spawned[1].args,spawned[0].args);assert.match(spawned[1].args.at(-1),/tmux new-session -A -s/);assert.equal(again.tmuxSession,item.tmuxSession);assert.match(again.buffer,/Reconnecting/);
+  // Detached on purpose, then reattached.
+  terminals.detach(item.id);assert.equal(terminals.attach(item.id).detached,true);
+  const back=terminals.restart(item.id,agent,host,{cols:100,rows:28});assert.equal(back.detached,false);assert.equal(back.exited,false);assert.equal(spawned.length,3);
+  spawned[1].exit({exitCode:0});assert.equal(terminals.attach(item.id).exited,false,'the process killed by detach does not end the reattached session');
+});

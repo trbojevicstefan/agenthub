@@ -1264,3 +1264,7 @@ body[data-theme="light"] .bring-M{color:#9a6a10}body[data-theme="light"] .bring-
 .topbar-actions .manage-button span{font-size:13px}
 /* xterm 6 paints its viewport black; the terminal element carries the theme background instead. */
 .xterm .xterm-viewport{background-color:transparent!important}
+/* A terminal the service opened while you typed in another one waits in its tab, pulsing, until you look at it. */
+.terminal-tab.attention>button[data-action="terminal-tab"]{color:var(--text)}
+.terminal-tab.attention .terminal-tab-dot{animation:terminal-tab-attention 1.1s ease-in-out infinite}
+@keyframes terminal-tab-attention{50%{transform:scale(1.7);opacity:.55}}
