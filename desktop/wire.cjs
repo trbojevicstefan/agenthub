@@ -58,7 +58,8 @@ class Client extends EventEmitter {
       this.pending.set(id, {resolve, reject, timer}); send(this.socket, {kind:'call', id, method, input});
     });
   }
-  answer(id, allow) { send(this.socket, {kind:'approval', id, allow: allow === true}); }
+  // value: what the user typed into a secure prompt (an approval of kind secret), only with allow.
+  answer(id, allow, value) { send(this.socket, {kind:'approval', id, allow: allow === true, ...(allow === true && typeof value === 'string' ? {value} : {})}); }
   close() { this.socket.destroy(); }
 }
 function connect(address, token, timeout = 2000) {

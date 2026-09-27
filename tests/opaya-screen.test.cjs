@@ -1,6 +1,6 @@
 'use strict';
 const {test}=require('node:test');const assert=require('node:assert/strict');
-const screen=require('../desktop/screen.cjs');const {OpayaAgent}=require('../desktop/opaya-agent.cjs');
+const screen=require('../desktop/screen.cjs');const {OpayaAgent}=require('../desktop/opaya-agent.cjs');const {temp}=require('./helpers.cjs');
 // A select menu program in a terminal: draws the menu (clack or Hermes curses style), reads arrow keys, Enter and
 // typed search text like the real ones. `app` turns on application cursor keys (curses): then only ESC O A/B move.
 function fakeMenu({options,active=0,app=false,window=0,search=false,style='clack'}){
@@ -76,7 +76,28 @@ test('the Opaya Agent sees menus while waiting and never types into a secret pro
   assert.equal(waited.question,true);assert.equal(waited.menu.question,'Model/auth provider');assert.equal(waited.menu.highlighted,PROVIDERS[0]);assert.match(waited.next,/answer=choose/);
   const writes=[],secret=agentOn({attach:id=>({id,buffer:'No DeepSeek API key configured.\r\nDEEPSEEK_API_KEY (or Enter to cancel): ',seq:1,exited:false}),write:(id,d)=>writes.push(d)});
   const w=await secret.tool('wait_for_terminal',{terminal_id:'t1',seconds:5});assert.equal(w.password,true);assert.equal(w.question,false);
-  await assert.rejects(()=>secret.tool('answer_prompt',{terminal_id:'t1',answer:'text',text:'sk-123'}),/Only the user can type it/);
-  await assert.rejects(()=>secret.tool('answer_prompt',{terminal_id:'t1',answer:'choose',option:'x'}),/Only the user can type it/);
-  assert.deepEqual(writes,[]);
+  await assert.rejects(()=>secret.tool('answer_prompt',{terminal_id:'t1',answer:'text',text:'sk-123'}),/never types a value you wrote/);
+  await assert.rejects(()=>secret.tool('answer_prompt',{terminal_id:'t1',answer:'choose',option:'x'}),/answer=secret/);
+  assert.deepEqual(writes,[]);assert.match(w.next,/answer=secret/);
+});
+// A secret the user gave, held in a vault stand-in (memory only, as without OS encryption).
+async function holding(t,agent,value,name){
+  const vault=new Map();Object.assign(agent,{home:await temp(t),sessionId:'chat',secrets:[],secretNext:1,secretCache:new Map(),trusted:()=>true,
+    vault:{available:()=>false,has:k=>vault.has(k),get:k=>vault.get(k)||'',set:async(k,v)=>{if(v)vault.set(k,v);else vault.delete(k);},remove:async k=>{vault.delete(k);}}});
+  return agent.holdFromUser({name,value});
+}
+test('answer_prompt types a secret the user gave, and only into a prompt that asks for one',async t=>{
+  const key='sk-0123456789abcdef0123456789abcdef',writes=[];let buffer='No DeepSeek API key configured.\r\nDEEPSEEK_API_KEY (or Enter to cancel): ';
+  const agent=agentOn({attach:id=>({id,buffer,seq:writes.length+1,exited:false,title:'Sign in to Hermes'}),write:(id,d)=>{writes.push(d);buffer+=`${d.replace(/\r$/,'')}\r\nSaved.\r\n$ `;}});
+  const s=await holding(t,agent,key,'DEEPSEEK_API_KEY');assert.equal(s.reference,'[secret S1 · DEEPSEEK_API_KEY · sk-0…cdef]');
+  const r=await agent.tool('answer_prompt',{terminal_id:'t1',answer:'secret',secret:'S1'});
+  assert.deepEqual(writes,[key+'\r']);assert.equal(r.typed,'S1');
+  assert(!JSON.stringify(r).includes(key.slice(3)),'the echoed key comes back as its reference');assert(JSON.stringify(r).includes(s.reference));
+  // The prompt is gone (a shell prompt now): nothing more is typed. A menu is not a secret prompt either.
+  await assert.rejects(()=>agent.tool('answer_prompt',{terminal_id:'t1',answer:'secret',secret:'S1'}),/only into a prompt/);
+  const fake=fakeMenu({options:PROVIDERS}),menu=agentOn(fake);await holding(t,menu,key);
+  await assert.rejects(()=>menu.tool('answer_prompt',{terminal_id:'t1',answer:'secret',secret:'S1'}),/only into a prompt/);assert.equal(fake.state.picked,null);assert.deepEqual(fake.state.keys,[]);
+  await assert.rejects(()=>agent.tool('answer_prompt',{terminal_id:'t1',answer:'secret',secret:'S7'}),/holds no secret S7/);
+  await assert.rejects(()=>agent.tool('answer_prompt',{terminal_id:'t1',answer:'text',text:s.reference}),/answer=secret/);
+  assert.equal(writes.length,1);
 });
