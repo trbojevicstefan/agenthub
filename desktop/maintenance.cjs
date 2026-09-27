@@ -123,8 +123,28 @@ function updateCommand(agent,{remote,windows=process.platform==='win32'}){
   return {title:`Update ${framework.name}`,summary:`Brings ${framework.name} to its latest version.`,after:'Reconnect the agent afterwards.',command};
 }
 // ---- Uninstall -----------------------------------------------------------------------------------------------
-function posixUninstall(t,{data}){
-  const lines=['found=0'];
+// Gateways that keep running as a background service (launchd, systemd user unit) or a plain process after the program
+// is gone; left running, discovery keeps finding them on their port.
+const SERVICES={
+  hermes:{bin:'hermes',name:'hermes',pattern:'[h]ermes.*gateway'},
+  openclaw:{bin:'openclaw',name:'openclaw',pattern:'[o]penclaw.*gateway'}
+};
+function stopServices(id,{home=''}={}){
+  const s=SERVICES[id];if(!s)return [];
+  const env=home?`HERMES_HOME=${q(home)} `:'';
+  return [`if command -v ${s.bin} >/dev/null 2>&1; then echo 'Stopping the ${s.bin} gateway'; ${env}${s.bin} gateway stop >/dev/null 2>&1; ${env}${s.bin} gateway uninstall >/dev/null 2>&1; fi`,
+    ...(home?[]:[`for f in "$HOME"/Library/LaunchAgents/*${s.name}*.plist; do [ -e "$f" ] || continue; launchctl bootout "gui/$(id -u)" "$f" 2>/dev/null || launchctl unload "$f" 2>/dev/null; rm -f "$f" && echo "Removed service $f"; done`,
+      `for f in "$HOME"/.config/systemd/user/*${s.name}*.service; do [ -e "$f" ] || continue; systemctl --user disable --now "$(basename "$f")" 2>/dev/null; rm -f "$f" && echo "Removed service $f"; done`,
+      // Shells are skipped: this script's own command line (and its parent's) names the gateway too.
+      `for p in $(pgrep -f '${s.pattern}' 2>/dev/null); do case "$(ps -o comm= -p "$p" 2>/dev/null)" in *sh|*fish|*tmux*|*ssh*|'') ;; *) kill "$p" 2>/dev/null && echo "Stopped a running ${s.bin} gateway ($p)";; esac; done`]),'true'];
+}
+function windowsStopServices(id){
+  const s=SERVICES[id];if(!s)return [];
+  return [`if (Get-Command ${s.bin} -ErrorAction SilentlyContinue) { 'Stopping the ${s.bin} gateway'; ${s.bin} gateway stop *> $null; ${s.bin} gateway uninstall *> $null }`,
+    `Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -match '${s.name}.*gateway' -and $_.ProcessId -ne $PID -and $_.Name -notmatch '^(powershell|pwsh|cmd|conhost|ssh|OpenConsole|WindowsTerminal)' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; 'Stopped a running ${s.bin} gateway' }`];
+}
+function posixUninstall(t,id,{data}){
+  const lines=['found=0',...stopServices(id)];
   if(t.npm)lines.push(`if command -v npm >/dev/null 2>&1 && npm ls -g --depth=0 ${t.npm} >/dev/null 2>&1; then echo 'Installed with npm (${t.npm})'; npm uninstall -g ${t.npm} && found=1; fi`);
   if(t.brew)lines.push(`if command -v brew >/dev/null 2>&1 && brew list ${t.brew} >/dev/null 2>&1; then echo 'Installed with Homebrew (${t.brew})'; brew uninstall ${t.brew} && found=1; fi`);
   if(t.uv)lines.push(`if command -v uv >/dev/null 2>&1 && uv tool list 2>/dev/null | grep -q '^${t.uv} '; then echo 'Installed with uv (${t.uv})'; uv tool uninstall ${t.uv} && found=1; fi`);
@@ -137,8 +157,8 @@ function posixUninstall(t,{data}){
     `hash -r 2>/dev/null; if command -v ${t.bin} >/dev/null 2>&1; then echo "Still on PATH: $(command -v ${t.bin}). Remove it with the tool that installed it."; fi`);
   return posixScript(lines);
 }
-function windowsUninstall(t,{data}){
-  const w=t.win||{},parts=[];
+function windowsUninstall(t,id,{data}){
+  const w=t.win||{},parts=[...windowsStopServices(id)];
   if(t.npm)parts.push(`npm.cmd ls -g --depth=0 ${t.npm} *> $null; if ($LASTEXITCODE -eq 0) { 'Installed with npm (${t.npm})'; npm.cmd uninstall -g ${t.npm} }`);
   if(w.winget)parts.push(`winget uninstall --id ${w.winget} -e`);
   if(w.pip)parts.push(`py -m pip uninstall -y ${w.pip}`);
@@ -158,13 +178,13 @@ function uninstallCommand(agent,{remote,data=false,windows=process.platform==='w
   if(k.kind==='hermes-profile'){
     const n=k.profile;deletable(k.dir);
     return {title:`Delete Hermes profile ${n}`,summary:`Deletes the profile ${n} and everything in it (config, memory, skills, sessions). Hermes itself and other profiles stay.`,
-      command:posix?posixScript([`if hermes profile delete --help >/dev/null 2>&1; then hermes profile delete ${q(n)}; else rm -rf ${q(k.dir)} && echo 'Deleted profile folder ${k.dir.replace(/'/g,'')}'; fi`])
+      command:posix?posixScript([...stopServices('hermes',{home:k.dir}),`if hermes profile delete --help >/dev/null 2>&1; then hermes profile delete ${q(n)}; else rm -rf ${q(k.dir)} && echo 'Deleted profile folder ${k.dir.replace(/'/g,'')}'; fi`])
         :`if (hermes profile delete --help 2>$null) { hermes profile delete ${q(n)} } else { Remove-Item -Recurse -Force ${q(k.dir)}; 'Deleted profile folder' }`};
   }
   const t=TOOLS[k.framework];if(!t)throw new Error('Opaya has no uninstaller for this agent.');
   if(k.framework==='hermes'){
     const home=agent.hermesHome?q(agent.hermesHome):'"${HERMES_HOME:-$HOME/.hermes}"';
-    const lines=[`home=${home}`,
+    const lines=[`home=${home}`,...stopServices('hermes'),
       'if hermes uninstall --help >/dev/null 2>&1; then echo "Running Hermes\' own uninstaller"; hermes uninstall',
       `elif command -v uv >/dev/null 2>&1 && uv tool list 2>/dev/null | grep -q '^hermes-agent '; then uv tool uninstall hermes-agent`,
       `elif command -v pipx >/dev/null 2>&1 && pipx list --short 2>/dev/null | grep -q '^hermes-agent '; then pipx uninstall hermes-agent`,
@@ -172,10 +192,10 @@ function uninstallCommand(agent,{remote,data=false,windows=process.platform==='w
       ...(data?['case "$home" in /|"$HOME"|"$HOME/"|"") echo "Opaya will not delete $home." ;; *) rm -rf "$home" && echo "Deleted data: $home" ;; esac']:[]),
       'hash -r 2>/dev/null; command -v hermes >/dev/null 2>&1 && echo "Still on PATH: $(command -v hermes)" || echo "Hermes is uninstalled."'];
     return {title:'Uninstall Hermes',summary:`Removes the Hermes installation${data?' and its home folder (config, memory, skills, sessions, every profile)':'. Its home folder with config, memory, skills and profiles stays'}.`,
-      command:posix?posixScript(lines):`if (hermes uninstall --help 2>$null) { hermes uninstall } else { 'Remove Hermes in Settings > Apps.' }`};
+      command:posix?posixScript(lines):[...windowsStopServices('hermes'),`if (hermes uninstall --help 2>$null) { hermes uninstall } else { 'Remove Hermes in Settings > Apps.' }`].join('; ')};
   }
   return {title:`Uninstall ${t.name}`,summary:`Finds how ${t.name} was installed (npm, Homebrew, uv, pipx, pip or the official installer) and removes it${data?', then deletes its data folder':'. Its settings and logins stay'}.`,
-    command:posix?posixUninstall(t,{data}):windowsUninstall(t,{data})};
+    command:posix?posixUninstall(t,k.framework,{data}):windowsUninstall(t,k.framework,{data})};
 }
 // ---- Detection -----------------------------------------------------------------------------------------------
 // Read-only: which installers own the agent, its path, version and data size. Parsed from key=value lines.

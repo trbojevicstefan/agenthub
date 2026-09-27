@@ -96,9 +96,13 @@ async function scanLocal({home = os.homedir(), extraHomes = [], probe = true} = 
   await primeShellPath(); // the login shell's PATH: nvm, Volta, Homebrew and other installs a GUI app does not see
   const found = [], warnings = [], env = environment();
   const binary = name => findExecutable(name, env);
-  const hermesBinary = binary('hermes') || (await fs.stat(path.join(home, '.hermes/hermes-agent/.venv/bin/hermes')).catch(() => null) ? path.join(home,'.hermes/hermes-agent/.venv/bin/hermes') : 'hermes');
+  // Only installed programs count: data an uninstall left behind (a Hermes home, ~/.openclaw) is not an agent.
   const roots = hermesRoots(home, extraHomes);
-  const homes = unique((await Promise.all(roots.map(async root => [root, ...(await directories(path.join(root, 'profiles')))]))).flat());
+  const venvs = roots.flatMap(root => ['.venv', 'venv'].map(v => process.platform === 'win32' ? path.join(root, 'hermes-agent', v, 'Scripts', 'hermes.exe') : path.join(root, 'hermes-agent', v, 'bin', 'hermes')));
+  let hermesBinary = binary('hermes');
+  for (const file of venvs) if (!hermesBinary && await fs.stat(file).catch(() => null)) hermesBinary = file;
+  if (!hermesBinary) for (const root of roots) if (await fs.stat(path.join(root, '.env')).catch(() => null)) warnings.push(`Hermes is not installed; its old data is still in ${root}.`);
+  const homes = !hermesBinary ? [] : unique((await Promise.all(roots.map(async root => [root, ...(await directories(path.join(root, 'profiles')))]))).flat());
   for (const root of homes) {
     if (!(await fs.stat(root).catch(() => null))?.isDirectory()) continue;
     if(!await fs.stat(path.join(root,'.env')).catch(()=>null)&&!await fs.stat(path.join(root,'config.yaml')).catch(()=>null))continue;
@@ -119,14 +123,15 @@ async function scanLocal({home = os.homedir(), extraHomes = [], probe = true} = 
   if (opencode) found.push(candidate({name: 'OpenCode', provider: 'custom', protocol: 'acp', transport: 'local', command: opencode, args: ['acp'], cwd: home, avatar: 'lib:opencode'}, 'Chats over ACP (opencode acp). Sign in once with opencode auth login in Terminal.'));
   const openclaw = binary('openclaw');
   const openclawRoot = path.join(home,'.openclaw');
-  if (openclaw || await fs.stat(openclawRoot).catch(() => null)) {
+  if (!openclaw && await fs.stat(openclawRoot).catch(() => null)) warnings.push(`OpenClaw is not installed; its old data is still in ${openclawRoot}.`);
+  if (openclaw) {
     let config = {};
     try { config = JSON.parse(await readSmall(path.join(openclawRoot, 'openclaw.json'))); } catch { warnings.push('OpenClaw: a JSON5/nonstandard config may need its port entered manually.'); }
     let port = 18789; try { port = schema.port(config.gateway?.port, 18789); } catch {}
     const agents = Array.isArray(config.agents?.list) ? config.agents.list.slice(0,64) : [{id: 'default', name: 'OpenClaw'}];
     for (const a of agents) {
       const agentId = typeof a.id === 'string' && a.id.length <= 100 ? a.id : 'default';
-      found.push(candidate({name: a.name || `OpenClaw / ${agentId}`, provider: 'openclaw', protocol: 'openai', transport: 'http', command: openclaw || 'openclaw', args: [], cwd: home, endpoint: `http://127.0.0.1:${port}/v1`, model: `openclaw/${agentId}`}, 'Enable gateway.http.endpoints.chatCompletions and enter the gateway token.', 'setup'));
+      found.push(candidate({name: a.name || `OpenClaw / ${agentId}`, provider: 'openclaw', protocol: 'openai', transport: 'http', command: openclaw, args: [], cwd: home, endpoint: `http://127.0.0.1:${port}/v1`, model: `openclaw/${agentId}`}, 'Enable gateway.http.endpoints.chatCompletions and enter the gateway token.', 'setup'));
     }
   }
   if (probe) {

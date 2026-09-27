@@ -45,9 +45,13 @@ def valid_port(value, default):
     except (TypeError, ValueError):
         return default
 
-homes = [home / ".hermes"]
+# Only installed programs count: data an uninstall left behind is not an agent.
+hermes = binary("hermes")
+homes = [home / ".hermes"] if hermes else []
+if not hermes and (home / ".hermes/.env").is_file():
+    warnings.append("Hermes is not installed; its old data is still in ~/.hermes.")
 try:
-    homes += sorted(p for p in (home / ".hermes/profiles").iterdir() if p.is_dir())[:128]
+    homes += sorted(p for p in (home / ".hermes/profiles").iterdir() if p.is_dir())[:128] if hermes else []
 except OSError:
     pass
 for root in homes:
@@ -57,7 +61,7 @@ for root in homes:
     meta = env_metadata(root / ".env")
     enabled = meta.get("API_SERVER_ENABLED", "").lower() in ("true", "1", "yes")
     port = valid_port(meta.get("API_SERVER_PORT"), 8642)
-    agents.append({"name": "Hermes / " + profile, "provider": "hermes", "protocol": "openai", "command": binary("hermes") or "hermes", "args": [], "cwd": str(home), "hermesHome": str(root), "endpoint": "http://127.0.0.1:%d/v1" % port, "model": "hermes-agent" if profile == "default" else profile, "readiness": "configured" if enabled else "setup", "detail": "Gateway API configured. Enter its API token." if enabled else "Profile found. Enable its gateway API before connecting. Do not launch a second writer against a running profile."})
+    agents.append({"name": "Hermes / " + profile, "provider": "hermes", "protocol": "openai", "command": hermes, "args": [], "cwd": str(home), "hermesHome": str(root), "endpoint": "http://127.0.0.1:%d/v1" % port, "model": "hermes-agent" if profile == "default" else profile, "readiness": "configured" if enabled else "setup", "detail": "Gateway API configured. Enter its API token." if enabled else "Profile found. Enable its gateway API before connecting. Do not launch a second writer against a running profile."})
 for provider, label in [("codex", "Codex CLI"), ("claude", "Claude Code")]:
     command = binary(provider)
     if command:
@@ -67,7 +71,9 @@ opencode = binary("opencode")
 if opencode:
     agents.append({"name": "OpenCode", "provider": "custom", "protocol": "acp", "command": opencode, "args": ["acp"], "cwd": str(home), "avatar": "lib:opencode", "detail": "Chats over ACP (opencode acp). Sign in once with opencode auth login on this machine."})
 root = home / ".openclaw"
-if binary("openclaw") or root.is_dir():
+if not binary("openclaw") and root.is_dir():
+    warnings.append("OpenClaw is not installed; its old data is still in ~/.openclaw.")
+if binary("openclaw"):
     try:
         config = json.loads(read_small(root / "openclaw.json") or "{}")
     except (ValueError, TypeError):
