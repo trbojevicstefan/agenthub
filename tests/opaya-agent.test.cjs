@@ -134,7 +134,7 @@ test('setup_agent runs the fixed onboarding and gateway steps where the agent ru
   agent.begin('finish onboarding');await settle(agent);
   assert.equal(commands.length,2);
   assert(commands[0].command.startsWith(catalog.setupCommand('openclaw','sign_in').command+'; '));assert.match(commands[0].command,/\[opaya\] finished with exit code/);
-  assert.match(commands[1].command,/^export HERMES_HOME='\/home\/me\/\.hermes\/profiles\/work'; /);assert.match(commands[1].command,/API_SERVER_ENABLED=true/);
+  assert.match(commands[1].command,/^(export |\$env:)HERMES_HOME='\/home\/me\/\.hermes\/profiles\/work'; /);assert.match(commands[1].command,/API_SERVER_ENABLED=true/);
   assert.match(approvals[0].title,/Sign in to OpenClaw on this computer/);assert.match(approvals[1].title,/gateway API of Hermes Agent/);
 });
 test('gateway tokens are imported only for Hermes and OpenClaw gateway connections',async t=>{
