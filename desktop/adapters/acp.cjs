@@ -2,6 +2,8 @@
 const {Rpc}=require('../rpc.cjs');
 const {launch}=require('../process.cjs');
 const {ConnectionLog}=require('../diagnostics.cjs');
+const attach=require('../attachments.cjs');
+const levels=require('../effort.cjs');
 function sessionCwd(agent){
   return agent.command==='docker'&&agent.provider==='hermes'&&agent.hermesHome?agent.hermesHome:agent.cwd;
 }
@@ -26,9 +28,13 @@ function activityOf(update){
 const ENV_START=/Creating new (\S+) environment for/,ENV_READY=/environment ready for|Session snapshot created|init_session failed/;
 const ENV_STALL_MS=30000;
 const envHint=agent=>`${agent.provider==='hermes'?'Hermes':'The agent'} is still starting its local terminal after 30 seconds. On Windows this is a known Hermes issue with Git Bash under ACP: run \`hermes update\` in Terminal and reconnect. If it persists, connect this Hermes through its gateway API (hermes gateway) instead of ACP.`;
+// Values of a select config option; options may be grouped.
+const flat=list=>(Array.isArray(list)?list:[]).flatMap(o=>Array.isArray(o?.options)?flat(o.options):[o?.value]).filter(v=>typeof v==='string');
 const commandList=list=>(Array.isArray(list)?list:[]).filter(c=>c&&typeof c.name==='string'&&/^[\w.:-]{1,64}$/.test(c.name)).slice(0,200).map(c=>({name:c.name,description:String(c.description||'').slice(0,300),hint:String(c.input?.hint||'').slice(0,120)}));
 class AcpAdapter {
-  constructor({agent,host,approve,spawnAgent=launch,mcpServers=()=>[],onChange=()=>{},trusted=()=>false,envStallMs=ENV_STALL_MS}){this.trusted=trusted;this.envStallMs=envStallMs;this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.mcpServers=mcpServers;this.onChange=onChange;this.sessions=new Map();this.active=null;this.log=new ConnectionLog();this.tools=new Map();this.permission=null;this.envStart=null;this.commands=[];this.agentInfo=null;}
+  constructor({agent,host,approve,spawnAgent=launch,mcpServers=()=>[],onChange=()=>{},trusted=()=>false,envStallMs=ENV_STALL_MS}){this.trusted=trusted;this.envStallMs=envStallMs;this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.mcpServers=mcpServers;this.onChange=onChange;this.sessions=new Map();this.active=null;this.log=new ConnectionLog();this.tools=new Map();this.permission=null;this.envStart=null;this.commands=[];this.agentInfo=null;this.levels=new Map();this.lastLevels=[];this.levelDefault='';this.effortNoted=new Set();}
+  // Reasoning effort: the levels of the thought_level config option the agent's sessions have ([] when they have none).
+  get efforts(){return this.lastLevels;}
   watchStderr(text){
     for(const line of String(text).split(/\r?\n/)){
       if(ENV_START.test(line))this.envStart={at:Date.now(),warned:false};
@@ -65,6 +71,7 @@ class AcpAdapter {
       const update=params?.update||{};
       // Slash commands (Hermes: /tools, /model, /compress ...) are advertised per session; they are the same for all.
       if(update.sessionUpdate==='available_commands_update'){this.commands=commandList(update.availableCommands);this.onChange();return;}
+      if(update.sessionUpdate==='config_option_update'){this.readConfig(params?.sessionId,update.configOptions);return;}
       if(!this.active||params.sessionId!==this.active.sessionId)return;
       // Track tool calls so diagnostics can say which tool is still running and for how long.
       if(['tool_call','tool_call_update'].includes(update.sessionUpdate)){const id=update.toolCallId||update.toolCall?.toolCallId||update.title;const status=update.status||update.toolCall?.status||'';const prev=this.tools.get(id);
@@ -85,11 +92,11 @@ class AcpAdapter {
       if(!cwd)throw new Error('ACP requires an absolute working directory. Edit this agent first.');
       if(ctx.conversation.externalSessionId){
         if(!this.capabilities.loadSession)throw new Error('This ACP server cannot resume a previous process session. The local transcript is preserved. Start a new conversation.');
-        this.readModels(await this.rpc.request('session/load',{sessionId:ctx.conversation.externalSessionId,cwd,mcpServers:this.sessionMcp()}));
+        this.readModels(await this.rpc.request('session/load',{sessionId:ctx.conversation.externalSessionId,cwd,mcpServers:this.sessionMcp()}),ctx.conversation.externalSessionId);
         sessionId=ctx.conversation.externalSessionId;
       }else{
         const session=this.preparedSession||await this.rpc.request('session/new',{cwd,mcpServers:this.sessionMcp()},60000);this.preparedSession=null;sessionId=session.sessionId;
-        this.readModels(session);
+        this.readModels(session,sessionId,true);
       }
       if(typeof sessionId!=='string')throw new Error('ACP did not return a session ID.');
       this.sessions.set(ctx.conversation.id,sessionId);await ctx.onSession(sessionId);
@@ -104,31 +111,76 @@ class AcpAdapter {
         // Newer ACP servers expose the model as a session config option; older ones take session/set_model. A model the
         // server never listed (typed by the user) is tried, and a refusal is reported instead of failing the turn.
         const listed=model.includes(':')||this.modelIds?.includes(model);
-        const apply=()=>this.modelConfigId?this.rpc.request('session/set_config_option',{sessionId,configId:this.modelConfigId,value:model},60000):this.rpc.request('session/set_model',{sessionId,modelId:model},60000);
+        const apply=()=>(this.modelConfigId?this.rpc.request('session/set_config_option',{sessionId,configId:this.modelConfigId,value:model},60000):this.rpc.request('session/set_model',{sessionId,modelId:model},60000)).then(r=>{this.readConfig(sessionId,r?.configOptions);return r;});
         if(listed)await apply();
         else if(!this.modelIds?.length)await apply().catch(error=>ctx.onEvent({type:'activity',text:`Model ${model} was not applied: ${String(error.message||error).slice(0,160)}. Using the agent's own setting.`}));
       }
+      await this.applyEffort(sessionId,ctx);
+      const prompt=await this.prompt(ctx);
+      if(ctx.signal.aborted)throw new Error('Cancelled.');
       // No fixed cap: long tool runs are normal. The broker's inactivity limit and Stop end a stuck turn.
       this.tools.clear();
       const pending=this.active;
       const watch=setInterval(()=>{if(this.envStart&&!this.envStart.warned&&Date.now()-this.envStart.at>this.envStallMs){this.envStart.warned=true;this.log.add('info','Terminal start is taking longer than 30 seconds.');pending.onEvent({type:'activity',text:envHint(this.agent)});}},Math.min(2000,this.envStallMs));watch.unref?.();
-      try{await this.rpc.request('session/prompt',{sessionId,prompt:[{type:'text',text:ctx.text}]},24*60*60*1000);}finally{clearInterval(watch);}
+      try{await this.rpc.request('session/prompt',{sessionId,prompt},24*60*60*1000);}finally{clearInterval(watch);}
       if(ctx.signal.aborted)throw new Error('Cancelled.');
       return {externalSessionId:sessionId};
     }finally{ctx.signal.removeEventListener('abort',cancel);this.active=null;this.tools.clear();}
   }
+  // Reasoning effort: the session's thought_level option set to the chosen level (or the nearest one it offers), or back to
+  // the level new sessions start with when the agent's own setting is chosen.
+  async applyEffort(sessionId,ctx){
+    const option=this.levels.get(sessionId),want=ctx.effort||'';
+    if(!option){
+      if(want&&!this.effortNoted.has(sessionId)){this.effortNoted.add(sessionId);ctx.onEvent({type:'activity',text:`${this.agentInfo?.name||this.agent.name||'This agent'} has no reasoning effort setting, so it uses its own.`});}
+      return;
+    }
+    const target=want?levels.nearest(want,levels.order(option.values)):option.initial;
+    if(want&&!target){ctx.onEvent({type:'activity',text:`This agent does not offer ${want} reasoning effort, so it uses its own.`});return;}
+    if(!target||target===option.current)return;
+    try{
+      const r=await this.rpc.request('session/set_config_option',{sessionId,configId:option.configId,value:target},60000);
+      option.current=target;this.readConfig(sessionId,r?.configOptions);
+      if(want&&target!==want)ctx.onEvent({type:'activity',text:`Using ${target} reasoning effort: this agent does not offer ${want}.`});
+    }catch(error){ctx.onEvent({type:'activity',text:`Reasoning effort ${target} was not applied: ${String(error?.message||error).slice(0,160)}.`});}
+  }
+  // The prompt blocks: the text with text files inlined; images as image blocks when the agent takes them (up to
+  // 3.75 MB); everything else as resource links to a path where the agent runs (copied there first over SSH or into its
+  // container), named in the text too for agents that ignore links.
+  async prompt(ctx){
+    const items=ctx.attachments||[];
+    if(!items.length)return [{type:'text',text:ctx.text}];
+    const caps=this.capabilities?.promptCapabilities||{},remote=attach.placeOf(this.agent)!=='local',cut=attach.plan(items);
+    const images=items.filter(i=>i.kind==='image'&&caps.image&&i.size<=attach.INLINE_IMAGE),linked=items.filter(i=>!images.includes(i)&&(i.kind!=='text'||cut.has(i)));
+    const where=linked.length?await attach.locate(this.agent,this.host,linked,ctx.conversation.id,{signal:ctx.signal,onEvent:ctx.onEvent,spawn:this.spawnAgent}):new Map();
+    return [{type:'text',text:attach.compose(ctx.text,items,i=>where.get(i)||'')},
+      ...await Promise.all(images.map(async i=>({type:'image',mimeType:i.mime,data:await attach.base64(i)}))),
+      ...linked.map(i=>({type:'resource_link',uri:attach.fileUri(where.get(i),remote),name:i.name,mimeType:i.mime,size:i.size}))];
+  }
+  // The thought_level option of a session, from session/new, session/load, set_config_option or config_option_update.
+  // `fresh`: a new session, whose level is the agent's own default.
+  readConfig(sessionId,options,fresh=false){
+    if(typeof sessionId!=='string'||!Array.isArray(options))return;
+    const o=options.find(x=>x&&x.category==='thought_level'&&typeof x.id==='string'&&x.type!=='boolean');
+    if(!o)return;
+    const values=flat(o.options),current=typeof o.currentValue==='string'?o.currentValue:'',prev=this.levels.get(sessionId);
+    if(fresh&&current)this.levelDefault=current;
+    this.levels.set(sessionId,{configId:o.id,values,current,initial:prev?.initial??(fresh?current:this.levelDefault||current)});
+    const shown=levels.order(values);
+    if(shown.join()!==this.lastLevels.join()){this.lastLevels=shown;this.onChange();}
+  }
   async listModels(){
     if(!this.preparedSession)this.preparedSession=await this.rpc.request('session/new',{cwd:sessionCwd(this.agent),mcpServers:this.sessionMcp()},60000);
-    this.readModels(this.preparedSession);
+    this.readModels(this.preparedSession,this.preparedSession?.sessionId,true);
     return this.modelIds||[];
   }
   // Models from a session/new or session/load result: the unstable `models.availableModels` field, or the newer
   // session config option with category "model" (options may be grouped).
-  readModels(session){
+  readModels(session,sessionId=session?.sessionId,fresh=false){
     if(!session||typeof session!=='object')return;
+    this.readConfig(sessionId,session.configOptions,fresh);
     const legacy=(session.models?.availableModels||[]).map(m=>m?.modelId).filter(m=>typeof m==='string');
     const option=(Array.isArray(session.configOptions)?session.configOptions:[]).find(o=>o&&(o.category==='model'||o.id==='model'));
-    const flat=list=>(Array.isArray(list)?list:[]).flatMap(o=>Array.isArray(o?.options)?flat(o.options):[o?.value]).filter(v=>typeof v==='string');
     const configured=option?flat(option.options):[];
     if(option&&typeof option.id==='string')this.modelConfigId=option.id;
     if(legacy.length||configured.length)this.modelIds=[...new Set([...legacy,...configured])];

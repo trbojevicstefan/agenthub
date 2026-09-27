@@ -78,6 +78,12 @@ function cloneRecipe(c) {
   if (!['skills', 'memory', 'personality', 'everything'].includes(c.scope) || !['regular', 'docker'].includes(c.runtime)) return null;
   return {from: id(c.from), scope: c.scope, keys: Boolean(c.keys), ...(c.cron === undefined ? {} : {cron: Boolean(c.cron)}), runtime: c.runtime, dir: text(c.dir, 'clone folder', 2048), container: text(c.container || '', 'container', 120), ...(['claude', 'codex', 'opencode', 'openclaw', 'goose'].includes(c.framework) ? {framework: c.framework} : {})};
 }
+// Reasoning effort: '' (the agent's own setting) or a level name such as low, high or xhigh.
+function effort(value) {
+  const v = text(value ?? '', 'reasoning effort', 32).trim().toLowerCase();
+  if (v && !/^[a-z][a-z0-9_-]{0,31}$/.test(v)) throw new Error('Invalid reasoning effort.');
+  return v;
+}
 function agent(input) {
   if (!input || typeof input !== 'object') throw new Error('Missing agent.');
   const provider = input.provider || 'custom';
@@ -101,6 +107,7 @@ function agent(input) {
     hostId: transport === 'ssh' ? id(input.hostId) : '', command, args: args.map(a => text(a, 'argument', 2048)), cwd, hermesHome,
     endpoint: protocol === 'openai' ? endpoint(input.endpoint, {ssh: transport === 'ssh'}) : '',
     model: text(input.model, 'model', 256, provider === 'hermes' && protocol==='openai' ? 'hermes-agent' : provider === 'openclaw' ? 'openclaw/default' : ''),
+    effort: effort(input.effort),
     tmuxSession: input.tmuxSession ? id(input.tmuxSession) : '',
     note: text(input.note, 'note', 400), displayName: text(input.displayName, 'display name', 80).trim(),
     description: text(input.description, 'description', 500).trim(), icon: text(input.icon, 'icon', 16).trim(),
@@ -111,8 +118,9 @@ function agent(input) {
     pinned: Boolean(input.pinned), itrust: Boolean(input.itrust), browser: Boolean(input.browser), createdAt: input.createdAt || new Date().toISOString()
   };
 }
-function prompt(value) {
-  if (typeof value !== 'string' || !value.trim() || value.length > 80000 || value.includes('\0')) throw new Error('Enter a message shorter than 80,000 characters.');
+// `empty`: a message with attachments may have no text.
+function prompt(value, {empty = false} = {}) {
+  if (typeof value !== 'string' || (!empty && !value.trim()) || value.length > 80000 || value.includes('\0')) throw new Error('Enter a message shorter than 80,000 characters.');
   return value;
 }
-module.exports = {text, id, port, endpoint, host, agent, avatar, group, tags, prompt, parseAddress};
+module.exports = {text, id, port, endpoint, host, agent, avatar, group, tags, prompt, effort, parseAddress};

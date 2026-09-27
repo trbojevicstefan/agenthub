@@ -4,6 +4,8 @@ const os=require('node:os');
 const path=require('node:path');
 const {launch,collect,terminate,inFolder}=require('../process.cjs');
 const {claudeConfig}=require('../mcp.cjs');
+const attach=require('../attachments.cjs');
+const levels=require('../effort.cjs');
 // MCP servers go to Claude in a private temporary file, so tokens in env or headers stay off the command line.
 function mcpFile(servers){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'opaya-mcp-'));const file=path.join(dir,'mcp.json');
@@ -14,22 +16,47 @@ function mcpFile(servers){
 const CLAUDE_MODELS=['sonnet','opus','haiku','opusplan','claude-opus-5-5','claude-sonnet-5','claude-fable-5-1','claude-haiku-4-5-20251001'];
 class ClaudeAdapter{
   async listModels(){return [...new Set([...CLAUDE_MODELS,this.agent.model].filter(Boolean))];}
-  constructor({agent,host,spawnAgent=launch,mcpServers=()=>[],trusted=()=>false}){this.trusted=trusted;this.agent=agent;this.host=host;this.spawnAgent=spawnAgent;this.mcpServers=mcpServers;}
+  constructor({agent,host,spawnAgent=launch,mcpServers=()=>[],trusted=()=>false,onChange=()=>{}}){this.trusted=trusted;this.agent=agent;this.host=host;this.spawnAgent=spawnAgent;this.mcpServers=mcpServers;this.onChange=onChange;this.noEffort=false;}
+  // --effort takes these; a Claude Code too old for the flag gets none (found on the first turn that uses it).
+  get efforts(){return this.noEffort?[]:levels.CLAUDE;}
   async connect(){
     const version=await collect(this.spawnAgent(this.agent,[...this.agent.args,'--version'],this.host),{timeout:15000,maxBytes:16384});
     return {description:`CLI available: ${version.trim().slice(0,100)}. Sign-in is checked when sending.`};
   }
   async run(ctx){
-    const agent=inFolder(this.agent,ctx.cwd),args=[...agent.args,'-p','--output-format','stream-json','--verbose','--include-partial-messages','--permission-mode',this.trusted()?'bypassPermissions':'default'];
+    const agent=inFolder(this.agent,ctx.cwd),items=ctx.attachments||[],remote=attach.placeOf(this.agent)!=='local';
+    // Attached files: text inlined, images up to 3.75 MB as image blocks (stream-json input), everything else by a path in
+    // a folder Claude may read (the chat's attachments folder here, or a copy on the machine or container it runs in).
+    const images=items.filter(i=>i.kind==='image'&&i.size<=attach.INLINE_IMAGE),cut=attach.plan(items);
+    const linked=items.filter(i=>i.kind==='file'||i.kind==='image'&&!images.includes(i)||cut.has(i));
+    const where=linked.length?await attach.locate(this.agent,this.host,linked,ctx.conversation.id,{signal:ctx.signal,onEvent:ctx.onEvent,spawn:this.spawnAgent,copyTo:ctx.filesDir||''}):new Map();
+    const text=items.length?attach.compose(ctx.text,items,i=>where.get(i)||''):ctx.text;
+    const args=[...agent.args,'-p','--output-format','stream-json','--verbose','--include-partial-messages','--permission-mode',this.trusted()?'bypassPermissions':'default'];
+    if(images.length)args.push('--input-format','stream-json');
     if(ctx.conversation.externalSessionId)args.push('--resume',ctx.conversation.externalSessionId);
     const model=ctx.conversation.model||this.agent.model;if(model)args.push('--model',model);
+    const effort=this.noEffort?'':levels.nearest(ctx.effort||'',levels.CLAUDE);if(effort)args.push('--effort',effort);
+    const dirs=[...new Set([...where.values()].map(p=>(remote?path.posix:path).dirname(p)))];if(dirs.length)args.push('--add-dir',...dirs);
     const servers=this.mcpServers()||[];let config=null;
     if(servers.length&&this.agent.transport==='ssh')ctx.onEvent({type:'activity',text:'MCP servers from Opaya are not passed to Claude over SSH. Add them on that machine with `claude mcp add`.'});
     else if(servers.length){config=mcpFile(servers);args.push('--mcp-config',config.file);}
-    let child;try{child=this.spawnAgent({...agent,args:this.agent.args},args,this.host);}catch(error){config?.remove();throw error;}this.child=child;
+    try{
+      // The prompt goes on stdin: plain text, or one stream-json user message when it carries images.
+      const input=images.length?JSON.stringify({type:'user',message:{role:'user',content:[{type:'text',text},...await Promise.all(images.map(async i=>({type:'image',source:{type:'base64',media_type:i.mime,data:await attach.base64(i)}})))]}})+'\n':text;
+      try{return await this.turn(agent,args,input,ctx);}
+      catch(error){
+        // Claude Code before --effort existed: answer without it, and stop offering it.
+        if(!effort||ctx.signal.aborted||!/unknown option.*--effort/i.test(String(error?.message||'')))throw error;
+        this.noEffort=true;this.onChange();ctx.onEvent({type:'activity',text:'This Claude Code version has no reasoning effort setting, so it answers with its own (update it with claude update).'});
+        args.splice(args.indexOf('--effort'),2);return await this.turn(agent,args,input,ctx);
+      }
+    }finally{config?.remove();}
+  }
+  turn(agent,args,input,ctx){
+    const child=this.spawnAgent({...agent,args:this.agent.args},args,this.host);this.child=child;
     return new Promise((resolve,reject)=>{
       let buffer='',stderr='',sessionId='',sawText=false,resultSeen=false,done=false,resultError='';
-      const finish=(error)=>{if(done)return;done=true;config?.remove();clearTimeout(timer);ctx.signal.removeEventListener('abort',cancel);this.child=null;error?reject(error):resolve({externalSessionId:sessionId||ctx.conversation.externalSessionId});};
+      const finish=(error)=>{if(done)return;done=true;clearTimeout(timer);ctx.signal.removeEventListener('abort',cancel);this.child=null;error?reject(error):resolve({externalSessionId:sessionId||ctx.conversation.externalSessionId});};
       const cancel=()=>{terminate(child);finish(new Error('Cancelled.'));};
       const timer=setTimeout(()=>{terminate(child);finish(new Error('Claude turn timed out.'));},10*60*1000);
       ctx.signal.addEventListener('abort',cancel,{once:true});
@@ -58,7 +85,7 @@ class ClaudeAdapter{
       child.on('close',code=>{if(buffer.trim())parse(buffer);finish(code!==0?new Error(stderr||`Claude exited (${code}).`):resultError?new Error(resultError):!resultSeen?new Error('Claude exited before a final result. Partial output was kept.'):null);});
       child.stdin.on('error',()=>{});
       // Prompt stays off the command line and process list, including over SSH.
-      child.stdin.end(ctx.text);
+      child.stdin.end(input);
       if(ctx.signal.aborted)cancel();
     });
   }

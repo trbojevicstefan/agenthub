@@ -30,7 +30,8 @@ class ConnectionLog{
   constructor(limit=500){this.limit=limit;this.entries=[];this.lastIn=0;this.lastOut=0;}
   add(direction,text){
     const now=Date.now();if(direction==='in')this.lastIn=now;if(direction==='out')this.lastOut=now;
-    for(const line of String(text).split(/\r?\n/)){if(!line.trim())continue;this.entries.push({at:now,direction,text:redact(line).slice(0,2000)});}
+    // Cut before redacting: a frame can carry megabytes (an attached image), and only the start is kept anyway.
+    for(const line of String(text).split(/\r?\n/)){if(!line.trim())continue;this.entries.push({at:now,direction,text:redact(line.slice(0,8000)).slice(0,2000)});}
     if(this.entries.length>this.limit)this.entries.splice(0,this.entries.length-this.limit);
   }
   toJSON(){return {entries:this.entries.slice(),lastIn:this.lastIn,lastOut:this.lastOut};}

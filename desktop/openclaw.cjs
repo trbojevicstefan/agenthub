@@ -47,4 +47,35 @@ async function setMcp(agent,host,server,secret,enabled){
   if(!enabled)return run(agent,host,['mcp','unset',server.name]).catch(error=>{if(!/not found|no such|unknown|no mcp server/i.test(String(error?.message||error)))throw error;});
   return run(agent,host,['mcp','set',server.name,JSON.stringify(mcpConfig(server,secret))]);
 }
-module.exports={run,json,isRoute,modelKey,parseModels,models,parseSkills,skills,mcpConfig,setMcp};
+// ---- Thinking (reasoning effort) --------------------------------------------------------------------------------
+// OpenClaw keeps a thinking level per session and its chat API has no field for it, so Opaya sets it with a gateway call
+// through the CLI where OpenClaw runs. The CLI reads the gateway's port and token from OpenClaw's own config; nothing
+// secret goes on the command line. Only possible where Opaya can run that CLI (this computer, SSH or its container).
+const reachable=agent=>require('./attachments.cjs').placeOf(agent)!=='api';
+// The gateway port the connection uses, for a CLI on the same machine (a container publishes it under another port).
+const cliPort=agent=>{if(agent.command==='docker')return '';try{return new URL(agent.endpoint).port||'';}catch{return '';}};
+// A gateway method; refusals come back as JSON on stdout with exit code 1.
+async function call(agent,host,method,params,{port=''}={}){
+  let out;
+  try{out=await run(agent,host,['gateway','call',method,'--json','--params',JSON.stringify(params),...(port?['--port',String(port)]:[])],{timeout:30000,maxBytes:2*1024*1024});}
+  catch(error){if(!error?.stdout)throw error;out=error.stdout;}
+  let data;try{data=json(out);}catch{throw new Error('OpenClaw gateway call returned no JSON.');}
+  if(data?.ok===false)throw new Error(String(data.error?.message||'OpenClaw refused the request.').slice(0,300));
+  return data;
+}
+const LEVEL=/^[a-z][a-z0-9_-]{0,31}$/;
+const levelsOf=list=>(Array.isArray(list)?list:[]).map(l=>typeof l==='string'?l:l?.id).filter(l=>typeof l==='string'&&LEVEL.test(l));
+// The levels a refusal names: thinkingLevel "xhigh" is not supported for fake/thinker (use off|minimal|low|medium|high)
+const offered=message=>levelsOf((/\(use ([a-z0-9_|-]+)\)/i.exec(String(message||''))?.[1]||'').split('|'));
+// The session an OpenAI-compatible chat with user "agenthub:<conversation>" runs in: the default agent's for the
+// openclaw and openclaw/default routes, agent:<id>:... for openclaw/<id>.
+function sessionKey(route,conversationId){
+  const id=/^openclaw[:/]([a-z0-9][a-z0-9_-]{0,63})$/i.exec(String(route||''))?.[1]?.toLowerCase();
+  return `${id&&id!=='default'?`agent:${id}:`:''}openai-user:agenthub:${conversationId}`;
+}
+// The levels the gateway's default model takes (low to high), and its default level.
+async function thinking(agent,host,{port=cliPort(agent),caller=call}={}){
+  const d=(await caller(agent,host,'sessions.list',{limit:1},{port}))?.defaults||{};
+  return {levels:require('./effort.cjs').order(levelsOf(d.thinkingLevels?.length?d.thinkingLevels:d.thinkingOptions)),default:LEVEL.test(d.thinkingDefault||'')?d.thinkingDefault:''};
+}
+module.exports={run,json,isRoute,modelKey,parseModels,models,parseSkills,skills,mcpConfig,setMcp,reachable,cliPort,call,levelsOf,offered,sessionKey,thinking};
