@@ -22,6 +22,7 @@ const {condense} = require('./condense.cjs');
 const free = require('./free-model.cjs');
 const maintenance = require('./maintenance.cjs');
 const versions = require('./versions.cjs');
+const diagnostics = require('./diagnostics.cjs');
 const containers = require('./containers.cjs');
 const remoteWork = require('./remote-work.cjs');
 const guide = require('./guide.cjs');
@@ -203,26 +204,47 @@ async function start({app, safeStorage}, root) {
     const view=await runInTerminal({label,key,host,command:command+end});
     return waitForMark(view.id,markCount(view.id),timeout);
   }
-  // A connection that fails because something is too old: update it, reconnect, and if that does not work hand the
-  // problem to the Opaya Agent; if the Opaya Agent cannot take it, show the user the error. At most once per 30 minutes
-  // per agent, so a failing update never loops.
-  const fixing=new Map(),inFlight=new Map();
-  async function escalate(a,error,detail){
-    const o=opaya;
-    if(o?.configured()&&!o.busy){
+  // Agent errors go to the Opaya Agent. A connection that fails because something is too old is updated first and
+  // reconnected; every other error (gateway not installed or down, onboarding or sign-in unfinished, a dropped
+  // connection, a failed answer) goes to the Opaya Agent right away with Opaya's guess at the cause. If the Opaya Agent
+  // cannot take it, the user sees the error. At most once per 30 minutes per agent and kind, so nothing loops, and one
+  // hand-off at a time, so the Opaya Agent is never asked while it is busy.
+  const fixing=new Map(),inFlight=new Map(),reported=new Map();let handoffs=Promise.resolve();
+  const PHASE={connect:'does not connect',dropped:'lost its connection',turn:'failed while answering a chat'};
+  const idle=async(o,ms)=>{const end=Date.now()+ms;while(o.busy&&Date.now()<end)await new Promise(r=>setTimeout(r,2000));return !o.busy;};
+  function escalate(a,error,detail,phase='connect'){
+    const run=handoffs.then(()=>handOff(a,error,detail,phase));handoffs=run.catch(()=>{});return run;
+  }
+  async function handOff(a,error,detail,phase){
+    if(stopping||!broker.data.agents.some(x=>x.id===a.id))return;
+    const o=opaya,where=whereName(a);
+    // Fixed in the meantime (by an earlier hand-off for an agent sharing its gateway, or by the user).
+    if(phase!=='turn'&&broker.runtimeFor(a.id).status==='connected')return;
+    if(o?.configured()){
       try{
-        o.begin(`${a.name} (${a.provider}, ${whereName(a)}) does not connect: "${error}". ${detail} Find out why and fix it, then reconnect it. Use your tools; tell me only what I must do myself.`);
+        if(!await idle(o,5*60*1000))throw new Error('it stayed busy with another request');
+        if(phase!=='turn'&&broker.runtimeFor(a.id).status==='connected')return;
+        o.begin(`${a.name} (agent_id ${a.id}; ${a.provider} over ${a.protocol}, on ${where}) ${PHASE[phase]||PHASE.connect}: "${error}". ${detail} Call agent_diagnostics and read_app_logs to find the real cause, fix it with your tools, then reconnect it and check that it works. Tell me only what I must do myself (for example an interactive sign-in or a token).`);
         notice({level:'info',kind:'opaya',title:`The Opaya Agent is looking into ${a.name}`,text:detail,agentId:a.id});
-        const end=Date.now()+15*60*1000;while(o.busy&&Date.now()<end)await new Promise(r=>setTimeout(r,2000));
+        await idle(o,15*60*1000);
         if(!o.error)return;
         detail+=` The Opaya Agent could not fix it: ${o.error}`;
       }catch(e){detail+=` The Opaya Agent could not take it: ${safeError(e)}`;}
-    }else if(!o?.configured())detail+=' The Opaya Agent has no model connected, so it could not take over.';
+    }else detail+=' The Opaya Agent has no model connected, so it could not take over.';
     notice({level:'error',kind:'fix-failed',title:`${a.name} needs your attention`,text:`${error}\n\n${detail}`,agentId:a.id});
   }
+  // Any error that is not "too old": hand it to the Opaya Agent with a first diagnosis.
+  function report(a,error,phase){
+    if(stopping||broker.data.settings?.autoFix===false)return;
+    const kind=diagnostics.classify(error,a),key=`${a.id}|${kind.id}`;
+    if(reported.has(key)&&Date.now()-reported.get(key)<30*60*1000)return;
+    reported.set(key,Date.now());
+    escalate(a,String(error||'Unknown error'),`Opaya's first guess: ${kind.hint}`,phase).catch(()=>{});
+  }
   async function autoFix(a,error){
+    if(broker.data.settings?.autoFix===false)return;
     const target=versions.fixTarget(error);
-    if(broker.data.settings?.autoFix===false||!target)return;
+    if(!target)return report(a,error,'connect');
     if(fixing.has(a.id)&&Date.now()-fixing.get(a.id)<30*60*1000)return;
     fixing.set(a.id,Date.now());
     const host=hostOf(a),remote=!!host;
@@ -240,9 +262,10 @@ async function start({app, safeStorage}, root) {
     if(code!==0)return escalate(a,error,`The automatic update (${c.title||'update'}) ended with exit code ${code}; see its terminal.`);
     versions.cache.clear();checkMachine(host).then(emit).catch(()=>{});
     try{await broker.connect(a.id);notice({level:'done',kind:'fixed',title:`${a.name} is updated and connected`,text:c.title||'',agentId:a.id});}
-    catch(e){escalate(a,safeError(e),`Opaya updated it (${c.title||'update'}), but it still does not connect.`);}
+    catch(e){const err=safeError(e);if(versions.fixTarget(err))escalate(a,err,`Opaya updated it (${c.title||'update'}), but it still does not connect.`);} // other errors were reported by onConnectError
   }
   broker.onConnectError=(a,error)=>{autoFix(a,error).catch(()=>{});};
+  broker.onAgentError=(a,error,phase)=>{report(a,error,phase);};
   broker.onClientRefused=(a,text)=>{notice({level:'info',kind:'surface',agentId:a.id,title:`${a.name} opens in its terminal now`,text:`It does not accept chats from other apps anymore ("${text.slice(0,160)}"). Its own CLI still works: Opaya shows it in the terminal. Right-click > Open as chat switches back, for example after you add an API key.`});emit();};
   // An agent installed as a Docker container on a machine: the script runs in a visible terminal (pull, start, install,
   // then an interactive sign-in), and when it ends Opaya adds the container as an agent and connects it.
