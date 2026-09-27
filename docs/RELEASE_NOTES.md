@@ -1,3 +1,13 @@
+# Opaya 0.18.2 - The Opaya Agent fixes agent errors, and the chat box keeps your typing
+
+- **The Opaya Agent hears about every agent error**: a gateway that is missing or down, onboarding or sign-in that was never finished, SSH trouble, dropped connections and failed answers now go to the Opaya Agent with a first diagnosis, so it can fix them. Too-old agents are still updated first. One error is handed over at a time, and the same error for the same agent is not sent again right away.
+- **Fixed: the chat box sometimes stopped taking typing.**
+  - Yes/no questions now use a native dialog that gives the keyboard back to the chat.
+  - A new chat getting its id no longer replaces the box you are typing in; the cursor stays where it was.
+  - The one-time "How do you like to work?" question waits until you stop typing.
+  - A hidden browser pane no longer keeps the keyboard.
+- **Gemini CLI is no longer offered as an agent**: Opaya no longer installs, finds, updates, backs up or runs it in a container, and it is gone from the setup guide. Google Gemini is still available as a model for the Opaya Agent.
+
 # Opaya 0.18.1 - Works on a bare computer: no winget, npm or Homebrew needed
 
 - **Opaya brings the basics itself**: Node.js (with npm), Python 3 (with pip), uv, GitHub CLI and, on Windows, Git (with Git Bash for Claude Code) are downloaded by Opaya from their official sources, checked against their published SHA-256 checksums, and installed for your user, with no administrator password. winget, Homebrew, apt and npm are no longer needed to get started. The setup guide, Install agents and the Opaya Agent all use it on this computer.
