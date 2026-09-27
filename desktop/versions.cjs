@@ -11,7 +11,6 @@ const TOOLS=[
   {id:'claude',name:'Claude Code',bin:'claude',latest:{npm:'@anthropic-ai/claude-code'}},
   {id:'codex',name:'Codex CLI',bin:'codex',latest:{npm:'@openai/codex'}},
   {id:'openclaw',name:'OpenClaw',bin:'openclaw',latest:{npm:'openclaw'}},
-  {id:'gemini-cli',name:'Gemini CLI',bin:'gemini',latest:{npm:'@google/gemini-cli'}},
   {id:'opencode',name:'OpenCode',bin:'opencode',latest:{npm:'opencode-ai'}},
   {id:'goose',name:'Goose',bin:'goose',latest:{github:'block/goose'}},
   {id:'aider',name:'Aider',bin:'aider',latest:{pypi:'aider-chat'}},

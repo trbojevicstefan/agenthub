@@ -21,9 +21,8 @@ function safeError(error,token=''){
   if(token)value=value.split(token).join('[redacted]');
   return value.replace(/\x1b\[[0-9;]*[A-Za-z]/g,'').replace(/(Bearer\s+)[^\s]+/gi,'$1[redacted]').replace(/\bsk-[A-Za-z0-9_-]{12,}/g,'[redacted]').slice(0,2400);
 }
-// Agents whose vendor no longer accepts connections from other apps (Gemini Code Assist for individuals now points to
-// Antigravity). Their own CLI in a terminal is the way to use them, so Opaya switches them to it.
-const CLIENT_REFUSED=/(client is no longer supported|no longer supported for Gemini Code Assist|migrate to the Antigravity|antigravity\.google)/i;
+// Agents whose vendor no longer accepts connections from other apps. Their own CLI in a terminal is the way to use them, so Opaya switches them to it.
+const CLIENT_REFUSED=/client is no longer supported/i;
 class Broker{
   constructor({store,vault,emit,approve,adapterFactory=createAdapter}){
     Object.assign(this,{store,vault,emit,approve,adapterFactory});this.runtime=new Map();this.histories=new Map();this.turns=new Map();this.connecting=new Map();this.scanBusy=false;this.closing=false;
@@ -326,7 +325,7 @@ class Broker{
         const info=await adapter.connect();
         if(r.generation!==generation){adapter.close();return;}
         Object.assign(r,info,{status:'connected'});
-        const closed=error=>{if(r.adapter!==adapter||r.generation!==generation)return;r.status='error';r.error=safeError(error,token);this.changed();};
+        const closed=error=>{if(r.adapter!==adapter||r.generation!==generation)return;r.status='error';r.error=safeError(error,token);this.changed();try{this.onAgentError?.(a,r.error,'dropped');}catch{}};
         adapter.rpc?.on('closed',closed);adapter.tunnel?.on('closed',closed);
       }catch(error){adapter?.close();if(r.generation===generation){r.adapter=null;r.status='error';r.error=safeError(error,token);}try{this.onConnectError?.(a,safeError(error,token));}catch{}throw new Error(safeError(error,token));}
       finally{this.changed();}
@@ -418,6 +417,7 @@ class Broker{
         if(result?.externalSessionId)c.externalSessionId=result.externalSessionId;
       }).catch(error=>{assistant.status=abort.signal.aborted?'cancelled':'error';assistant.error=abort.signal.aborted?(turn.reason||'Stopped. The answer so far is kept and the agent stays connected.'):safeError(error,token);}).finally(async()=>{
         clearTimeout(timeout);clearTimeout(emitTimer);clearInterval(checkpoint);refused();
+        if(assistant.status==='error'&&!CLIENT_REFUSED.test(`${assistant.content||''} ${assistant.error||''}`)){const a=this.data.agents.find(x=>x.id===agentId);try{if(a)this.onAgentError?.(a,assistant.error,'turn');}catch{}}
         try{await this.store.writeTranscript(c.id,messages);await this.store.write(this.data);}catch{assistant.error='Could not save the final transcript to disk. Export it before closing.';}
         if(this.turns.get(agentId)===turn)this.turns.delete(agentId);
         finishDone();this.changed();

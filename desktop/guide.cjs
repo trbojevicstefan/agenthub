@@ -26,13 +26,12 @@ const GOALS={
 const AGENTS={
   codex:{name:'Codex CLI',needs:['node'],signIn:{posix:'codex login',windows:'codex.cmd login'},signInNote:'A browser page opens: sign in with your ChatGPT account. When it says you are signed in, come back here.'},
   claude:{name:'Claude Code',needs:[],needsWindows:['git'],signIn:{posix:'claude',windows:'claude'},signInNote:'Claude Code starts in the terminal below. Pick how to sign in (your Claude account), finish in the browser, then type /exit and press Enter.'},
-  'gemini-cli':{name:'Gemini CLI',needs:['node']},
   opencode:{name:'OpenCode',needs:['node']}
 };
-const TOOL_NAMES={git:'Git',node:'Node.js',python:'Python',uv:'uv',gh:'GitHub CLI',codex:'Codex CLI',claude:'Claude Code','gemini-cli':'Gemini CLI',opencode:'OpenCode'};
+const TOOL_NAMES={git:'Git',node:'Node.js',python:'Python',uv:'uv',gh:'GitHub CLI',codex:'Codex CLI',claude:'Claude Code',opencode:'OpenCode'};
 // Plain-language reasons shown next to each step.
 const WHY={git:'Keeps every version of your work, so nothing gets lost.',node:'Runs JavaScript: needed for websites and for Codex CLI.',python:'The most popular language for scripts, data and automation.',uv:'Installs Python packages quickly and safely.',gh:'Connects your projects to GitHub.',
-  codex:'OpenAI\'s coding agent. Works with your ChatGPT account.',claude:'Anthropic\'s coding agent. Works with your Claude account.','gemini-cli':'Google\'s coding agent. Works with your Google account.',opencode:'An open-source coding agent that works with many models.'};
+  codex:'OpenAI\'s coding agent. Works with your ChatGPT account.',claude:'Anthropic\'s coding agent. Works with your Claude account.',opencode:'An open-source coding agent that works with many models.'};
 const exists=file=>{try{return fs.existsSync(file);}catch{return false;}};
 const read=file=>{try{return fs.readFileSync(file,'utf8');}catch{return '';}};
 // Whether a CLI is signed in on this computer, from the files it writes when you sign in. (Claude Code on macOS keeps
@@ -40,7 +39,6 @@ const read=file=>{try{return fs.readFileSync(file,'utf8');}catch{return '';}};
 function signedIn(tool,home=os.homedir(),env=process.env){
   if(tool==='codex')return exists(path.join(env.CODEX_HOME||path.join(home,'.codex'),'auth.json'));
   if(tool==='claude')return exists(path.join(env.CLAUDE_CONFIG_DIR||path.join(home,'.claude'),'.credentials.json'))||/"oauthAccount"\s*:\s*\{/.test(read(path.join(home,'.claude.json')));
-  if(tool==='gemini-cli')return exists(path.join(home,'.gemini','oauth_creds.json'));
   return false;
 }
 // The computer as the guide describes it. installed: tool id -> version text (versions.installed).
@@ -50,7 +48,7 @@ function describe({installed={},platform=process.platform,arch=process.arch,memo
   return {platform,arch,system:`${os_}${platform==='darwin'?arch==='arm64'?' (Apple silicon)':' (Intel)':''}`,memoryGb:Math.round(memory/1e9),
     // Node.js without npm (some Linux packages) cannot install agents: it counts as missing.
     tools:Object.fromEntries(Object.keys(TOOL_NAMES).map(id=>[id,has(id)&&(id!=='node'||has('npm'))?String(installed[id]).slice(0,60):''])),
-    signedIn:{codex:has('codex')&&signedIn('codex',home,env),claude:has('claude')&&signedIn('claude',home,env),'gemini-cli':has('gemini-cli')&&signedIn('gemini-cli',home,env)},
+    signedIn:{codex:has('codex')&&signedIn('codex',home,env),claude:has('claude')&&signedIn('claude',home,env)},
     packageManager:platform==='win32'?'winget':has('homebrew')?'Homebrew':platform==='darwin'?'':'system',
     // A local model needs about 8 GB of memory to be useful.
     localModelOk:memory>=7.5e9};

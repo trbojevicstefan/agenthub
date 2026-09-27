@@ -60,7 +60,7 @@ test('the guide gets a model first, then hands the rest to the Opaya Agent; noth
   const win=guide.plan({way:'claude',goals:[],agents:[],facts:{tools:{},signedIn:{claude:true}},platform:'win32'});
   assert.deepEqual(win.map(s=>s.id),['install-git','install-claude','brain','add']);
   // No account: everything by script, no model steps.
-  assert.deepEqual(guide.plan({way:'none',goals:['agents'],agents:['gemini-cli'],facts:{tools:{}},platform:'linux'}).map(s=>s.id),['install-git','install-node','install-gemini-cli','add']);
+  assert.deepEqual(guide.plan({way:'none',goals:['agents'],agents:['opencode'],facts:{tools:{}},platform:'linux'}).map(s=>s.id),['install-git','install-node','install-opencode','add']);
   assert.throws(()=>guide.plan({way:'hack',facts}),/Choose what you have/);
 });
 test('sign-in is read from the files each CLI writes',async t=>{

@@ -27,20 +27,20 @@ test('"too old" connection errors say what to update',()=>{
 test('a machine report lists installed tools and marks the outdated ones',{skip},async t=>{
   const home=await temp(t),bin=path.join(home,'.local','bin');await fs.mkdir(bin,{recursive:true});
   const cli=async(name,out)=>fs.writeFile(path.join(bin,name),`#!/bin/sh\necho "${out}"\n`,{mode:0o755});
-  await cli('codex','codex-cli 0.150.0');await cli('gemini','0.61.0');await cli('ollama','Warning: could not connect to a running Ollama instance\nollama version is 0.12.1');
+  await cli('codex','codex-cli 0.150.0');await cli('opencode','0.61.0');await cli('ollama','Warning: could not connect to a running Ollama instance\nollama version is 0.12.1');
   const env={HOME:process.env.HOME,PATH:process.env.PATH};process.env.HOME=home;process.env.PATH=`${bin}:/usr/bin:/bin`;t.after(()=>Object.assign(process.env,env));
   versions.cache.clear();
-  const latest={'@openai%2Fcodex':'0.157.0','@google%2Fgemini-cli':'0.61.0'};
+  const latest={'@openai%2Fcodex':'0.157.0','opencode-ai':'0.61.0'};
   const fetchImpl=async url=>{const npm=/registry\.npmjs\.org\/(.+)\/latest/.exec(url);if(npm&&latest[npm[1]])return {ok:true,json:async()=>({version:latest[npm[1]]})};if(url.includes('ollama/ollama'))return {ok:true,json:async()=>({tag_name:'v0.13.0'})};return {ok:false,status:404,json:async()=>({})};};
   const found=Object.fromEntries((await versions.check(null,{fetchImpl})).items.map(i=>[i.id,i]));
   assert.deepEqual([found.codex.installed,found.codex.latest,found.codex.outdated],['0.150.0','0.157.0',true]);
-  assert.deepEqual([found['gemini-cli'].installed,found['gemini-cli'].outdated],['0.61.0',false]);
+  assert.deepEqual([found.opencode.installed,found.opencode.outdated],['0.61.0',false]);
   assert.deepEqual([found.ollama.installed,found.ollama.latest,found.ollama.outdated],['0.12.1','0.13.0',true],'a warning line before the version is skipped');
-  assert(!found.opencode,'tools that are not installed are not listed');
+  assert(!found.goose,'tools that are not installed are not listed');
 });
 test('the Opaya browser is only for models that can see images',()=>{
   assert.equal(visionOf({provider:'claude',command:'claude'}).vision,true);
-  assert.equal(visionOf({provider:'custom',command:'/usr/local/bin/gemini'}).vision,true);
+  assert.equal(visionOf({provider:'custom',command:'/usr/local/bin/gemini'}).vision,null,'Gemini CLI is not a known agent');
   assert.equal(visionOf({provider:'hermes',model:'anthropic/claude-sonnet-4.6'}).vision,true);
   assert.equal(visionOf({provider:'hermes',activeModel:'deepseek-v4-pro'}).vision,false);
   for(const m of ['qwen3:4b','openai/gpt-oss-120b','codestral-latest','llama3.2:3b'])assert.equal(visionOf({provider:'ollama',model:m}).vision,false,m);
@@ -60,4 +60,12 @@ test('broker refuses the browser for a text-only model and leaves it out of the 
   const i=b.data.agents.findIndex(a=>a.id===seeing.id);b.data.agents[i]={...b.data.agents[i],model:'qwen3:4b'};
   assert(!b.mcpFor(seeing.id).some(s=>s.name==='opaya-browser'));
   await b.close();
+});
+test('other agent errors get a first diagnosis for the Opaya Agent',()=>{
+  const {classify}=require('../desktop/diagnostics.cjs');const kind=(e,provider='hermes')=>classify(e,{provider}).id;
+  assert.equal(kind('connect ECONNREFUSED 127.0.0.1:8642'),'gateway');assert.match(classify('fetch failed',{provider:'hermes'}).hint,/hermes gateway status/);
+  assert.equal(kind('API authentication failed. Edit this agent and add or import its gateway token.','openclaw'),'onboarding');assert.match(classify('not configured',{provider:'openclaw'}).hint,/openclaw onboard/);
+  assert.equal(kind('Claude Code is not signed in yet.','claude'),'onboarding');
+  assert.equal(kind('spawn hermes ENOENT'),'not-installed');assert.equal(kind('The gateway is rate limited or busy (HTTP 429).'),'rate-limit');
+  assert.equal(kind('Host key verification failed'),'ssh');assert.equal(kind('something new'),'other');
 });

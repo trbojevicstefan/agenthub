@@ -44,3 +44,9 @@ test('connect all connects every disconnected agent and reports failures separat
   const original=b.adapterFactory;b.adapterFactory=options=>{const a=original(options);if(options.agent.id===two.id)a.connect=async()=>{throw new Error('gateway down');};return a;};
   const result=await b.connectAll();assert.equal(result.attempted,2);assert.equal(result.connected,1);assert.equal(result.failed.length,1);assert.equal(result.failed[0].name,'two');assert.equal(b.runtimeFor(one.id).status,'connected');
   const again=await b.connectAll();assert.equal(again.attempted,1);});
+test('dropped connections and failed answers are reported as agent errors, cancelled turns are not',async t=>{const {b,runs,adapters}=await fixture(t),one=await b.saveAgent({agent:apiAgent('one',8642)});const seen=[];b.onAgentError=(a,error,phase)=>seen.push([a.id,error,phase]);
+  const {EventEmitter}=require('node:events');const original=b.adapterFactory;b.adapterFactory=options=>{const a=original(options);a.rpc=new EventEmitter();return a;};
+  await b.connect(one.id);await b.send({agentId:one.id,text:'hello'});runs[0].reject(new Error('The Hermes gateway failed while answering (HTTP 502).'));await b.turns.get(one.id)?.done;
+  assert.deepEqual(seen,[[one.id,'The Hermes gateway failed while answering (HTTP 502).','turn']]);
+  await b.send({agentId:one.id,text:'again'});b.stop(one.id);await b.turns.get(one.id)?.done;assert.equal(seen.length,1,'a stopped turn is not an error');
+  adapters.at(-1).rpc.emit('closed',new Error('socket hang up'));assert.deepEqual(seen.at(-1),[one.id,'socket hang up','dropped']);assert.equal(b.runtimeFor(one.id).status,'error');});

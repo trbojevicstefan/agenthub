@@ -62,17 +62,7 @@ for provider, label in [("codex", "Codex CLI"), ("claude", "Claude Code")]:
     command = binary(provider)
     if command:
         agents.append({"name": label, "provider": provider, "protocol": provider, "command": command, "args": [], "cwd": str(home), "detail": "Uses this SSH account's existing CLI login."})
-# Gemini CLI and OpenCode chat over ACP. Older Gemini versions only know --experimental-acp.
-gemini = binary("gemini")
-if gemini:
-    flag = "--acp"
-    try:
-        helptext = subprocess.run([gemini, "--help"], capture_output=True, text=True, timeout=15).stdout
-        if "--acp" not in helptext.replace("--experimental-acp", "") and "--experimental-acp" in helptext:
-            flag = "--experimental-acp"
-    except Exception:
-        pass
-    agents.append({"name": "Gemini CLI", "provider": "custom", "protocol": "acp", "command": gemini, "args": [flag], "cwd": str(home), "avatar": "lib:gemini-cli", "surface": "terminal", "detail": "Opens in its own terminal (gemini %s is available for chat with an API key). Sign in once by running gemini on this machine." % flag})
+# OpenCode chats over ACP.
 opencode = binary("opencode")
 if opencode:
     agents.append({"name": "OpenCode", "provider": "custom", "protocol": "acp", "command": opencode, "args": ["acp"], "cwd": str(home), "avatar": "lib:opencode", "detail": "Chats over ACP (opencode acp). Sign in once with opencode auth login on this machine."})
