@@ -1386,6 +1386,9 @@ body[data-theme="light"] .bring-M{color:#9a6a10}body[data-theme="light"] .bring-
 .xterm .xterm-viewport{background-color:transparent!important}
 /* Secrets: the key button next to the Opaya Agent's message box, its dialog, and the secure prompt (request_secret). */
 .compose-secret{height:30px;min-width:30px;padding:6px;color:var(--muted)}
+/* The key sits where the paperclip sits in an agent chat: first in the row, left of the model. */
+.compose-bottom>.compose-secret{order:-1;margin-right:-4px;border:1px solid var(--border);border-radius:8px}
+.compose-bottom:has(>.compose-secret)>div:first-child{margin-right:auto}
 .compose-secret:hover{color:var(--text)}
 .secret-list{display:flex;flex-direction:column;gap:6px;margin:4px 0 8px}
 .secret-list .field-help{margin:0 0 2px}
