@@ -6,7 +6,8 @@ const {primeShellPath}=require('./process.cjs');
 const {visionOf}=require('./vision.cjs');
 const {scanLocal,scanRemote,fingerprint}=require('./discovery.cjs');
 const {hermesLogs}=require('./diagnostics.cjs');
-const {createAdapter}=require('./adapters/index.cjs');
+const {createAdapter,efforts:effortLevels}=require('./adapters/index.cjs');
+const attach=require('./attachments.cjs');
 const {importGatewayToken}=require('./credentials.cjs');
 const {gatewayOperation}=require('./management.cjs');
 const mcp=require('./mcp.cjs');
@@ -43,6 +44,7 @@ class Broker{
     for(const c of this.data.conversations.slice(-100))this.histories.set(c.id,await this.store.transcript(c.id));
     // An app crash may have left streaming placeholders on disk.
     for(const [id,messages] of this.histories){let recovered=false;for(const m of messages)if(m.status==='streaming'){m.status='error';m.error='The session service stopped during this turn. Saved partial output is preserved. Check the agent before retrying.';recovered=true;}if(recovered)await this.store.writeTranscript(id,messages);}
+    attach.prune(this.store.root).catch(()=>{});
     // No snapshot here: it asks the OS keychain whether encryption is available, and on macOS that can wait on a
     // keychain prompt. The service must finish starting first; the UI's first snapshot asks instead.
     return true;
@@ -52,7 +54,7 @@ class Broker{
   runtimeFor(id){if(!this.runtime.has(id))this.runtime.set(id,{status:'disconnected',error:'',models:[]});return this.runtime.get(id);}
   snapshot(){
     const {agents,hosts,conversations,activeAgentId,activeConversationId}=this.data;
-    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',activeModel:r.adapter?.currentModel||'',commands:r.adapter?.commands||[],models:r.models||[],hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,settings:this.data.settings,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations:conversations.map(({essence,...c})=>essence?{...c,essence:{by:essence.by,at:essence.at}}:c),activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
+    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',activeModel:r.adapter?.currentModel||'',commands:r.adapter?.commands||[],models:r.models||[],efforts:effortLevels(a,r.adapter),hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,settings:this.data.settings,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations:conversations.map(({essence,...c})=>essence?{...c,essence:{by:essence.by,at:essence.at}}:c),activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
   }
   changed(){if(!this.closing)this.emit(this.snapshot());}
   async persist(){await this.store.write(this.data);this.changed();}
@@ -95,7 +97,7 @@ class Broker{
   async removeAgent(id){
     const a=this.agent(id),turn=this.turns.get(id);this.disconnect(id);await turn?.done;this.data.agents=this.data.agents.filter(x=>x.id!==id);
     const conversations=this.data.conversations.filter(c=>c.agentId===id);this.data.conversations=this.data.conversations.filter(c=>c.agentId!==id);
-    for(const c of conversations){this.histories.delete(c.id);delete this.data.drafts[c.id];await this.store.deleteTranscript(c.id);}
+    for(const c of conversations){this.histories.delete(c.id);delete this.data.drafts[c.id];await this.store.deleteTranscript(c.id);await attach.remove(this.store.root,c.id);}
     delete this.data.drafts[id];delete this.data.lastConversation[id];
     for(const p of this.data.projects||[]){p.agentIds=p.agentIds.filter(x=>x!==id);p.remotes=(p.remotes||[]).filter(r=>r.agentId!==id);}
     await this.vault.remove(id);this.runtime.delete(id);
@@ -141,7 +143,7 @@ class Broker{
     if(this.data.lastConversation?.[c.agentId]===c.id)delete this.data.lastConversation[c.agentId];
     if(this.data.activeConversationId===c.id)this.data.activeConversationId=this.data.conversations.filter(x=>x.agentId===c.agentId).at(-1)?.id||'';
     const pg=this.data.playground;if(pg?.conversations)for(const [k,v] of Object.entries(pg.conversations))if(v===c.id)delete pg.conversations[k];
-    await this.store.deleteTranscript(c.id);await this.persist();return true;
+    await this.store.deleteTranscript(c.id);await attach.remove(this.store.root,c.id);await this.persist();return true;
   }
   async setEssence(id,essence){const c=this.conversation(id);c.essence={text:String(essence.text||'').slice(0,40000),by:String(essence.by||'').slice(0,120),at:new Date().toISOString()};await this.persist();return c.essence;}
   async messagesOf(id){const c=this.conversation(id);return this.histories.get(c.id)||await this.store.transcript(c.id);}
@@ -367,6 +369,16 @@ class Broker{
     if(scope==='conversation'){const c=this.data.conversations.find(c=>c.id===schema.id(conversationId)&&c.agentId===a.id);if(!c)throw new Error('Start a conversation first.');c.model=model;await this.persist();return true;}
     a.model=model;await this.persist();return true;
   }
+  // Reasoning effort, like the model: scope 'default' for every chat of the agent, 'conversation' for one chat. '' is the
+  // agent's own setting (for a chat: the agent default). It applies from the next message, so a running answer is fine.
+  async selectEffort({id,effort,scope='default',conversationId}){
+    const a=this.agent(id);effort=schema.effort(effort);
+    if(!['default','conversation'].includes(scope))throw new Error('Choose default or conversation.');
+    const offered=effortLevels(a,this.runtimeFor(a.id).adapter);
+    if(effort&&!offered.includes(effort))throw new Error(offered.length?`${a.displayName||a.name} takes these reasoning efforts: ${offered.join(', ')}.`:`${a.displayName||a.name} has no reasoning effort setting.`);
+    if(scope==='conversation'){const c=this.data.conversations.find(c=>c.id===schema.id(conversationId)&&c.agentId===a.id);if(!c)throw new Error('Start a conversation first.');c.effort=effort;await this.persist();return true;}
+    a.effort=effort;await this.persist();return true;
+  }
   async gateway({id,operation}){
     const a=this.agent(id);if(this.turns.has(id))throw new Error('Stop this agent\'s current turn first.');
     if(!['status','restart'].includes(operation))throw new Error('Unsupported gateway operation.');
@@ -380,8 +392,8 @@ class Broker{
     }
     return {output:safeError(output||'Command completed.'),operation};
   }
-  async send({agentId,conversationId,text}){
-    this.agent(agentId);text=schema.prompt(text);
+  async send({agentId,conversationId,text,attachments}){
+    this.agent(agentId);const files=attach.check(attachments);text=schema.prompt(text??'',{empty:files.length>0});
     if(this.closing)throw new Error('Opaya is closing.');
     if(this.turns.has(agentId))throw new Error('This agent is already working. Stop or wait for the active turn.');
     const r=this.runtimeFor(agentId);
@@ -392,14 +404,18 @@ class Broker{
     this.turns.set(agentId,turn);this.changed();
     let c,messages,assistant,timeout,emitTimer,checkpoint;
     try{
+      // What each attached file is, read before any chat is created, so a missing file changes nothing.
+      const items=files.length?await attach.load(files,{root:this.store.root}):[];
       c=this.data.conversations.find(x=>x.id===conversationId&&x.agentId===agentId);
       if(!c){if(conversationId)throw new Error('Conversation does not belong to this agent.');c=await this.createConversation(agentId);}
       turn.conversationId=c.id;
       messages=this.histories.get(c.id)||await this.store.transcript(c.id);this.histories.set(c.id,messages);
       if(abort.signal.aborted)throw new Error('Turn cancelled before it was sent.');
-      const user={id:randomUUID(),role:'user',content:text,status:'done',createdAt:new Date().toISOString()};
+      // Pasted files are saved in this chat's attachments folder; the transcript keeps only name, size, type and kind.
+      if(items.length)await attach.save(items,{root:this.store.root,conversationId:c.id});
+      const user={id:randomUUID(),role:'user',content:text,status:'done',createdAt:new Date().toISOString(),...(items.length?{attachments:attach.meta(items)}:{})};
       assistant={id:randomUUID(),role:'assistant',content:'',status:'streaming',activity:[],createdAt:new Date().toISOString()};
-      messages.push(user,assistant);if(c.title==='New conversation')c.title=text.slice(0,65).replace(/\s+/g,' ');
+      messages.push(user,assistant);if(c.title==='New conversation')c.title=(text.trim()?text:items.map(i=>i.name).join(', ')).slice(0,65).replace(/\s+/g,' ');
       delete this.data.drafts[conversationId||agentId];
       await this.store.writeTranscript(c.id,messages);await this.persist();
       if(abort.signal.aborted)throw new Error('Turn cancelled before it was sent.');
@@ -422,7 +438,8 @@ class Broker{
       const refused=()=>{const text=`${assistant.content||''} ${assistant.error||''}`;if(!CLIENT_REFUSED.test(text))return;const a=this.data.agents.find(x=>x.id===agentId);if(!a||a.surface==='terminal')return;a.surface='terminal';this.onClientRefused?.(a,text.trim().slice(0,400));}; // saved with the turn below
       turn.task=Promise.resolve().then(()=>{
         if(abort.signal.aborted)throw new Error('Turn cancelled before it was sent.');
-        return adapter.run({text,messages:messages.filter(m=>m!==assistant),conversation:c,cwd:this.conversationCwd(c,this.agent(agentId)),signal:abort.signal,onEvent,onSession:async sessionId=>{c.externalSessionId=sessionId;await this.store.write(this.data);}});
+        const a=this.agent(agentId);
+        return adapter.run({text,attachments:items,effort:c.effort||a.effort||'',filesDir:attach.folder(this.store.root,c.id),messages:messages.filter(m=>m!==assistant),conversation:c,cwd:this.conversationCwd(c,a),signal:abort.signal,onEvent,onSession:async sessionId=>{c.externalSessionId=sessionId;await this.store.write(this.data);}});
       }).then(result=>{
         if(abort.signal.aborted){assistant.status='cancelled';assistant.error=turn.reason||'Stopped. The answer so far is kept and the agent stays connected.';}else assistant.status='done';
         if(result?.externalSessionId)c.externalSessionId=result.externalSessionId;

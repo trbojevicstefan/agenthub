@@ -223,7 +223,8 @@ function collect(child, {timeout = 15000, maxBytes = 1024 * 1024, input = '', si
     child.stdout.on('data', chunk => { out += chunk; if (out.length > maxBytes) { terminate(child); finish(new Error('Discovery response exceeded the safety limit.')); } });
     child.stderr.on('data', chunk => { err = (err + chunk).slice(-4000); });
     child.on('error', error => finish(error));
-    child.on('close', code => finish(code === 0 ? null : new Error(err.trim() || `Process exited with code ${code}.`), out));
+    // A failed command keeps what it printed: some CLIs (openclaw gateway call) answer with JSON and exit code 1.
+    child.on('close', code => finish(code === 0 ? null : Object.assign(new Error(err.trim() || `Process exited with code ${code}.`), {stdout: out}), out));
     child.stdin.on('error', () => {});
     child.stdin.end(input);
     if (signal?.aborted) abort();

@@ -532,6 +532,8 @@ async function start({app, safeStorage}, root) {
   }
   const actions = {
     agentModels:x=>broker.models(schema.id(x.id)),selectModel:x=>broker.selectModel(x),gateway:x=>broker.gateway(x),
+    // Reasoning effort under the chat, and what a picked or dropped file is ([{path,name,size,mime}]) before it is attached.
+    selectEffort:x=>broker.selectEffort(x), fileInfo:x=>require('./attachments.cjs').inspect(x?.paths),
     snapshot, saveAgent:x=>broker.saveAgent(x), reorderAgents:x=>broker.reorderAgents(x), updateAgentDisplay:x=>broker.updateAgentDisplay(x), saveHost:x=>broker.saveHost(x), removeHost:x=>broker.removeHost(x.id),
     removeAgent:async x=>{const a=broker.agent(x.id); if(!await approve(a,'Remove this agent connection?','Deletes its saved connection and local chat transcripts, not the agent installation.'))return false;terminals.closeAgent(a.id);await broker.removeAgent(a.id);return true;},
     discover:x=>broker.discover(x), connect:x=>broker.connect(x.id), disconnect:x=>broker.disconnect(x.id), clearError:x=>broker.clearError(x.id),
