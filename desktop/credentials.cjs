@@ -15,7 +15,33 @@ function parseGatewayToken(raw){
   }
   throw new Error('API_SERVER_KEY was not found in this profile. Configure the gateway API first.');
 }
+// OpenClaw keeps its gateway token in ~/.openclaw/openclaw.json (gateway.auth.token).
+function parseOpenclawToken(raw){
+  let config;try{config=JSON.parse(raw);}catch{throw new Error('OpenClaw\'s config is not plain JSON, so Opaya cannot read its gateway token. Enter it manually (openclaw config get gateway.auth.token).');}
+  const value=config?.gateway?.auth?.token;
+  if(typeof value!=='string'||!value||value.length>16000||/[\r\n\0]/.test(value))throw new Error('No OpenClaw gateway token was found (gateway.auth.token). Finish openclaw onboard first, or enter the token manually.');
+  if(value.includes('${'))throw new Error('The OpenClaw gateway token uses environment expansion. Enter its resolved value manually.');
+  return value;
+}
+async function importOpenclawToken(agent,host){
+  if(agent.transport!=='ssh'){
+    const file=path.join(require('node:os').homedir(),'.openclaw','openclaw.json');const info=await fs.stat(file);
+    if(info.size>1048576)throw new Error('OpenClaw config is too large.');
+    return parseOpenclawToken(await fs.readFile(file,'utf8'));
+  }
+  const code=[
+    'import sys,pathlib,json',
+    'p=pathlib.Path.home()/".openclaw"/"openclaw.json"',
+    'assert p.stat().st_size <= 1048576, "config too large"',
+    'c=json.loads(p.read_text())',
+    't=((c.get("gateway") or {}).get("auth") or {}).get("token") or ""',
+    'print(json.dumps({"gateway":{"auth":{"token":t}}}))'
+  ].join('\n');
+  const child=launch({...agent,command:'python3',hermesHome:''},['-c',code],host);
+  return parseOpenclawToken(await collect(child,{maxBytes:40000,timeout:15000}));
+}
 async function importGatewayToken(agent,host){
+  if(agent.provider==='openclaw')return importOpenclawToken(agent,host);
   if(agent.provider!=='hermes'||!agent.hermesHome)throw new Error('Token import requires a Hermes profile path.');
   if(agent.transport!=='ssh'){
     const file=path.join(agent.hermesHome,'.env');const info=await fs.stat(file);
@@ -44,4 +70,4 @@ async function importGatewayToken(agent,host){
   const response=JSON.parse(await collect(child,{maxBytes:20000,timeout:15000}));
   return parseGatewayToken(response.line||'');
 }
-module.exports={parseGatewayToken,importGatewayToken};
+module.exports={parseGatewayToken,parseOpenclawToken,importGatewayToken};

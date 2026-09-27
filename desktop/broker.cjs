@@ -79,7 +79,8 @@ class Broker{
       if(!ok)throw new Error('Agent executable was not approved.');
     }
     if(importToken){
-      const ok=await this.approve(a,'Import this Hermes gateway token?',`Read only API_SERVER_KEY from ${a.hermesHome}/.env${a.transport==='ssh'?' over verified SSH':''}. Provider API keys are not imported. The token stays in Opaya\'s native process and OS-encrypted vault.`);
+      const where=a.transport==='ssh'?' over verified SSH':'';
+      const ok=await this.approve(a,`Import this ${a.provider==='openclaw'?'OpenClaw':'Hermes'} gateway token?`,a.provider==='openclaw'?`Read only gateway.auth.token from ~/.openclaw/openclaw.json${where}. Provider API keys are not imported. The token stays in Opaya\'s native process and OS-encrypted vault.`:`Read only API_SERVER_KEY from ${a.hermesHome}/.env${where}. Provider API keys are not imported. The token stays in Opaya\'s native process and OS-encrypted vault.`);
       if(!ok)throw new Error('Token import cancelled.');
       token=await importGatewayToken(a,a.transport==='ssh'?this.host(a.hostId):null);
     }
@@ -245,6 +246,8 @@ class Broker{
     const result=await cloner.clone({agent:a,sourceHost:a.transport==='ssh'?this.host(a.hostId):null,host,runtime,scope,keys,cron:cron===undefined?undefined:!!cron,name:name||`${a.name}-clone`,progress});
     progress({step:'save',state:'active',message:'Adding the clone to Opaya'});
     const saved=await this.saveAgent({agent:result.connection},{preapproved:true});
+    // An OpenClaw clone got the source's config, so its gateway token is the same one.
+    if(result.copyToken&&this.vault.has(a.id))await this.vault.set(saved.id,this.vault.get(a.id),true);
     progress({step:'save',state:'done',message:`${saved.name} added`});
     progress({step:'connect',state:'active',message:`Connecting to ${saved.name}`});
     try{await this.connect(saved.id);progress({step:'connect',state:'done',message:`${saved.name} is connected`});}

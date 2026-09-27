@@ -60,9 +60,11 @@ async function selection(where,home,scope,keys,cron=cronDefault(scope)){
   return wanted?names:names.filter(keep);
 }
 // Uncompressed tar, so bytes on the wire match file sizes and the percentage is real; ssh -C compresses on the network.
-function producer(where,home,paths){
-  if(isLocal(where)){const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-cf','-','-C',home,...paths],{windowsHide:true,stdio:['ignore','pipe','pipe']});}
-  return shell(where,`cd ${quote(home)} && tar -cf - ${paths.map(quote).join(' ')}`,{compress:true});
+// `excludes` are paths below the copied ones to leave out (history, logins), as tar patterns.
+function producer(where,home,paths,excludes=[]){
+  const ex=excludes.map(e=>`--exclude=${e}`);
+  if(isLocal(where)){const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-cf','-',...ex,'-C',home,...paths],{windowsHide:true,stdio:['ignore','pipe','pipe']});}
+  return shell(where,`cd ${quote(home)} && tar -cf - ${[...ex,...paths].map(quote).join(' ')}`,{compress:true});
 }
 async function consumer(where,dest){
   if(isLocal(where)){await fs.mkdir(dest,{recursive:true,mode:0o700});const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-xf','-','-C',dest],{windowsHide:true,stdio:['pipe','ignore','pipe']});}
@@ -78,12 +80,12 @@ async function measure(where,home,paths){
   const [bytes,files]=out.trim().split(/\s+/).map(Number);return {bytes:bytes||0,files:files||0};
 }
 // Pipe the archive from source to target; both sides must finish cleanly. Reports bytes as they pass.
-async function transfer(from,home,paths,to,dest,{onBytes=()=>{},timeout=2*60*60*1000}={}){
+async function transfer(from,home,paths,to,dest,{onBytes=()=>{},timeout=2*60*60*1000,excludes=[]}={}){
   // Listen for exit as soon as each process exists, so a fast process cannot finish unnoticed.
   const done=child=>new Promise(resolve=>{child.on('error',e=>resolve(e.message));child.on('close',code=>resolve(code));});
   // The receiving side starts first; the sender starts only when it is ready and is connected in the same tick.
   const inp=await consumer(to,dest),inDone=done(inp);let errIn='',sent=0;inp.stderr?.on('data',d=>{errIn=(errIn+d).slice(-2000);});inp.stdin.on('error',()=>{});
-  let out;try{out=producer(from,home,paths);}catch(error){inp.kill();throw error;}
+  let out;try{out=producer(from,home,paths,excludes);}catch(error){inp.kill();throw error;}
   const outDone=done(out);let errOut='';out.stderr?.on('data',d=>{errOut=(errOut+d).slice(-2000);});
   out.stdout.on('data',chunk=>{sent+=chunk.length;onBytes(sent);});
   out.stdout.pipe(inp.stdin);
@@ -141,7 +143,7 @@ const fmt=n=>n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?
 // Clone `agent` (from `sourceHost`) to `host` (null = this computer). Returns the new agent connection to save.
 async function clone({agent,sourceHost,host,runtime='regular',scope='everything',keys=true,cron=cronDefault(scope),name,progress=()=>{}}){
   cron=!!cron;
-  if(agent.provider!=='hermes')throw new Error('Cloning is available for Hermes agents.');
+  if(agent.provider!=='hermes')return require('./clone-cli.cjs').clone({agent,sourceHost,host,runtime,scope,keys,name,progress});
   const id=slug(name);if(!id)throw new Error('Give the clone a name with letters or numbers.');
   progress({step:'target',state:'active',message:`Checking ${host?host.name:'this computer'} for ${runtime==='docker'?'Docker':'Hermes'}`});
   const t=await targetInfo({host,runtime,name:id}),container=runtime==='docker'?`opaya-hermes-${id}`:'';
@@ -159,9 +161,10 @@ async function clone({agent,sourceHost,host,runtime='regular',scope='everything'
 // Copy the same parts again from the source into an existing clone; containers restart to pick them up.
 async function redeploy({agent,source,sourceHost,host,progress=()=>{}}){
   const c=agent.clone;if(!c)throw new Error('This agent is not a clone.');
+  if(c.framework&&c.framework!=='hermes')return require('./clone-cli.cjs').redeploy({agent,source,sourceHost,host,progress});
   const to={host:host||null,container:''};
   const paths=await copyParts({agent:source,sourceHost,scope:c.scope,keys:c.keys,cron:c.cron??cronDefault(c.scope),to,dest:c.dir,progress});
   if(c.container){progress({step:'start',state:'active',message:`Restarting container ${c.container}`});await startContainer(to,c.dir,c.container);progress({step:'start',state:'done',message:`Container ${c.container} restarted`});}
   return {copied:paths};
 }
-module.exports={clone,redeploy,SCOPES,EXCLUDE,slug,selection,transfer,measure,place,shell,run,sourceHome,isLocal};
+module.exports={clone,redeploy,SCOPES,EXCLUDE,slug,selection,transfer,measure,place,shell,run,sourceHome,isLocal,fmt};

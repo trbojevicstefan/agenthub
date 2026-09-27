@@ -1,4 +1,5 @@
 'use strict';
+const quote=v=>"'"+String(v).replace(/'/g,"'\\''")+"'";
 // Installable agent frameworks. Commands are fixed strings from the vendors' published install instructions; nothing
 // from the UI or the Opaya Agent is ever interpolated into them. Installs run in a visible terminal after approval.
 const FRAMEWORKS = [
@@ -96,4 +97,47 @@ function updateCommand(id,{remote}){
   if(!value||!available(f,remote))throw new Error(`Opaya has no ${remote?'remote':posix?'':'Windows '}update command for ${f.name}. Install it again to get the latest version.`.replace('  ',' '));
   return {framework:{...f,after:`${f.name} is up to date.`},command:value};
 }
-module.exports={FRAMEWORKS,UPDATES,list,command};
+// Onboarding and gateways, so the Opaya Agent can finish an agent's setup after installing it. Same rules as installs:
+// fixed vendor commands in a visible terminal; the user types passwords, API keys and browser sign-ins there.
+// sign_in: the vendor's own setup wizard. enable_api: turn on the OpenAI-compatible API Opaya chats through (Hermes gets
+// a random API_SERVER_KEY that is written to its .env, never printed; Opaya imports it into its vault).
+// start_gateway: start the gateway in the background (its service when installed). status: read-only check.
+const HERMES_WIN_HOME="$h=if($env:HERMES_HOME){$env:HERMES_HOME}elseif(Test-Path \"$env:LOCALAPPDATA\\hermes\\.env\"){\"$env:LOCALAPPDATA\\hermes\"}else{\"$HOME\\.hermes\"}";
+const SETUP={
+  hermes:{
+    sign_in:{posix:'hermes setup',windows:'hermes setup',note:'The Hermes setup wizard asks for the model provider and its API key. The user types the key in the terminal.'},
+    enable_api:{
+      posix:`h="\${HERMES_HOME:-$HOME/.hermes}"; mkdir -p "$h" && f="$h/.env" && touch "$f" && chmod 600 "$f" && if grep -q '^API_SERVER_ENABLED=' "$f"; then sed -i.opaya 's/^API_SERVER_ENABLED=.*/API_SERVER_ENABLED=true/' "$f" && rm -f "$f.opaya"; else echo 'API_SERVER_ENABLED=true' >> "$f"; fi && { grep -q '^API_SERVER_KEY=.' "$f" || echo "API_SERVER_KEY=$(openssl rand -hex 32 2>/dev/null || od -An -N32 -tx1 /dev/urandom | tr -d ' \\n')" >> "$f"; } && echo "Gateway API enabled in $f (API_SERVER_ENABLED=true, API_SERVER_KEY set). Restart the gateway to use it."`,
+      windows:`${HERMES_WIN_HOME}; New-Item -ItemType Directory -Force $h | Out-Null; $f=Join-Path $h '.env'; if(-not (Test-Path $f)){New-Item -ItemType File $f | Out-Null}; $lines=@(Get-Content $f | Where-Object { $_ -notmatch '^API_SERVER_ENABLED=' }); $lines+='API_SERVER_ENABLED=true'; if(-not ($lines | Where-Object { $_ -match '^API_SERVER_KEY=.' })){ $b=New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); $lines+='API_SERVER_KEY='+(-join ($b | ForEach-Object { '{0:x2}' -f $_ })) }; Set-Content -Path $f -Value $lines; "Gateway API enabled in $f (API_SERVER_ENABLED=true, API_SERVER_KEY set). Restart the gateway to use it."`},
+    start_gateway:{
+      posix:`hermes gateway start 2>/dev/null || { h="\${HERMES_HOME:-$HOME/.hermes}"; mkdir -p "$h/logs"; nohup hermes gateway run >> "$h/logs/opaya-gateway.log" 2>&1 & sleep 6; }; hermes gateway status`,
+      windows:`hermes gateway start; if ($LASTEXITCODE -ne 0) { Start-Process hermes -ArgumentList 'gateway','run' -WindowStyle Hidden; Start-Sleep 6 }; hermes gateway status`},
+    status:{posix:'hermes status; hermes gateway status',windows:'hermes status; hermes gateway status'}},
+  openclaw:{
+    sign_in:{posix:'openclaw onboard --install-daemon',windows:'openclaw onboard --install-daemon',note:'The OpenClaw onboarding wizard asks for the model provider, its sign-in or API key, and installs the gateway service. The user types keys in the terminal.'},
+    enable_api:{posix:'openclaw config set gateway.http.endpoints.chatCompletions.enabled true && { openclaw gateway restart || true; }',windows:'openclaw config set gateway.http.endpoints.chatCompletions.enabled true; openclaw gateway restart'},
+    start_gateway:{
+      posix:`openclaw gateway start 2>/dev/null || { mkdir -p "$HOME/.openclaw"; nohup openclaw gateway >> "$HOME/.openclaw/opaya-gateway.log" 2>&1 & sleep 6; }; openclaw gateway status`,
+      windows:`openclaw gateway start; if ($LASTEXITCODE -ne 0) { Start-Process openclaw -ArgumentList 'gateway' -WindowStyle Hidden; Start-Sleep 6 }; openclaw gateway status`},
+    status:{posix:'openclaw status; openclaw gateway status',windows:'openclaw status; openclaw gateway status'}},
+  claude:{sign_in:{posix:'claude',windows:'claude',note:'Claude Code opens: the user picks how to sign in and finishes in the browser, then types /exit (or you send ctrl_c twice once it says they are signed in).'}},
+  codex:{
+    sign_in:{posix:'codex login',remote:'codex login --device-auth',windows:'codex.cmd login',note:'On this computer a browser page opens for the ChatGPT sign-in; on a machine Codex shows a link and a code to enter on any device.'},
+    status:{posix:'codex login status',windows:'codex.cmd login status'}},
+  opencode:{sign_in:{posix:'opencode auth login',windows:'opencode auth login',note:'OpenCode asks for a provider and its key.'},status:{posix:'opencode auth list',windows:'opencode auth list'}},
+  goose:{sign_in:{posix:'goose configure',windows:'',note:'Goose asks for a provider and its key.'}}
+};
+const SETUP_STEPS=['sign_in','enable_api','start_gateway','status'];
+// The command for one setup step. hermesHome picks a Hermes profile; container runs it inside a Docker agent.
+function setupCommand(id,step,{remote=false,windows=process.platform==='win32'&&!remote,hermesHome='',container=''}={}){
+  const f=FRAMEWORKS.find(x=>x.id===id),s=SETUP[id]?.[step];
+  if(!f||!SETUP[id])throw new Error(`Opaya has no setup steps for ${id}. Setup steps exist for ${Object.keys(SETUP).join(', ')}.`);
+  if(!s)throw new Error(`${f.name} has no ${step.replace('_',' ')} step. It has: ${Object.keys(SETUP[id]).join(', ')}.`);
+  if(container)windows=false;
+  let command=windows?s.windows:(remote&&s.remote)||s.posix;
+  if(!command)throw new Error(`${f.name} cannot do this on Windows.`);
+  if(hermesHome&&id==='hermes')command=windows?`$env:HERMES_HOME='${String(hermesHome).replace(/'/g,"''")}'; ${command}`:`export HERMES_HOME=${quote(hermesHome)}; ${command}`;
+  if(container)command=`if [ -t 0 ]; then t=-it; else t=-i; fi; docker exec $t ${quote(container)} sh -c ${quote(command)}`;
+  return {framework:{id:f.id,name:f.name},step,command,note:s.note||''};
+}
+module.exports={FRAMEWORKS,UPDATES,SETUP,SETUP_STEPS,list,command,setupCommand};
