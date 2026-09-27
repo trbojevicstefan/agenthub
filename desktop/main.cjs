@@ -153,6 +153,7 @@ if(hostMode){
       handlers.pickFiles=async()=>{const result=await dialog.showOpenDialog(win,{title:'Attach files',properties:['openFile','multiSelections']});return result.canceled||!result.filePaths.length?[]:client.call('fileInfo',{paths:result.filePaths});};
       handlers.send=async input=>{const attachments=require('./attachments.cjs'),staged=await attachments.stage(input,app.getPath('userData'));try{return await client.call('send',staged.input);}catch(error){await attachments.unstage(staged.files);throw error;}};
       for(const method of ['agentModels','selectModel','gateway'])handlers[method]=input=>client.call(method,input);
+      for(const method of ['opayaHoldSecret','opayaForgetSecret'])handlers[method]=input=>client.call(method,input);
       // Copying an agent to a VPS can take minutes.
       for(const method of ['cloneAgent','redeployAgent'])handlers[method]=input=>client.call(method,input,20*60*1000);
       // These wait for the user's approval, which can take up to ten minutes.
@@ -215,6 +216,10 @@ if(hostMode){
         openDocs:x=>{const framework=String(x.topic||'').startsWith('framework:')&&require('./catalog.cjs').FRAMEWORKS.find(f=>'framework:'+f.id===x.topic);if(framework)return shell.openExternal(framework.docs);if(!Object.hasOwn(docs,x.topic))throw new Error('Unknown documentation topic.');return shell.openExternal(docs[x.topic]);},
         exportConversation:async x=>{const {conversation:c,agent:a,messages}=await client.call('transcript',x);const result=await dialog.showSaveDialog(win,{title:'Export conversation',defaultPath:(c.title.replace(/[^a-zA-Z0-9 -]/g,'').slice(0,70)||'conversation')+'.md',filters:[{name:'Markdown',extensions:['md']}]});if(result.canceled||!result.filePath)return false;await fs.writeFile(result.filePath,`# ${c.title}\n\nAgent: ${a.name}\n\n`+messages.map(m=>`## ${m.role==='user'?'You':a.name}\n\n${m.content}\n${m.error?'> '+m.error:''}\n`).join('\n'),{mode:0o600});return true;}
       });
+      // Secure prompts (the Opaya Agent's request_secret) are approvals of kind secret: their answer carries the typed
+      // value to the session service, only for those requests, and never becomes an "Allow always" rule.
+      const secretRequests=new Set(),answerApproval=handlers.approvalAnswer;client.on('approval',request=>{if(request?.kind==='secret')secretRequests.add(request.id);});
+      handlers.approvalAnswer=async x=>{if(!secretRequests.has(x.id))return answerApproval(x);const pending=pendingApprovals.get(x.id);secretRequests.delete(x.id);if(!pending)return false;pendingApprovals.delete(x.id);const value=x.choice==='once'&&Date.now()<=pending.expires&&typeof x.value==='string'?x.value:'';client.answer(x.id,!!value,value||undefined);return !!value;};
       for(const [method,handler]of Object.entries(handlers))ipcMain.handle(`hub:${method}`,async(event,input)=>{
         if(!trusted(event))throw new Error('Untrusted desktop caller.');
         try{return {ok:true,data:await handler(input||{})};}catch(error){return {ok:false,error:safeError(error)};}

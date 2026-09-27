@@ -1384,3 +1384,17 @@ body[data-theme="light"] .bring-M{color:#9a6a10}body[data-theme="light"] .bring-
 .topbar-actions .manage-button span{font-size:13px}
 /* xterm 6 paints its viewport black; the terminal element carries the theme background instead. */
 .xterm .xterm-viewport{background-color:transparent!important}
+/* Secrets: the key button next to the Opaya Agent's message box, its dialog, and the secure prompt (request_secret). */
+.compose-secret{height:30px;min-width:30px;padding:6px;color:var(--muted)}
+.compose-secret:hover{color:var(--text)}
+.secret-list{display:flex;flex-direction:column;gap:6px;margin:4px 0 8px}
+.secret-list .field-help{margin:0 0 2px}
+.secret-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg)}
+.secret-row>span:first-child{min-width:0;overflow-wrap:anywhere}
+.secret-row>span:last-child{display:flex;gap:8px;flex-shrink:0}
+.secret-row small{color:var(--muted);margin-left:4px}
+.secret-row code{color:var(--accent)}
+.approval-dialog.secret-prompt{width:min(520px,90vw)}
+.approval-dialog.secret-prompt .field{margin:18px 0 10px}
+.approval-dialog.secret-prompt .field-help{margin:0}
+.approval-dialog .secret-for{margin-top:-8px}

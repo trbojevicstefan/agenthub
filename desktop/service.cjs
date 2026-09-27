@@ -55,6 +55,18 @@ async function start({app, safeStorage}, root) {
       approvals.set(id,{socket,finish}); listener.notify(socket,'approval',{id,agent:{name:agent.name},title,detail});
     });
   }
+  // The Opaya Agent's secure prompt (request_secret): an approval of kind secret, with a password field in the window.
+  // The typed value comes back with the answer and goes to the vault, never into a chat. No window: no value.
+  function askSecret({name, why = '', agent = ''}) {
+    const socket = [...(listener?.clients || [])].at(-1);
+    if (!socket) return Promise.resolve(null);
+    const id = randomUUID();
+    return new Promise(resolve => {
+      const timer = setTimeout(() => finish(false), 10 * 60 * 1000);
+      function finish(allow, value) { clearTimeout(timer); approvals.delete(id); resolve(allow === true && typeof value === 'string' && value.trim() && value.length <= 12000 && !value.includes('\0') ? value.trim() : null); }
+      approvals.set(id,{socket,finish}); listener.notify(socket,'approval',{id,kind:'secret',agent:{name:'Opaya Agent'},title:`The Opaya Agent asks for ${name}`,detail:[why,agent?`For ${agent}.`:''].filter(Boolean).join('\n\n'),secret:{name,why,for:agent}});
+    });
+  }
   require('./process.cjs').primeShellPath(); // read the login shell's PATH in the background (macOS GUI apps lack it)
   broker = new Broker({store:new Store(root),vault:new Vault(root,safeStorage),emit,approve});
   await stage('broker');
@@ -513,6 +525,7 @@ async function start({app, safeStorage}, root) {
     }
   };
   opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal,trusted:()=>!!broker.data.settings?.itrustOpaya||setupTrust});
+  opaya.askSecret = askSecret;
   // Claude Code as the Opaya Agent's model reaches the Opaya tools through this bridge; its token can only list and call them.
   opaya.builtinInstall = async id=>{const ids=builtinIds(id);if(!ids.length)return null;const {job,done}=builtinJob(ids);const r=await done;return {job_id:job.id,...r};};
   opaya.toolBridge = {command:process.execPath, args:[path.join(__dirname,'opaya-tools-mcp.cjs')], env:{ELECTRON_RUN_AS_NODE:'1',OPAYA_TOOLS_ENDPOINT:endpoint(root),OPAYA_TOOLS_TOKEN:toolsToken}};
@@ -656,10 +669,13 @@ async function start({app, safeStorage}, root) {
     ...maintenanceActions, ...toolActions, ...projectRemoteActions, ...guideActions,
     shutdown
   };
+  // Secrets the user gives the Opaya Agent with the key button next to its message box, and forgetting one.
+  actions.opayaHoldSecret = x=>opaya.holdFromUser({name:x.name,value:x.value});
+  actions.opayaForgetSecret = x=>opaya.forgetSecret(String(x.id||''));
   const token = randomBytes(32).toString('hex');
   listener = server({token,snapshot,scopes:()=>new Map([[browserToken,new Set(['browserTool'])],[toolsToken,new Set(['opayaToolList','opayaToolCall'])]]),
     dispatch:async (method,input)=>{if(!Object.hasOwn(actions,method))throw new Error('Unsupported desktop action.');try{return await actions[method](input||{});}catch(error){throw new Error(safeError(error));}},
-    onApproval:(socket,message)=>{const a=approvals.get(message.id);if(a?.socket===socket)a.finish(message.allow===true);},
+    onApproval:(socket,message)=>{const a=approvals.get(message.id);if(a?.socket===socket)a.finish(message.allow===true,message.value);},
     onDetach:socket=>{for(const a of approvals.values())if(a.socket===socket)a.finish(false);}
   });
   await stage('listen');

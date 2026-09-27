@@ -5,13 +5,13 @@ const apiAgent=(name,port)=>({name,provider:'hermes',protocol:'openai',transport
 // A scripted OpenAI-compatible endpoint: each call returns the next scripted assistant message.
 function model(script){const requests=[];return {requests,fetch:async(url,init)=>{requests.push({url,body:init.body?JSON.parse(init.body):null,headers:init.headers});const message=script.shift()||{content:'done'};return {ok:true,status:200,json:async()=>url.endsWith('/models')?{data:[{id:'m1'}]}:{choices:[{message}]}};}};}
 const call=(name,args={})=>({content:'',tool_calls:[{id:'c'+Math.random(),type:'function',function:{name,arguments:JSON.stringify(args)}}]});
-async function fixture(t,script,{allow=true,trusted=false}={}){
+async function fixture(t,script,{allow=true,trusted=false,...options}={}){
   const root=await temp(t),approvals=[],commands=[];
   const approve=async(_a,title,detail)=>{approvals.push({title,detail});return allow;};
   const broker=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve,adapterFactory:()=>({connect:async()=>({}),close(){},run:async()=>({})})});await broker.init();t.after(()=>broker.close());
   const terminals={describe:()=>[],attach:id=>({id,buffer:'installed ok',exited:true}),closeAgent(){}};
   const m=model(script);
-  const agent=new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit:()=>{},runInTerminal:async x=>{commands.push(x);return {id:'term1'};},fetchImpl:m.fetch,trusted:()=>trusted});
+  const agent=new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit:()=>{},runInTerminal:async x=>{commands.push(x);return {id:'term1'};},fetchImpl:m.fetch,trusted:()=>trusted,...options});
   await agent.init();await agent.saveConfig({preset:'ollama',model:'m1'});
   return {root,agent,broker,approvals,commands,requests:m.requests};
 }
@@ -186,4 +186,92 @@ test('the logins check shows accounts and key names, never key values',()=>{
   const r=spawnSync('sh',['-c',DIAGNOSTICS.logins.posix],{env:{PATH:'/usr/bin:/bin',OPENAI_API_KEY:'sk-proj-abcdefghijklmnopqrstuvwxyz0123456789'},encoding:'utf8'});
   assert.match(r.stdout,/OPENAI_API_KEY is set/);assert(!r.stdout.includes('abcdefghij'));
   const mask=spawnSync('sh',['-c',DIAGNOSTICS.logins.posix.split('; echo')[0]+"; echo 'OpenAI ✓ sk-abcde...ABCDEFGH' | m"],{encoding:'utf8'});assert.equal(mask.stdout.trim(),'OpenAI ✓ sk-***');
+});
+// ---- Secrets: the model only ever sees references such as [secret S1 · OPENAI_API_KEY · sk-p…abcd] --------------
+const OPENAI_KEY='sk-proj-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789abcd',ROUTER_KEY='sk-or-v1-0123456789abcdef0123456789abcdef0123456789abcdef';
+test('keys pasted into the chat reach neither the model nor the chat saved on disk',async t=>{
+  const password='Tajna123!x',{agent,root,requests}=await fixture(t,[{content:'Got it.'},{content:'Same key.'}]);
+  agent.begin(`Use this key ${OPENAI_KEY} for Hermes. My sudo password: ${password}`);await settle(agent);
+  const sent=JSON.stringify(requests);assert(!sent.includes(OPENAI_KEY.slice(8))&&!sent.includes(password),'the model never gets the values');
+  assert.match(sent,/Use this key \[secret S1 · OPENAI_API_KEY · sk-p…abcd\] for Hermes\. My sudo password: \[secret S2 · PASSWORD · •••\]/);
+  assert.match(requests[0].body.messages[0].content,/Secrets the user gave in this chat: \[secret S1 · OPENAI_API_KEY · sk-p…abcd\]; \[secret S2 · PASSWORD · •••\]/);
+  const dir=path.join(root,'opaya-agent'),chat=path.join(dir,'sessions',`${agent.sessionId}.json`);
+  for(const file of [chat,path.join(dir,'sessions.json'),path.join(dir,'secrets.json')]){const text=await fs.readFile(file,'utf8');assert(!text.includes(OPENAI_KEY.slice(8))&&!text.includes(password),file);}
+  assert.match(await fs.readFile(chat,'utf8'),/\[secret S1 · OPENAI_API_KEY · sk-p…abcd\]/);
+  const shown=agent.describe();assert(!JSON.stringify(shown).includes(OPENAI_KEY.slice(8)));
+  assert.deepEqual(shown.secrets.map(s=>[s.id,s.name,s.mask,s.current]),[['S2','PASSWORD','•••',true],['S1','OPENAI_API_KEY','sk-p…abcd',true]]);
+  // The same key again is the same secret; the value is still only in the vault.
+  agent.begin(`again: OPENAI_API_KEY=${OPENAI_KEY}`);await settle(agent);
+  assert.match(JSON.stringify(requests[1].body.messages.at(-1)),/again: OPENAI_API_KEY=\[secret S1 · OPENAI_API_KEY · sk-p…abcd\]/);assert.equal(agent.describe().secrets.length,2);
+});
+test('store_secret puts a key where each agent reads it, with approval and without a command line',async t=>{
+  const home=await temp(t),hermesHome=path.join(home,'.hermes','profiles','work'),claudeKey='sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCD-xyz';
+  await fs.mkdir(hermesHome,{recursive:true});await fs.writeFile(path.join(hermesHome,'.env'),'# keys\nOPENROUTER_API_KEY=old\nAPI_SERVER_ENABLED=true\n');
+  await fs.mkdir(path.join(home,'.claude'),{recursive:true});await fs.writeFile(path.join(home,'.claude','settings.json'),JSON.stringify({model:'opus',env:{KEEP:'1'}}));
+  const {agent,broker,approvals,commands}=await fixture(t,[],{userHome:home});
+  const hermes=await broker.saveAgent({agent:{name:'Hermes work',provider:'hermes',protocol:'acp',transport:'local',command:'hermes',args:['acp'],hermesHome}},{preapproved:true});
+  const claw=await broker.saveAgent({agent:{name:'OpenClaw',provider:'openclaw',protocol:'openai',transport:'http',endpoint:'http://127.0.0.1:18789/v1',model:'openclaw'}});
+  const claude=await broker.saveAgent({agent:{name:'Claude',provider:'claude',protocol:'claude',transport:'local',command:'claude'}},{preapproved:true});
+  const groq=await broker.saveAgent({agent:{name:'Groq',provider:'custom',protocol:'openai',transport:'http',endpoint:'https://api.groq.com/openai/v1',model:'llama'}});
+  const router=await agent.holdFromUser({value:ROUTER_KEY}),anthropic=await agent.holdFromUser({value:claudeKey});
+  assert.deepEqual([router.name,router.mask,anthropic.name],['OPENROUTER_API_KEY','sk-o…cdef','ANTHROPIC_API_KEY']);approvals.length=0;
+  const results=[await agent.tool('store_secret',{secret:router.id,agent_id:hermes.id}),await agent.tool('store_secret',{secret:router.id,agent_id:claw.id}),
+    await agent.tool('store_secret',{secret:anthropic.reference,agent_id:claude.id}),await agent.tool('store_secret',{secret:'S1',agent_id:groq.id}),await agent.tool('store_secret',{secret:'s1',agent_id:'opaya'})];
+  const files=[path.join(hermesHome,'.env'),path.join(home,'.openclaw','.env'),path.join(home,'.claude','settings.json')];
+  assert.equal(await fs.readFile(files[0],'utf8'),`# keys\nOPENROUTER_API_KEY=${ROUTER_KEY}\nAPI_SERVER_ENABLED=true\n`);
+  assert.equal(await fs.readFile(files[1],'utf8'),`OPENROUTER_API_KEY=${ROUTER_KEY}\n`);
+  assert.deepEqual(JSON.parse(await fs.readFile(files[2],'utf8')),{model:'opus',env:{KEEP:'1',ANTHROPIC_API_KEY:claudeKey}});
+  if(process.platform!=='win32')for(const file of files)assert.equal((await fs.stat(file)).mode&0o777,0o600,file);
+  assert.equal(broker.vault.get(groq.id),ROUTER_KEY,'an API connection gets it as its token');assert.equal(broker.vault.get('opaya-agent'),ROUTER_KEY,'agent_id opaya: the Opaya Agent\'s own model key');
+  assert.equal(commands.length,0,'no terminal and no command line');
+  assert.equal(approvals.length,5);for(const a of approvals){assert(!a.title.includes(ROUTER_KEY)&&!a.detail.includes(ROUTER_KEY.slice(9))&&!a.detail.includes(claudeKey.slice(13)));}
+  assert.match(approvals[0].detail,/OPENROUTER_API_KEY=sk-o…cdef/);
+  assert(!JSON.stringify(results).includes(ROUTER_KEY.slice(9)));assert.match(results[0].next,/disconnect_agent, then connect_agent/);assert.match(results[1].next,/openclaw gateway restart/);assert.match(results[3].next,/next connection/);
+  assert.deepEqual(agent.describe().secrets.find(s=>s.id===router.id).stored.map(s=>s.agent),['Hermes work','OpenClaw','Groq','Opaya Agent']);
+  await assert.rejects(()=>agent.tool('store_secret',{secret:'S9',agent_id:hermes.id}),/holds no secret S9/);
+  await assert.rejects(()=>agent.tool('run_command',{command:`export X=${router.reference}`,why:'no'}),/never carries a secret/);
+});
+test('store_secret signs Codex in with the key on its input, never on its command line',async t=>{
+  const {EventEmitter}=require('node:events'),{PassThrough}=require('node:stream'),spawned=[];
+  const spawnAgent=(a,args)=>{const child=new EventEmitter(),run={args,input:''};Object.assign(child,{stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),exitCode:null,signalCode:null});spawned.push(run);child.stdin.on('data',d=>{run.input+=d;});child.stdin.on('end',()=>setImmediate(()=>{child.exitCode=0;child.emit('close',0);}));return child;};
+  const {agent,broker}=await fixture(t,[],{spawnAgent,trusted:true});
+  const codex=await broker.saveAgent({agent:{name:'Codex',provider:'codex',protocol:'codex',transport:'local',command:'codex'}},{preapproved:true});
+  const key=await agent.holdFromUser({value:OPENAI_KEY}),other=await agent.holdFromUser({value:ROUTER_KEY});
+  const r=await agent.tool('store_secret',{secret:key.id,agent_id:codex.id});
+  assert.deepEqual(spawned.map(s=>s.args),[['login','--with-api-key']]);assert.equal(spawned[0].input,OPENAI_KEY+'\n');assert.match(r.next,/connect_agent/);
+  await assert.rejects(()=>agent.tool('store_secret',{secret:other.id,agent_id:codex.id}),/OpenAI API key only/);
+});
+test('request_secret asks in the secure prompt and the model gets only a reference',async t=>{
+  const asked=[],answers=['xai-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789',null];
+  const {agent,requests}=await fixture(t,[call('request_secret',{name:'XAI_API_KEY',why:'Grok for Hermes'}),call('request_secret',{name:'telegram bot token',why:'For your bot'}),{content:'Thanks.'}],{askSecret:async x=>{asked.push(x);return answers.shift();}});
+  agent.begin('set up grok');await settle(agent);
+  assert.deepEqual(asked,[{name:'XAI_API_KEY',why:'Grok for Hermes',agent:''},{name:'TELEGRAM_BOT_TOKEN',why:'For your bot',agent:''}]);
+  const results=requests.at(-1).body.messages.filter(m=>m.role==='tool').map(m=>JSON.parse(m.content));
+  assert.equal(results[0].given,true);assert.equal(results[0].secret,'S1');assert.equal(results[0].reference,'[secret S1 · XAI_API_KEY · xai-…6789]');
+  assert.equal(results[1].given,false);assert.match(results[1].note,/did not give it/);assert(!JSON.stringify(requests).includes('AbCdEfGh'));
+});
+test('everything a tool returns has held keys replaced, also a key a terminal wrapped over two lines',async t=>{
+  const {agent}=await fixture(t,[]),held=await agent.holdFromUser({value:OPENAI_KEY}),github='ghp_ZyXwVuTsRqPoNmLkJiHgFeDcBa9876543210';
+  const buffer=`$ cat config\r\napi_key: ${OPENAI_KEY}\r\n│  API key: ${OPENAI_KEY.slice(0,20)}\r\n│  ${OPENAI_KEY.slice(20)}\r\nGITHUB_TOKEN=${github}\r\n$ `;
+  agent.terminals={describe:()=>[],attach:id=>({id,buffer,exited:false,cols:100,rows:30}),closeAgent(){}};
+  const text=JSON.stringify(await agent.tool('read_terminal',{terminal_id:'t9'}));
+  assert(!text.includes(OPENAI_KEY.slice(8,24))&&!text.includes(OPENAI_KEY.slice(20)),'no piece of the held key');assert(!text.includes(github.slice(4)),'other keys are hidden too');
+  assert(text.includes(held.reference));assert.match(text,/\[hidden GITHUB_TOKEN · ghp_…3210\]/);
+  // Errors a tool throws are shielded the same way.
+  agent.broker.diagnostics=async()=>{throw new Error(`agent said: bad key ${OPENAI_KEY}`);};
+  await assert.rejects(()=>agent.tool('agent_diagnostics',{agent_id:'a1'}),error=>!error.message.includes(OPENAI_KEY)&&error.message.includes(held.reference));
+});
+test('secrets are forgotten with their chat or on request, and survive a restart as references',async t=>{
+  const {agent,broker,root}=await fixture(t,[]),first=agent.sessionId;
+  agent.messages.push({id:'m1',role:'user',content:'first chat',createdAt:new Date().toISOString()});
+  const a=await agent.holdFromUser({value:OPENAI_KEY}),vaultKey=agent.secrets[0].key;
+  await agent.newSession();const b=await agent.holdFromUser({name:'sudo password',value:'hunter2!'});
+  assert.deepEqual([b.id,b.name,b.mask],['S2','SUDO_PASSWORD','•••']);
+  const again=new OpayaAgent({root,vault:broker.vault,broker,terminals:{describe:()=>[]},approve:async()=>true,emit:()=>{},runInTerminal:async()=>({id:'x'}),trusted:()=>true});await again.init();
+  assert.deepEqual(again.describe().secrets.map(s=>s.id),['S2','S1']);assert.equal((await again.tool('store_secret',{secret:'S1',agent_id:'opaya'})).stored,true);
+  // A reference from the earlier chat used in this one becomes a secret of this chat, so it outlives the earlier chat.
+  assert.equal(await agent.holdPasted(`use ${a.reference} again`),'use [secret S3 · OPENAI_API_KEY · sk-p…abcd] again');
+  await agent.deleteSession(first);assert.equal(broker.vault.has(vaultKey),false);assert.deepEqual(agent.describe().secrets.map(s=>s.id),['S3','S2']);
+  await agent.forgetSecret(b.id);assert.deepEqual(agent.describe().secrets.map(s=>s.id),['S3']);
+  await assert.rejects(()=>agent.tool('store_secret',{secret:a.id,agent_id:'opaya'}),/holds no secret S1/);
 });
