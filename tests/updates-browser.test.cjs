@@ -61,3 +61,11 @@ test('broker refuses the browser for a text-only model and leaves it out of the 
   assert(!b.mcpFor(seeing.id).some(s=>s.name==='opaya-browser'));
   await b.close();
 });
+test('other agent errors get a first diagnosis for the Opaya Agent',()=>{
+  const {classify}=require('../desktop/diagnostics.cjs');const kind=(e,provider='hermes')=>classify(e,{provider}).id;
+  assert.equal(kind('connect ECONNREFUSED 127.0.0.1:8642'),'gateway');assert.match(classify('fetch failed',{provider:'hermes'}).hint,/hermes gateway status/);
+  assert.equal(kind('API authentication failed. Edit this agent and add or import its gateway token.','openclaw'),'onboarding');assert.match(classify('not configured',{provider:'openclaw'}).hint,/openclaw onboard/);
+  assert.equal(kind('Claude Code is not signed in yet.','claude'),'onboarding');
+  assert.equal(kind('spawn hermes ENOENT'),'not-installed');assert.equal(kind('The gateway is rate limited or busy (HTTP 429).'),'rate-limit');
+  assert.equal(kind('Host key verification failed'),'ssh');assert.equal(kind('something new'),'other');
+});

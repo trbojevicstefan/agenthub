@@ -65,4 +65,32 @@ async function remoteHermesLogs(agent,host){
   }catch{return [];}
 }
 function hermesLogs(agent,host){return agent.transport==='ssh'&&host?remoteHermesLogs(agent,host):localHermesLogs(agent);}
-module.exports={ConnectionLog,redact,collapse,hermesLogs,hermesHomes};
+// What kind of problem an agent error is, and where to look, so the Opaya Agent starts from a good guess.
+// The order matters: "API authentication failed ... gateway token" is a sign-in problem, not a gateway that is down.
+const SETUP={
+  hermes:{install:'Install agents > Hermes Agent',onboard:'`hermes setup` (model provider and API key)',gateway:'`hermes gateway status`; start it with `hermes gateway`'},
+  openclaw:{install:'Install agents > OpenClaw',onboard:'`openclaw onboard`',gateway:'`openclaw gateway status`; start it with `openclaw gateway`, and enable gateway.http.endpoints.chatCompletions'},
+  claude:{install:'Install agents > Claude Code',onboard:'a first `claude` run to sign in (Run native CLI)'},
+  codex:{install:'Install agents > Codex',onboard:'`codex login` (Run native CLI)'},
+};
+const KINDS=[
+  ['ssh',/host key|permission denied \(publickey|could not resolve hostname|ssh: |ssh exited|no route to host/i],
+  ['not-installed',/ENOENT|command not found|is not recognized as|not installed|no such file or directory|cannot find (?:the )?(?:module|executable|command)/i],
+  ['rate-limit',/HTTP 429|rate limit|quota|too many requests/i],
+  ['onboarding',/not signed in|sign ?in|log ?in\b|login|onboard|\bsetup\b|not configured|no (?:model|provider)|api[_ ]?key|authenticat|unauthori[sz]ed|HTTP 40[13]|credential|token/i],
+  ['gateway',/gateway|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ETIMEDOUT|fetch failed|socket hang up|connection refused|refused to connect|unreachable|not reachable|HTTP 5\d\d|timed? ?out|did not (?:answer|respond|start)|closed|exited/i],
+];
+function classify(error,agent={}){
+  const text=String(error||''),s=SETUP[agent.provider]||{};
+  const id=(KINDS.find(([,re])=>re.test(text))||['other'])[0];
+  const hint={
+    ssh:'the SSH connection to its machine fails. Check the machine in Machines (host key, user, key) before the agent itself.',
+    'not-installed':`the agent or a program it needs is not installed where it runs${s.install?` (${s.install})`:''}, or its path changed.`,
+    'rate-limit':'its model provider is rate limiting or out of quota. Usually temporary; check the account, plan or model it uses.',
+    onboarding:`its onboarding or sign-in is not finished, or its token is missing or wrong${s.onboard?`; finish it with ${s.onboard}`:''}. Tokens are entered by the user in the connection form.`,
+    gateway:`its gateway or server is not running, not installed or not reachable${s.gateway?` (${s.gateway})`:''}.`,
+    other:'no known pattern. Read its diagnostics and logs to find the cause.',
+  }[id];
+  return {id,hint};
+}
+module.exports={ConnectionLog,redact,collapse,hermesLogs,hermesHomes,classify};
