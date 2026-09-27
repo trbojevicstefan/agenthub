@@ -95,7 +95,7 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 ### Discover and install agents
 - **Discover** separates installed agents from ones you can still add, and local from remote. Agents you have already added are hidden.
 - **Install agents** installs these in one click, on this computer or a VPS:
-  - agents: Hermes Agent, Claude Code, Codex, OpenClaw, Gemini CLI, OpenCode, Goose, Aider or Ollama;
+  - agents: Hermes Agent, Claude Code, Codex, OpenClaw, OpenCode, Goose, Aider or Ollama;
   - dependencies: Node.js, Python, Git, uv, tmux, OpenSSH, Homebrew, or **All essentials**.
 - You see the exact vendor command first, and it runs in a terminal you can watch.
 

@@ -429,7 +429,7 @@ async function start({app, safeStorage}, root) {
     progress({step:step.id,state:'active',message:'Looking for agents on this computer'});
     const found=await broker.discover({}).catch(()=>({agents:[]}));let added=[];
     for(const c of found.agents||[]){
-      if(c.existingId||!['codex','claude'].includes(c.provider)&&!/^(gemini|opencode)$/.test(String(c.command||'').split(/[\\/]/).pop().replace(/\.(exe|cmd)$/i,'')))continue;
+      if(c.existingId||!['codex','claude'].includes(c.provider)&&!/^opencode$/.test(String(c.command||'').split(/[\\/]/).pop().replace(/\.(exe|cmd)$/i,'')))continue;
       const {existingId,detail,readiness,...agent}=c;try{const saved=await broker.saveAgent({agent},{preapproved:true});added.push(saved.name);}catch{}
     }
     progress({step:step.id,state:'done',message:added.length?`Added ${added.join(', ')}`:'Your agents are already in Opaya'});return added;
