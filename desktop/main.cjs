@@ -116,12 +116,24 @@ if(hostMode){
       const windowState=()=>{if(!win.isDestroyed())win.webContents.send('hub:window-state',{maximized:win.isMaximized(),fullscreen:win.isFullScreen(),focused:win.isFocused()});};
       for(const event of ['maximize','unmaximize','enter-full-screen','leave-full-screen','focus','blur'])win.on(event,windowState);
       win.webContents.on('did-finish-load',windowState);
-      client.on('state',value=>{if(!win.isDestroyed())win.webContents.send('hub:state',value);});
-      // Tell the user through the OS when Opaya is not in front: finished background jobs and pending approvals.
-      const notify=(title,body)=>{if(win.isDestroyed()||win.isFocused()||!Notification.isSupported())return;const n=new Notification({title,body,silent:false});n.on('click',()=>show());n.show();if(process.platform==='win32'){win.flashFrame(true);win.once('focus',()=>win.flashFrame(false));}};
-      client.on('job',job=>{if(!win.isDestroyed())win.webContents.send('hub:job',job);if(job.status==='done')notify(job.kind==='clone'?'Clone finished':'Redeploy finished',job.detail||job.title);else if(job.status==='error')notify(`${job.title} failed`,String(job.error||'').slice(0,180));});
+      // Settings decide which notifications show; the Opaya Agent's replies are seen as its busy state ending.
+      let settings={},opayaBusy=null;
+      client.on('state',value=>{
+        if(!win.isDestroyed())win.webContents.send('hub:state',value);
+        if(value?.settings)settings=value.settings;
+        const o=value?.opayaAgent;if(!o)return;
+        if(opayaBusy&&!o.busy&&settings.notifyReplies!==false){const last=[...(o.messages||[])].reverse().find(m=>m.role==='assistant');if(last)notify(last.error?'Opaya Agent stopped with an error':'Opaya Agent replied',snippet(last.error||last.content),{opaya:true});}
+        opayaBusy=!!o.busy;
+      });
+      const snippet=text=>String(text||'').replace(/[`*_#>|]/g,'').replace(/\s+/g,' ').trim().slice(0,180)||'Open Opaya to read it.';
+      // Tell the user through the OS when Opaya is not in front (hidden, minimized or behind another app). A click
+      // brings Opaya back and opens what the notification is about.
+      const notify=(title,body,open)=>{if(win.isDestroyed()||win.isFocused()||!Notification.isSupported())return;const n=new Notification({title,body,silent:settings.notifySound===false});n.on('click',()=>{show();if(open&&!win.isDestroyed())win.webContents.send('hub:open',open);});n.show();if(process.platform==='win32'){win.flashFrame(true);win.once('focus',()=>win.flashFrame(false));}};
+      client.on('reply',r=>{if(settings.notifyReplies!==false&&r?.agentId)notify(r.status==='error'?`${r.agentName} stopped with an error`:`${r.agentName} replied`,snippet(r.text),{agentId:r.agentId,conversationId:r.conversationId});});
+      const notifyJob=(title,body)=>{if(settings.notifyJobs!==false)notify(title,body);};
+      client.on('job',job=>{if(!win.isDestroyed())win.webContents.send('hub:job',job);if(job.status==='done')notifyJob(job.kind==='clone'?'Clone finished':'Redeploy finished',job.detail||job.title);else if(job.status==='error')notifyJob(`${job.title} failed`,String(job.error||'').slice(0,180));});
       // Update checks and automatic fixes report here; errors and finished fixes also reach the OS when Opaya is behind.
-      client.on('notice',n=>{if(!win.isDestroyed())win.webContents.send('hub:notice',n);if(['error','done'].includes(n.level)||n.kind==='updates')notify(n.title,String(n.text||'').slice(0,180));});
+      client.on('notice',n=>{if(!win.isDestroyed())win.webContents.send('hub:notice',n);if(['error','done'].includes(n.level)||n.kind==='updates')notifyJob(n.title,String(n.text||'').slice(0,180));});
       client.on('terminal',value=>{for(const w of [win,...terminalWindows.values()])if(!w.isDestroyed())w.webContents.send('hub:terminal',value);});
       const pendingApprovals=new Map(),approvalFile=path.join(app.getPath('userData'),'approval-rules.json');
       const approvalRules=new Set(await fs.readFile(approvalFile,'utf8').then(JSON.parse).catch(()=>[]));
@@ -130,7 +142,7 @@ if(hostMode){
         show();
         const key=JSON.stringify([request.agent,request.title,request.detail]);
         if(approvalRules.has(key)){client.answer(request.id,true);return;}
-        pendingApprovals.set(request.id,{key,expires:Date.now()+10*60*1000});win.webContents.send('hub:approval',request);notify('Opaya needs your approval',`${request.agent?.name||'Agent'}: ${request.title}`);
+        pendingApprovals.set(request.id,{key,expires:Date.now()+10*60*1000});win.webContents.send('hub:approval',request);if(settings.notifyApprovals!==false)notify('Opaya needs your approval',`${request.agent?.name||'Agent'}: ${request.title}`);
       });
       client.on('closed',()=>{if(!quitting&&!smoke&&!win.isDestroyed())win.webContents.send('hub:service-error','Session service disconnected. Reopen Opaya to reconnect. Saved history has not been deleted.');});
       const forwards=['projectRemoteInfo','projectRemoteStart','projectRemoteSend','projectRemoteBring','projectRemoteApply','projectRemoteStop','projectRemoteGithubLogin','guideScan','guidePlan','guideStart','toolVersions','toolCheckAll','agentInstallInfo','agentMaintenanceCommand','agentUpdate','agentUpdateAll','agentBackup','agentBackups','backupRemove','agentUninstall','opayaFreeModels','opayaFreeSetup','agentEnvKeys','transferStart','renameConversation','deleteConversation','condenseConversation','conversationMarkdown','libraryList','libraryImport','libraryInstall','libraryRemove','libraryAddFolder','jobs','jobDismiss','sshKeyCreate','hostTest','saveSettings','projectSave','projectRemove','projectInfo','projectBranches','projectGit','projectClone','mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaNewSession','opayaSelectSession','opayaDeleteSession','opayaStop','opayaClear','snapshot','saveAgent','reorderAgents','updateAgentDisplay','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
@@ -189,6 +201,10 @@ if(hostMode){
           popup.on('closed',()=>{terminalWindows.delete(item.id);if(!win.isDestroyed())win.webContents.send('hub:terminal-docked',{id:item.id});});
           await popup.loadURL('agenthub://app/terminal.html#'+encodeURIComponent(item.id));return true;
         },
+        // Start Opaya when you sign in (Windows and macOS). The OS keeps this setting, not the workspace.
+        loginItem:async x=>{if(!['win32','darwin'].includes(process.platform))return {supported:false,on:false};if(typeof x.on==='boolean')app.setLoginItemSettings({openAtLogin:x.on});return {supported:true,on:!!app.getLoginItemSettings().openAtLogin};},
+        // The folder with the workspace, transcripts and logs.
+        openDataFolder:async()=>{const error=await shell.openPath(app.getPath('userData'));if(error)throw new Error(error);return true;},
         approvalAnswer:async x=>{const pending=pendingApprovals.get(x.id);if(!pending)return false;pendingApprovals.delete(x.id);if(Date.now()>pending.expires){client.answer(x.id,false);return false;}if(x.choice==='always'){approvalRules.add(pending.key);await fs.writeFile(approvalFile,JSON.stringify([...approvalRules]),{mode:0o600});}client.answer(x.id,x.choice==='once'||x.choice==='always');return true;},
         pick:async x=>{if(!['directory','identityFile','executable'].includes(x.kind))throw new Error('Invalid file picker.');const result=await dialog.showOpenDialog(win,{title:'Choose '+x.kind,properties:[x.kind==='directory'?'openDirectory':'openFile']});return result.canceled?'':result.filePaths[0];},
         openDocs:x=>{const framework=String(x.topic||'').startsWith('framework:')&&require('./catalog.cjs').FRAMEWORKS.find(f=>'framework:'+f.id===x.topic);if(framework)return shell.openExternal(framework.docs);if(!Object.hasOwn(docs,x.topic))throw new Error('Unknown documentation topic.');return shell.openExternal(docs[x.topic]);},

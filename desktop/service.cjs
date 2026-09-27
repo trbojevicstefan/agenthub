@@ -520,6 +520,9 @@ async function start({app, safeStorage}, root) {
   await opaya.init();
   // A fresh install: connect the Opaya Agent to a local Ollama model with tools if one already runs (no input needed).
   free.autoConnect({opaya}).then(model=>{if(model)emit();}).catch(()=>{});
+  broker.onReply=(a,c,m)=>{if(a)listener?.broadcast('reply',{agentId:a.id,agentName:a.displayName||a.name,conversationId:c.id,status:m.status,text:String(m.status==='error'?m.error:m.content||'').replace(/\s+/g,' ').trim().slice(0,220)});};
+  // "Connect agents when Opaya starts": after a reboot the service starts fresh, so connect them once, quietly.
+  if(broker.data.settings?.autoConnect)setTimeout(()=>{for(const a of broker.data.agents)if(a.protocol!=='terminal')broker.connect(a.id).catch(()=>{});},1500).unref?.();
   async function shutdown() {
     if (stopping) return true; stopping = true;
     for (const a of approvals.values()) a.finish(false);

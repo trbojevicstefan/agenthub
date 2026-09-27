@@ -21,16 +21,27 @@ async function createKey(name){
   if(!/^ssh-ed25519 [A-Za-z0-9+/=]+( .*)?$/.test(publicKey)&&!/^ssh-(rsa|ecdsa)[\w-]* /.test(publicKey))throw new Error('The public key file is not a valid SSH key.');
   return {name,identityFile:file,publicKey,created};
 }
+// What the Machines screen shows about a server. The probe always exits 0: a server without Docker or Hermes is
+// still a good connection, and a missing tool (free, uptime -p on macOS) only leaves its line out.
+const TOOLS=['docker','tmux','git','node','python3','hermes','openclaw','claude','codex'];
+const PROBE=['echo OPAYA_OK','uname -sm 2>/dev/null','echo "host=$(hostname 2>/dev/null)"','if [ -r /etc/os-release ]; then . /etc/os-release; echo "os=$PRETTY_NAME"; fi',
+  'echo "uptime=$(uptime -p 2>/dev/null | sed \'s/^up //\')"',`echo "disk=$(df -Ph "$HOME" 2>/dev/null | awk 'NR==2{print $4" free of "$2}')"`,`echo "memory=$(free -h 2>/dev/null | awk '/^Mem:/{print $7" free of "$2}')"`,
+  `for t in ${TOOLS.join(' ')}; do if command -v $t >/dev/null 2>&1; then echo "tool=$t"; fi; done`,'if [ -x "$HOME/.local/bin/hermes" ]; then echo "tool=hermes"; fi','exit 0'].join('; ');
+function parseProbe(out){
+  const lines=String(out||'').split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  if(!lines.includes('OPAYA_OK'))throw new Error('Unexpected answer from the server.');
+  const field=name=>(lines.find(l=>l.startsWith(name+'='))||'').slice(name.length+1).slice(0,120);
+  const tools=[...new Set(lines.filter(l=>l.startsWith('tool=')).map(l=>l.slice(5)).filter(t=>TOOLS.includes(t)))];
+  return {ok:true,system:lines.find(l=>l!=='OPAYA_OK'&&!l.includes('='))||'',host:field('host'),os:field('os'),uptime:field('uptime'),disk:field('disk'),memory:field('memory'),tools,docker:tools.includes('docker'),hermes:tools.includes('hermes')};
+}
 // accept-new: trust the server key the first time only; a changed key later is still refused.
 async function test(host){
   const ssh=findExecutable('ssh',environment());if(!ssh)throw new Error('OpenSSH client is not installed.');
   const args=sshArgs(host).map(a=>a==='StrictHostKeyChecking=yes'?'StrictHostKeyChecking=accept-new':a);
   try{
-    // The probe always exits 0: a server without Docker or Hermes is still a good connection.
-    const out=await collect(spawn(ssh,[...args,'-T',target(host),'echo OPAYA_OK; uname -sm 2>/dev/null; command -v docker >/dev/null && echo docker; if command -v hermes >/dev/null 2>&1 || [ -x "$HOME/.local/bin/hermes" ]; then echo hermes; fi; exit 0'],{env:environment(),windowsHide:true,stdio:['pipe','pipe','pipe']}),{timeout:25000});
-    const lines=out.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
-    if(!lines.includes('OPAYA_OK'))throw new Error('Unexpected answer from the server.');
-    return {ok:true,system:lines.find(l=>l!=='OPAYA_OK'&&l!=='docker'&&l!=='hermes')||'',docker:lines.includes('docker'),hermes:lines.includes('hermes')};
+    const started=Date.now();
+    const out=await collect(spawn(ssh,[...args,'-T',target(host),PROBE],{env:environment(),windowsHide:true,stdio:['pipe','pipe','pipe']}),{timeout:25000});
+    return {...parseProbe(out),ms:Date.now()-started,checkedAt:new Date().toISOString()};
   }catch(error){
     const m=String(error.message||error);
     if(/Permission denied|publickey/i.test(m))throw new Error('The server refused the key. Add the public key to the VPS (provider panel or ~/.ssh/authorized_keys), then test again.');
@@ -39,4 +50,4 @@ async function test(host){
     throw new Error(m.slice(0,400));
   }
 }
-module.exports={createKey,test,keyName,keyPath};
+module.exports={createKey,test,keyName,keyPath,parseProbe,PROBE};

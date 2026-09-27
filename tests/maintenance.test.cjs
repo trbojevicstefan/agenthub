@@ -90,7 +90,7 @@ test('this computer keeps its Opaya name, note and backup folder across restarts
   await assert.rejects(()=>b.saveSettings({machineName:'x'.repeat(61)}),/machine name/);
   await b.close();
   const again=await make();
-  assert.deepEqual({...again.data.settings},{itrustAll:false,itrustOpaya:true,opayaDefaults:2,machineName:'Studio Mac',machineNote:'Office',backupDir:dir,updateChecks:true,autoFix:true,interface:''});
+  assert.deepEqual({...again.data.settings},{itrustAll:false,itrustOpaya:true,opayaDefaults:2,machineName:'Studio Mac',machineNote:'Office',backupDir:dir,updateChecks:true,autoFix:true,interface:'',notifyReplies:true,notifyApprovals:true,notifyJobs:true,notifySound:true,tips:true,autoConnect:false,sendKey:'enter'});
   // iTrust for the Opaya Agent is on after the 0.19 upgrade, and stays off once the user turns it off.
   await again.saveSettings({itrustOpaya:false});await again.close();
   const third=await make();assert.equal(third.data.settings.itrustOpaya,false);await third.close();

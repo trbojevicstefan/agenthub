@@ -32,7 +32,8 @@ class Broker{
     this.data.drafts=this.data.drafts||{};this.data.lastConversation=this.data.lastConversation||{};this.data.view=this.data.view||{};
     this.data.agents=this.data.agents.map(a=>schema.agent(a));
     // 0.19: iTrust for the Opaya Agent is on by default (once for existing settings too); the user can turn it off.
-    {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:s.opayaDefaults===2?!!s.itrustOpaya:true,opayaDefaults:2,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false,interface:['chat','terminal'].includes(s.interface)?s.interface:''};}
+    {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:s.opayaDefaults===2?!!s.itrustOpaya:true,opayaDefaults:2,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false,interface:['chat','terminal'].includes(s.interface)?s.interface:'',
+      notifyReplies:s.notifyReplies!==false,notifyApprovals:s.notifyApprovals!==false,notifyJobs:s.notifyJobs!==false,notifySound:s.notifySound!==false,tips:s.tips!==false,autoConnect:s.autoConnect===true,sendKey:s.sendKey==='mod-enter'?'mod-enter':'enter'};}
     this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
     this.migrateLinkedCopies();
     this.data.mcpServers=(Array.isArray(this.data.mcpServers)?this.data.mcpServers:[]).flatMap(s=>{try{return [mcp.server(s)];}catch{return [];}});this.data.hosts=this.data.hosts.map(h=>schema.host(h));
@@ -161,6 +162,9 @@ class Broker{
     // Hourly update checks, and fixing "too old" connection errors by updating automatically. Both on by default.
     if(input.updateChecks!==undefined)next.updateChecks=!!input.updateChecks;
     if(input.autoFix!==undefined)next.autoFix=!!input.autoFix;
+    // System notifications when Opaya is not in front (all on by default), Opaya's tips, connecting at start, the send key.
+    for(const key of ['notifyReplies','notifyApprovals','notifyJobs','notifySound','tips','autoConnect'])if(input[key]!==undefined)next[key]=!!input[key];
+    if(input.sendKey!==undefined){if(!['enter','mod-enter'].includes(input.sendKey))throw new Error('Choose Enter or Ctrl+Enter to send.');next.sendKey=input.sendKey;}
     // Chat or Terminal first. '' until the user chooses on first launch.
     if(input.interface!==undefined){if(!['chat','terminal'].includes(input.interface))throw new Error('Choose chat or terminal.');next.interface=input.interface;}
     // This computer as shown in Opaya (the sidebar, Machines, backups) and where local backups go.
@@ -427,6 +431,7 @@ class Broker{
         if(assistant.status==='error'&&!CLIENT_REFUSED.test(`${assistant.content||''} ${assistant.error||''}`)){const a=this.data.agents.find(x=>x.id===agentId);try{if(a)this.onAgentError?.(a,assistant.error,'turn');}catch{}}
         try{await this.store.writeTranscript(c.id,messages);await this.store.write(this.data);}catch{assistant.error='Could not save the final transcript to disk. Export it before closing.';}
         if(this.turns.get(agentId)===turn)this.turns.delete(agentId);
+        if(assistant.status==='done'||assistant.status==='error'){try{this.onReply?.(this.data.agents.find(x=>x.id===agentId),c,assistant);}catch{}}
         finishDone();this.changed();
       });
       this.changed();return {conversationId:c.id,messageId:assistant.id};

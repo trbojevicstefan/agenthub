@@ -15,6 +15,10 @@ for(const method of methods)api[method]=async input=>{
 for(const [name,channel] of [['onTerminalDocked','hub:terminal-docked'],['onWindowState','hub:window-state'],['onApproval','hub:approval'],['onState','hub:state'],['onTerminal','hub:terminal'],['onServiceError','hub:service-error'],['onUpdate','hub:update'],['onBrowser','hub:browser'],['onJob','hub:job'],['onNotice','hub:notice']]){
   api[name]=callback=>{if(typeof callback!=='function')throw new Error('A callback is required.');const listener=(_event,value)=>callback(value);ipcRenderer.on(channel,listener);return()=>ipcRenderer.removeListener(channel,listener);};
 }
+// Start at sign-in and the workspace folder (handled by the window process itself).
+for(const method of ['loginItem','openDataFolder'])api[method]=async input=>{const result=await ipcRenderer.invoke(`hub:${method}`,input);if(!result?.ok)throw new Error(result?.error||'Desktop request failed.');return result.data;};
+// A notification was clicked: open the agent chat or the Opaya Agent it was about.
+api.onOpen=callback=>{if(typeof callback!=='function')throw new Error('A callback is required.');const listener=(_event,value)=>callback(value);ipcRenderer.on('hub:open',listener);return()=>ipcRenderer.removeListener('hub:open',listener);};
 // The local path of a file dropped on a terminal (typed there, quoted).
 api.pathForFile=file=>webUtils?.getPathForFile?.(file)||'';
 contextBridge.exposeInMainWorld('agenthub',Object.freeze(api));

@@ -34,7 +34,9 @@ async function run({win,client,output}){
     const agent=await client.call('saveAgent',{agent:{name:'Model selector verification',provider:'custom',protocol:'openai',transport:'http',endpoint:`http://127.0.0.1:${server.address().port}/v1`}});
     await until(()=>js(`!!document.querySelector('[data-action="select"][data-id="${agent.id}"]')`));
     await js(`document.querySelector('[data-action="select"][data-id="${agent.id}"]').click()`);
-    await until(()=>js(`!!document.querySelector('[data-action="models"]')`));await js(`document.querySelector('[data-action="models"]').click()`);
+    // The agent default model lives in Manage > Model & reasoning; each chat picks its own under the message box.
+    await until(()=>js(`!!document.querySelector('#topbar [data-action="manage"]')`));await js(`document.querySelector('#topbar [data-action="manage"]').click()`);
+    await until(()=>js(`!!document.querySelector('[data-action="manage-run"][data-key="models"]')`));await js(`document.querySelector('[data-action="manage-run"][data-key="models"]').click()`);
     await until(()=>js(`!!document.querySelector('#model-form')`));
     await js(`document.querySelector('#model-form select').value='test-model-b';document.querySelector('#model-form').requestSubmit()`);
     await until(async()=> (await client.call('snapshot')).agents.find(a=>a.id===agent.id)?.model==='test-model-b');

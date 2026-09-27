@@ -447,6 +447,7 @@
 :where(body[data-theme="light"]) .manage-card{border:1px solid #cbd6d0;background:#dee5e2}
 :where(body[data-theme="light"]) .manage-card>p{color:#49544e}
 :where(body[data-theme="light"]) .manage-card.danger-zone{border-color:#d8c1bc;background:#e6dfde}
+:where(body[data-theme="light"]) .manage-card.danger-zone .manage-card-icon{color:#401913}
 :where(body[data-theme="light"]) .danger-button{background:#dfc9c5;border:1px solid #d1a8a0;color:#240e0a}
 :where(body[data-theme="light"]) .danger-button .manage-btn-icon{color:#31130e}
 :where(body[data-theme="light"]) .primary.danger-button{background:#debfba;border-color:#c0867c;color:#000000}
@@ -456,6 +457,8 @@
 :where(body[data-theme="light"]) .uninstall-kind{border:1px solid #cbd6d0;background:#dee5e2}
 :where(body[data-theme="light"]) .uninstall-kind small{color:#49544e}
 :where(body[data-theme="light"]) .host-note{color:#49544e}
+:where(body[data-theme="light"]) .ws-control em{color:#554219}
+:where(body[data-theme="light"]) .machine-tools em.outdated{color:#554219}
 :where(body[data-theme="light"]) .maintenance-form .switch-row small{color:#49544e}
 :where(body[data-theme="light"]) .status-tools{background:#ebe5d5;border-color:#d3c7a4;color:#473b15}
 :where(body[data-theme="light"]) .tool-row{border:1px solid #cfd9d4}
