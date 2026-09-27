@@ -2,7 +2,7 @@
 const {contextBridge,ipcRenderer,webUtils}=require('electron');
 const methods=['snapshot','saveAgent','reorderAgents','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalAttach','terminalOpen','terminalWrite','terminalResize','terminalDetach','terminalClose','pick','openDocs','exportConversation'];
 const api={};
-methods.push('approvalAnswer','terminalPopout','terminalRename');
+methods.push('approvalAnswer','terminalPopout','terminalRename','terminalRestart');
 methods.push('agentEnvKeys','transferStart','renameConversation','deleteConversation','condenseConversation','conversationMarkdown','libraryList','libraryImport','libraryInstall','libraryRemove','libraryAddFolder','jobs','jobDismiss','cloneAgent','redeployAgent','sshKeyCreate','hostTest','browserPlace','browserOpen','browserNav','browserPreview','browserState','updateState','updateCheck','updateDownload','updateInstall','updateRunInstaller','clipboardRead','clipboardWrite','openLink');
 methods.push('agentModels','selectModel','gateway','updateAgentDisplay');
 methods.push('selectEffort','pickFiles','fileInfo');

@@ -108,7 +108,7 @@
     $('#status-left').textContent=playgroundView?'Playground / ask two agents the same question':opayaView?'Opaya Agent / installs, connects and troubleshoots your agents':a&&!overview?`${labels[a.provider]} / ${a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase()} / ${location(a)}`:'One place. All your agents.';
     $('#status-right').textContent=state.agents.some(a=>a.busy)?`${state.agents.filter(a=>a.busy).length} agent working`:(state.service?.persistent?'Sessions protected / safe to close window':'Local workspace / no cloud account');
     updateTurnWatch();renderToolChip();
-    if(lastSelected!==state.activeAgentId){lastSelected=state.activeAgentId;if(!$('#terminal-panel').hidden){const match=[...terminalViews.values()].find(v=>v.agentId===state.activeAgentId&&!v.exited);activateTerminal(match?.id||'');}}
+    if(lastSelected!==state.activeAgentId){lastSelected=state.activeAgentId;followSelectedAgent();}
   }
   // ---- Workspace: every control in one place, and filters for a long list of agents --------------------------------
   let wsQuery='',wsStatus='',wsPlace='';
@@ -472,15 +472,35 @@
     markPanes();
     for(const id of panes){const view=terminalViews.get(id);if(view&&!view.poppedOut)requestAnimationFrame(()=>{if(!view.exited)view.core.fitAndReport(view.report);else{try{view.fit.fit();}catch{}}});}
   }
-  function activateTerminal(id){
+  // focus: false when the change comes from elsewhere (a session ended, was renamed or started again, the selected agent
+  // changed in the background); the keyboard then stays where the user is typing.
+  function activateTerminal(id,{focus=true}={}){
     if(id&&terminalViews.has(id)){const at=panes.indexOf(id);if(at>=0)paneFocus=at;else panes[paneFocus]=id;}
     else if(!id)panes[paneFocus]='';
     renderPanes();currentTerminal=panes[paneFocus]||'';
-    $('#terminal-tabs').innerHTML=[...terminalViews.values()].map(v=>`<div class="terminal-tab ${v.exited?'archived':''}"><button type="button" data-action="terminal-tab" data-id="${esc(v.id)}" title="${esc(v.title)}${v.exited?' (saved output)':''}"><span class="terminal-tab-dot" aria-hidden="true"></span><span class="terminal-tab-title">${esc(tabTitle(v))}</span></button><button type="button" class="terminal-tab-close" data-action="terminal-tab-close" data-id="${esc(v.id)}" aria-label="Close ${esc(v.title)}" title="Close">&#10005;</button></div>`).join('')||'<span class="terminal-tabs-empty"><span class="terminal-glyph">&gt;_</span> Terminal</span>';
+    for(const shown of panes){const v=terminalViews.get(shown);if(v)v.attention=false;}
+    $('#terminal-tabs').innerHTML=[...terminalViews.values()].map(v=>`<div class="terminal-tab ${v.exited?'archived':''} ${v.attention?'attention':''}"><button type="button" data-action="terminal-tab" data-id="${esc(v.id)}" title="${esc(v.title)}${v.exited?' (ended: press Enter in it to start it again)':''}"><span class="terminal-tab-dot" aria-hidden="true"></span><span class="terminal-tab-title">${esc(tabTitle(v))}</span></button><button type="button" class="terminal-tab-close" data-action="terminal-tab-close" data-id="${esc(v.id)}" aria-label="Close ${esc(v.title)}" title="Close">&#10005;</button></div>`).join('')||'<span class="terminal-tabs-empty"><span class="terminal-glyph">&gt;_</span> Terminal</span>';
     markPanes();
     const active=terminalViews.get(currentTerminal);if(!active)closeTerminalSearch();
-    if(active&&!active.poppedOut)requestAnimationFrame(()=>active.term.focus());
+    if(focus&&active&&!active.poppedOut)requestAnimationFrame(()=>active.term.focus());
   }
+  // Where the keyboard is: in a live terminal on screen (someone is typing there), or in another text field.
+  function viewOf(element){const el=element?.closest?.('.terminal-view');return el?[...terminalViews.values()].find(v=>v.element===el):null;}
+  function typingInTerminal(){const v=viewOf(document.activeElement);return !!v&&!v.exited&&!v.poppedOut&&!v.element.hidden&&!$('#terminal-panel').hidden;}
+  function typingElsewhere(){const el=document.activeElement;return !!el&&el!==document.body&&!viewOf(el)&&(el.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));}
+  function focusCurrent(){const v=terminalViews.get(currentTerminal);if(v&&!v.poppedOut&&!v.element.hidden&&!$('#terminal-panel').hidden)v.term.focus();}
+  // The terminal panel follows the selected agent. A selection made in the background (the Opaya Agent saving a
+  // connection, an install or clone finishing) no longer swaps out the terminal someone is typing in, or takes the keyboard.
+  function followSelectedAgent(){
+    if($('#terminal-panel').hidden||typingInTerminal())return;
+    const match=[...terminalViews.values()].find(v=>v.agentId===state.activeAgentId&&!v.exited);activateTerminal(match?.id||'',{focus:!typingElsewhere()});
+  }
+  // The keyboard goes back to the terminal it was in when a menu over it closed by itself (the window lost focus) and the
+  // window comes back: focus was left on the page, and typing went nowhere until the terminal was clicked again.
+  let keyboardIn='';
+  document.addEventListener('focusin',event=>{if(event.target.closest?.('.context-menu,.terminal-toolbar'))return;keyboardIn=viewOf(event.target)?.id||'';});
+  document.addEventListener('pointerdown',event=>{if(!event.target.closest?.('.terminal-view,.context-menu,.terminal-toolbar'))keyboardIn='';},true);
+  window.addEventListener('focus',()=>setTimeout(()=>{if(document.activeElement&&document.activeElement!==document.body||$('#app-dialog'))return;const v=terminalViews.get(keyboardIn);if(v&&!v.poppedOut&&!v.element.hidden&&!$('#terminal-panel').hidden)v.term.focus();},0));
   // Put `id` in a new pane left or right of pane `index`. Returns false when there is no room.
   function insertPane(id,dir,index=paneFocus){
     normalizePanes();
@@ -540,7 +560,7 @@
   // Sessions from before a restart keep their output; they wait here instead of filling the tab bar.
   const savedSessions=new Map();
   function terminalMoreMenu(){
-    const view=terminalViews.get(currentTerminal),finished=[...terminalViews.values()].filter(v=>v.exited);
+    const view=terminalViews.get(currentTerminal),finished=[...terminalViews.values()].filter(v=>v.exited),zoom=step=>()=>{zoomTerminals(step);focusCurrent();};
     return [
       view&&{icon:'&#9906;',label:'Find...',hint:`${mod()}F`,run:()=>openTerminalSearch()},
       view&&{icon:'&#9998;',label:'Rename...',run:()=>renameTerminal(view.id)},
@@ -548,7 +568,7 @@
       view&&{icon:'&#9707;',label:'Open beside',submenu:newTerminalItems('right')},
       savedSessions.size&&{icon:'&#9776;',label:'Saved output',submenu:[...savedSessions.values()].map(t=>({icon:'&gt;_',label:tabTitle(t),run:()=>{savedSessions.delete(t.id);return openTerminal({terminalId:t.id});}}))},
       finished.length&&{icon:'&#10003;',label:`Close finished tabs (${finished.length})`,run:()=>closeFinished()},
-      {icon:'A',label:'Text size',submenu:[{icon:'+',label:'Larger',hint:`${mod()}+`,run:()=>zoomTerminals(1)},{icon:'-',label:'Smaller',hint:`${mod()}-`,run:()=>zoomTerminals(-1)},{icon:'0',label:'Reset',hint:`${mod()}0`,run:()=>zoomTerminals(0)}]},
+      {icon:'A',label:'Text size',submenu:[{icon:'+',label:'Larger',hint:`${mod()}+`,run:zoom(1)},{icon:'-',label:'Smaller',hint:`${mod()}-`,run:zoom(-1)},{icon:'0',label:'Reset',hint:`${mod()}0`,run:zoom(0)}]},
       view&&'-',
       view&&{icon:'&#10005;',label:view.exited?'Close saved output':'End session',danger:!view.exited,run:()=>closeTerminalTab(view.id)}
     ];
@@ -572,12 +592,14 @@
     const pane=event.target.closest('.terminal-pane'),index=pane?Number(pane.dataset.index):paneFocus;
     if(pane&&index!==paneFocus){paneFocus=index;currentTerminal=panes[index]||'';markPanes();}
     const hidden=[...terminalViews.values()].filter(v=>!panes.includes(v.id)&&!v.poppedOut),text=view?view.core.selection():'';
+    // The menu takes the keyboard while it is open; Copy, Paste, Select all and Clear give it back to the terminal.
+    const back=run=>()=>{run();if(!view.poppedOut)view.term.focus();};
     const items=[
-      view&&{icon:'&#10697;',label:'Copy',hint:text?`${mod()}Shift+C`:state.platform==='darwin'?'Option+drag selects':'Shift+drag selects',disabled:!text,run:()=>{view.core.copy(text);view.term.clearSelection();}},
-      view&&!view.exited&&{icon:'&#8615;',label:'Paste',hint:`${mod()}V`,run:()=>view.core.paste()},
-      view&&{icon:'&#9633;',label:'Select all',run:()=>view.term.selectAll()},
+      view&&{icon:'&#10697;',label:'Copy',hint:text?`${mod()}Shift+C`:state.platform==='darwin'?'Option+drag selects':'Shift+drag selects',disabled:!text,run:back(()=>{view.core.copy(text);view.term.clearSelection();})},
+      view&&!view.exited&&{icon:'&#8615;',label:'Paste',hint:`${mod()}V`,run:back(()=>view.core.paste())},
+      view&&{icon:'&#9633;',label:'Select all',run:back(()=>view.term.selectAll())},
       view&&{icon:'&#9906;',label:'Find...',hint:`${mod()}F`,run:()=>openTerminalSearch()},
-      view&&{icon:'&#8634;',label:'Clear',run:()=>view.term.clear()},
+      view&&{icon:'&#8634;',label:'Clear',run:back(()=>view.term.clear())},
       '-',
       {icon:'&#9707;',label:'Open beside',submenu:newTerminalItems('right',view)},
       hidden.length&&{icon:'&#9776;',label:'Show beside',submenu:hidden.map(v=>({icon:'&gt;_',label:tabTitle(v),run:()=>showInSplit(v.id,'right',index)}))},
@@ -600,39 +622,73 @@
     const pane=event.target.closest('.terminal-pane');if(!pane)return;event.preventDefault();event.stopPropagation();
     terminalContextMenu(event,terminalViews.get(panes[Number(pane.dataset.index)]));
   });
-  async function openTerminal({agentId=selected()?.id,hostId,mode='shell',local=false,terminalId,restoring=false,split=null,projectId}={}){
+  // A click on the panel around the terminals (a pane's title bar, the tab strip, a gap) keeps the keyboard in a terminal:
+  // that pane's, or the one in use. Focus used to fall to the page there, and typing went nowhere.
+  $('#terminal-panel').addEventListener('mousedown',event=>{
+    if(event.button!==0||event.defaultPrevented||event.target.closest('.xterm,button,input,select,textarea,a,[tabindex],[contenteditable="true"],.pane-grip,.terminal-search'))return;
+    const pane=event.target.closest('.terminal-pane'),view=terminalViews.get(pane?panes[Number(pane.dataset.index)]:currentTerminal);
+    if(view&&!view.poppedOut){event.preventDefault();view.term.focus();}
+  });
+  // background: only add a tab (a terminal the service opened while someone types in another one). focus: false leaves the
+  // keyboard, and an open dialog, where they are (someone typing in the chat box or a form).
+  async function openTerminal({agentId=selected()?.id,hostId,mode='shell',local=false,terminalId,restoring=false,split=null,projectId,background=false,focus=true}={}){
     if(!agentId&&!hostId&&!local&&!terminalId){toast('Select an agent, or open a machine from Machines.');return;}
     if(typeof window.Terminal!=='function'||!window.FitAddon||!window.OpayaTerminal){toast('The terminal UI did not load. Reinstall the complete Opaya build rather than moving the executable out of its installation folder.',true);return;}
-    if(!restoring){closeModal();$('#terminal-panel').hidden=false;}
+    if(!restoring&&!background){if(focus)closeModal();$('#terminal-panel').hidden=false;}
     const a=local?null:state.agents.find(a=>a.id===agentId),h=state.hosts.find(h=>h.id===hostId);
     const active=terminalViews.get(currentTerminal),size=active&&!active.exited?{cols:active.term.cols,rows:active.term.rows}:{};
     const result=terminalId?await api.terminalAttach({id:terminalId}):await api.terminalOpen({agentId:hostId||local?undefined:agentId,hostId,mode,local,projectId,...size});
     if(!terminalViews.has(result.id)){
       const element=document.createElement('div');element.className='terminal-view';$('#terminal-views').append(element);
       const archived=!!result.exited;
-      const core=window.OpayaTerminal.create(element,{archived,fontSize:terminalFont,windowsBuild:result.windowsBuild||0,light:theme==='light',onSearch:()=>openTerminalSearch(),onContextMenu:event=>terminalContextMenu(event,terminalViews.get(result.id)),onZoom:applyFont}),{term,fit}=core;
+      const core=window.OpayaTerminal.create(element,{archived,fontSize:terminalFont,windowsBuild:result.windowsBuild||0,light:theme==='light',onSearch:()=>openTerminalSearch(),onContextMenu:event=>terminalContextMenu(event,terminalViews.get(result.id)),onZoom:applyFont,onRestart:()=>action(()=>restartTerminal(result.id))}),{term,fit}=core;
       const report=(cols,rows)=>action(()=>api.terminalResize({id:result.id,cols,rows}));
       const view={id:result.id,agentId:result.agentId||a?.id||'',mode:result.mode||mode,remote:result.remote,title:result.title||`${a?title(a):h?.name||(local?'This computer':'SSH')} / ${mode}`,term,fit,core,report,element,exited:!!result.exited,lastSeq:result.seq||0};terminalViews.set(result.id,view);
-      if(!archived)term.onData(data=>action(()=>api.terminalWrite({id:result.id,data})));
+      // Typing goes to the live session in pieces the service accepts (a large paste used to be refused whole), in order.
+      // An ended session takes none until it starts again (Enter, restartTerminal).
+      term.onData(data=>{if(view.exited||view.poppedOut)return;for(const part of window.OpayaTerminal.chunks(data))action(()=>api.terminalWrite({id:result.id,data:part}));});
       let timer;const observer=new ResizeObserver(()=>{clearTimeout(timer);timer=setTimeout(()=>{if(element.hidden||view.poppedOut||view.exited||$('#terminal-panel').hidden)return;core.fitAndReport(report);},60);});observer.observe(element);view.observer=observer;
       // Reattaching replays saved output drawn at another size. Nudge the size once so full-screen programs repaint.
       if(result.buffer)term.write(result.buffer,()=>{if(!archived&&(result.mode==='agent'||result.buffer.includes('\x1b[?1049h'))){requestAnimationFrame(()=>{if(!core.fitAndReport(report))return;});setTimeout(()=>{if(view.exited)return;report(term.cols,Math.max(5,term.rows-1));setTimeout(()=>report(term.cols,term.rows),120);},250);}});
-      if(archived)term.write('\r\n\x1b[90m[Saved output from a closed session. Open New shell to reconnect.]\x1b[0m\r\n');
+      if(archived)term.write(window.OpayaTerminal.endedNote(view));
       for(const event of terminalPending.get(result.id)||[])terminalEvent(event);terminalPending.delete(result.id);
     }
+    if(background){const view=terminalViews.get(result.id);if(!panes.includes(result.id)){view.attention=true;activateTerminal(currentTerminal,{focus:false});toast(`${tabTitle(view)} opened in a terminal tab.`);}return result.id;}
     if(split)insertPane(result.id,split.dir,split.index);
-    activateTerminal(result.id);if(!restoring)saveView();
+    activateTerminal(result.id,{focus});if(!restoring)saveView();
     return result.id;
   }
+  // Enter in an ended session starts it again in its tab: a remote one reattaches to its tmux session, which usually kept
+  // running on the host when the SSH connection dropped. Saved output from before a restart of Opaya works the same way.
+  async function restartTerminal(id){
+    const view=terminalViews.get(id);if(!view||!view.exited||view.poppedOut||view.restarting)return;view.restarting=true;
+    try{
+      const r=await api.terminalRestart({id,cols:view.term.cols,rows:view.term.rows});
+      // The same agent, mode and folder already runs in another tab (one live session each): go there.
+      if(r.id!==id){if(terminalViews.has(r.id))activateTerminal(r.id);else await openTerminal({terminalId:r.id});toast('This session already runs in another tab.');return;}
+      // Normally the 'restarted' event came first; this covers it arriving later.
+      if(view.exited&&r.seq>view.lastSeq){view.exited=false;view.core.setLive(true);activateTerminal(currentTerminal,{focus:false});}
+    }finally{view.restarting=false;}
+  }
   function terminalEvent(event){
-    if(event.type==='opened'){if(terminalViews.has(event.id)){$('#terminal-panel').hidden=false;activateTerminal(event.id);}else action(()=>openTerminal({terminalId:event.id}));return;}
-    if(event.type==='renamed'){const view=terminalViews.get(event.id);if(view){view.title=event.title;activateTerminal(currentTerminal);}return;}
+    // A terminal the service opens (an install, an update, a command of the Opaya Agent) is shown, but it no longer takes the
+    // pane and the keyboard from someone typing in another terminal: it waits in a tab. Typing in the chat box or a form
+    // keeps the keyboard there.
+    if(event.type==='opened'){
+      const typing=typingInTerminal()?viewOf(document.activeElement):null,busy=!!typing&&typing.id!==event.id,focus=!busy&&!typingElsewhere(),view=terminalViews.get(event.id);
+      if(!view){action(()=>openTerminal({terminalId:event.id,background:busy,focus}));return;}
+      if(busy){if(!panes.includes(event.id)){view.attention=true;activateTerminal(currentTerminal,{focus:false});toast(`${tabTitle(view)} is running in its terminal tab.`);}return;}
+      $('#terminal-panel').hidden=false;activateTerminal(event.id,{focus});return;
+    }
+    if(event.type==='renamed'){const view=terminalViews.get(event.id);if(view){view.title=event.title;activateTerminal(currentTerminal,{focus:false});}return;}
     if(event.type==='warning'){toast(event.error,true);return;}
     const view=terminalViews.get(event.id);
     if(!view){const pending=terminalPending.get(event.id)||[];if(pending.length<100)pending.push(event);terminalPending.set(event.id,pending);return;}
     if(event.seq&&event.seq<=view.lastSeq)return;view.lastSeq=event.seq||view.lastSeq;
     if(event.type==='data')view.term.write(event.data);
-    if(event.type==='exit'){view.exited=true;view.term.options.disableStdin=true;view.term.write(`\r\n\x1b[90m[Session ${event.exitCode==='detached'?'detached':'ended: '+event.exitCode}]\x1b[0m\r\n`);activateTerminal(currentTerminal);}
+    if(event.type==='exit'){view.exited=true;view.core.setLive(false);view.term.write(window.OpayaTerminal.endedNote(view,event.exitCode));activateTerminal(currentTerminal,{focus:false});}
+    // Started again (here or in its separate window): it takes typing again, except in the docked copy of a popped-out one.
+    if(event.type==='restarted'){view.exited=false;view.core.setLive(true);view.term.options.disableStdin=!!view.poppedOut;activateTerminal(currentTerminal,{focus:false});}
   }
   document.addEventListener('click',event=>{
     const button=event.target.closest('[data-action]');if(!button)return;const {action:name,id,index}=button.dataset;
@@ -776,13 +832,15 @@
   });
   document.addEventListener('input',event=>{if(event.target.id==='ws-search'){wsQuery=event.target.value;render();}});
   document.addEventListener('keydown',event=>{
-    if(!(event.ctrlKey||event.metaKey))return;
+    // AltGr is Ctrl+Alt on Windows and types characters (@ \ { } `): no shortcut here uses Alt, so a terminal gets them.
+    if(!(event.ctrlKey||event.metaKey)||event.altKey)return;
     if(event.key.toLowerCase()==='k'){event.preventDefault();switcher();}
     if(event.shiftKey&&event.key.toLowerCase()==='m'&&selected()&&!$('#app-dialog')){event.preventDefault();openManage(selected().id);return;}
     if($('#app-dialog'))return;
     if(event.key.toLowerCase()==='n'&&selected()){event.preventDefault();action(()=>api.newConversation({agentId:selected().id}));}
     if(event.key==='`'){event.preventDefault();if(!$('#terminal-panel').hidden)$('#terminal-panel').hidden=true;else action(()=>currentTerminal&&terminalViews.has(currentTerminal)?($('#terminal-panel').hidden=false,activateTerminal(currentTerminal)):agentTerminal());}
-    if(/^[1-9]$/.test(event.key)&&state.agents[Number(event.key)-1]){event.preventDefault();overview=false;opayaView=false;playgroundView=false;action(()=>api.select({id:state.agents[Number(event.key)-1].id}));}
+    // Chosen from inside a terminal, the terminal panel still follows the choice (followSelectedAgent keeps a focused one).
+    if(/^[1-9]$/.test(event.key)&&state.agents[Number(event.key)-1]){event.preventDefault();overview=false;opayaView=false;playgroundView=false;const id=state.agents[Number(event.key)-1].id;if(id!==state.activeAgentId&&viewOf(document.activeElement))document.activeElement.blur();action(()=>api.select({id}));}
   });
   if(!api){$('#content').innerHTML='<div class="runtime-missing"><h1>Open Opaya as a desktop app.</h1><p>This workspace needs its native bridge to discover agents, use SSH and open terminals.</p><code>npm install &amp;&amp; npm start</code></div>';return;}
   // Scrollback search (Ctrl+F in a terminal, or the search button).
@@ -801,16 +859,19 @@
   async function closeTerminalTab(id){
     const view=terminalViews.get(id);if(!view||view.closing)return;view.closing=true;
     // The tab goes away even if the service could not end the session (for example its agent was removed).
-    try{try{const r=await api.terminalClose({id});if(r?.warning)toast(`Tab closed. ${r.warning}`,true);}catch(error){toast(`Tab closed. ${error.message}`,true);}const ids=[...terminalViews.keys()].filter(x=>x!==id&&!panes.includes(x)),at=panes.indexOf(id);view.observer.disconnect();view.term.dispose();view.element.remove();terminalViews.delete(id);if(at>=0){if(panes.length>1){panes.splice(at,1);const [size]=paneSizes.splice(at,1);paneSizes[Math.max(0,at-1)]+=size;paneFocus=Math.min(paneFocus>at?paneFocus-1:paneFocus,panes.length-1);}else panes[at]=ids.at(-1)||'';}activateTerminal(panes[paneFocus]);saveView();}finally{view.closing=false;}
+    try{try{const r=await api.terminalClose({id});if(r?.warning)toast(`Tab closed. ${r.warning}`,true);}catch(error){toast(`Tab closed. ${error.message}`,true);}const ids=[...terminalViews.keys()].filter(x=>x!==id&&!panes.includes(x)),at=panes.indexOf(id);view.observer.disconnect();view.core.dispose();view.element.remove();terminalViews.delete(id);if(at>=0){if(panes.length>1){panes.splice(at,1);const [size]=paneSizes.splice(at,1);paneSizes[Math.max(0,at-1)]+=size;paneFocus=Math.min(paneFocus>at?paneFocus-1:paneFocus,panes.length-1);}else panes[at]=ids.at(-1)||'';}activateTerminal(panes[paneFocus]);saveView();}finally{view.closing=false;}
   }
   $('#terminal-tabs').addEventListener('mousedown',event=>{if(event.button===1)event.preventDefault();});
   $('#terminal-tabs').addEventListener('auxclick',event=>{const tab=event.target.closest('[data-action="terminal-tab"]');if(event.button===1&&tab){event.preventDefault();action(()=>closeTerminalTab(tab.dataset.id));}});
   async function popoutTerminal(id){
-    const view=terminalViews.get(id);if(!view)return;view.poppedOut=true;view.term.options.disableStdin=true;
+    // The window reports its own size; back in a pane, this copy reports its size again (resetSize).
+    const view=terminalViews.get(id);if(!view)return;view.poppedOut=true;view.term.options.disableStdin=true;view.core.resetSize();
     try{await api.terminalPopout({id});if(panes.filter(x=>x&&x!==id).length)activateTerminal(panes.find(x=>x&&x!==id));else if(currentTerminal===id)$('#terminal-panel').hidden=true;}catch(error){view.poppedOut=false;view.term.options.disableStdin=view.exited;throw error;}
   }
   function renameTerminal(id){
     const view=terminalViews.get(id);if(!view)return;
+    // The dialog gives the keyboard back to what had it when it opened: the terminal, not the menu that asked for it.
+    if(id===currentTerminal&&!typingElsewhere())focusCurrent();
     modal('Rename terminal','',`<form id="terminal-rename-form"><label class="field"><span>Name</span><input name="title" value="${esc(view.title)}" required maxlength="80" autocomplete="off"></label><div class="modal-footer"><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="submit" class="primary">Rename</button></div></form>`);
     const form=$('#terminal-rename-form');form.elements.title.select();form.addEventListener('submit',event=>{event.preventDefault();action(async()=>{await api.terminalRename({id,title:form.elements.title.value});closeModal();});});
   }

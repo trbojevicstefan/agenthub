@@ -108,6 +108,9 @@ async function start({app, safeStorage}, root) {
       .finally(()=>{clearTimeout(timer);publishJob(job);emit();});
     return job;
   }
+  // The pseudo agents behind "This computer" and a machine's own shell.
+  const localShell=()=>({id:'local-shell',name:'This computer',provider:'custom',transport:'local',command:'',args:[],cwd:app.getPath('home')});
+  const hostShell=hostId=>({id:`host_${schema.id(hostId)}`,name:broker.host(hostId).name,provider:'custom',transport:'ssh',hostId,command:'',args:[],cwd:''});
   async function runInTerminal({label,key,host,command}){
     const pseudo={id:`svc_${key}_${host?host.id:'local'}`.slice(0,80),name:label,provider:'custom',transport:host?'ssh':'local',hostId:host?.id||'',command:'',args:[],cwd:host?'':app.getPath('home'),ephemeral:true,run:host?command:''};
     const reused=terminals.hasLive(pseudo.id,'shell'),view=terminals.open(pseudo,host,'shell',{cols:110,rows:30});
@@ -554,7 +557,7 @@ async function start({app, safeStorage}, root) {
     send:x=>broker.send(x), stop:x=>broker.stop(x.id), saveDraft:x=>broker.saveDraft(x), saveView:x=>broker.saveView(x),
     transcript:async x=>{const c=broker.data.conversations.find(c=>c.id===schema.id(x.id));if(!c)throw new Error('Conversation not found.');return {conversation:c,agent:broker.agent(c.agentId),messages:broker.histories.get(c.id)||await broker.store.transcript(c.id)};},
     terminalOpen:async x=>{
-      const a=x.local===true?{id:'local-shell',name:'This computer',provider:'custom',transport:'local',command:'',args:[],cwd:app.getPath('home')}:x.agentId?broker.agent(x.agentId):{id:`host_${schema.id(x.hostId)}`,name:broker.host(x.hostId).name,provider:'custom',transport:'ssh',hostId:x.hostId,command:'',args:[],cwd:''};
+      const a=x.local===true?localShell():x.agentId?broker.agent(x.agentId):hostShell(x.hostId);
       // A project: the agent's CLI (or a shell) starts in the project's folder on the machine where it runs.
       let cwd='',title='';
       if(x.projectId){
@@ -565,6 +568,20 @@ async function start({app, safeStorage}, root) {
       }
       if(x.mode==='agent'&&a.provider==='hermes'&&!terminals.hasLive(a.id,x.mode)&&!await approve(a,'Start a new Hermes CLI process?','This does not attach to an existing gateway. Do not run another writer against a Hermes profile already used by a gateway. Use its gateway API or existing tmux session instead.'))throw new Error('CLI launch cancelled.');
       const result=terminals.open(a,a.transport==='ssh'?broker.host(a.hostId):null,x.mode||'shell',{cols:x.cols||100,rows:x.rows||28},{cwd,title});emit();return result;
+    },
+    // Enter in an ended terminal starts it again in its tab: the same agent or shell, machine, mode and folder. A remote one
+    // reattaches to its tmux session, which usually outlived the dropped SSH connection.
+    terminalRestart:async x=>{
+      const s=terminals.describe().find(s=>s.id===schema.id(x.id));if(!s)throw new Error('This terminal was closed.');
+      if(!s.exited)return terminals.attach(s.id);
+      let a;
+      if(s.agentId==='local-shell')a=localShell();
+      else if(s.agentId.startsWith('host_')){try{a=hostShell(s.agentId.slice(5));}catch{throw new Error('The machine of this terminal was removed from Opaya. Close the tab.');}}
+      // An install or diagnostics terminal gets a plain shell on its machine; the finished command does not run again.
+      else if(s.agentId.startsWith('svc_')){const host=s.remote?broker.data.hosts.find(h=>h.id===s.hostId||s.agentId.endsWith('_'+h.id)):null;if(s.remote&&!host)throw new Error('The machine of this terminal was removed from Opaya.');a={id:s.agentId,name:s.title,provider:'custom',transport:host?'ssh':'local',hostId:host?.id||'',command:'',args:[],cwd:host?'':app.getPath('home'),ephemeral:true};}
+      else{try{a=broker.agent(s.agentId);}catch{throw new Error('The agent of this terminal was removed from Opaya. Close the tab.');}}
+      if(s.mode==='agent'&&a.provider==='hermes'&&!terminals.hasLive(a.id,s.mode)&&!await approve(a,'Start a new Hermes CLI process?','This does not attach to an existing gateway. Do not run another writer against a Hermes profile already used by a gateway. Use its gateway API or existing tmux session instead.'))throw new Error('CLI launch cancelled.');
+      const result=terminals.restart(s.id,a,a.transport==='ssh'?broker.host(a.hostId):null,{cols:x.cols||100,rows:x.rows||28});emit();return result;
     },
     terminalAttach:x=>terminals.attach(schema.id(x.id)), terminalWrite:x=>terminals.write(schema.id(x.id),x.data),
     terminalResize:x=>terminals.resize(schema.id(x.id),x.cols,x.rows),

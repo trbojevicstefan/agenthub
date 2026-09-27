@@ -1401,3 +1401,7 @@ body[data-theme="light"] .bring-M{color:#9a6a10}body[data-theme="light"] .bring-
 .approval-dialog.secret-prompt .field{margin:18px 0 10px}
 .approval-dialog.secret-prompt .field-help{margin:0}
 .approval-dialog .secret-for{margin-top:-8px}
+/* A terminal the service opened while you typed in another one waits in its tab, pulsing, until you look at it. */
+.terminal-tab.attention>button[data-action="terminal-tab"]{color:var(--text)}
+.terminal-tab.attention .terminal-tab-dot{animation:terminal-tab-attention 1.1s ease-in-out infinite}
+@keyframes terminal-tab-attention{50%{transform:scale(1.7);opacity:.55}}
