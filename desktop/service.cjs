@@ -637,7 +637,7 @@ async function start({app, safeStorage}, root) {
     opayaFreeModels:async()=>({models:free.FREE_MODELS.map(({id,label,size,note})=>({id,label,size,note})),recommended:free.recommended(),installed:await free.ollamaModels()}),
     opayaFreeSetup:async x=>{const model=String(x?.model||free.recommended());const m=free.FREE_MODELS.find(f=>f.id===model);if(!m)throw new Error('Choose one of the free models.');
       return startJob({kind:'free-model',route:{from:m.label,fromWhere:`Free / ${m.size}`,to:'Opaya Agent',toWhere:'This computer',provider:'ollama'},title:`Setting up ${m.label}`,detail:'Free local model through Ollama. No account and no key.',steps:[['ollama','Install and start Ollama'],['download',`Download ${m.label} (${m.size})`],['connect','Connect the Opaya Agent']]},progress=>free.setupFree({opaya,model,progress}).then(r=>{emit();return r;}));},
-    opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}), opayaForgetKey:()=>opaya.forgetKey(),
+    opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}), opayaForgetKey:()=>opaya.forgetKey(), opayaTerminalAccess:x=>opaya.setTerminalAccess(!!x?.on),
     opayaSend:x=>opaya.begin(x.text), opayaNewSession:()=>opaya.newSession(), opayaSelectSession:x=>opaya.selectSession(String(x.id||'')), opayaDeleteSession:x=>opaya.deleteSession(String(x.id||'')), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),
     ...maintenanceActions, ...toolActions, ...projectRemoteActions, ...guideActions,
     shutdown

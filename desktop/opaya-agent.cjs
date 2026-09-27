@@ -1,7 +1,8 @@
 'use strict';
 // Opaya Agent: a built-in assistant that helps install, connect, maintain and troubleshoot agents and machines.
 // Safety boundary:
-// - It only acts through the tools below. There is no generic shell, file or network tool.
+// - It acts through the tools below. A general terminal (run_command, open_app, typed answers) exists only after the user
+//   turns on terminal access (it asks the first time), and every command still asks for approval unless iTrust is on.
 // - Connections and machines change only through the broker, so the same schema validation applies as in the UI.
 // - Every change and every command asks for native approval first. Commands come from fixed templates (catalog.cjs,
 //   DIAGNOSTICS, SSH key templates) with validated parameters, and they run in a visible terminal.
@@ -37,6 +38,14 @@ const PRESETS={
   custom:{label:'Custom OpenAI-compatible API',baseUrl:'',model:'',models:[]}
 };
 const KEY='opaya-agent',MAX_STEPS=40,TIMEOUT=120000;
+// Opens a website or an app on this computer. Values are passed as arguments, never parsed by a shell.
+function openCommand(target,platform){
+  const url=/^https?:\/\//i.test(target);
+  if(platform==='darwin')return {file:'open',args:url?[target]:['-a',target]};
+  // Windows: links through the URL handler (no shell); app names (letters, digits, spaces, . + ( ) - only) through start.
+  if(platform==='win32')return url?{file:'rundll32.exe',args:['url.dll,FileProtocolHandler',target]}:{file:'cmd.exe',args:['/d','/s','/c',`start "" "${target}"`],verbatim:true};
+  return {file:url?'xdg-open':'gtk-launch',args:[target]};
+}
 const DIAGNOSTICS={
   versions:{label:'Installed agent tools',
     posix:"for c in hermes claude codex openclaw opencode goose aider ollama node npm python3 tmux ssh; do printf '%s: ' \"$c\"; if command -v \"$c\" >/dev/null 2>&1; then \"$c\" --version 2>&1 | head -1; else echo 'not installed'; fi; done",
@@ -59,7 +68,7 @@ function promptState(output){
 // How the Opaya Agent installs and updates things end to end, without the user typing in the terminal.
 const INSTALL_PROCEDURE=[
   'Installing and updating: do the whole job yourself. The user should not have to type anything in a terminal.',
-  'Never ask the user to type or paste commands into a terminal. You have tools for installing, updating, checks, answering installer questions, connections, machines, SSH keys and skills: use them. If something truly has no tool, say so plainly and point to the Opaya feature that does it (for example right-click an agent > Run native CLI for a first sign-in), instead of handing over shell commands.',
+  'Never ask the user to type or paste commands into a terminal. You have tools for installing, updating, onboarding (setup_agent), checks, answering installer questions, connections, machines, SSH keys and skills: use them. When none fits, use run_command yourself (it asks the user for terminal access the first time) instead of handing over shell commands.',
   '1. run_diagnostic versions on the target (this computer or the machine) to see what is installed and which versions.',
   '2. Install missing dependencies first with install_framework (node, python, git, uv, tmux, gh, homebrew on macOS; or essentials when several are missing). Check list_frameworks for each agent\'s requires.',
   '3. install_framework for the agent, or update_framework to bring an installed agent or dependency to its latest version (essentials updates all of them).',
@@ -110,7 +119,9 @@ const TOOLS=[
   fn('install_framework','Install an agent framework, a dependency or the essentials bundle in a visible terminal, on this computer or a saved machine. The user approves the exact command first. Dependency commands skip what is already installed.',{framework_id:{type:'string',description:'An id from list_frameworks, for example codex, node, python or essentials.'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['framework_id']),
   fn('update_framework','Update an installed agent framework or dependency (or every essential) to its latest version, in a visible terminal, on this computer or a saved machine. The user approves the exact command first. Check versions first with run_diagnostic versions.',{framework_id:{type:'string',description:'An id from list_frameworks, for example hermes, claude, codex, node or essentials.'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['framework_id']),
   fn('wait_for_terminal','Wait for an install, update or check you started to finish (up to 180 seconds) and return its latest output. Returns finished=true with the exit code when the command ended, question=true when the program is waiting for an answer (then use answer_prompt), or password=true when it asks for a password (only the user can type that).',{terminal_id:{type:'string'},seconds:{type:'integer',description:'Maximum seconds to wait, 5 to 180. Default 90.'}},['terminal_id']),
-  fn('answer_prompt','Answer a question from an installer in a terminal you started (install_framework, update_framework, setup_agent, run_diagnostic, install_skill): press Enter for the default, y/n, yes/no, a menu number, arrow keys, space, tab, q or Ctrl+C. Only these fixed answers are possible: never passwords, keys, tokens or commands. Read the output first and pick the safe default unless the user said otherwise.',{terminal_id:{type:'string'},answer:{type:'string',enum:['enter','y','n','yes','no','1','2','3','4','5','6','7','8','9','up','down','space','tab','q','ctrl_c']}},['terminal_id','answer']),
+  fn('run_command','Run any command in a visible terminal on this computer or a saved machine, for what your other tools do not cover (for example finishing an onboarding, fixing a PATH or a config). Needs terminal access, which the user turns on when you first ask; each command also asks for approval unless iTrust is on. Follow it with wait_for_terminal and answer_prompt. Prefer the specific tools when one fits. Never put API keys, passwords or tokens in a command: the user types those in the terminal.',{command:{type:'string',description:'The shell command (sh on macOS, Linux and machines; PowerShell on Windows).'},why:{type:'string',description:'One sentence the user sees in the approval: what it does and why.'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['command','why']),
+  fn('open_app','Open a website in the default browser, or start an app on this computer by name (for example System Settings, Docker, Terminal), for example to show the user a sign-in page. Needs terminal access, like run_command.',{target:{type:'string',description:'An https:// link or an app name.'},why:{type:'string'}},['target','why']),
+  fn('answer_prompt','Answer a question from an installer in a terminal you started (install_framework, update_framework, setup_agent, run_command, run_diagnostic, install_skill): press Enter for the default, y/n, yes/no, a menu number, arrow keys, space, tab, q or Ctrl+C; with terminal access also answer=text with text (typed, then Enter), for names, folders or model ids. Never passwords, keys or tokens: the user types those. Read the output first and pick the safe default unless the user said otherwise.',{terminal_id:{type:'string'},answer:{type:'string',enum:['enter','y','n','yes','no','1','2','3','4','5','6','7','8','9','up','down','space','tab','q','ctrl_c','text']},text:{type:'string',description:'Only with answer=text: what to type (one line, no secrets).'}},['terminal_id','answer']),
   fn('ssh_key','Create an ed25519 SSH key on this computer, or install a public key on a saved machine, in a visible terminal. The user approves it first and types any passphrase or password.',{action:{type:'string',enum:['generate','install']},key_name:{type:'string',description:'File name in ~/.ssh, letters, numbers, _ and -.'},machine_id:{type:'string'}},['action','key_name']),
   fn('list_directory','Read-only: list a folder on this computer or a saved machine (default: home folder).',{path:{type:'string'},machine_id:{type:'string'}}),
   fn('read_file','Read-only: read up to 256 KB of a text file on this computer or a saved machine. Secret files such as .env, keys and tokens are refused.',{path:{type:'string'},machine_id:{type:'string'}},['path']),
@@ -174,7 +185,7 @@ class OpayaAgent{
   async saveConfig({preset='custom',baseUrl,model,apiKey,remember=true}){
     if(!Object.hasOwn(PRESETS,preset))throw new Error('Unknown model provider.');
     const codex=this.cli(preset);
-    const config={preset,baseUrl:codex?'':schema.endpoint(baseUrl||PRESETS[preset].baseUrl),model:schema.text(model,'model',256).trim()};
+    const config={preset,baseUrl:codex?'':schema.endpoint(baseUrl||PRESETS[preset].baseUrl),model:schema.text(model,'model',256).trim(),terminal:!!this.config.terminal};
     if(!codex&&!config.model)throw new Error('Choose a model from the provider list.');
     if(!codex&&apiKey!==undefined&&apiKey!=='')await this.vault.set(KEY,schema.text(apiKey,'API key',16000).trim(),Boolean(remember));
     if(this.config.preset!==config.preset||this.config.model!==config.model||this.config.baseUrl!==config.baseUrl){await this.closeCodex();this.claudeSessionId='';}
@@ -226,7 +237,8 @@ class OpayaAgent{
       'Opaya connects Hermes, Claude Code, Codex, OpenClaw and other agents on this computer and on SSH machines, keeps their chats and terminals, and lets the user switch between them.',
       'Your job: help install new agents, connect and maintain existing ones, manage SSH machines and keys, and troubleshoot agents that do not work.',
       'Work only through your tools. Check the workspace before changing anything. Prefer the smallest change. Explain briefly what you will do before a change; every change and command is approved by the user in a native dialog, and a declined approval is final.',
-      'You cannot edit the app itself, its code or files outside your home folder, and you never see or handle API tokens: ask the user to enter tokens in the connection form.',
+      'You never see or handle API tokens: gateway tokens are imported with save_connection import_gateway_token, other tokens the user enters in the connection form or types in a terminal.',
+      `Terminal access is ${this.config.terminal?'on':'off'}: ${this.config.terminal?'run_command and open_app work (each command is approved); answer_prompt can type text.':'run_command and open_app first ask the user to turn it on; ask only when your other tools cannot do the job.'} Use it to finish onboarding and fixes end to end, with as few extra programs as possible.`,
       'Projects: list_projects shows saved project folders and their agents; chats started from a project open the agent in that folder. Git and GitHub CLI actions are in the Projects panel (right-click a project). '+
       'Skills: list_skills shows what an agent has; users run one with /name in its chat. Install Hermes skills with install_skill. MCP servers are added by the user in Settings > MCP servers (list_mcp_servers shows them); Opaya passes them to Hermes over ACP and to Claude Code. ',
       'When an agent hangs or does not answer, call agent_diagnostics first and explain what it shows: a pending approval, a tool that is still running, stderr errors or Hermes log errors. A Hermes log full of repeated "slack_bolt ... Session is closed" tracebacks is a known Hermes gateway bug in its Slack reconnect (NousResearch/hermes-agent#83662); it only affects the gateway and Slack, and restarting the Hermes gateway clears it. For agents that fail: read the connection and error, run diagnostics, check that the endpoint/port or executable exists, reconnect, and only then propose an edited connection. Do not remove connections unless asked.',
@@ -407,6 +419,14 @@ class OpayaAgent{
   async closeCodex(){const rpc=this.codexRpc,active=this.codexActive;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;if(rpc&&!rpc.closed)rpc.close();active?.reject(new Error('Codex stopped.'));}
   async close(){await this.closeCodex();if(this.claudeChild)terminate(this.claudeChild);}
   host(id){return id?this.broker.host(id):null;}
+  // Terminal access: off until the user allows it once (always asked, even with iTrust). Commands still ask each time.
+  async terminalAccess(){
+    if(this.config.terminal)return;
+    await this.ask('Let the Opaya Agent use the terminal and apps?','It can then run any command and open apps on this computer and your machines, so it can finish setups your other tools do not cover. Every command still asks you first (unless iTrust is on). Turn it off any time in Model settings.',{always:true});
+    await this.setTerminalAccess(true);
+  }
+  async setTerminalAccess(on){this.config={...this.config,terminal:!!on};await atomicJson(path.join(this.home,'config.json'),this.config);this.emit();return this.describe();}
+  spawnProcess(file,args,{verbatim=false}={}){return require('node:child_process').spawn(file,args,{detached:true,stdio:'ignore',windowsHide:true,windowsVerbatimArguments:verbatim}).once('spawn',function(){this.unref();});}
   // iTrust for the Opaya Agent skips the dialog, except for removals, which always ask.
   async ask(title,detail,{always=false}={}){if(!always&&this.trusted?.()){this.status=`iTrust approved: ${title}`;this.current?.activity?.push(this.status);this.emit();return;}if(!await this.approve({name:'Opaya Agent'},title,detail))throw new Error('The user declined this action.');}
   // Terminals the Opaya Agent started; answer_prompt works only in these. Marked commands print an end line with the
@@ -484,6 +504,24 @@ class OpayaAgent{
         const next={sign_in:'Follow it with wait_for_terminal and answer menus with answer_prompt. When it asks for an API key, password or browser sign-in, tell the user exactly what to enter in that terminal, then keep waiting.',enable_api:'Then start_gateway (or restart it), save_connection over the gateway API with import_gateway_token, and connect_agent.',start_gateway:'Then discover_agents, save_connection with import_gateway_token, and connect_agent.',status:'Read the output.'}[s.step];
         return {terminal_id:view.id,started:true,note:s.note||undefined,next,output:await this.terminalOutput(view.id,s.step==='status'?(host?9000:5000):4000)};
       }
+      case 'run_command':{
+        const host=this.host(args.machine_id),command=String(args.command||'').trim(),why=String(args.why||'').slice(0,300);
+        if(!command||command.length>4000||command.includes('\0'))throw new Error('Give one command, up to 4000 characters.');
+        await this.terminalAccess();
+        await this.ask(`Run a command ${host?`on ${host.name}`:'on this computer'}?`,`${why?why+'\n\n':''}Runs in a visible terminal:\n\n${command}`);
+        const view=await this.runOwn({label:`Opaya Agent: ${command.split(/\s+/).slice(0,3).join(' ')}`.slice(0,60),key:`cmd_${Date.now().toString(36)}`,host,command,marked:true});
+        return {terminal_id:view.id,started:true,hint:'Call wait_for_terminal with this terminal_id to follow it to the end; answer questions with answer_prompt.',output:await this.terminalOutput(view.id,3000)};
+      }
+      case 'open_app':{
+        const target=String(args.target||'').trim();
+        if(!target||target.length>300||/[\r\n\0]/.test(target)||(!/^https?:\/\//i.test(target)&&!/^[\w .+()-]{1,80}$/.test(target)))throw new Error('Give an https:// link or an app name.');
+        if(/^http:\/\//i.test(target)&&!/^http:\/\/(127\.0\.0\.1|localhost)[:/]/i.test(target))throw new Error('Open https:// links (or http://localhost).');
+        await this.terminalAccess();
+        await this.ask(`Open ${target}?`,String(args.why||'').slice(0,300)||'Opens it on this computer.');
+        const {file,args:argv,verbatim}=openCommand(target,this.platform);
+        await new Promise((resolve,reject)=>{const child=this.spawnProcess(file,argv,{verbatim});child.on('error',reject);child.on('spawn',resolve);setTimeout(resolve,1500);});
+        return {opened:target};
+      }
       case 'wait_for_terminal':{
         const id=schema.id(args.terminal_id),limit=Math.min(Math.max(Number(args.seconds)||90,5),180)*1000,start=Date.now();
         let last='',quietSince=Date.now(),state;
@@ -500,9 +538,14 @@ class OpayaAgent{
       case 'answer_prompt':{
         const id=schema.id(args.terminal_id);if(!this.ownTerminals.has(id))throw new Error('You can only answer prompts in terminals you started.');
         const keys={enter:'\r',y:'y\r',n:'n\r',yes:'yes\r',no:'no\r',up:'\u001b[A',down:'\u001b[B',space:' ',tab:'\t',q:'q',ctrl_c:'\u0003'};
-        const answer=String(args.answer||''),data=keys[answer]??(/^[1-9]$/.test(answer)?answer+'\r':null);if(data===null)throw new Error('Unsupported answer.');
+        const answer=String(args.answer||'');let data=keys[answer]??(/^[1-9]$/.test(answer)?answer+'\r':null);
+        if(answer==='text'){
+          if(!this.config.terminal)throw new Error('Typing text needs terminal access. Ask for it with run_command first, or answer with the fixed keys.');
+          const text=String(args.text??'');if(!text||text.length>500||/[\r\n\0\u001b]/.test(text))throw new Error('Type one line of plain text, up to 500 characters.');data=text+'\r';
+        }
+        if(data===null)throw new Error('Unsupported answer.');
         const before=await this.terminalOutput(id);if(promptState(before).password&&answer!=='ctrl_c')throw new Error('The terminal is asking for a password. Only the user can type it.');
-        this.terminals.write(id,data);this.status=`Answered ${answer} in the terminal`;this.emit();
+        this.terminals.write(id,data);this.status=`Answered ${answer==='text'?'with typed text':answer} in the terminal`;this.emit();
         return {sent:answer,output:(await this.terminalOutput(id,2500)).slice(-2500)};
       }
       case 'ssh_key':{
