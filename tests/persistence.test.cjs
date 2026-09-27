@@ -79,3 +79,17 @@ test('service install terminals over SSH pass the command to ssh and do not requ
   terminals.open({id:'regular',name:'Regular',provider:'custom',transport:'ssh',hostId:'h',command:'',args:[],cwd:''},{alias:'vps'},'shell');
   assert.match(spawned[1].at(-1),/tmux/);
 });
+test('a terminal can start an agent CLI in a project folder, one session per folder, and remembers its size',async t=>{
+  const {withWorkdir}=require('../desktop/terminal.cjs');
+  const one=await temp(t),two=await temp(t),spawned=[];
+  const terminals=new Terminals(()=>{},{ptyFactory:{spawn:(command,args,options)=>{spawned.push({command,args,options});return {onData(){},onExit(){},write(){},resize(){},kill(){}};}}});
+  const agent={id:'cli',name:'Node CLI',provider:'custom',protocol:'acp',transport:'local',command:'node',args:[]};
+  const a=terminals.open(agent,null,'agent',{cols:90,rows:20},{cwd:one,title:'Node CLI · Site'});
+  assert.equal(spawned[0].options.cwd,one);assert.equal(a.title,'Node CLI · Site');assert.equal(a.cwd,one);assert.deepEqual([a.cols,a.rows],[90,20]);
+  assert.equal(terminals.open(agent,null,'agent',{cols:90,rows:20},{cwd:one}).id,a.id,'the same folder reuses its session');
+  terminals.open(agent,null,'agent',{cols:90,rows:20},{cwd:two});assert.equal(spawned.length,2);assert.equal(spawned[1].options.cwd,two);
+  assert.throws(()=>terminals.open(agent,null,'agent',{cols:90,rows:20},{cwd:path.join(one,'missing')}),/does not exist/);
+  terminals.resize(a.id,120,40);assert.deepEqual([terminals.attach(a.id).cols,terminals.attach(a.id).rows],[120,40]);
+  assert.deepEqual(withWorkdir(['exec','-it','-e','TERM=xterm-256color','box','codex'],'/root/site'),['exec','-it','-e','TERM=xterm-256color','-w','/root/site','box','codex']);
+  assert.deepEqual(withWorkdir(['exec','-it','box','sh'],''),['exec','-it','box','sh']);
+});

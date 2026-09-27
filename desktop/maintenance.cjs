@@ -104,6 +104,12 @@ function updateCommand(agent,{remote,windows=process.platform==='win32'}){
       const cmd=`docker exec ${q(c)} npm install -g ${plan.npm}@latest`;
       return {title:`Update ${plan.name} in ${c}`,summary:`Updates ${plan.name} inside the container to its latest version.`,after:'Reconnect the agent afterwards.',command:posix?posixScript([cmd]):cmd};
     }
+    if(/^opaya-/.test(c)&&k.framework==='openclaw'&&plan?.gateway){
+      // Same data volume, port and gateway token; only the image is new.
+      const containers=require('./containers.cjs');
+      const lines=[`tok=$(docker exec ${q(c)} printenv OPENCLAW_GATEWAY_TOKEN) || exit 1`,`docker pull ${containers.OPENCLAW_IMAGE} || exit 1`,`docker rm -f ${q(c)} >/dev/null`,`${containers.openclawRun(c,containers.openclawPort(c))} && echo 'Container ${c} runs the newest OpenClaw image.'`];
+      return {title:`Update container ${c}`,summary:`Downloads the newest ${containers.OPENCLAW_IMAGE} and recreates ${c} with the same data volume, port and gateway token.`,after:'Reconnect the agent afterwards.',command:posixScript(lines)};
+    }
     if(/^opaya-/.test(c)&&k.framework==='hermes'&&plan?.image){
       const dir=`"$HOME/${plan.dir}/${c.replace(/^opaya-/,'')}"`;
       const lines=[`docker pull ${plan.image} || exit 1`,`docker rm -f ${q(c)} >/dev/null`,`docker run -d --name ${q(c)} --restart unless-stopped -v ${dir}:${plan.mount} -e HERMES_HOME=${plan.mount} --entrypoint sleep ${plan.image} infinity >/dev/null && echo 'Container ${c} runs the newest Hermes image.'`];
@@ -172,8 +178,10 @@ function uninstallCommand(agent,{remote,data=false,windows=process.platform==='w
   if(k.kind==='remote-api')throw new Error('This is an API connection. There is nothing installed to remove; remove the connection instead.');
   if(k.kind==='docker'){
     const c=k.container,dir=data&&k.managed&&k.dir?deletable(k.dir):'';
-    return {title:`Remove container ${c}`,summary:`Stops and deletes the container ${c}.${dir?` Also deletes its data folder ${dir}.`:k.managed?' Its data folder stays.':' Volumes and the image stay.'}`,
-      command:posix?posixScript([`docker rm -f ${q(c)} && echo 'Container ${c} removed.'`,...(dir?[`rm -rf ${q(dir)} && echo 'Deleted data: ${dir.replace(/'/g,'')}'`]:[])]):`docker rm -f ${q(c)}${dir?`; Remove-Item -Recurse -Force ${q(dir)}`:''}`};
+    // OpenClaw containers from Install agents keep their data in the volume <container>-data.
+    const volume=data&&k.framework==='openclaw'&&/^opaya-/.test(c)?`${c}-data`:'';
+    return {title:`Remove container ${c}`,summary:`Stops and deletes the container ${c}.${dir?` Also deletes its data folder ${dir}.`:volume?` Also deletes its data volume ${volume}.`:k.managed?' Its data folder stays.':' Volumes and the image stay.'}`,
+      command:posix?posixScript([`docker rm -f ${q(c)} && echo 'Container ${c} removed.'`,...(dir?[`rm -rf ${q(dir)} && echo 'Deleted data: ${dir.replace(/'/g,'')}'`]:[]),...(volume?[`docker volume rm ${q(volume)} >/dev/null && echo 'Deleted data volume ${volume}'`]:[])]):`docker rm -f ${q(c)}${dir?`; Remove-Item -Recurse -Force ${q(dir)}`:''}${volume?`; docker volume rm ${q(volume)}`:''}`};
   }
   if(k.kind==='hermes-profile'){
     const n=k.profile;deletable(k.dir);

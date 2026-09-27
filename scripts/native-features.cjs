@@ -12,7 +12,9 @@ async function run({win,client,output}){
   const before=await js(`document.querySelector('#dock-bottom').offsetHeight`);
   await js(`document.querySelector('.dock-grip[data-grip="bottom"]').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowUp',bubbles:true}))`);
   assert(await js(`document.querySelector('#dock-bottom').offsetHeight>${before}`));
-  await js(`document.querySelector('[data-action="terminal-detach"]').click()`);
+  await js(`document.querySelector('[data-action="terminal-more"]').click()`);
+  await until(()=>js(`!!document.querySelector('.context-menu [data-menu-index]')`));
+  await js(`[...document.querySelectorAll('.context-menu [data-menu-index]')].find(b=>b.textContent.includes('Open in separate window')).click()`);
   const {BrowserWindow}=require('electron');let popup;
   await until(async()=>{popup=BrowserWindow.getAllWindows().find(w=>w!==win);return popup&&await popup.webContents.executeJavaScript(`!!document.querySelector('#terminal .xterm')`).catch(()=>false);});
   popup.setSize(720,480);await new Promise(r=>setTimeout(r,300));

@@ -40,7 +40,13 @@ test('skills are read from SKILL.md folders and Hermes installs use a validated 
   assert.equal(skills.hermesSkillCommand(agent,{action:'install',skill:'official/security/1password',windows:false}),`HERMES_HOME='${home}' hermes skills install official/security/1password`);
   assert.equal(skills.hermesSkillCommand({...agent,hermesHome:''},{action:'browse',windows:true}),'hermes skills browse');
   assert.throws(()=>skills.hermesSkillCommand(agent,{action:'install',skill:'x; rm -rf ~'}),/skill id/);
-  assert.throws(()=>skills.hermesSkillCommand({...agent,provider:'claude'},{action:'install',skill:'a'}),/available for Hermes/);
+  assert.throws(()=>skills.hermesSkillCommand({...agent,provider:'claude'},{action:'install',skill:'a'}),/available for Hermes and OpenClaw/);
+  // OpenClaw installs from ClawHub, skills.sh or git, inside its container when it runs in one.
+  const claw={id:'o',name:'Claw',provider:'openclaw',protocol:'openai',transport:'local',command:'',args:[]};
+  assert.equal(skills.hermesSkillCommand(claw,{action:'install',skill:'@steipete/weather'}),'openclaw skills install @steipete/weather');
+  assert.equal(skills.hermesSkillCommand({...claw,command:'docker',args:['exec','-i','opaya-claw','openclaw']},{action:'install',skill:'git:owner/repo@main'}),"docker exec -it 'opaya-claw' openclaw skills install git:owner/repo@main");
+  for(const bad of ['x; rm -rf ~','@a/b c','git:../../etc','https://evil'])assert.throws(()=>skills.hermesSkillCommand(claw,{action:'install',skill:bad}),/ClawHub skill/);
+  assert.deepEqual(skills.skillDirs(claw,{remote:true}),['~/.openclaw/skills','~/.openclaw/workspace/skills','~/.agents/skills']);
   assert.equal((await skills.listSkills({provider:'custom',transport:'local'},null)).supported,false);
 });
 test('skills on another machine or in a container are read with sh and find, from the real Hermes home',{skip:process.platform==='win32'?'uses POSIX sh':false},async t=>{

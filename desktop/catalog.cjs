@@ -13,7 +13,7 @@ const FRAMEWORKS = [
     docs:'https://developers.openai.com/codex/cli', after:'Run `codex` once to sign in. Discover adds it.', requires:'Node.js 18+',
     posix:'npm install -g @openai/codex || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g @openai/codex; }', windows:'npm.cmd install -g @openai/codex'},
   {id:'openclaw', name:'OpenClaw', provider:'openclaw', icon:'openclaw', description:'Personal agent gateway with an OpenAI-compatible API.',
-    docs:'https://docs.openclaw.ai/', after:'Run `openclaw onboard`, then start its gateway. Discover adds it.', requires:'Node.js 22+',
+    docs:'https://docs.openclaw.ai/', after:'Run `openclaw onboard`, then start its gateway. Discover adds it.', requires:'Node.js 24+',
     posix:'npm install -g openclaw@latest || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g openclaw@latest; }', windows:'npm.cmd install -g openclaw@latest'},
   {id:'opencode', name:'OpenCode', provider:'custom', icon:'opencode', command:'opencode', description:'Open-source coding agent for the terminal.',
     docs:'https://opencode.ai/docs/', after:'Run `opencode auth login`. Discover adds it; Opaya chats with it over ACP.', requires:'Node.js 18+',
@@ -105,7 +105,8 @@ function updateCommand(id,{remote}){
 const HERMES_WIN_HOME="$h=if($env:HERMES_HOME){$env:HERMES_HOME}elseif(Test-Path \"$env:LOCALAPPDATA\\hermes\\.env\"){\"$env:LOCALAPPDATA\\hermes\"}else{\"$HOME\\.hermes\"}";
 const SETUP={
   hermes:{
-    sign_in:{posix:'hermes setup',windows:'hermes setup',note:'The Hermes setup wizard asks for the model provider and its API key. The user types the key in the terminal.'},
+    sign_in:{posix:'hermes setup',windows:'hermes setup',note:'hermes setup first asks how to set up: Quick Setup (Nous Portal, free sign-in) is highlighted; choose "Full setup" to pick another provider. In Select provider, OpenAI > "ChatGPT or Codex Subscription" offers to import the Codex login ("Import these credentials?" y), and Anthropic offers "Use existing credentials" from Claude Code. The user types API keys in the terminal.'},
+    model:{posix:'hermes model',windows:'hermes model',note:'Only the provider and model menus of hermes setup. The same logins can be reused there.'},
     enable_api:{
       posix:`h="\${HERMES_HOME:-$HOME/.hermes}"; mkdir -p "$h" && f="$h/.env" && touch "$f" && chmod 600 "$f" && if grep -q '^API_SERVER_ENABLED=' "$f"; then sed -i.opaya 's/^API_SERVER_ENABLED=.*/API_SERVER_ENABLED=true/' "$f" && rm -f "$f.opaya"; else echo 'API_SERVER_ENABLED=true' >> "$f"; fi && { grep -q '^API_SERVER_KEY=.' "$f" || echo "API_SERVER_KEY=$(openssl rand -hex 32 2>/dev/null || od -An -N32 -tx1 /dev/urandom | tr -d ' \\n')" >> "$f"; } && echo "Gateway API enabled in $f (API_SERVER_ENABLED=true, API_SERVER_KEY set). Restart the gateway to use it."`,
       windows:`${HERMES_WIN_HOME}; New-Item -ItemType Directory -Force $h | Out-Null; $f=Join-Path $h '.env'; if(-not (Test-Path $f)){New-Item -ItemType File $f | Out-Null}; $lines=@(Get-Content $f | Where-Object { $_ -notmatch '^API_SERVER_ENABLED=' }); $lines+='API_SERVER_ENABLED=true'; if(-not ($lines | Where-Object { $_ -match '^API_SERVER_KEY=.' })){ $b=New-Object byte[] 32; [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); $lines+='API_SERVER_KEY='+(-join ($b | ForEach-Object { '{0:x2}' -f $_ })) }; Set-Content -Path $f -Value $lines; "Gateway API enabled in $f (API_SERVER_ENABLED=true, API_SERVER_KEY set). Restart the gateway to use it."`},
@@ -114,11 +115,16 @@ const SETUP={
       windows:`hermes gateway start; if ($LASTEXITCODE -ne 0) { Start-Process hermes -ArgumentList 'gateway','run' -WindowStyle Hidden; Start-Sleep 6 }; hermes gateway status`},
     status:{posix:'hermes status; hermes gateway status',windows:'hermes status; hermes gateway status'}},
   openclaw:{
-    sign_in:{posix:'openclaw onboard --install-daemon',windows:'openclaw onboard --install-daemon',note:'The OpenClaw onboarding wizard asks for the model provider, its sign-in or API key, and installs the gateway service. The user types keys in the terminal.'},
+    sign_in:{posix:'openclaw onboard --install-daemon',windows:'openclaw onboard --install-daemon',note:'The OpenClaw onboarding wizard asks for the model provider, its sign-in or API key, and installs the gateway service. Logins it finds are listed first as "Detected on this machine". The user types keys in the terminal. OpenClaw needs Node.js 24 or newer.'},
+    // Reuse a login the user already has, without the wizard (run_diagnostic logins shows which ones exist).
+    use_claude_login:{posix:'openclaw onboard --non-interactive --accept-risk --mode local --auth-choice anthropic-cli --no-install-daemon --skip-channels --skip-search --skip-skills --skip-ui --skip-health',windows:'openclaw onboard --non-interactive --accept-risk --mode local --auth-choice anthropic-cli --no-install-daemon --skip-channels --skip-search --skip-skills --skip-ui --skip-health',note:'Sets OpenClaw up with the Claude Code login on this machine (claude must be signed in).'},
+    use_codex_login:{posix:'{ [ -f "$HOME/.openclaw/openclaw.json" ] || openclaw onboard --non-interactive --accept-risk --mode local --auth-choice skip --no-install-daemon --skip-channels --skip-search --skip-skills --skip-ui --skip-health; } && openclaw migrate apply codex --from "$HOME/.codex" --agent main --include-secrets --item auth:openai --yes && openclaw models status',
+      windows:'if (-not (Test-Path "$HOME\\.openclaw\\openclaw.json")) { openclaw onboard --non-interactive --accept-risk --mode local --auth-choice skip --no-install-daemon --skip-channels --skip-search --skip-skills --skip-ui --skip-health }; openclaw migrate apply codex --from "$HOME\\.codex" --agent main --include-secrets --item auth:openai --yes; openclaw models status',note:'Imports the ChatGPT sign-in of Codex on this machine into OpenClaw (codex must be signed in). Then choose the default model (list_agent_models / set_agent_model).'},
     enable_api:{posix:'openclaw config set gateway.http.endpoints.chatCompletions.enabled true && { openclaw gateway restart || true; }',windows:'openclaw config set gateway.http.endpoints.chatCompletions.enabled true; openclaw gateway restart'},
     start_gateway:{
-      posix:`openclaw gateway start 2>/dev/null || { mkdir -p "$HOME/.openclaw"; nohup openclaw gateway >> "$HOME/.openclaw/opaya-gateway.log" 2>&1 & sleep 6; }; openclaw gateway status`,
-      windows:`openclaw gateway start; if ($LASTEXITCODE -ne 0) { Start-Process openclaw -ArgumentList 'gateway' -WindowStyle Hidden; Start-Sleep 6 }; openclaw gateway status`},
+      // The service when there is one (or can be installed: launchd, systemd, schtasks), otherwise a background run.
+      posix:`openclaw gateway start 2>/dev/null || openclaw gateway install 2>/dev/null || { mkdir -p "$HOME/.openclaw"; nohup openclaw gateway run >> "$HOME/.openclaw/opaya-gateway.log" 2>&1 & sleep 6; }; openclaw gateway status`,
+      windows:`openclaw gateway start; if ($LASTEXITCODE -ne 0) { openclaw gateway install }; if ($LASTEXITCODE -ne 0) { Start-Process openclaw -ArgumentList 'gateway','run' -WindowStyle Hidden; Start-Sleep 6 }; openclaw gateway status`},
     status:{posix:'openclaw status; openclaw gateway status',windows:'openclaw status; openclaw gateway status'}},
   claude:{sign_in:{posix:'claude',windows:'claude',note:'Claude Code opens: the user picks how to sign in and finishes in the browser, then types /exit (or you send ctrl_c twice once it says they are signed in).'}},
   codex:{
@@ -127,7 +133,7 @@ const SETUP={
   opencode:{sign_in:{posix:'opencode auth login',windows:'opencode auth login',note:'OpenCode asks for a provider and its key.'},status:{posix:'opencode auth list',windows:'opencode auth list'}},
   goose:{sign_in:{posix:'goose configure',windows:'',note:'Goose asks for a provider and its key.'}}
 };
-const SETUP_STEPS=['sign_in','enable_api','start_gateway','status'];
+const SETUP_STEPS=['sign_in','model','use_claude_login','use_codex_login','enable_api','start_gateway','status'];
 // The command for one setup step. hermesHome picks a Hermes profile; container runs it inside a Docker agent.
 function setupCommand(id,step,{remote=false,windows=process.platform==='win32'&&!remote,hermesHome='',container=''}={}){
   const f=FRAMEWORKS.find(x=>x.id===id),s=SETUP[id]?.[step];

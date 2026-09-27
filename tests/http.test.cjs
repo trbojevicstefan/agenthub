@@ -17,3 +17,21 @@ test('Hermes progress events surface tool status without treating it as assistan
 test('streams that finish with finish_reason but no [DONE] marker are complete answers',async t=>{const endpoint=await server(t,(req,res)=>{res.writeHead(200,{'content-type':'text/event-stream'});res.end('data: {"choices":[{"delta":{"reasoning_content":"hmm"}}]}\n\ndata: {"choices":[{"delta":{"content":[{"type":"text","text":"Hel"}]}}]}\n\ndata: {"choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}]}\n\n');});const out=[];await new HttpAdapter({agent:{endpoint,model:'m',provider:'hermes'}}).run(context({onEvent:e=>out.push(e)}));assert.deepEqual(out.map(e=>e.type),['activity','text','text']);assert.equal(out[0].text,'Thinking');assert.equal(out.filter(e=>e.type==='text').map(e=>e.text).join(''),'Hello');});
 test('gateway errors keep the gateway message and long chat requests disable fetch body timeouts',async t=>{const endpoint=await server(t,(req,res)=>{res.writeHead(502,{'content-type':'application/json'});res.end(JSON.stringify({error:{message:'upstream model overloaded'}}));});await assert.rejects(()=>new HttpAdapter({agent:{endpoint,model:'m',provider:'hermes'}}).run(context()),/Hermes gateway failed.*upstream model overloaded/);
   let init;const a=new HttpAdapter({agent:{endpoint:'http://127.0.0.1:1/v1',model:'m',provider:'hermes'},fetchImpl:async(_u,i)=>{init=i;return new Response('data: [DONE]\n\n',{headers:{'content-type':'text/event-stream'}});}});await fetch('http://127.0.0.1:9/').catch(()=>{});await a.run(context());assert.ok(init.dispatcher,'chat requests use the no-timeout dispatcher');assert.equal(init.headers.Accept,'text/event-stream');});
+test('OpenClaw provider models go in its model header on the connection route',async t=>{const seen=[];const endpoint=await server(t,async(req,res)=>{let raw='';for await(const c of req)raw+=c;seen.push({model:JSON.parse(raw).model,header:req.headers['x-openclaw-model']});sse(res,'ok');});
+  const a=new HttpAdapter({agent:{provider:'openclaw',transport:'http',endpoint,model:'openclaw/research'}});
+  await a.run(context({text:'hi',conversation:{id:'c1',model:'anthropic/claude-sonnet-5'}}));
+  await a.run(context({text:'hi',conversation:{id:'c1',model:''}}));
+  const plain=new HttpAdapter({agent:{provider:'openclaw',transport:'http',endpoint,model:'openai/gpt-6-astra'}});await plain.run(context({text:'hi'}));
+  assert.deepEqual(seen,[{model:'openclaw/research',header:'anthropic/claude-sonnet-5'},{model:'openclaw/research',header:undefined},{model:'openclaw',header:'openai/gpt-6-astra'}]);
+  await assert.rejects(()=>a.run(context({text:'hi',conversation:{id:'c1',model:'bad model\r\nx: y'}})),/Choose an OpenClaw model/);});
+test('OpenClaw model lists keep signed-in, configured and default models; skills and MCP servers use its formats',()=>{
+  const oc=require('../desktop/openclaw.cjs');
+  const r=oc.parseModels({models:[{key:'anthropic/claude-opus-5',available:false,tags:['default','configured']},{key:'claude-cli/claude-sonnet-5',available:true,tags:[]},{key:'openai/gpt-5.4',available:false,tags:[]},{key:'bad key',available:true}]});
+  assert.deepEqual(r,{models:['anthropic/claude-opus-5','claude-cli/claude-sonnet-5'],default:'anthropic/claude-opus-5'});
+  assert.deepEqual(oc.json('Config warnings\n{"a":1}'),{a:1});assert.throws(()=>oc.json('no json'),/no JSON/);
+  assert.equal(oc.isRoute('openclaw/main'),true);assert.equal(oc.isRoute('openai/gpt'),false);
+  assert.deepEqual(oc.parseSkills({skills:[{name:'1password',bundled:true,eligible:false},{name:'weather',bundled:true,eligible:true,description:'Forecasts'},{name:'mine',source:'openclaw-workspace',bundled:false,eligible:false},{name:'off',eligible:true,disabled:true}]}).map(s=>[s.name,s.category]),[['weather','bundled with OpenClaw'],['mine','workspace']]);
+  assert.deepEqual(oc.mcpConfig({type:'stdio',command:'npx',args:['-y','x']},{env:{K:'v'}}),{command:'npx',args:['-y','x'],env:{K:'v'}});
+  assert.deepEqual(oc.mcpConfig({type:'http',url:'https://m.example/mcp'},{headers:{Authorization:'Bearer t'}}),{url:'https://m.example/mcp',transport:'streamable-http',headers:{Authorization:'Bearer t'}});
+  assert.deepEqual(oc.mcpConfig({type:'sse',url:'https://m.example/sse'},{}),{url:'https://m.example/sse'});
+});

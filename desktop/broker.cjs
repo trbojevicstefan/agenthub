@@ -31,7 +31,8 @@ class Broker{
     await this.vault.load();this.data=await this.store.load();
     this.data.drafts=this.data.drafts||{};this.data.lastConversation=this.data.lastConversation||{};this.data.view=this.data.view||{};
     this.data.agents=this.data.agents.map(a=>schema.agent(a));
-    {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:!!s.itrustOpaya,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false,interface:['chat','terminal'].includes(s.interface)?s.interface:''};}
+    // 0.19: iTrust for the Opaya Agent is on by default (once for existing settings too); the user can turn it off.
+    {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:s.opayaDefaults===2?!!s.itrustOpaya:true,opayaDefaults:2,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false,interface:['chat','terminal'].includes(s.interface)?s.interface:''};}
     this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
     this.migrateLinkedCopies();
     this.data.mcpServers=(Array.isArray(this.data.mcpServers)?this.data.mcpServers:[]).flatMap(s=>{try{return [mcp.server(s)];}catch{return [];}});this.data.hosts=this.data.hosts.map(h=>schema.host(h));
@@ -66,7 +67,8 @@ class Broker{
     await this.persist();return host;
   }
   async removeHost(id){this.host(id);if(this.data.agents.some(a=>a.hostId===id))throw new Error('Remove or reassign this host\'s agents before removing the host.');this.data.hosts=this.data.hosts.filter(h=>h.id!==id);await this.persist();}
-  // `preapproved` is internal only (the service passes one argument): a clone the user just confirmed is not asked again.
+  // `preapproved` is internal only (the service passes one argument): a clone the user just confirmed, or the Opaya Agent
+  // with iTrust on, is not asked again (also not for a gateway token import).
   async saveAgent({agent:input,token,remember=true,importToken=false},{preapproved=false}={}){
     const a=schema.agent(input);if(a.transport==='ssh')this.host(a.hostId);
     const existing=this.data.agents.find(x=>x.id===a.id);
@@ -80,7 +82,7 @@ class Broker{
     }
     if(importToken){
       const where=a.transport==='ssh'?' over verified SSH':'';
-      const ok=await this.approve(a,`Import this ${a.provider==='openclaw'?'OpenClaw':'Hermes'} gateway token?`,a.provider==='openclaw'?`Read only gateway.auth.token from ~/.openclaw/openclaw.json${where}. Provider API keys are not imported. The token stays in Opaya\'s native process and OS-encrypted vault.`:`Read only API_SERVER_KEY from ${a.hermesHome}/.env${where}. Provider API keys are not imported. The token stays in Opaya\'s native process and OS-encrypted vault.`);
+      const ok=preapproved||await this.approve(a,`Import this ${a.provider==='openclaw'?'OpenClaw':'Hermes'} gateway token?`,a.provider==='openclaw'?`Read only gateway.auth.token from ~/.openclaw/openclaw.json${where}. Provider API keys are not imported. The token stays in Opaya\'s native process and OS-encrypted vault.`:`Read only API_SERVER_KEY from ${a.hermesHome}/.env${where}. Provider API keys are not imported. The token stays in Opaya\'s native process and OS-encrypted vault.`);
       if(!ok)throw new Error('Token import cancelled.');
       token=await importGatewayToken(a,a.transport==='ssh'?this.host(a.hostId):null);
     }
@@ -148,7 +150,7 @@ class Broker{
     const key=conversationId||agentId;this.data.drafts[key]=text;await this.store.write(this.data);return true;
   }
   async saveView(input){
-    this.data.view={overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',panes:Array.isArray(input.panes)?input.panes.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)).slice(0,8):[],paneSizes:Array.isArray(input.paneSizes)?input.paneSizes.map(Number).filter(x=>Number.isFinite(x)&&x>0&&x<100).slice(0,8):[],theme:input.theme==='light'?'light':'dark',projects:!!input.projects,tips:Array.isArray(input.tips)?[...new Set(input.tips.filter(x=>typeof x==='string'&&x.length<=200))].slice(-300):[],lastVersion:typeof input.lastVersion==='string'&&/^\d+\.\d+\.\d+$/.test(input.lastVersion)?input.lastVersion:'',greeted:typeof input.greeted==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(input.greeted)?input.greeted:'',layout:(l=>({terminal:l?.terminal==='right'?'right':'bottom',browser:l?.browser==='bottom'?'bottom':'right',bottomHeight:Math.max(120,Math.min(3000,Number(l?.bottomHeight)||280)),rightWidth:Math.max(240,Math.min(4000,Number(l?.rightWidth)||520))}))(input.layout),projectsOpen:Array.isArray(input.projectsOpen)?[...new Set(input.projectsOpen.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)))].slice(0,50):[]};await this.store.write(this.data);return true;
+    this.data.view={overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',panes:Array.isArray(input.panes)?input.panes.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)).slice(0,8):[],paneSizes:Array.isArray(input.paneSizes)?input.paneSizes.map(Number).filter(x=>Number.isFinite(x)&&x>0&&x<100).slice(0,8):[],theme:input.theme==='light'?'light':'dark',projects:!!input.projects,tips:Array.isArray(input.tips)?[...new Set(input.tips.filter(x=>typeof x==='string'&&x.length<=200))].slice(-300):[],lastVersion:typeof input.lastVersion==='string'&&/^\d+\.\d+\.\d+$/.test(input.lastVersion)?input.lastVersion:'',greeted:typeof input.greeted==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(input.greeted)?input.greeted:'',layout:(l=>({terminal:l?.terminal==='right'?'right':'bottom',browser:l?.browser==='bottom'?'bottom':'right',bottomHeight:Math.max(120,Math.min(3000,Number(l?.bottomHeight)||280)),rightWidth:Math.max(240,Math.min(4000,Number(l?.rightWidth)||520))}))(input.layout),terminalFont:(n=>Number.isInteger(n)&&n>=8&&n<=28?n:13)(Number(input.terminalFont)),projectsOpen:Array.isArray(input.projectsOpen)?[...new Set(input.projectsOpen.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)))].slice(0,50):[]};await this.store.write(this.data);return true;
   }
   // iTrust: tool requests from this agent (or every agent) are approved without asking. Read at request time.
   isTrusted(id){const a=this.data.agents.find(x=>x.id===id);return !!a&&(this.data.settings?.itrustAll||a.itrust);}
@@ -299,6 +301,8 @@ class Broker{
     const a=this.agent(agentId),s=this.data.mcpServers.find(x=>x.id===schema.id(serverId));if(!s)throw new Error('MCP server not found.');
     let list=s.agents==='all'?this.data.agents.map(x=>x.id):[...s.agents];
     list=enabled?[...new Set([...list,a.id])]:list.filter(x=>x!==a.id);
+    // OpenClaw takes MCP servers from its own config (mcp.servers), so they are written there where it runs.
+    if(a.provider==='openclaw')await require('./openclaw.cjs').setMcp(a,a.transport==='ssh'?this.host(a.hostId):null,s,this.mcpSecrets(s.id),enabled);
     s.agents=list.length===this.data.agents.length&&this.data.agents.every(x=>list.includes(x.id))?'all':list;if(enabled)s.enabled=true;
     await this.persist();return mcp.publicView(s);
   }

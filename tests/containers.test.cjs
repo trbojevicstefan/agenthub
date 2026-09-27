@@ -9,7 +9,7 @@ async function fakeDocker(dir,{info=true,exists=false}={}){
 }
 const runPlan=(plan,home,bin,withDocker=true)=>spawnSync('sh',['-c',plan.command],{env:{HOME:home,PATH:withDocker?`${bin}:/usr/bin:/bin`:'/usr/bin:/bin'},encoding:'utf8',input:''});
 test('agents that can be installed as a container, and their connections',()=>{
-  assert.deepEqual(catalog.list().filter(f=>f.docker).map(f=>f.id).sort(),['claude','codex','hermes','opencode']);
+  assert.deepEqual(catalog.list().filter(f=>f.docker).map(f=>f.id).sort(),['claude','codex','hermes','openclaw','opencode']);
   const codex=containers.plan('codex',{name:'Work Bot'});
   assert.equal(codex.container,'opaya-work-bot');
   assert.deepEqual(codex.connection,{name:'Codex CLI (Docker)',transport:'ssh',tags:['docker'],provider:'codex',protocol:'codex',command:'docker',args:['exec','-i','-w','/root','opaya-work-bot','codex'],cwd:'/root'});
@@ -33,7 +33,7 @@ test('the install script pulls, starts, installs and signs in, and reuses an exi
   assert.equal(r.status,0,r.stderr+r.stdout);
   const calls=(await fs.readFile(path.join(bin,'calls.log'),'utf8')).trim().split('\n');
   assert.deepEqual(calls.map(c=>c.split(' ')[0]),['info','inspect','image','run','exec','exec'],'an image already on the machine is not pulled again');
-  assert.match(calls[3],new RegExp(`run -d --name opaya-work --restart unless-stopped -v ${home}/opaya-agents/work:/root -w /root node:22-bookworm sleep infinity`));
+  assert.match(calls[3],new RegExp(`run -d --name opaya-work --restart unless-stopped -v ${home}/opaya-agents/work:/root -w /root node:24-bookworm sleep infinity`));
   assert.match(calls[4],/exec opaya-work npm install -g @openai\/codex@latest/);
   assert.match(calls[5],/exec -e HOME=\/root -i opaya-work sh -c codex login --device-auth/);assert(!/\|\| codex login( |$)/.test(calls[5]),'no browser login on a server');
   await fs.stat(path.join(home,'opaya-agents','work'));
@@ -41,4 +41,28 @@ test('the install script pulls, starts, installs and signs in, and reuses an exi
   runPlan(containers.plan('hermes',{name:'h'}),home,again);
   const second=(await fs.readFile(path.join(again,'calls.log'),'utf8')).trim().split('\n').map(c=>c.split(' ')[0]);
   assert.deepEqual(second,['info','inspect','start','exec'],'an existing container is started, not pulled or created again');
+});
+test('OpenClaw runs its official image with the gateway on the machine\'s loopback, onboards, then turns on its chat API',{skip},async t=>{
+  const plan=containers.plan('openclaw',{name:'Claw'});
+  assert.equal(plan.container,'opaya-claw');assert.equal(plan.importToken,true);assert(plan.port>=18800&&plan.port<19600);assert.equal(containers.openclawPort('opaya-claw'),plan.port,'the port is fixed per name');
+  assert.deepEqual(plan.connection,{name:'OpenClaw (Docker)',transport:'ssh',tags:['docker'],provider:'openclaw',protocol:'openai',endpoint:`http://127.0.0.1:${plan.port}/v1`,model:'openclaw',command:'docker',args:['exec','-i','opaya-claw','openclaw'],cwd:''});
+  assert.match(plan.preview,new RegExp(`docker run -d --name 'opaya-claw' --restart unless-stopped -v 'opaya-claw-data':/home/node/.openclaw -p 127.0.0.1:${plan.port}:18789 -e OPENCLAW_GATEWAY_TOKEN="\\$tok" --entrypoint node ghcr.io/openclaw/openclaw:latest dist/index.js gateway run --bind lan --port 18789 --auth token --allow-unconfigured`));
+  const home=await temp(t),bin=path.join(home,'bin');await fakeDocker(bin);await fs.writeFile(path.join(bin,'curl'),'#!/bin/sh\nexit 0\n',{mode:0o755});
+  const r=runPlan(plan,home,bin);assert.equal(r.status,0,r.stderr+r.stdout);assert.match(r.stdout,/Gateway is up/);
+  const calls=(await fs.readFile(path.join(bin,'calls.log'),'utf8')).trim().split('\n');
+  assert.deepEqual(calls.map(c=>c.split(' ')[0]),['info','inspect','image','run','exec','exec','restart']);
+  assert.match(calls[3],/-e OPENCLAW_GATEWAY_TOKEN=[0-9a-f]{48} /,'a fresh random gateway token');
+  assert.match(calls[4],/exec -i opaya-claw openclaw onboard --mode local --no-install-daemon --skip-health/);
+  assert.match(calls[5],/gateway\.http\.endpoints\.chatCompletions\.enabled true/);
+  const m=require('../desktop/maintenance.cjs'),agent={id:'c',name:'Claw',transport:'ssh',hostId:'s1',...plan.connection};
+  const update=m.updateCommand(agent,{remote:true}).preview;
+  assert.match(update,/tok=\$\(docker exec 'opaya-claw' printenv OPENCLAW_GATEWAY_TOKEN\)[\s\S]*docker pull ghcr\.io\/openclaw\/openclaw:latest[\s\S]*docker rm -f 'opaya-claw'[\s\S]*-v 'opaya-claw-data':\/home\/node\/\.openclaw/,'same volume, port and token');
+  assert.match(m.uninstallCommand(agent,{remote:true,data:true}).preview,/docker volume rm 'opaya-claw-data'/);assert(!m.uninstallCommand(agent,{remote:true,data:false}).preview.includes('volume rm'));
+});
+test('the gateway token of an OpenClaw container is read from its environment',{skip},async t=>{
+  const home=await temp(t),bin=path.join(home,'bin');await fs.mkdir(bin,{recursive:true});
+  await fs.writeFile(path.join(bin,'docker'),`#!/bin/sh\necho "$*" >> "${path.join(bin,'calls.log')}"\n[ "$1 $2 $3" = "exec opaya-claw sh" ] && printf 'feedbeef42'\nexit 0\n`,{mode:0o755});
+  const {importGatewayToken}=require('../desktop/credentials.cjs'),old=process.env.PATH;process.env.PATH=`${bin}:${old}`;t.after(()=>{process.env.PATH=old;});
+  assert.equal(await importGatewayToken({provider:'openclaw',protocol:'openai',transport:'local',command:'docker',args:['exec','-i','opaya-claw','openclaw']},null),'feedbeef42');
+  assert.match(await fs.readFile(path.join(bin,'calls.log'),'utf8'),/exec opaya-claw sh -c printf %s "\$OPENCLAW_GATEWAY_TOKEN"/);
 });

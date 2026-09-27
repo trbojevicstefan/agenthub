@@ -1,10 +1,10 @@
 'use strict';
 // Opaya Agent: a built-in assistant that helps install, connect, maintain and troubleshoot agents and machines.
 // Safety boundary:
-// - It acts through the tools below. A general terminal (run_command, open_app, typed answers) exists only after the user
-//   turns on terminal access (it asks the first time), and every command still asks for approval unless iTrust is on.
+// - It acts through the tools below, and its commands run in visible terminals. With iTrust on (the default) it runs
+//   them without asking; with iTrust off every change and command asks first. Removals always ask.
 // - Connections and machines change only through the broker, so the same schema validation applies as in the UI.
-// - Every change and every command asks for native approval first. Commands come from fixed templates (catalog.cjs,
+// - Commands come from fixed templates (catalog.cjs,
 //   DIAGNOSTICS, SSH key templates) with validated parameters, and they run in a visible terminal.
 // - Its only writable files are in its home folder: <userData>/opaya-agent (config, chat, notes). API keys stay in the vault.
 const fs=require('node:fs/promises');
@@ -18,6 +18,7 @@ const {atomicJson,readJson}=require('./store.cjs');
 const {quote,target,launch,primeShellPath,findExecutable,environment,terminate,dockerExecContainerIndex}=require('./process.cjs');
 const {Rpc}=require('./rpc.cjs');
 const {PROVIDERS}=require('./providers.cjs');
+const screen=require('./screen.cjs');
 
 const PRESETS={
   codex:{label:'Codex CLI (this computer)',kind:'codex',baseUrl:'',model:'',models:[]},
@@ -55,6 +56,10 @@ const DIAGNOSTICS={
     windows:"Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in 8642,8643,8644,8645,18789,11434,1234,8000,8080 } | Format-Table LocalAddress,LocalPort,OwningProcess -AutoSize"},
   hermes:{label:'Hermes status',posix:"hermes status 2>&1 | tail -40; ls -1 ~/.hermes/profiles 2>/dev/null | sed 's/^/profile: /'",windows:"hermes status"},
   docker:{label:'Running containers',posix:"docker ps --format '{{.Names}}  {{.Image}}  {{.Status}}' 2>&1 | head -40",windows:"docker ps --format '{{.Names}}  {{.Image}}  {{.Status}}'"},
+  // What the user is already signed in to, so onboarding reuses it. Names and states only: secrets are masked.
+  logins:{label:'Signed-in accounts and API keys',
+    posix:"m(){ sed -E 's/(sk-|sk_|ghp_|gho_|xai-|AIza)[A-Za-z0-9_.-]*/\\1***/g; s/[A-Za-z0-9_+=-]{40,}/***/g'; }; echo '== Codex (ChatGPT sign-in)'; if command -v codex >/dev/null 2>&1; then codex login status </dev/null 2>&1 | head -3 | m; else echo 'not installed'; fi; echo '== Claude Code'; if command -v claude >/dev/null 2>&1; then claude auth status </dev/null 2>&1 | head -8 | m; else echo 'not installed'; fi; echo '== API keys in the environment (names only)'; for k in OPENAI_API_KEY ANTHROPIC_API_KEY OPENROUTER_API_KEY GEMINI_API_KEY GOOGLE_API_KEY XAI_API_KEY DEEPSEEK_API_KEY MISTRAL_API_KEY GROQ_API_KEY; do [ -n \"$(printenv $k)\" ] && echo \"$k is set\"; done; echo '== Hermes'; if command -v hermes >/dev/null 2>&1; then hermes status </dev/null 2>&1 | grep -E 'Model:|Provider:|✓' | head -20 | m; else echo 'not installed'; fi; echo '== OpenClaw'; if command -v openclaw >/dev/null 2>&1; then openclaw models status </dev/null 2>&1 | head -24 | m; else echo 'not installed'; fi",
+    windows:"function m { process { \"$_\" -replace '(sk-|sk_|ghp_|gho_|xai-|AIza)[A-Za-z0-9_.-]*','$1***' -replace '[A-Za-z0-9_+=-]{40,}','***' } }; '== Codex (ChatGPT sign-in)'; if(Get-Command codex -ErrorAction SilentlyContinue){ codex login status 2>&1 | Select-Object -First 3 | m } else { 'not installed' }; '== Claude Code'; if(Get-Command claude -ErrorAction SilentlyContinue){ claude auth status 2>&1 | Select-Object -First 8 | m } else { 'not installed' }; '== API keys in the environment (names only)'; foreach($k in 'OPENAI_API_KEY','ANTHROPIC_API_KEY','OPENROUTER_API_KEY','GEMINI_API_KEY','GOOGLE_API_KEY','XAI_API_KEY','DEEPSEEK_API_KEY','MISTRAL_API_KEY','GROQ_API_KEY'){ if([Environment]::GetEnvironmentVariable($k)){ \"$k is set\" } }; '== Hermes'; if(Get-Command hermes -ErrorAction SilentlyContinue){ hermes status 2>&1 | Select-String -Pattern 'Model:|Provider:|✓' | Select-Object -First 20 | m } else { 'not installed' }; '== OpenClaw'; if(Get-Command openclaw -ErrorAction SilentlyContinue){ openclaw models status 2>&1 | Select-Object -First 24 | m } else { 'not installed' }"},
   resources:{label:'Disk and memory',posix:"df -h ~ | tail -1; (free -h 2>/dev/null || vm_stat 2>/dev/null) | head -3; uptime",windows:"Get-PSDrive C | Format-Table Used,Free -AutoSize; Get-CimInstance Win32_OperatingSystem | Format-List FreePhysicalMemory,TotalVisibleMemorySize"}
 };
 // What an install terminal is doing now, from its output: finished (with exit code), asking a question or a password.
@@ -68,21 +73,22 @@ function promptState(output){
 // How the Opaya Agent installs and updates things end to end, without the user typing in the terminal.
 const INSTALL_PROCEDURE=[
   'Installing and updating: do the whole job yourself. The user should not have to type anything in a terminal.',
-  'Never ask the user to type or paste commands into a terminal. You have tools for installing, updating, onboarding (setup_agent), checks, answering installer questions, connections, machines, SSH keys and skills: use them. When none fits, use run_command yourself (it asks the user for terminal access the first time) instead of handing over shell commands.',
+  'Never ask the user to type or paste commands into a terminal. You have tools for installing, updating, onboarding (setup_agent), checks, answering installer questions, connections, machines, SSH keys and skills: use them. When none fits, use run_command yourself instead of handing over shell commands.',
   '1. run_diagnostic versions on the target (this computer or the machine) to see what is installed and which versions.',
   '2. Install missing dependencies first with install_framework (node, python, git, uv, tmux, gh, homebrew on macOS; or essentials when several are missing). Check list_frameworks for each agent\'s requires.',
   '3. install_framework for the agent, or update_framework to bring an installed agent or dependency to its latest version (essentials updates all of them).',
   '4. Follow every terminal with wait_for_terminal until finished=true. When it reports question=true, read the output and answer with answer_prompt (usually enter for the default, or y). Keep waiting and answering until it finishes. When it fails (exit code not 0), read the output, fix the cause (usually a missing dependency or PATH) and retry once.',
   '5. Only two things need the user: a password prompt (password=true; sudo or SSH), and signing in to an account (browser login, API keys). Say exactly what to do and where, then continue.',
-  '6. Finish the onboarding yourself with setup_agent: sign_in runs the agent\'s own wizard (hermes setup, openclaw onboard, codex login, claude, opencode auth login) and you drive its menus with wait_for_terminal and answer_prompt; the user only types keys and passwords and finishes browser sign-ins. Hermes and OpenClaw also need their gateway API: setup_agent enable_api, then start_gateway (for Hermes, ACP works without it).',
-  '7. Afterwards: discover_agents on that target, save_connection for the new agent (for Hermes prefer its gateway API when it runs, otherwise ACP; for Hermes and OpenClaw gateways set import_gateway_token so the user never copies a token), connect_agent, and report the result.',
+  '6. Before any sign-in, run_diagnostic logins on the same target: it shows what the user is already signed in to (ChatGPT through Codex, Claude Code, API keys by name, Hermes and OpenClaw providers), never the secrets. Reuse it: for OpenClaw prefer setup_agent use_claude_login or use_codex_login (no wizard); in a wizard pick that provider.',
+  '7. Finish the onboarding yourself with setup_agent: sign_in runs the agent\'s own wizard (hermes setup, openclaw onboard, codex login, claude, opencode auth login); model runs hermes model (provider and model only). Drive menus with wait_for_terminal and answer_prompt choose with the option text: Opaya reads the screen and presses the arrow key exactly as many times as needed, so never step through a menu with down one press at a time. The user only types keys and passwords and finishes browser sign-ins. Hermes and OpenClaw also need their gateway API: setup_agent enable_api, then start_gateway (for Hermes, ACP works without it).',
+  '8. Afterwards: discover_agents on that target, save_connection for the new agent (for Hermes prefer its gateway API when it runs, otherwise ACP; for Hermes and OpenClaw gateways set import_gateway_token so the user never copies a token), connect_agent, and report the result.',
   'When an agent\'s error says its onboarding, sign-in or gateway is unfinished or down, fix it the same way: setup_agent status to see where it stands, then sign_in, enable_api or start_gateway, and reconnect.',
   'On Windows, tools installed by winget appear on PATH in terminals opened afterwards; a new install terminal picks them up. npm tools that cannot install globally go to ~/.npm-global.'
 ].join('\n');
 // Everything in the Opaya desktop app, so the Opaya Agent can explain it and point to the right place.
 const APP_GUIDE=`Opaya app guide (tell the user where things are; you cannot click for them):
 - Sidebar: the Opaya Agent at the top, Workspace (cards for every agent, Connect all), Playground (two agents answer the same question side by side), agents grouped as Pinned, custom groups, This computer and Remote; under each agent's name is the machine it runs on (or the provider's server for API connections). Right-click an agent: Open chat, New conversation, Connect or Disconnect, Manage, Chat history, then submenus Files & terminal (Browse files, Open shell, Run native CLI, Connection log), Skills & tools (Skills tools & MCP, Projects, Transfer to another agent, iTrust, Opaya browser), Name & look (Rename, Change icon, Group & tags, Pin, Move up or down) and Maintenance (Update, Back up to this computer, Clone for Hermes, Redeploy for clones, Uninstall), plus Connection settings and Remove connection. Drag agents to reorder or into a group. Right-click empty sidebar space for Discover, Install agents, Update all agents, Add connection, Machines, local terminal, Skills library, theme and Settings.
-- Manage (right-click > Manage, or the Manage button above a chat): one screen with every option for an agent: where it runs, how it is installed (npm, Homebrew, uv, pipx, official installer, Hermes profile or Docker container), its version and data size, all actions, its local backups and a danger zone (Uninstall, Remove connection).
+- Manage (the gear next to an agent in the sidebar, Manage on its workspace card, the Manage button above a chat, right-click > Manage, or Ctrl/Cmd+Shift+M): one screen with every option for an agent: where it runs, how it is installed (npm, Homebrew, uv, pipx, official installer, Hermes profile or Docker container), its version and data size, all actions, its local backups and a danger zone (Uninstall, Remove connection). Its Check & fix with Opaya Agent button sends you the agent to check and repair.
 - Updates: Opaya checks every agent, CLI and tool (Node.js, Python, Git, uv, gh...) on this computer and on machines with agents once an hour; a status bar chip and a note show what to update (Updates dialog: Update, Update all here, Check now). Install agents shows installed tools with their version and Update instead of Install. When a connection fails because something is too old, Opaya updates it automatically, reconnects, then hands it to you (the Opaya Agent) and finally shows the user the error. Every other agent error (a gateway that is not installed or not running, unfinished onboarding or sign-in, a dropped connection, a failed answer) comes straight to you with what Opaya thinks the cause is: find the real cause, fix it with your tools, reconnect and verify; only what truly needs the user (an interactive sign-in, a token) goes back to them (Settings > Agents and tools).
 - Update, back up, uninstall: Update runs the right updater for the installation (hermes update, claude update, npm, Docker image pull and recreate). Update all agents (Machines, or right-click the workspace) updates each installation once per machine. Back up to this computer saves the agent's data (Hermes home without the installation; ~/.claude, ~/.codex, ~/.openclaw and so on) as a .tar.gz with or without chat history and API keys, local or remote, into the backup folder. Uninstall finds how the agent was installed and removes it in a visible terminal, optionally backs up first, deletes its data and removes the connection; for a Hermes profile it deletes the profile, for a container it removes the container. Agents that share one installation (Hermes profiles) are named before anything is removed.
 - Chat: Markdown replies with tables, code blocks (Copy, Preview for HTML and SVG) and images; / in the message box lists commands and skills; Models sets the default model or one for this chat; Stop cancels only the current answer; the chat picker switches conversations (project chats show [project] first).
@@ -90,11 +96,11 @@ const APP_GUIDE=`Opaya app guide (tell the user where things are; you cannot cli
 - Remote agents on local projects: Projects > a project on this computer > Let an agent on a machine work on it (or right-click > Work on it from a machine). The agent gets its own copy in ~/opaya-projects/<name> on the machine: Git over SSH (recommended for git repos; the current branch, optionally with uncommitted changes; the agent works on branch opaya/<agent>), Through GitHub (the machine clones the repo; the agent pushes its branch; GitHub sign-in on the machine if needed), or Plain copy (non-git folders; node_modules and build output skipped). The project card then has Send (your latest changes) and Bring back (the agent's work, reviewed first: Apply to my folder as uncommitted edits, Merge commits when clean, New branch, Full diff). Nothing in the local folder changes until the user applies it; plain copies back up every file they replace.
 - Projects (folder button in the top bar or Ctrl/Cmd+Shift+P): a folder on this computer or a machine plus the agents working in it; clicking an agent starts a chat in that folder. Right-click a project for git (status, pull, push, commit, stash, branches, merge, history) and GitHub CLI (create PR, list PRs, checks, open, check out, merge, sign in).
 - Chat or Terminal: on first launch Opaya asks how the user likes to work; Settings > Workspace style changes it, and right-click an agent > Open as chat / Open as terminal sets one agent. In Terminal mode an agent opens in its own CLI filling the window. API connections always chat. Agents whose vendor refuses other apps switch to their terminal by themselves.
-- Terminal (Ctrl+\`): tabs, search (Ctrl+F), rename, pop out to a window, end; Split (toolbar) or right-click a terminal > Split right / Split left puts terminals side by side (drag the line between them to resize), Show beside this puts a running tab next to it, Close pane keeps the session running; right-click also has Copy, Paste, Select all, Clear, Find and New terminal (Shift + right-click is quick copy or paste); sessions keep running when Opaya closes; remote terminals use tmux. Terminal and browser dock at the bottom or on the right and resize; the layout is remembered.
+- Terminal (Ctrl+\`): the Terminal button above a chat opens that agent's own CLI (in a project chat, in the project's folder on the agent's machine). Toolbar: + New (the agent's CLI, its shell, this computer, a machine) and ... (Find, Rename, Open in separate window, Open beside, Saved output of finished sessions, Close finished tabs, Text size, End session). Right-click a terminal: Copy (keeps the selection), Paste, Select all, Find, Clear, Open beside, Show beside, Rename, Open in separate window, Close pane (keeps running), End session; Shift+drag (Option+drag on macOS) selects inside full-screen programs. Ctrl/Cmd +/- changes the text size; dropping files types their paths. Sessions keep running when Opaya closes; remote terminals use tmux. Terminal and browser dock at the bottom or on the right and resize; the layout is remembered.
 - Opaya browser (globe button): links open inside Opaya. Right-click an agent > Give Opaya browser lets local ACP (Hermes) and Claude Code agents open pages, read, click and type from their next conversation. Only for models that can see images (Claude, GPT-4o and later, Gemini, Grok, Qwen-VL, Llama 3.2 Vision, Pixtral and similar); text-only models such as DeepSeek, Qwen3 or gpt-oss do not get it, and Manage shows why. Page dialogs are answered automatically and every browser action returns within 45 seconds.
 - Skills, tools & MCP (Skills button or right-click): lists skills and commands, installs Hermes skills, MCP servers per agent. Settings > MCP servers adds stdio or HTTP servers once for all agents (secrets stay encrypted). Transfer to another agent copies all or selected skills, Hermes API keys by name (values never shown), MCP servers and the gateway token, and runs in the progress window. Skills library (Settings, sidebar right-click or Skills panel) keeps global skills: add from an agent or a folder, install to many agents, remove.
 - Clone (Hermes, right-click > Clone): copy Everything, Skills + personality, Skills or Memory (optionally API keys) to this computer or a VPS, as a Hermes profile or a Docker container; progress window with speed and time left, minimizable to the status bar. Redeploy copies the same parts again.
-- Machines: This computer (click its name or the pencil to rename it in Opaya, add a note and choose the backup folder) plus SSH machines. Add a new VPS creates an SSH key in ~/.ssh, shows the public key to add at the provider (or installs it with the password), tests the connection and checks Docker and Hermes. Discover finds agents per machine; installed ones are hidden, missing ones have Install buttons. Install agents installs agents and dependencies on this computer or a machine. On a machine, Install agents asks whether to install an agent regularly or as a Docker container (Hermes from its official image; Claude Code, Codex and OpenCode in a Node.js container, data in ~/opaya-agents/<name>); the Docker install signs in and adds the agent by itself. Your install_framework does the regular install; for a container, send the user to Install agents > the machine > the agent > Docker container. Docker itself is installable as a dependency (id docker).
+- Machines: This computer (click its name or the pencil to rename it in Opaya, add a note and choose the backup folder) plus SSH machines. Add a new VPS creates an SSH key in ~/.ssh, shows the public key to add at the provider (or installs it with the password), tests the connection and checks Docker and Hermes. Discover finds agents per machine; installed ones are hidden, missing ones have Install buttons. Install agents installs agents and dependencies on this computer or a machine. On a machine, Install agents asks whether to install an agent regularly or as a Docker container (Hermes and OpenClaw from their official images, OpenClaw with its gateway on the machine's 127.0.0.1 reached through SSH; Claude Code, Codex and OpenCode in a Node.js container, data in ~/opaya-agents/<name>); the Docker install signs in and adds the agent by itself. Your install_framework does the regular install; for a container, send the user to Install agents > the machine > the agent > Docker container. Docker itself is installable as a dependency (id docker).
 - iTrust: Settings > iTrust mode for all agents or the Opaya Agent, or right-click an agent: its tool requests are approved automatically. For you, removals still ask.
 - Settings: theme (dark or light), iTrust, Updates, Skills library, MCP servers. Updates: Opaya checks GitHub releases, downloads with checksum verification and installs in place (Update in the status bar, then Install and restart).
 - Connection log (right-click an agent): protocol messages, stderr, running tools, pending approvals and Hermes log tail; your agent_diagnostics tool reads the same.
@@ -107,27 +113,27 @@ const TOOLS=[
   fn('connect_agent','Connect (or reconnect) a saved agent and report its status or error.',{agent_id:{type:'string'}},['agent_id']),
   fn('disconnect_agent','Disconnect a saved agent.',{agent_id:{type:'string'}},['agent_id']),
   fn('clear_agent_error','Clear a stale connection error on a saved agent.',{agent_id:{type:'string'}},['agent_id']),
-  fn('read_terminal','Read the recent output of a terminal, for example an install or diagnostic.',{terminal_id:{type:'string'},max_chars:{type:'integer'}},['terminal_id']),
+  fn('read_terminal','Read a terminal: its recent output, the screen as the user sees it, and the menu on it (question, options, highlighted) when there is one.',{terminal_id:{type:'string'},max_chars:{type:'integer'}},['terminal_id']),
   fn('read_app_logs','Read Opaya startup diagnostics and every agent connection error.'),
   fn('agent_diagnostics','Read-only: why an agent is slow or not answering. Returns its status, how long the current answer has run and since the last update, the tools it is running, a pending approval, the last protocol messages between Opaya and the agent, its stderr and, for Hermes, the end of its own log files.',{agent_id:{type:'string'}},['agent_id']),
   fn('run_diagnostic','Run a fixed read-only check in a visible terminal and return its output.',{check:{type:'string',enum:Object.keys(DIAGNOSTICS)},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['check']),
   fn('save_connection','Add or update an agent connection. The user approves it first. Never include API tokens; the user enters tokens in the connection form.',{connection:{type:'object',description:'Fields: id (to update), name, provider (hermes|codex|claude|openclaw|custom), protocol (openai|acp|codex|claude|terminal), transport (http|local|ssh), hostId, endpoint, model, command, args, cwd, hermesHome, displayName, description, note, group (sidebar group name), tags (array of labels). OpenCode: provider custom, protocol acp, command opencode, args ["acp"]. Codex CLI: provider codex, protocol codex, command codex. Prefer discover_agents, which fills these in.'},import_gateway_token:{type:'boolean',description:'Hermes (with hermesHome) or OpenClaw over its gateway API: Opaya reads the gateway token from the agent\'s own config into its vault after the user approves. You never see the token. Use it after setup_agent enable_api or onboarding.'}},['connection']),
-  fn('setup_agent','Finish an installed agent\'s setup in a visible terminal, on this computer, a saved machine or inside the agent\'s Docker container. The user approves the exact command first. Steps: sign_in runs the vendor\'s onboarding wizard (hermes setup, openclaw onboard --install-daemon, codex login, claude, opencode auth login, goose configure): follow it with wait_for_terminal and answer its menus with answer_prompt; the user types API keys, passwords and browser sign-ins. enable_api turns on the OpenAI-compatible gateway API Opaya chats through (Hermes: API_SERVER_ENABLED with a new random API_SERVER_KEY in its .env; OpenClaw: gateway.http.endpoints.chatCompletions). start_gateway starts the Hermes or OpenClaw gateway in the background. status is a read-only check.',{framework_id:{type:'string',enum:Object.keys(catalog.SETUP)},step:{type:'string',enum:catalog.SETUP_STEPS},agent_id:{type:'string',description:'A saved agent: runs where it runs (its machine, Hermes profile or Docker container).'},machine_id:{type:'string',description:'Saved machine id when there is no saved agent yet; omit both for this computer.'}},['framework_id','step']),
+  fn('setup_agent','Finish an installed agent\'s setup in a visible terminal, on this computer, a saved machine or inside the agent\'s Docker container. The user approves the exact command first. Steps: sign_in runs the vendor\'s onboarding wizard (hermes setup, openclaw onboard --install-daemon, codex login, claude, opencode auth login, goose configure): follow it with wait_for_terminal and pick its menu options with answer_prompt choose; the user types API keys, passwords and browser sign-ins. model runs hermes model (provider and model only). OpenClaw use_claude_login / use_codex_login set it up with the Claude Code or ChatGPT (Codex) login already on that machine, without a wizard. enable_api turns on the OpenAI-compatible gateway API Opaya chats through (Hermes: API_SERVER_ENABLED with a new random API_SERVER_KEY in its .env; OpenClaw: gateway.http.endpoints.chatCompletions). start_gateway starts the Hermes or OpenClaw gateway in the background. status is a read-only check.',{framework_id:{type:'string',enum:Object.keys(catalog.SETUP)},step:{type:'string',enum:catalog.SETUP_STEPS},agent_id:{type:'string',description:'A saved agent: runs where it runs (its machine, Hermes profile or Docker container).'},machine_id:{type:'string',description:'Saved machine id when there is no saved agent yet; omit both for this computer.'}},['framework_id','step']),
   fn('remove_connection','Remove a saved agent connection and its local chats. The user approves it first.',{agent_id:{type:'string'}},['agent_id']),
   fn('save_machine','Add or update a saved SSH machine. The user approves it first.',{machine:{type:'object',description:'Fields: id (to update), name, alias, hostname, username, port, identityFile.'}},['machine']),
   fn('remove_machine','Remove a saved SSH machine that no agent uses. The user approves it first.',{machine_id:{type:'string'}},['machine_id']),
   fn('install_framework','Install an agent framework, a dependency or the essentials bundle in a visible terminal, on this computer or a saved machine. The user approves the exact command first. Dependency commands skip what is already installed.',{framework_id:{type:'string',description:'An id from list_frameworks, for example codex, node, python or essentials.'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['framework_id']),
   fn('update_framework','Update an installed agent framework or dependency (or every essential) to its latest version, in a visible terminal, on this computer or a saved machine. The user approves the exact command first. Check versions first with run_diagnostic versions.',{framework_id:{type:'string',description:'An id from list_frameworks, for example hermes, claude, codex, node or essentials.'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['framework_id']),
-  fn('wait_for_terminal','Wait for an install, update or check you started to finish (up to 180 seconds) and return its latest output. Returns finished=true with the exit code when the command ended, question=true when the program is waiting for an answer (then use answer_prompt), or password=true when it asks for a password (only the user can type that).',{terminal_id:{type:'string'},seconds:{type:'integer',description:'Maximum seconds to wait, 5 to 180. Default 90.'}},['terminal_id']),
-  fn('run_command','Run any command in a visible terminal on this computer or a saved machine, for what your other tools do not cover (for example finishing an onboarding, fixing a PATH or a config). Needs terminal access, which the user turns on when you first ask; each command also asks for approval unless iTrust is on. Follow it with wait_for_terminal and answer_prompt. Prefer the specific tools when one fits. Never put API keys, passwords or tokens in a command: the user types those in the terminal.',{command:{type:'string',description:'The shell command (sh on macOS, Linux and machines; PowerShell on Windows).'},why:{type:'string',description:'One sentence the user sees in the approval: what it does and why.'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['command','why']),
-  fn('open_app','Open a website in the default browser, or start an app on this computer by name (for example System Settings, Docker, Terminal), for example to show the user a sign-in page. Needs terminal access, like run_command.',{target:{type:'string',description:'An https:// link or an app name.'},why:{type:'string'}},['target','why']),
-  fn('answer_prompt','Answer a question from an installer in a terminal you started (install_framework, update_framework, setup_agent, run_command, run_diagnostic, install_skill): press Enter for the default, y/n, yes/no, a menu number, arrow keys, space, tab, q or Ctrl+C; with terminal access also answer=text with text (typed, then Enter), for names, folders or model ids. Never passwords, keys or tokens: the user types those. Read the output first and pick the safe default unless the user said otherwise.',{terminal_id:{type:'string'},answer:{type:'string',enum:['enter','y','n','yes','no','1','2','3','4','5','6','7','8','9','up','down','space','tab','q','ctrl_c','text']},text:{type:'string',description:'Only with answer=text: what to type (one line, no secrets).'}},['terminal_id','answer']),
+  fn('wait_for_terminal','Wait for an install, update, setup or command you started to finish (up to 180 seconds). Returns finished=true with the exit code when it ended; question=true when the program waits for an answer, with the screen and, for a select menu, menu (question, options, highlighted) so you can answer_prompt choose by text; password=true when it asks for a password, API key or token (only the user types those).',{terminal_id:{type:'string'},seconds:{type:'integer',description:'Maximum seconds to wait, 5 to 180. Default 90.'}},['terminal_id']),
+  fn('run_command','Run any command in a visible terminal on this computer or a saved machine, for what your other tools do not cover (for example finishing an onboarding, fixing a PATH or a config). The user sees it in a terminal (and approves it first when iTrust is off). Follow it with wait_for_terminal and answer_prompt. Prefer the specific tools when one fits. Never put API keys, passwords or tokens in a command: the user types those in the terminal.',{command:{type:'string',description:'The shell command (sh on macOS, Linux and machines; PowerShell on Windows).'},why:{type:'string',description:'One sentence the user sees in the approval: what it does and why.'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['command','why']),
+  fn('open_app','Open a website in the default browser, or start an app on this computer by name (for example System Settings, Docker, Terminal), for example to show the user a sign-in page.',{target:{type:'string',description:'An https:// link or an app name.'},why:{type:'string'}},['target','why']),
+  fn('answer_prompt','Answer a question in a terminal you started (install_framework, update_framework, setup_agent, run_command, run_diagnostic, install_skill). Menus (wait_for_terminal returns menu with its options): answer=choose with option=<the option text>; Opaya reads the screen, presses the arrow key exactly as many times as needed, checks the highlighted option and presses Enter (space in a checklist), and searches or opens "More..." when the option is further down. Never step through a menu with down one press at a time. Other answers: Enter for the default, y/n, yes/no, a number, up/down (with times), space, tab, esc, q or Ctrl+C; answer=text with text (typed, then Enter) for names, folders or model ids. Never passwords, keys or tokens: the user types those. Pick the safe default unless the user said otherwise.',{terminal_id:{type:'string'},answer:{type:'string',enum:['choose','enter','y','n','yes','no','1','2','3','4','5','6','7','8','9','up','down','space','tab','esc','q','ctrl_c','text']},option:{type:'string',description:'Only with answer=choose: the menu option to pick, as shown (or a distinctive part of it, e.g. "OpenAI" or "Use existing credentials").'},text:{type:'string',description:'Only with answer=text: what to type (one line, no secrets).'},times:{type:'integer',description:'Only with up or down: how many presses (1 to 60).'}},['terminal_id','answer']),
   fn('ssh_key','Create an ed25519 SSH key on this computer, or install a public key on a saved machine, in a visible terminal. The user approves it first and types any passphrase or password.',{action:{type:'string',enum:['generate','install']},key_name:{type:'string',description:'File name in ~/.ssh, letters, numbers, _ and -.'},machine_id:{type:'string'}},['action','key_name']),
   fn('list_directory','Read-only: list a folder on this computer or a saved machine (default: home folder).',{path:{type:'string'},machine_id:{type:'string'}}),
   fn('read_file','Read-only: read up to 256 KB of a text file on this computer or a saved machine. Secret files such as .env, keys and tokens are refused.',{path:{type:'string'},machine_id:{type:'string'}},['path']),
   fn('project_info','Read-only: project markers, git branch, uncommitted changes and recent commits for a folder.',{path:{type:'string'},machine_id:{type:'string'}},['path']),
   fn('list_skills','Read-only: the skills installed for an agent (folders with a SKILL.md) and where they live. Users run a skill with /name in the chat.',{agent_id:{type:'string'}},['agent_id']),
-  fn('install_skill','Install a Hermes skill with `hermes skills install` in a visible terminal. The user approves it first. Use hub ids such as official/security/1password or skills-sh/owner/repo/skill, or an https link to a SKILL.md.',{agent_id:{type:'string'},skill:{type:'string'}},['agent_id','skill']),
+  fn('install_skill','Install a skill for a Hermes agent (`hermes skills install`: hub ids such as official/security/1password or skills-sh/owner/repo/skill, or an https link to a SKILL.md) or an OpenClaw agent (`openclaw skills install`: ClawHub @owner/skill, skills-sh:owner/repo/skill or git:owner/repo), in a visible terminal. The user approves it first (unless iTrust is on).',{agent_id:{type:'string'},skill:{type:'string'}},['agent_id','skill']),
   fn('list_projects','Read-only: saved projects (a folder on this computer or a machine, and the agents that work in it). Use project_info with the folder for git state. The user runs git actions from the Projects panel.'),
   fn('list_mcp_servers','Read-only: MCP servers saved in Opaya and which agents use them. Values of environment variables and headers are never shown. The user adds or edits servers in Settings > MCP servers.'),
   fn('read_notes','Read your notes file in your home folder.'),
@@ -140,7 +146,7 @@ const stripAnsi=text=>String(text||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\
 
 class OpayaAgent{
   constructor({root,vault,broker,terminals,approve,emit,runInTerminal,builtinInstall=null,platform=process.platform,fetchImpl=globalThis.fetch,spawnAgent=launch,trusted=()=>false}){
-    Object.assign(this,{builtinInstall,home:path.join(root,'opaya-agent'),root,vault,broker,terminals,approve,emit,runInTerminal,platform,fetch:fetchImpl,spawnAgent,trusted});this.ownTerminals=new Set();
+    Object.assign(this,{builtinInstall,home:path.join(root,'opaya-agent'),root,vault,broker,terminals,approve,emit,runInTerminal,platform,fetch:fetchImpl,spawnAgent,trusted});this.ownTerminals=new Set();this.runs=new Map();this.screens=new Map();
     this.config={preset:'',baseUrl:'',model:''};this.messages=[];this.busy=false;this.status='';this.error='';this.controller=null;this.liveReply=null;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;this.claudeSessionId='';this.claudeChild=null;this.claudeActive=null;this.toolBridge=null;
   }
   async init(){
@@ -185,7 +191,7 @@ class OpayaAgent{
   async saveConfig({preset='custom',baseUrl,model,apiKey,remember=true}){
     if(!Object.hasOwn(PRESETS,preset))throw new Error('Unknown model provider.');
     const codex=this.cli(preset);
-    const config={preset,baseUrl:codex?'':schema.endpoint(baseUrl||PRESETS[preset].baseUrl),model:schema.text(model,'model',256).trim(),terminal:!!this.config.terminal};
+    const config={preset,baseUrl:codex?'':schema.endpoint(baseUrl||PRESETS[preset].baseUrl),model:schema.text(model,'model',256).trim()};
     if(!codex&&!config.model)throw new Error('Choose a model from the provider list.');
     if(!codex&&apiKey!==undefined&&apiKey!=='')await this.vault.set(KEY,schema.text(apiKey,'API key',16000).trim(),Boolean(remember));
     if(this.config.preset!==config.preset||this.config.model!==config.model||this.config.baseUrl!==config.baseUrl){await this.closeCodex();this.claudeSessionId='';}
@@ -236,9 +242,9 @@ class OpayaAgent{
       'You are the Opaya Agent, the built-in assistant of the Opaya desktop app ("One place. All your agents.").',
       'Opaya connects Hermes, Claude Code, Codex, OpenClaw and other agents on this computer and on SSH machines, keeps their chats and terminals, and lets the user switch between them.',
       'Your job: help install new agents, connect and maintain existing ones, manage SSH machines and keys, and troubleshoot agents that do not work.',
-      'Work only through your tools. Check the workspace before changing anything. Prefer the smallest change. Explain briefly what you will do before a change; every change and command is approved by the user in a native dialog, and a declined approval is final.',
+      `Work only through your tools. Check the workspace before changing anything. Prefer the smallest change. Explain briefly what you will do before a change. ${this.trusted?.()?'iTrust is on: your changes and commands run without asking the user (removals still ask), so be careful and say what you did.':'iTrust is off: every change and command is approved by the user in a native dialog, and a declined approval is final.'}`,
       'You never see or handle API tokens: gateway tokens are imported with save_connection import_gateway_token, other tokens the user enters in the connection form or types in a terminal.',
-      `Terminal access is ${this.config.terminal?'on':'off'}: ${this.config.terminal?'run_command and open_app work (each command is approved); answer_prompt can type text.':'run_command and open_app first ask the user to turn it on; ask only when your other tools cannot do the job.'} Use it to finish onboarding and fixes end to end, with as few extra programs as possible.`,
+      'Use run_command and open_app to finish onboarding and fixes end to end when no specific tool fits, with as few extra programs as possible.',
       'Projects: list_projects shows saved project folders and their agents; chats started from a project open the agent in that folder. Git and GitHub CLI actions are in the Projects panel (right-click a project). '+
       'Skills: list_skills shows what an agent has; users run one with /name in its chat. Install Hermes skills with install_skill. MCP servers are added by the user in Settings > MCP servers (list_mcp_servers shows them); Opaya passes them to Hermes over ACP and to Claude Code. ',
       'When an agent hangs or does not answer, call agent_diagnostics first and explain what it shows: a pending approval, a tool that is still running, stderr errors or Hermes log errors. A Hermes log full of repeated "slack_bolt ... Session is closed" tracebacks is a known Hermes gateway bug in its Slack reconnect (NousResearch/hermes-agent#83662); it only affects the gateway and Slack, and restarting the Hermes gateway clears it. For agents that fail: read the connection and error, run diagnostics, check that the endpoint/port or executable exists, reconnect, and only then propose an edited connection. Do not remove connections unless asked.',
@@ -317,7 +323,7 @@ class OpayaAgent{
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.18.3'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.19.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
@@ -419,26 +425,125 @@ class OpayaAgent{
   async closeCodex(){const rpc=this.codexRpc,active=this.codexActive;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;if(rpc&&!rpc.closed)rpc.close();active?.reject(new Error('Codex stopped.'));}
   async close(){await this.closeCodex();if(this.claudeChild)terminate(this.claudeChild);}
   host(id){return id?this.broker.host(id):null;}
-  // Terminal access: off until the user allows it once (always asked, even with iTrust). Commands still ask each time.
-  async terminalAccess(){
-    if(this.config.terminal)return;
-    await this.ask('Let the Opaya Agent use the terminal and apps?','It can then run any command and open apps on this computer and your machines, so it can finish setups your other tools do not cover. Every command still asks you first (unless iTrust is on). Turn it off any time in Model settings.',{always:true});
-    await this.setTerminalAccess(true);
-  }
-  async setTerminalAccess(on){this.config={...this.config,terminal:!!on};await atomicJson(path.join(this.home,'config.json'),this.config);this.emit();return this.describe();}
   spawnProcess(file,args,{verbatim=false}={}){return require('node:child_process').spawn(file,args,{detached:true,stdio:'ignore',windowsHide:true,windowsVerbatimArguments:verbatim}).once('spawn',function(){this.unref();});}
   // iTrust for the Opaya Agent skips the dialog, except for removals, which always ask.
   async ask(title,detail,{always=false}={}){if(!always&&this.trusted?.()){this.status=`iTrust approved: ${title}`;this.current?.activity?.push(this.status);this.emit();return;}if(!await this.approve({name:'Opaya Agent'},title,detail))throw new Error('The user declined this action.');}
   // Terminals the Opaya Agent started; answer_prompt works only in these. Marked commands print an end line with the
-  // exit code, so wait_for_terminal knows when an install is done.
+  // exit code and a run tag, so wait_for_terminal knows when this run (not an earlier one in the same tab) is done.
+  // A tab whose last run finished is reused; one still busy gets a sibling, so a command never types into a running one.
   async runOwn({label,key,host,command,marked=false}){
-    const posix=!!host||this.platform!=='win32';
-    const full=marked?(posix?`${command}; echo "[opaya] finished with exit code $?"`:`${command}; Write-Host "[opaya] finished with exit code $(if ($?) { 0 } else { 1 })"`):command;
-    const view=await this.runInTerminal({label,key,host,command:full});this.ownTerminals.add(view.id);return view;
+    const posix=!!host||this.platform!=='win32',tag=randomUUID().replace(/-/g,'').slice(0,8),hostId=host?.id||'';
+    let slot=key;for(let n=2;n<10&&this.tabBusy(slot,hostId);n++)slot=`${key}_${n}`;
+    const full=marked?(posix?`${command}; echo "[opaya] finished with exit code $? (run ${tag})"`:`${command}; Write-Host "[opaya] finished with exit code $(if ($?) { 0 } else { 1 }) (run ${tag})"`):command;
+    const view=await this.runInTerminal({label,key:slot,host,command:full});this.ownTerminals.add(view.id);
+    this.runs.set(view.id,{key:slot,hostId,tag:marked?tag:''});return view;
+  }
+  tabBusy(key,hostId){
+    for(const [id,run] of this.runs){
+      if(run.key!==key||run.hostId!==hostId)continue;
+      let view;try{view=this.terminals.attach(id);}catch{this.runs.delete(id);continue;}
+      if(!view.exited&&!this.runState(id,stripAnsi(view.buffer)).finished)return true;
+    }
+    return false;
+  }
+  // Output of the current run: what came after the end line of an earlier run in the same tab.
+  runText(id,text){
+    const run=this.runs.get(id);if(!run?.tag)return text;
+    const ends=[...text.matchAll(/\[opaya\] finished with exit code \d+ \(run (\w+)\)[^\n]*\n?/g)].filter(m=>m[1]!==run.tag);
+    const last=ends.at(-1);return last?text.slice(last.index+last[0].length):text;
+  }
+  // Finished (this run's end line), or waiting for an answer or a password.
+  runState(id,text){
+    const run=this.runs.get(id),state=promptState(text);if(!run?.tag)return state;
+    const done=[...text.matchAll(new RegExp(`\\[opaya\\] finished with exit code (\\d+) \\(run ${run.tag}\\)`,'g'))].pop();
+    return done?{finished:true,exit_code:Number(done[1])}:{finished:false,question:!!state.question,password:!!state.password};
   }
   async terminalOutput(id,wait=0){
     const deadline=Date.now()+wait;
-    for(;;){const view=this.terminals.attach(id);if(view.exited||Date.now()>=deadline)return stripAnsi(view.buffer).slice(-6000);await new Promise(r=>setTimeout(r,800));}
+    for(;;){const view=this.terminals.attach(id);if(view.exited||Date.now()>=deadline)return this.runText(id,stripAnsi(view.buffer)).slice(-6000);await new Promise(r=>setTimeout(r,800));}
+  }
+  // Wait until this run finishes (for short checks), up to `wait` ms.
+  async runOutput(id,wait){
+    const deadline=Date.now()+wait;
+    for(;;){const view=this.terminals.attach(id),text=this.runText(id,stripAnsi(view.buffer));if(view.exited||this.runState(id,text).finished||Date.now()>=deadline)return text.slice(-6000);await new Promise(r=>setTimeout(r,700));}
+  }
+  // The screen the program drew, as a person sees it, with the select menu or numbered list on it.
+  async screenOf(id){
+    const view=this.terminals.attach(id),buffer=String(view.buffer||''),stamp=`${view.seq??''}:${buffer.length}:${buffer.slice(-64)}:${view.cols}x${view.rows}`;
+    const cached=this.screens.get(id);if(cached?.stamp===stamp)return cached.value;
+    const shot=await screen.render(buffer,view.cols||110,view.rows||30);
+    const menu=screen.readMenu(shot.lines),numbered=menu?null:screen.readNumbered(shot.lines);
+    const lines=shot.lines.map(l=>l.replace(/\s+$/,''));while(lines.length&&!lines[0].trim())lines.shift();
+    const value={text:screen.screenText(lines),menu,numbered,appCursor:shot.appCursor,alternate:shot.alternate,seq:view.seq};
+    this.screens.set(id,{stamp,value});return value;
+  }
+  // A secret prompt on the screen (password, API key, token): only the user types those.
+  secretPrompt(shot){
+    if(shot.menu)return false;
+    const lines=shot.text.split('\n').filter(l=>l.trim()),tail=lines.slice(-4).join('\n');
+    const asking=lines.slice(-4).reverse().find(l=>/^\s*[◆?]|[:?>]\s*\S?\s*$/.test(l))||'';
+    return /(password|passphrase|passcode)[^\n]*:\s*$/im.test(tail)||(/(api[ _-]?key|token|secret|password)/i.test(asking)&&!/\[[yY]\/[nN]\]|\([yY]\/[nN]\)|yes\/no/i.test(asking));
+  }
+  // Settle after keys: wait for the program to redraw and then go quiet (short).
+  async settle(id,before,limit=2500){
+    const start=Date.now();let last=before,quietSince=Date.now();
+    for(;;){
+      await new Promise(r=>setTimeout(r,120));
+      const view=this.terminals.attach(id),mark=`${view.seq??''}:${String(view.buffer||'').length}`;
+      if(mark!==last){last=mark;quietSince=Date.now();}
+      if((mark!==before&&Date.now()-quietSince>=300)||Date.now()-start>=limit)return;
+    }
+  }
+  mark(id){const view=this.terminals.attach(id);return `${view.seq??''}:${String(view.buffer||'').length}`;}
+  async keys(id,data,times=1){
+    const before=this.mark(id);
+    // Arrow keys go one by one with a short gap, as a person types; curses and prompt libraries read each one.
+    for(let i=0;i<times;i++){this.terminals.write(id,data);if(times>1)await new Promise(r=>setTimeout(r,25));}
+    await this.settle(id,before);
+  }
+  // Pick a menu option by its text: read the screen, press the arrow key exactly as often as needed, check the
+  // highlighted option, then Enter (space in a checklist). Searches or opens "More..." when the option is not listed.
+  async choose(id,option){
+    const want=String(option||'').trim();
+    if(!want||want.length>200||/[\r\n\0\u001b]/.test(want))throw new Error('Give the text of the option to choose (one line).');
+    const seen=[],moves=[];let searched=false,more=false,stale=0,dir='down';
+    for(let round=0;round<24;round++){
+      const shot=await this.screenOf(id);
+      if(this.secretPrompt(shot))throw new Error('The terminal asks for a password, API key or token. Only the user can type it.');
+      if(!shot.menu){
+        const list=shot.numbered,i=list?screen.pick(list.options.map(o=>o.label),want):-1;
+        if(i>=0){await this.keys(id,`${list.options[i].number}\r`);return {chose:list.options[i].label,by:`typed ${list.options[i].number}`};}
+        throw new Error(`No menu option matching "${want}" is on the screen. ${list?`Options: ${list.options.map(o=>`${o.number}. ${o.label}`).join('; ')}.`:'Read the screen with read_terminal.'}`);
+      }
+      const {menu}=shot;
+      for(const o of menu.options)if(!seen.includes(o))seen.push(o);
+      const i=screen.pick(menu.options,want);
+      if(i>=0){
+        const delta=i-menu.active;
+        if(delta===0){
+          await this.keys(id,menu.checklist?' ':'\r');
+          return {chose:menu.options[i],question:menu.question,pressed:[...moves,menu.checklist?'space (toggled; choose more, then answer enter)':'enter'].join(', ')};
+        }
+        moves.push(`${Math.abs(delta)}x ${delta>0?'down':'up'}`);
+        await this.keys(id,screen.arrow(delta>0?'down':'up',shot.appCursor),Math.abs(delta));continue;
+      }
+      // Not in view: search when the menu can, open "More..." once, or scroll to the next page of a long list.
+      if(menu.search&&!searched){searched=true;moves.push(`searched "${want}"`);await this.keys(id,(menu.search==='slash'?'/':'')+want);continue;}
+      const other=menu.options.findIndex(o=>/^(more|other|show (all|more)|browse all)\b|^more…/i.test(o));
+      if(other>=0&&!more&&!searched){
+        more=true;const delta=other-menu.active;moves.push(`opened "${menu.options[other]}"`);
+        if(delta)await this.keys(id,screen.arrow(delta>0?'down':'up',shot.appCursor),Math.abs(delta));
+        const again=await this.screenOf(id);if(again.menu&&screen.pick([again.menu.options[again.menu.active]],menu.options[other])===0)await this.keys(id,'\r');
+        continue;
+      }
+      // A long list shows a window of it: move a page past the window's edge (down first, then up for lists that do not
+      // wrap around) until the option shows up or nothing new appears.
+      const before=seen.length,len=menu.options.length,step=dir==='down'?len-1-menu.active+len:menu.active+len;
+      await this.keys(id,screen.arrow(dir,shot.appCursor),Math.min(Math.max(1,step),60));
+      const next=await this.screenOf(id);for(const o of next.menu?.options||[])if(!seen.includes(o))seen.push(o);
+      if(seen.length===before&&++stale>=2){if(dir==='up')break;dir='up';stale=0;}
+    }
+    throw new Error(`"${want}" is not in this menu. Options: ${seen.slice(0,60).join('; ')}.`);
   }
   async tool(name,args){
     const b=this.broker;
@@ -449,7 +554,10 @@ class OpayaAgent{
       case 'connect_agent':{const id=schema.id(args.agent_id);await b.connect(id).catch(()=>{});const r=b.runtimeFor(id);return {status:r.status,error:r.error||''};}
       case 'disconnect_agent':{const id=schema.id(args.agent_id);await b.disconnect(id);return {status:b.runtimeFor(id).status};}
       case 'clear_agent_error':return {cleared:b.clearError(schema.id(args.agent_id))};
-      case 'read_terminal':return {output:(await this.terminalOutput(schema.id(args.terminal_id))).slice(-Math.min(Math.max(Number(args.max_chars)||4000,200),6000))};
+      case 'read_terminal':{
+        const id=schema.id(args.terminal_id),shot=await this.screenOf(id);
+        return {output:(await this.terminalOutput(id)).slice(-Math.min(Math.max(Number(args.max_chars)||4000,200),6000)),screen:shot.text.slice(-4000),menu:shot.menu||undefined,numbered:shot.numbered||undefined};
+      }
       case 'agent_diagnostics':{const d=await b.diagnostics(schema.id(args.agent_id));if(d.adapter)d.adapter={...d.adapter,entries:(d.adapter.entries||[]).slice(-60),stderr:String(d.adapter.stderr||'').slice(-3000)};d.hermesLogs=(d.hermesLogs||[]).map(l=>({...l,tail:String(l.tail).slice(-3000)}));return d;}
       case 'read_app_logs':{
         const read=file=>fs.readFile(path.join(this.root,file),'utf8').then(t=>t.slice(-4000)).catch(()=>'');
@@ -458,8 +566,8 @@ class OpayaAgent{
       case 'run_diagnostic':{
         const check=DIAGNOSTICS[args.check];if(!check)throw new Error('Unknown diagnostic.');const host=this.host(args.machine_id);
         const command=host||this.platform!=='win32'?check.posix:check.windows;
-        const view=await this.runOwn({label:`Check / ${check.label}`,key:`check_${args.check}`,host,command});
-        return {terminal_id:view.id,output:await this.terminalOutput(view.id,host?9000:5000)};
+        const view=await this.runOwn({label:`Check / ${check.label}`,key:`check_${args.check}`,host,command,marked:true});
+        return {terminal_id:view.id,output:await this.runOutput(view.id,host?30000:20000)};
       }
       case 'save_connection':{
         const input=args.connection&&typeof args.connection==='object'?args.connection:{};
@@ -469,7 +577,7 @@ class OpayaAgent{
         await this.ask(existing?`Update connection "${existing.name}"?`:`Add connection "${agent.name}"?`,JSON.stringify(Object.fromEntries(Object.entries(agent).filter(([k,v])=>v!==''&&!(Array.isArray(v)&&!v.length)&&!['createdAt','avatar'].includes(k))),null,2));
         const wantToken=args.import_gateway_token===true;
         if(wantToken&&!(agent.protocol==='openai'&&(agent.provider==='openclaw'||(agent.provider==='hermes'&&agent.hermesHome))))throw new Error('Gateway tokens can be imported for Hermes (with hermesHome) and OpenClaw connections over the gateway API.');
-        const saved=await b.saveAgent({agent,importToken:wantToken});return {saved:{id:saved.id,name:saved.name},token:wantToken?'imported into the vault':undefined,note:wantToken?'Connect it with connect_agent.':'Ask the user to add an API token in the connection form if the agent needs one, or save again with import_gateway_token for Hermes and OpenClaw gateways.'};
+        const saved=await b.saveAgent({agent,importToken:wantToken},{preapproved:!!this.trusted?.()});return {saved:{id:saved.id,name:saved.name},token:wantToken?'imported into the vault':undefined,note:wantToken?'Connect it with connect_agent.':'Ask the user to add an API token in the connection form if the agent needs one, or save again with import_gateway_token for Hermes and OpenClaw gateways.'};
       }
       case 'remove_connection':{const a=b.agent(args.agent_id);await this.ask(`Remove connection "${a.name}"?`,'Deletes the saved connection and its local chats in Opaya, not the agent installation.',{always:true});this.terminals.closeAgent(a.id);await b.removeAgent(a.id);return {removed:a.id};}
       case 'save_machine':{
@@ -498,25 +606,24 @@ class OpayaAgent{
         const docker=agent?.command==='docker'?agent.args[dockerExecContainerIndex(agent.args||[])]||'':'';
         const s=catalog.setupCommand(String(args.framework_id||''),String(args.step||''),{remote:!!host,windows:!host&&!docker&&this.platform==='win32',hermesHome:agent?.hermesHome||'',container:docker});
         const where=`${docker?`in container ${docker} `:''}${host?`on ${host.name}`:'on this computer'}`;
-        const verb={sign_in:'Sign in to',enable_api:'Turn on the gateway API of',start_gateway:'Start the gateway of',status:'Check'}[s.step];
+        const verb={sign_in:'Sign in to',model:'Choose the model of',use_claude_login:'Set up with the Claude Code login:',use_codex_login:'Set up with the ChatGPT (Codex) login:',enable_api:'Turn on the gateway API of',start_gateway:'Start the gateway of',status:'Check'}[s.step];
         if(s.step!=='status')await this.ask(`${verb} ${s.framework.name} ${where}?`,`Runs in a visible terminal:\n\n${s.command}${s.note?`\n\n${s.note}`:''}`);
         const view=await this.runOwn({label:`${verb} ${s.framework.name}`,key:`setup_${s.framework.id}_${s.step}`,host,command:s.command,marked:true});
-        const next={sign_in:'Follow it with wait_for_terminal and answer menus with answer_prompt. When it asks for an API key, password or browser sign-in, tell the user exactly what to enter in that terminal, then keep waiting.',enable_api:'Then start_gateway (or restart it), save_connection over the gateway API with import_gateway_token, and connect_agent.',start_gateway:'Then discover_agents, save_connection with import_gateway_token, and connect_agent.',status:'Read the output.'}[s.step];
-        return {terminal_id:view.id,started:true,note:s.note||undefined,next,output:await this.terminalOutput(view.id,s.step==='status'?(host?9000:5000):4000)};
+        const wizard='Follow it with wait_for_terminal and pick menu options with answer_prompt choose (the option text; prefer the provider the user is already signed in to). When it asks for an API key, password or browser sign-in, tell the user exactly what to enter in that terminal, then keep waiting.';
+        const next={sign_in:wizard,model:wizard,use_claude_login:'Follow it with wait_for_terminal to the end, then enable_api and start_gateway.',use_codex_login:'Follow it with wait_for_terminal to the end, then set the default model and enable_api and start_gateway.',enable_api:'Then start_gateway (or restart it), save_connection over the gateway API with import_gateway_token, and connect_agent.',start_gateway:'Then discover_agents, save_connection with import_gateway_token, and connect_agent.',status:'Read the output.'}[s.step];
+        return {terminal_id:view.id,started:true,note:s.note||undefined,next,output:s.step==='status'?await this.runOutput(view.id,host?30000:20000):await this.terminalOutput(view.id,4000)};
       }
       case 'run_command':{
         const host=this.host(args.machine_id),command=String(args.command||'').trim(),why=String(args.why||'').slice(0,300);
         if(!command||command.length>4000||command.includes('\0'))throw new Error('Give one command, up to 4000 characters.');
-        await this.terminalAccess();
         await this.ask(`Run a command ${host?`on ${host.name}`:'on this computer'}?`,`${why?why+'\n\n':''}Runs in a visible terminal:\n\n${command}`);
-        const view=await this.runOwn({label:`Opaya Agent: ${command.split(/\s+/).slice(0,3).join(' ')}`.slice(0,60),key:`cmd_${Date.now().toString(36)}`,host,command,marked:true});
+        const view=await this.runOwn({label:'Opaya Agent commands',key:'cmd',host,command,marked:true});
         return {terminal_id:view.id,started:true,hint:'Call wait_for_terminal with this terminal_id to follow it to the end; answer questions with answer_prompt.',output:await this.terminalOutput(view.id,3000)};
       }
       case 'open_app':{
         const target=String(args.target||'').trim();
         if(!target||target.length>300||/[\r\n\0]/.test(target)||(!/^https?:\/\//i.test(target)&&!/^[\w .+()-]{1,80}$/.test(target)))throw new Error('Give an https:// link or an app name.');
         if(/^http:\/\//i.test(target)&&!/^http:\/\/(127\.0\.0\.1|localhost)[:/]/i.test(target))throw new Error('Open https:// links (or http://localhost).');
-        await this.terminalAccess();
         await this.ask(`Open ${target}?`,String(args.why||'').slice(0,300)||'Opens it on this computer.');
         const {file,args:argv,verbatim}=openCommand(target,this.platform);
         await new Promise((resolve,reject)=>{const child=this.spawnProcess(file,argv,{verbatim});child.on('error',reject);child.on('spawn',resolve);setTimeout(resolve,1500);});
@@ -524,29 +631,48 @@ class OpayaAgent{
       }
       case 'wait_for_terminal':{
         const id=schema.id(args.terminal_id),limit=Math.min(Math.max(Number(args.seconds)||90,5),180)*1000,start=Date.now();
-        let last='',quietSince=Date.now(),state;
+        let last=null,quietSince=Date.now(),state,shot=null,exited=false;
         for(;;){
-          const output=await this.terminalOutput(id),tail=output.slice(-1500);state=promptState(output);
-          if(output!==last){last=output;quietSince=Date.now();}
+          const view=this.terminals.attach(id),output=this.runText(id,stripAnsi(view.buffer));state=this.runState(id,output);exited=!!view.exited;
+          if(output!==last){last=output;quietSince=Date.now();shot=null;}
           const quiet=Date.now()-quietSince;
-          if(state.finished||state.exited||((state.question||state.password)&&quiet>=2500)||Date.now()-start>=limit)break;
-          await new Promise(r=>setTimeout(r,1500));
+          if(state.finished||exited)break;
+          // Quiet for a moment: look at the screen. A menu or a prompt there is a question; a secret prompt is for the user.
+          if(quiet>=1200){
+            shot=shot||await this.screenOf(id);
+            const onScreen=promptState(shot.text);
+            if(this.secretPrompt(shot))state={...state,password:true,question:false};
+            else if(shot.menu||shot.numbered||onScreen.question)state={...state,question:true};
+            if((state.question||state.password)&&quiet>=1500)break;
+          }
+          if(Date.now()-start>=limit)break;
+          await new Promise(r=>setTimeout(r,700));
         }
-        return {...state,waited_seconds:Math.round((Date.now()-start)/1000),output:last.slice(-4000),
-          next:state.password?'It asks for a password. Only the user can type it: tell them which terminal and what it is for, then wait_for_terminal again.':state.question?'Answer with answer_prompt.':state.finished?(state.exit_code===0?'Done. Continue with the next step.':'It failed. Read the output, fix the cause (often a missing dependency) and try again.'):'Still running. Call wait_for_terminal again.'};
+        shot=shot||await this.screenOf(id);
+        const menu=shot.menu?{question:shot.menu.question,options:shot.menu.options,highlighted:shot.menu.options[shot.menu.active],checklist:shot.menu.checklist||undefined,filter:shot.menu.filter||undefined}:undefined;
+        return {...state,exited:exited||undefined,waited_seconds:Math.round((Date.now()-start)/1000),menu,numbered:shot.numbered||undefined,
+          screen:state.finished?undefined:shot.text.slice(-3000),output:last.slice(state.finished?-4000:-1500),
+          next:state.password?'It asks for a password, API key or token. Only the user can type it: tell them which terminal and what it is for, then wait_for_terminal again.':menu?'Pick with answer_prompt answer=choose and option=<the option text> (Opaya presses the arrow keys exactly as needed). Pick what the user already signed in to (run_diagnostic logins) unless they said otherwise.':state.question?'Answer with answer_prompt.':state.finished?(state.exit_code===0?'Done. Continue with the next step.':'It failed. Read the output, fix the cause (often a missing dependency) and try again.'):exited?'The terminal closed.':'Still running. Call wait_for_terminal again.'};
       }
       case 'answer_prompt':{
         const id=schema.id(args.terminal_id);if(!this.ownTerminals.has(id))throw new Error('You can only answer prompts in terminals you started.');
-        const keys={enter:'\r',y:'y\r',n:'n\r',yes:'yes\r',no:'no\r',up:'\u001b[A',down:'\u001b[B',space:' ',tab:'\t',q:'q',ctrl_c:'\u0003'};
-        const answer=String(args.answer||'');let data=keys[answer]??(/^[1-9]$/.test(answer)?answer+'\r':null);
+        const answer=String(args.answer||''),shot=await this.screenOf(id);
+        if(answer!=='ctrl_c'&&(this.secretPrompt(shot)||promptState(await this.terminalOutput(id)).password))throw new Error('The terminal is asking for a password, API key or token. Only the user can type it.');
+        if(answer==='choose'){
+          const r=await this.choose(id,args.option);this.status=`Chose ${r.chose}`;this.emit();
+          const after=await this.screenOf(id);
+          return {...r,screen:after.text.slice(-2500),menu:after.menu?{question:after.menu.question,options:after.menu.options,highlighted:after.menu.options[after.menu.active]}:undefined};
+        }
+        const keys={enter:'\r',y:'y\r',n:'n\r',yes:'yes\r',no:'no\r',up:screen.arrow('up',shot.appCursor),down:screen.arrow('down',shot.appCursor),space:' ',tab:'\t',q:'q',esc:'\u001b',ctrl_c:'\u0003'};
+        let data=keys[answer]??(/^[1-9]$/.test(answer)?answer+'\r':null);
         if(answer==='text'){
-          if(!this.config.terminal)throw new Error('Typing text needs terminal access. Ask for it with run_command first, or answer with the fixed keys.');
           const text=String(args.text??'');if(!text||text.length>500||/[\r\n\0\u001b]/.test(text))throw new Error('Type one line of plain text, up to 500 characters.');data=text+'\r';
         }
         if(data===null)throw new Error('Unsupported answer.');
-        const before=await this.terminalOutput(id);if(promptState(before).password&&answer!=='ctrl_c')throw new Error('The terminal is asking for a password. Only the user can type it.');
-        this.terminals.write(id,data);this.status=`Answered ${answer==='text'?'with typed text':answer} in the terminal`;this.emit();
-        return {sent:answer,output:(await this.terminalOutput(id,2500)).slice(-2500)};
+        const times=['up','down'].includes(answer)?Math.min(Math.max(Number(args.times)||1,1),60):1;
+        await this.keys(id,data,times);this.status=`Answered ${answer==='text'?'with typed text':answer} in the terminal`;this.emit();
+        const after=await this.screenOf(id);
+        return {sent:times>1?`${times}x ${answer}`:answer,screen:after.text.slice(-2500),menu:after.menu?{question:after.menu.question,options:after.menu.options,highlighted:after.menu.options[after.menu.active]}:undefined,output:(await this.terminalOutput(id)).slice(-1500)};
       }
       case 'ssh_key':{
         const name=String(args.key_name||'');if(!/^[a-zA-Z0-9_-]{1,40}$/.test(name))throw new Error('Use a key name with letters, numbers, _ and -.');

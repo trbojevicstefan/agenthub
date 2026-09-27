@@ -15,7 +15,8 @@ function skillDirs(agent,{remote=false}={}){
     case 'hermes':return remote?[agent.hermesHome?`${agent.hermesHome}/skills`:'@hermes/skills']:hermesHomes(agent).map(h=>path.join(h,'skills'));
     case 'claude':return [remote?'~/.claude/skills':path.join(os.homedir(),'.claude','skills'),cwd&&(remote?`${cwd}/.claude/skills`:path.join(cwd,'.claude','skills'))].filter(Boolean);
     case 'codex':return [remote?'~/.codex/skills':path.join(os.homedir(),'.codex','skills'),cwd&&(remote?`${cwd}/.codex/skills`:path.join(cwd,'.codex','skills'))].filter(Boolean);
-    case 'openclaw':return [remote?'~/.openclaw/skills':path.join(os.homedir(),'.openclaw','skills'),cwd&&(remote?`${cwd}/skills`:path.join(cwd,'skills'))].filter(Boolean);
+    // Managed skills, the workspace's skills and the shared ~/.agents/skills (all loaded by OpenClaw).
+    case 'openclaw':return [...(remote?['~/.openclaw/skills','~/.openclaw/workspace/skills','~/.agents/skills']:[path.join(os.homedir(),'.openclaw','skills'),path.join(os.homedir(),'.openclaw','workspace','skills'),path.join(os.homedir(),'.agents','skills')]),cwd&&(remote?`${cwd}/skills`:path.join(cwd,'skills'))].filter(Boolean);
     default:return [];
   }
 }
@@ -57,8 +58,13 @@ async function listSkills(agent,host){
   const inContainer=agent.command==='docker',remote=agent.transport==='ssh'||inContainer;
   const dirs=skillDirs(agent,{remote});
   if(!dirs.length)return {skills:[],dirs:[],supported:false};
-  if(!remote){const skills=await localSkills(dirs);skills.sort((a,b)=>a.name.localeCompare(b.name));return {skills,dirs,supported:true};}
-  const r=await remoteSkills(agent,host,dirs);r.skills.sort((a,b)=>a.name.localeCompare(b.name));
+  const r=remote?await remoteSkills(agent,host,dirs):{skills:await localSkills(dirs),roots:dirs};
+  // OpenClaw also has bundled skills with no folder of their own; its CLI lists the ones it can use.
+  if(agent.provider==='openclaw'){
+    const have=new Set(r.skills.map(s=>s.name));
+    try{for(const s of await require('./openclaw.cjs').skills(agent,host))if(!have.has(s.name))r.skills.push(s);}catch{}
+  }
+  r.skills.sort((a,b)=>a.name.localeCompare(b.name));
   return {skills:r.skills,dirs:r.roots,supported:true};
 }
 // Skill ids accepted by `hermes skills install`: hub ids (official/security/1password, skills-sh/owner/repo/skill) or
@@ -69,13 +75,25 @@ function skillId(value){
   if(/^https:\/\/[a-z0-9.-]+(:\d+)?(\/[\w.~%-]+)*\/SKILL\.md$/i.test(v)&&v.length<=500)return v;
   throw new Error('Use a skill id such as official/security/1password, or an https:// link to a SKILL.md.');
 }
-// Hermes manages skills with its own CLI (`hermes skills ...`). Runs in a visible terminal after approval.
+// OpenClaw skill specs: ClawHub @owner/slug, skills-sh:owner/repo/slug or git:owner/repo[@ref].
+function openclawSkillId(value){
+  const v=String(value||'').trim();
+  if(v.length<=200&&/^(@[\w.-]+\/[\w.-]+|skills-sh:[\w.-]+(\/[\w.-]+){1,3}|git:[\w.-]+\/[\w.-]+(@[\w./-]+)?)$/.test(v))return v;
+  throw new Error('Use a ClawHub skill such as @owner/skill, skills-sh:owner/repo/skill or git:owner/repo.');
+}
+// Hermes and OpenClaw manage skills with their own CLI (`hermes skills ...`, `openclaw skills ...`). Runs in a visible
+// terminal after approval; OpenClaw in a container installs inside it.
 function hermesSkillCommand(agent,{action,skill,remote,windows}){
-  if(agent.provider!=='hermes')throw new Error('Installing skills from Opaya is available for Hermes. For other agents, add a skill folder with a SKILL.md to the skills folder shown here.');
+  if(agent.provider==='openclaw'){
+    const args=action==='browse'?'skills search --limit 30':action==='install'?`skills install ${openclawSkillId(skill)}`:(()=>{throw new Error('Unknown skill action.');})();
+    const index=agent.command==='docker'?require('./process.cjs').dockerExecContainerIndex(agent.args||[]):-1;
+    return index>=0?`docker exec -it ${quote(agent.args[index])} openclaw ${args}`:`openclaw ${args}`;
+  }
+  if(agent.provider!=='hermes')throw new Error('Installing skills from Opaya is available for Hermes and OpenClaw. For other agents, add a skill folder with a SKILL.md to the skills folder shown here.');
   if(agent.command==='docker')throw new Error('This Hermes runs in a container. Install skills inside the container with `hermes skills install`.');
   const args=action==='browse'?'skills browse':action==='install'?`skills install ${skillId(skill)}`:(()=>{throw new Error('Unknown skill action.');})();
   const home=agent.hermesHome||'';
   if(remote||!windows)return `${home?`HERMES_HOME=${quote(home)} `:''}hermes ${args}`;
   return `${home?`$env:HERMES_HOME='${home.replace(/'/g,"''")}'; `:''}hermes ${args}`;
 }
-module.exports={localSkills,remoteSkills,listSkills,skillDirs,frontMatter,skillId,hermesSkillCommand};
+module.exports={localSkills,remoteSkills,listSkills,skillDirs,frontMatter,skillId,openclawSkillId,hermesSkillCommand};

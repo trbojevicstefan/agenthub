@@ -25,7 +25,8 @@ async function ensureDir(where,dir){if(isLocal(where))await fs.mkdir(dir,{recurs
 // Skill folders of `agent`, optionally only the named ones.
 async function pickSkills(agent,host,names){
   const r=await listSkills(agent,host);
-  const list=names==='all'||!names?r.skills:r.skills.filter(s=>names.includes(s.name));
+  // Bundled skills (OpenClaw's) have no folder: they come with the agent and are not copied.
+  const list=(names==='all'||!names?r.skills:r.skills.filter(s=>names.includes(s.name))).filter(s=>s.path);
   if(!list.length)throw new Error('No matching skills to copy.');
   return list;
 }

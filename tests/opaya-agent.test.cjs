@@ -105,15 +105,19 @@ test('installer output is read as finished, asking a question or asking for a pa
 test('Opaya Agent updates, follows the terminal to the end and answers installer prompts itself',async t=>{
   const root=await temp(t),writes=[],commands=[];let buffer='';
   const broker=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory:()=>({connect:async()=>({}),close(){}})});await broker.init();t.after(()=>broker.close());
-  const terminals={describe:()=>[],attach:id=>({id,buffer,exited:false}),write:(id,data)=>{writes.push([id,data]);if(data==='\r')buffer+='\nDone.\n[opaya] finished with exit code 0\n';}};
-  const agent=new OpayaAgent({root,vault:broker.vault,broker,terminals,approve:async()=>true,emit:()=>{},runInTerminal:async x=>{commands.push(x);buffer='Updating...\nContinue? [Y/n] ';return {id:'t1'};},platform:'linux'});await agent.init();
+  const tag=()=>/\(run (\w+)\)/.exec(commands.at(-1).command)[1];
+  const terminals={describe:()=>[],attach:id=>({id,buffer,exited:false}),write:(id,data)=>{writes.push([id,data]);if(data==='\r')buffer+=`\nDone.\n[opaya] finished with exit code 0 (run ${tag()})\n`;}};
+  const agent=new OpayaAgent({root,vault:broker.vault,broker,terminals,approve:async()=>true,emit:()=>{},runInTerminal:async x=>{commands.push(x);buffer+='Updating...\nContinue? [Y/n] ';return {id:'t1'};},platform:'linux'});await agent.init();
   const r=await agent.tool('update_framework',{framework_id:'codex'});
-  assert.match(commands[0].command,/^npm(\.cmd)? install -g @openai\/codex@latest/);assert.match(commands[0].command,/\[opaya\] finished with exit code \$\?"$/);
+  assert.match(commands[0].command,/^npm(\.cmd)? install -g @openai\/codex@latest/);assert.match(commands[0].command,/\[opaya\] finished with exit code \$\? \(run \w{8}\)"$/);
   const waited=await agent.tool('wait_for_terminal',{terminal_id:r.terminal_id,seconds:10});assert.equal(waited.question,true);
   await assert.rejects(()=>agent.tool('answer_prompt',{terminal_id:r.terminal_id,answer:'rm -rf /'}),/Unsupported/);
   await assert.rejects(()=>agent.tool('answer_prompt',{terminal_id:'other',answer:'y'}),/terminals you started/);
   await agent.tool('answer_prompt',{terminal_id:r.terminal_id,answer:'enter'});assert.deepEqual(writes,[['t1','\r']]);
   const done=await agent.tool('wait_for_terminal',{terminal_id:r.terminal_id,seconds:10});assert.equal(done.finished,true);assert.equal(done.exit_code,0);
+  // The same tab runs the next update: the end line of the earlier run does not end this one, and its output is left out.
+  await agent.tool('update_framework',{framework_id:'codex'});assert.equal(commands[1].key,commands[0].key,'a finished tab is reused');
+  const again=await agent.tool('wait_for_terminal',{terminal_id:'t1',seconds:10});assert.equal(again.finished,false);assert.equal(again.question,true);assert(!again.output.includes('Done.'));
   buffer='[sudo] password for me: ';await assert.rejects(()=>agent.tool('answer_prompt',{terminal_id:r.terminal_id,answer:'y'}),/password/);
 });
 test('every framework and dependency has an update command, and the essentials update covers them',()=>{
@@ -144,7 +148,7 @@ test('gateway tokens are imported only for Hermes and OpenClaw gateway connectio
   agent.begin('add');await settle(agent);
   assert.equal(broker.snapshot().agents.length,0);
 });
-test('run_command asks for terminal access once, then approves each command',async t=>{
+test('run_command and open_app ask first with iTrust off, and commands share one tab per machine',async t=>{
   const {agent,commands,approvals}=await fixture(t,[
     call('answer_prompt',{terminal_id:'term1',answer:'text',text:'my-bot'}),
     call('run_command',{command:'hermes model',why:'Pick the Hermes model'}),
@@ -154,15 +158,32 @@ test('run_command asks for terminal access once, then approves each command',asy
     {content:'Done.'}]);
   const opened=[];agent.spawnProcess=(file,args)=>{opened.push([file,...args]);const e=new (require('node:events').EventEmitter)();setImmediate(()=>e.emit('spawn'));return e;};
   agent.begin('finish onboarding');await settle(agent);
-  assert.deepEqual(approvals.map(a=>a.title),['Let the Opaya Agent use the terminal and apps?','Run a command on this computer?','Run a command on this computer?','Open https://console.anthropic.com?']);
-  assert.equal(commands.length,2);assert(commands[0].command.startsWith('hermes model; '));assert.match(approvals[1].detail,/Pick the Hermes model/);
+  assert.deepEqual(approvals.map(a=>a.title),['Run a command on this computer?','Run a command on this computer?','Open https://console.anthropic.com?'],'no separate terminal access question');
+  assert.equal(commands.length,2);assert(commands[0].command.startsWith('hermes model; '));assert.match(approvals[0].detail,/Pick the Hermes model/);
+  assert.deepEqual(commands.map(c=>c.key),['cmd','cmd'],'the finished tab is reused');
   assert.equal(opened.length,1);assert(opened[0].includes('https://console.anthropic.com'));
-  assert.equal(agent.config.terminal,true);
-  await agent.saveConfig({preset:'ollama',model:'m1'});assert.equal(agent.config.terminal,true,'changing the model keeps terminal access');
-  await agent.setTerminalAccess(false);assert.equal(agent.config.terminal,false);
 });
-test('without terminal access nothing runs and typed answers are refused',async t=>{
-  const {agent,commands}=await fixture(t,[call('run_command',{command:'ls',why:'look'}),{content:'ok'}],{allow:false});
-  agent.begin('look');await settle(agent);
-  assert.equal(commands.length,0);assert.equal(agent.config.terminal,false);
+test('with iTrust on commands run without asking; declined commands never run',async t=>{
+  const trusted=await fixture(t,[call('run_command',{command:'ls',why:'look'}),{content:'ok'}],{trusted:true});
+  trusted.agent.begin('look');await settle(trusted.agent);
+  assert.equal(trusted.commands.length,1);assert.equal(trusted.approvals.length,0);
+  const declined=await fixture(t,[call('run_command',{command:'ls',why:'look'}),{content:'ok'}],{allow:false});
+  declined.agent.begin('look');await settle(declined.agent);
+  assert.equal(declined.commands.length,0);
+});
+test('a command never types into a tab that is still busy: it gets its own',async t=>{
+  const {agent,commands}=await fixture(t,[]);
+  agent.terminals={describe:()=>[],attach:id=>({id,buffer:id==='busy'?'npm install...':'',exited:false}),closeAgent(){}};
+  agent.runInTerminal=async x=>{commands.push(x);return {id:commands.length===1?'busy':'free'};};agent.trusted=()=>true;
+  await agent.tool('run_command',{command:'npm install -g x',why:'a'});await agent.tool('run_command',{command:'ls',why:'b'});
+  assert.deepEqual(commands.map(c=>c.key),['cmd','cmd_2']);
+});
+test('the logins check shows accounts and key names, never key values',()=>{
+  const {DIAGNOSTICS}=require('../desktop/opaya-agent.cjs');const {spawnSync}=require('node:child_process');
+  assert.match(DIAGNOSTICS.logins.posix,/codex login status/);assert.match(DIAGNOSTICS.logins.posix,/claude auth status/);assert.match(DIAGNOSTICS.logins.posix,/openclaw models status/);
+  assert.match(DIAGNOSTICS.logins.windows,/claude auth status/);
+  if(process.platform==='win32')return;
+  const r=spawnSync('sh',['-c',DIAGNOSTICS.logins.posix],{env:{PATH:'/usr/bin:/bin',OPENAI_API_KEY:'sk-proj-abcdefghijklmnopqrstuvwxyz0123456789'},encoding:'utf8'});
+  assert.match(r.stdout,/OPENAI_API_KEY is set/);assert(!r.stdout.includes('abcdefghij'));
+  const mask=spawnSync('sh',['-c',DIAGNOSTICS.logins.posix.split('; echo')[0]+"; echo 'OpenAI ✓ sk-abcde...ABCDEFGH' | m"],{encoding:'utf8'});assert.equal(mask.stdout.trim(),'OpenAI ✓ sk-***');
 });

@@ -2,6 +2,7 @@
 const {Tunnel} = require('../tunnel.cjs');
 const {limitedBody} = require('../discovery.cjs');
 const {ConnectionLog} = require('../diagnostics.cjs');
+const openclaw = require('../openclaw.cjs');
 class SSE {
   constructor(onEvent) { this.buffer=''; this.onEvent=onEvent; }
   feed(chunk) {
@@ -73,8 +74,11 @@ class HttpAdapter {
     // the new turn avoids replaying previously stored messages into its session.
     if(this.agent.provider==='openclaw') { payload.user=`agenthub:${conversation.id}`;payload.messages=[...(cwd?[history[0]]:[]),{role:'user',content:text}]; }
     const headers=this.headers();
+    // OpenClaw's chat routes are openclaw and openclaw/<agent>; a provider model (anthropic/claude-sonnet-5) goes in its
+    // model header on the connection's route.
+    if(this.agent.provider==='openclaw'&&!openclaw.isRoute(model)){payload.model=openclaw.isRoute(this.agent.model)?this.agent.model:'openclaw';headers['x-openclaw-model']=openclaw.modelKey(model);}
     if(this.agent.provider==='hermes'){headers['X-Hermes-Session-Id']=conversation.id;headers['X-Hermes-Session-Key']=`agenthub:${this.agent.id}:${conversation.id}`;}
-    this.log.add('out',`POST ${this.url}/chat/completions model=${payload.model} messages=${payload.messages.length}`);
+    this.log.add('out',`POST ${this.url}/chat/completions model=${payload.model}${headers['x-openclaw-model']?` (${headers['x-openclaw-model']})`:''} messages=${payload.messages.length}`);
     const r=await this.fetch(`${this.url}/chat/completions`,{method:'POST',headers:{...headers,Accept:'text/event-stream'},body:JSON.stringify(payload),signal,redirect:'error',dispatcher:longRequestDispatcher()});
     this.log.add('in',`HTTP ${r.status} ${r.headers.get('content-type')||''}`);
     if(!r.ok) throw new Error(await this.failureFrom(r));
@@ -119,15 +123,22 @@ class HttpAdapter {
   close(){this.tunnel?.close();}
   async listModels(){
     const r=await this.fetch(`${this.url}/models`,{headers:this.headers(),signal:AbortSignal.timeout(15000),redirect:'error'});
-    if(r.status===404&&this.agent.provider==='openclaw'){await r.body?.cancel();return this.models||[this.agent.model];}
-    if(!r.ok){await r.body?.cancel();throw new Error(this.failure(r.status));}
-    const data=JSON.parse(await limitedBody(r,256*1024));this.models=(data.data||[]).map(m=>m.id).filter(m=>typeof m==='string');
+    if(r.status===404&&this.agent.provider==='openclaw'){await r.body?.cancel();this.models=[...new Set(['openclaw',this.agent.model].filter(Boolean))];}
+    else{
+      if(!r.ok){await r.body?.cancel();throw new Error(this.failure(r.status));}
+      const data=JSON.parse(await limitedBody(r,256*1024));this.models=(data.data||[]).map(m=>m.id).filter(m=>typeof m==='string');
+    }
     if(this.agent.provider==='hermes'){
       const options=await this.fetch(this.url.replace(/\/v1$/,'')+'/api/model/options',{headers:this.headers(),signal:AbortSignal.timeout(15000),redirect:'error'});
       if(options.ok){
         const inventory=JSON.parse(await limitedBody(options,2*1024*1024));
         for(const provider of inventory.providers||[]){if(!provider.authenticated)continue;for(const model of provider.models||[]){const id=typeof model==='string'?model:model.id||model.model;if(id&&provider.slug)this.models.push(`${provider.slug}:${id}`);}}
       }else{await options.body?.cancel();if(![404,405,501].includes(options.status))throw new Error(this.failure(options.status));}
+    }
+    // OpenClaw: the models of the providers it is signed in to, from its CLI where it runs (chosen per chat or as default).
+    if(this.agent.provider==='openclaw'){
+      try{const r=await openclaw.models(this.agent,this.host);this.models.push(...r.models);this.defaultModel=r.default;}
+      catch(error){this.log.add('err',`openclaw models list: ${String(error?.message||error).slice(0,300)}`);}
     }
     return [...new Set(this.models)].slice(0,500);
   }

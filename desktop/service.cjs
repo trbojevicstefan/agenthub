@@ -273,7 +273,7 @@ async function start({app, safeStorage}, root) {
     if(!host)throw new Error('Docker installs are for machines added in Machines. On this computer use the regular install.');
     const p=containers.plan(String(x.id||''),{name:x.name});
     if(broker.data.agents.some(a=>a.hostId===host.id&&a.command==='docker'&&a.args?.includes(p.container)))throw new Error(`${host.name} already has an agent in container ${p.container}. Choose another name.`);
-    if(!await approve({name:'Opaya'},`Install ${p.framework.name} in a Docker container on ${host.name}?`,`Container ${p.container} (${p.image}), data in ${p.folder}. It restarts with the machine. Afterwards you sign in, and Opaya adds it as an agent.\n\nRuns in a visible terminal:\n\n${p.preview}`))throw new Error('Install cancelled.');
+    if(!await approve({name:'Opaya'},`Install ${p.framework.name} in a Docker container on ${host.name}?`,`Container ${p.container} (${p.image}), data in ${p.folder}. It restarts with the machine. Afterwards you sign in, and Opaya adds it as an agent${p.importToken?' and imports its gateway token into the vault':''}.\n\nRuns in a visible terminal:\n\n${p.preview}`))throw new Error('Install cancelled.');
     return startJob({kind:'install',route:{from:p.framework.name,fromWhere:`Docker / ${p.image}`,to:p.container,toWhere:host.name,toHostId:host.id,provider:p.connection.provider==='custom'?'custom':p.connection.provider},title:`Installing ${p.framework.name} in Docker`,detail:`${host.name} / container ${p.container}`,
       steps:[['install','Start the container and install'],['signin','Sign in (in the terminal)'],['save','Add to Opaya'],['connect','Connect']]},async progress=>{
       progress({step:'install',state:'active',message:`Running on ${host.name}. Follow it in the terminal below; the first download can take a few minutes.`});
@@ -283,7 +283,8 @@ async function start({app, safeStorage}, root) {
       if(code!==0)throw new Error(containers.EXIT[code]||`The install ended with exit code ${code}. See the terminal.`);
       progress({step:'signin',state:'done',message:'Done in the terminal'});
       progress({step:'save',state:'active',message:'Adding the agent to Opaya'});
-      const agent=await broker.saveAgent({agent:{...p.connection,name:String(x.name||'').trim()?`${String(x.name).trim().slice(0,60)}`:p.connection.name,hostId:host.id}});
+      // OpenClaw: its gateway token is imported from the container (the user approved that with the install).
+      const agent=await broker.saveAgent({agent:{...p.connection,name:String(x.name||'').trim()?`${String(x.name).trim().slice(0,60)}`:p.connection.name,hostId:host.id},importToken:!!p.importToken},{preapproved:!!p.importToken});
       progress({step:'save',state:'done',message:`Added ${agent.name}`});
       progress({step:'connect',state:'active',message:`Connecting ${agent.name}`});
       try{await broker.connect(agent.id);progress({step:'connect',state:'done',message:'Connected'});}
@@ -536,8 +537,16 @@ async function start({app, safeStorage}, root) {
     transcript:async x=>{const c=broker.data.conversations.find(c=>c.id===schema.id(x.id));if(!c)throw new Error('Conversation not found.');return {conversation:c,agent:broker.agent(c.agentId),messages:broker.histories.get(c.id)||await broker.store.transcript(c.id)};},
     terminalOpen:async x=>{
       const a=x.local===true?{id:'local-shell',name:'This computer',provider:'custom',transport:'local',command:'',args:[],cwd:app.getPath('home')}:x.agentId?broker.agent(x.agentId):{id:`host_${schema.id(x.hostId)}`,name:broker.host(x.hostId).name,provider:'custom',transport:'ssh',hostId:x.hostId,command:'',args:[],cwd:''};
+      // A project: the agent's CLI (or a shell) starts in the project's folder on the machine where it runs.
+      let cwd='',title='';
+      if(x.projectId){
+        const p=broker.project(x.projectId);
+        if(x.agentId&&!x.local){cwd=projects.folderFor(a,p);if(!cwd)throw new Error(`${a.name} runs on a different machine than ${p.name}.`);}
+        else{if((p.hostId||'')!==(x.local===true?'':String(x.hostId||'')))throw new Error(`${p.name} is on another machine.`);cwd=p.path;}
+        title=`${x.mode==='agent'?a.name:a.name+' shell'} · ${p.name}`.slice(0,80);
+      }
       if(x.mode==='agent'&&a.provider==='hermes'&&!terminals.hasLive(a.id,x.mode)&&!await approve(a,'Start a new Hermes CLI process?','This does not attach to an existing gateway. Do not run another writer against a Hermes profile already used by a gateway. Use its gateway API or existing tmux session instead.'))throw new Error('CLI launch cancelled.');
-      const result=terminals.open(a,a.transport==='ssh'?broker.host(a.hostId):null,x.mode||'shell',{cols:x.cols||100,rows:x.rows||28});emit();return result;
+      const result=terminals.open(a,a.transport==='ssh'?broker.host(a.hostId):null,x.mode||'shell',{cols:x.cols||100,rows:x.rows||28},{cwd,title});emit();return result;
     },
     terminalAttach:x=>terminals.attach(schema.id(x.id)), terminalWrite:x=>terminals.write(schema.id(x.id),x.data),
     terminalResize:x=>terminals.resize(schema.id(x.id),x.cols,x.rows),
@@ -625,19 +634,19 @@ async function start({app, safeStorage}, root) {
     opayaToolCall:async x=>opaya.bridgeCall(String(x?.name||''),x?.args),
     browserTool, browserResult:async x=>{const c=browserCalls.get(x.id);if(!c)return false;clearTimeout(c.timer);browserCalls.delete(x.id);x.ok?c.resolve(x.value):c.reject(new Error(String(x.error||'Browser action failed.')));return true;},
     mcpSave:x=>broker.saveMcpServer(x), mcpRemove:x=>broker.removeMcpServer(x.id), agentMcp:x=>broker.setAgentMcp(x), agentSkills:x=>broker.skills(x.id),
-    // Hermes skills: browse the hub or install one with the Hermes CLI in a visible terminal.
+    // Hermes and OpenClaw skills: browse the hub or install one with the agent's CLI in a visible terminal.
     skillAction:async x=>{
       const a=broker.agent(x.agentId),host=a.transport==='ssh'?broker.host(a.hostId):null;
       const command=skills.hermesSkillCommand(a,{action:x.action,skill:x.skill,remote:!!host,windows:process.platform==='win32'});
-      if(x.action==='install'&&!await approve(a,`Install skill ${x.skill}?`,`Runs in a visible terminal ${host?'on '+host.name:'on this computer'}:\n\n${command}\n\nHermes scans hub skills before installing. Start a new conversation to use it.`))throw new Error('Skill install cancelled.');
-      return runInTerminal({label:x.action==='install'?`Skill ${x.skill}`:'Hermes skills',key:`skills_${a.id}`.slice(0,60),host,command});
+      if(x.action==='install'&&!await approve(a,`Install skill ${x.skill}?`,`Runs in a visible terminal ${host?'on '+host.name:'on this computer'}:\n\n${command}\n\n${a.provider==='openclaw'?'OpenClaw checks ClawHub skills before installing.':'Hermes scans hub skills before installing.'} Start a new conversation to use it.`))throw new Error('Skill install cancelled.');
+      return runInTerminal({label:x.action==='install'?`Skill ${x.skill}`:a.provider==='openclaw'?'OpenClaw skills':'Hermes skills',key:`skills_${a.id}`.slice(0,60),host,command});
     },
     playground:x=>broker.playground(x), moveAgent:x=>broker.moveAgent(x), connectAll:x=>broker.connectAll(x),
     // Free local model: install Ollama if needed, start it, download the model and connect the Opaya Agent.
     opayaFreeModels:async()=>({models:free.FREE_MODELS.map(({id,label,size,note})=>({id,label,size,note})),recommended:free.recommended(),installed:await free.ollamaModels()}),
     opayaFreeSetup:async x=>{const model=String(x?.model||free.recommended());const m=free.FREE_MODELS.find(f=>f.id===model);if(!m)throw new Error('Choose one of the free models.');
       return startJob({kind:'free-model',route:{from:m.label,fromWhere:`Free / ${m.size}`,to:'Opaya Agent',toWhere:'This computer',provider:'ollama'},title:`Setting up ${m.label}`,detail:'Free local model through Ollama. No account and no key.',steps:[['ollama','Install and start Ollama'],['download',`Download ${m.label} (${m.size})`],['connect','Connect the Opaya Agent']]},progress=>free.setupFree({opaya,model,progress}).then(r=>{emit();return r;}));},
-    opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}), opayaForgetKey:()=>opaya.forgetKey(), opayaTerminalAccess:x=>opaya.setTerminalAccess(!!x?.on),
+    opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}), opayaForgetKey:()=>opaya.forgetKey(),
     opayaSend:x=>opaya.begin(x.text), opayaNewSession:()=>opaya.newSession(), opayaSelectSession:x=>opaya.selectSession(String(x.id||'')), opayaDeleteSession:x=>opaya.deleteSession(String(x.id||'')), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),
     ...maintenanceActions, ...toolActions, ...projectRemoteActions, ...guideActions,
     shutdown

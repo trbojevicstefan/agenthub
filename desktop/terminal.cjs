@@ -1,5 +1,6 @@
 'use strict';
 const os=require('node:os');
+const fs=require('node:fs');
 const path=require('node:path');
 const {spawn}=require('node:child_process');
 const {randomUUID,createHash}=require('node:crypto');
@@ -18,6 +19,8 @@ function tmuxCommand(name,command,{existing=false}={}){
   // Existing sessions are never replaced or silently restarted.
   return check+(existing?`exec tmux attach-session -t ${quote(name)}`:`exec tmux new-session -A -s ${quote(name)} ${quote(command)}`);
 }
+// A docker exec that starts in a folder inside the container (the project copy there).
+function withWorkdir(args,dir){const index=dockerExecContainerIndex(args);return dir&&index>=0?[...args.slice(0,index),'-w',dir,...args.slice(index)]:args;}
 function dockerShellArgs(agent){
   const index=dockerExecContainerIndex(agent.args||[]);
   if(agent.command!=='docker'||index<0)return null;
@@ -35,7 +38,7 @@ class Terminals{
       this.sessions.set(item.id,{...item,process:null,exited:true,restored:true,buffer:String(item.buffer||'').slice(-200000),seq:Number(item.seq)||0});
     }
   }
-  describe(){return [...this.sessions.values()].map(({id,agentId,mode,title,exited,remote,restored,tmuxSession,seq})=>({id,agentId,mode,title,exited,remote,restored,tmuxSession,seq}));}
+  describe(){return [...this.sessions.values()].map(({id,agentId,mode,cwd,title,exited,remote,restored,tmuxSession,seq})=>({id,agentId,mode,cwd:cwd||'',title,exited,remote,restored,tmuxSession,seq}));}
   hasLive(agentId,mode){return [...this.sessions.values()].some(s=>s.agentId===agentId&&s.mode===mode&&!s.exited);}
   persist(){
     if(!this.root)return Promise.resolve();
@@ -51,31 +54,35 @@ class Terminals{
   }
   // xterm needs the Windows build to match ConPTY's line wrapping; without it resized TUIs draw duplicate lines.
   attach(id){const item=this.sessions.get(id);if(!item)throw new Error('Terminal not found.');const {process,...view}=item;return {...view,windowsBuild:WINDOWS_BUILD};}
-  open(agent,host,mode='shell',size={cols:100,rows:28}){
+  // cwd: a project folder to start in (the agent's CLI or a shell there). One live session per agent, mode and folder.
+  open(agent,host,mode='shell',size={cols:100,rows:28},{cwd='',title=''}={}){
     if(!['shell','agent'].includes(mode))throw new Error('Invalid terminal mode.');
-    const previous=[...this.sessions.values()].find(s=>s.agentId===agent.id&&s.mode===mode&&!s.exited);
+    if(typeof cwd!=='string'||cwd.length>2048||/[\0\r\n]/.test(cwd))throw new Error('Invalid terminal folder.');
+    const previous=[...this.sessions.values()].find(s=>s.agentId===agent.id&&s.mode===mode&&(s.cwd||'')===cwd&&!s.exited);
     if(previous)return this.attach(previous.id);
     if([...this.sessions.values()].filter(s=>!s.exited).length>=12)throw new Error('Close an existing terminal before opening another.');
     let pty=this.ptyFactory;
     if(!pty){try{pty=require('node-pty');}catch(error){throw new Error('The native terminal could not load. Install the matching Opaya Windows build; do not copy node_modules between operating systems. '+error.message.slice(0,300));}}
+    const docker=agent.command==='docker'&&dockerExecContainerIndex(agent.args)>=0,workdir=docker?cwd:'';
+    if(cwd&&!docker){if(agent.transport!=='ssh'&&!fs.existsSync(cwd))throw new Error(`The folder ${cwd} does not exist on this computer.`);agent={...agent,cwd};}
     const env=environment({...(agent.hermesHome&&agent.transport!=='ssh'?{HERMES_HOME:agent.hermesHome}:{}),TERM:'xterm-256color'});
-    let command,args,cwd=agent.cwd||os.homedir(),sessionName='';
+    let command,args,dir=agent.cwd||os.homedir(),sessionName='';
     if(agent.transport==='ssh'){
       if(!host)throw new Error('Save an SSH host first.');
       command=findExecutable('ssh',env);if(!command)throw new Error('OpenSSH client is not installed. Enable the Windows OpenSSH Client optional feature.');
       let remote;
       const dockerShell=mode==='shell'?dockerShellArgs(agent):null;
-      if(mode==='agent')remote=remoteCommand(agent,this.cliArgs(agent));
-      else if(dockerShell)remote=remoteCommand(agent,dockerShell);
+      if(mode==='agent')remote=remoteCommand(agent,withWorkdir(this.cliArgs(agent),workdir));
+      else if(dockerShell)remote=remoteCommand(agent,withWorkdir(dockerShell,workdir));
       else remote=(agent.cwd?`cd ${quote(agent.cwd)} || exit 1; `:'')+(agent.hermesHome?`export HERMES_HOME=${quote(agent.hermesHome)}; `:'')+'exec "${SHELL:-/bin/sh}" -l';
       // Service-run commands (installs, diagnostics) go to ssh as the remote command, so SSH prompts cannot swallow them.
       if(agent.ephemeral&&agent.run)remote=`${agent.run}; printf '\n[Finished. This shell stays open.]\n'; exec "\${SHELL:-/bin/sh}" -l`;
       // One-off service terminals (installs, diagnostics) must work on fresh hosts without tmux.
-      if(!agent.ephemeral){sessionName=tmuxName(agent,mode);remote=tmuxCommand(sessionName,remote,{existing:!!agent.tmuxSession});}
-      args=[...sshArgs(host,{interactive:true}),'-tt',target(host),remote];cwd=os.homedir();
+      if(!agent.ephemeral){sessionName=tmuxName(agent,cwd?`${mode}:${cwd}`:mode);remote=tmuxCommand(sessionName,remote,{existing:!!agent.tmuxSession});}
+      args=[...sshArgs(host,{interactive:true}),'-tt',target(host),remote];dir=os.homedir();
     }else if(agent.command==='docker'&&dockerExecContainerIndex(agent.args)>=0){
       command=findExecutable('docker',env);if(!command)throw new Error('Docker client is not installed on this computer.');
-      args=dockerExecArgs(agent,mode==='shell'?dockerShellArgs(agent):this.cliArgs(agent));cwd=os.homedir();
+      args=dockerExecArgs(agent,withWorkdir(mode==='shell'?dockerShellArgs(agent):this.cliArgs(agent),workdir));dir=os.homedir();
     }else if(mode==='agent'){
       if(!agent.command)throw new Error('This API agent has no native CLI command. Use Open shell instead.');
       const executable=findExecutable(agent.command,env);if(!executable)throw new Error('The agent CLI is not installed on this machine.');
@@ -87,9 +94,10 @@ class Terminals{
     }
     const archived=null;
     const id=randomUUID();
-    const processPty=pty.spawn(command,args,{name:'xterm-256color',...dimensions(size.cols,size.rows),cwd,env});
+    const initial=dimensions(size.cols,size.rows);
+    const processPty=pty.spawn(command,args,{name:'xterm-256color',...initial,cwd:dir,env});
     const buffer=archived?.buffer?archived.buffer+'\r\n\x1b[90m[Saved output above. Reconnecting below.]\x1b[0m\r\n':'';
-    const item={id,agentId:agent.id,mode,title:`${agent.name} / ${mode}`,process:processPty,buffer,seq:archived?.seq||0,exited:false,restored:false,remote:agent.transport==='ssh',tmuxSession:sessionName};this.sessions.set(id,item);
+    const item={id,agentId:agent.id,mode,cwd,title:title||`${agent.name} / ${mode}`,process:processPty,buffer,seq:archived?.seq||0,exited:false,restored:false,remote:agent.transport==='ssh',tmuxSession:sessionName,...initial};this.sessions.set(id,item);
     processPty.onData(data=>{item.buffer=(item.buffer+data).slice(-200000);item.seq++;this.emit({id,type:'data',data,seq:item.seq});this.checkpoint();});
     processPty.onExit(({exitCode})=>{if(item.detaching)return;item.exited=true;item.seq++;this.emit({id,type:'exit',exitCode,seq:item.seq});this.checkpoint();});
     this.checkpoint();return this.attach(id);
@@ -110,7 +118,8 @@ class Terminals{
     if(typeof data!=='string'||data.length>65536)throw new Error('Terminal input exceeds the safety limit.');
     const s=this.sessions.get(id);if(!s||s.exited)throw new Error('This is saved terminal output from a closed session. Open a new shell to reconnect.');s.process.write(data);
   }
-  resize(id,cols,rows){const size=dimensions(cols,rows);const s=this.sessions.get(id);if(s&&!s.exited)s.process.resize(size.cols,size.rows);}
+  // The size is kept with the session, so its screen can be rendered as the program drew it (screen.cjs).
+  resize(id,cols,rows){const size=dimensions(cols,rows);const s=this.sessions.get(id);if(s&&!s.exited){s.process.resize(size.cols,size.rows);Object.assign(s,size);}}
   async rename(id,title){
     const s=this.sessions.get(id);if(!s)throw new Error('Terminal not found.');
     if(typeof title!=='string'||!title.trim()||title.trim().length>80||/[\x00-\x1f\x7f]/.test(title))throw new Error('Use a terminal name between 1 and 80 characters.');
@@ -139,4 +148,4 @@ class Terminals{
     await this.queue;
   }
 }
-module.exports={Terminals,dimensions,tmuxName,tmuxCommand,dockerShellArgs};
+module.exports={Terminals,dimensions,tmuxName,tmuxCommand,dockerShellArgs,withWorkdir};

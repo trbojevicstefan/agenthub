@@ -1254,3 +1254,13 @@ body[data-theme="light"] .bring-M{color:#9a6a10}body[data-theme="light"] .bring-
 .guide-callout{margin:4px 0 10px;padding:10px 12px;border:1px solid #6b5a2a;background:#221d10;color:#f3dc9b;border-radius:9px;font-size:12.5px}
 @media (max-width:900px){.guide-cards,.guide-cards.two,.guide-cards.goals{grid-template-columns:1fr}}
 .message-text .guide-plan{padding-left:0;margin-left:0}
+/* Manage is one click away: a gear on the hovered or selected agent in the sidebar, and on every agent card. */
+.agent-nav-manage{position:absolute;z-index:2;right:20px;top:calc(50% - 11px);width:22px;height:22px;padding:0;border-radius:5px;color:var(--muted);font-size:13px;line-height:1;opacity:0;transition:opacity .15s,background .15s,color .15s}
+.agent-nav-row:hover .agent-nav-manage,.agent-nav-row:focus-within .agent-nav-manage,.agent-nav.selected+.agent-nav-manage{opacity:1}
+.agent-nav-manage:hover,.agent-nav-manage:focus-visible{background:var(--hover);color:var(--text)}
+.agent-nav-row:hover .agent-nav-text,.agent-nav.selected .agent-nav-text{padding-right:18px}
+.card-bottom .card-manage{margin-left:auto;margin-right:8px;color:var(--muted)}
+.card-bottom .card-manage:hover{color:var(--text)}
+.topbar-actions .manage-button span{font-size:13px}
+/* xterm 6 paints its viewport black; the terminal element carries the theme background instead. */
+.xterm .xterm-viewport{background-color:transparent!important}

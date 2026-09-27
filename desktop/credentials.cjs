@@ -24,6 +24,14 @@ function parseOpenclawToken(raw){
   return value;
 }
 async function importOpenclawToken(agent,host){
+  // In a container Opaya installed, the gateway token is in the container's environment (it is never written to a file).
+  const index=agent.command==='docker'?dockerExecContainerIndex(agent.args||[]):-1;
+  if(index>=0){
+    const container=agent.args[index],run=args=>collect(launch({...agent,command:'docker',args:[],hermesHome:''},['exec',container,...args],host),{maxBytes:1100000,timeout:15000});
+    const env=String(await run(['sh','-c','printf %s "$OPENCLAW_GATEWAY_TOKEN"']).catch(()=>'')).trim();
+    if(env&&env.length<=16000&&!/\s/.test(env))return env;
+    return parseOpenclawToken(await run(['cat','/home/node/.openclaw/openclaw.json']));
+  }
   if(agent.transport!=='ssh'){
     const file=path.join(require('node:os').homedir(),'.openclaw','openclaw.json');const info=await fs.stat(file);
     if(info.size>1048576)throw new Error('OpenClaw config is too large.');

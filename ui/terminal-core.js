@@ -4,7 +4,9 @@
 // - Unicode 11 widths, so emoji and symbols in agent TUIs take the same cells the program expects.
 // - WebGL rendering when available (crisp box drawing, fast output), DOM rendering otherwise.
 // - Clipboard: Ctrl+C copies a selection (otherwise it interrupts), Ctrl+V / Ctrl+Shift+V paste, Ctrl+Shift+C copies.
-// - Ctrl/Cmd+click opens http(s) links. Ctrl+F searches the scrollback.
+// - Ctrl/Cmd+click opens http(s) links. Ctrl+F searches the scrollback. Ctrl/Cmd + = / - / 0 zooms the text.
+// - Programs that use the mouse (Claude Code, Codex, htop) get the clicks; Shift+drag (Option+drag on a Mac) selects.
+// - Dropping files types their paths, quoted.
 (()=>{
   const THEME={background:'#111315',foreground:'#d9dde0',cursor:'#a7f3c6',cursorAccent:'#111315',selectionBackground:'#3c4f4680',
     black:'#1b1f22',red:'#f28b82',green:'#8fd9a8',yellow:'#e6c77a',blue:'#8ab4f8',magenta:'#d7aefb',cyan:'#78d9ec',white:'#d9dde0',
@@ -12,12 +14,15 @@
   const LIGHT={...THEME,background:'#fbfcfa',foreground:'#1d2a23',cursor:'#1f7a45',cursorAccent:'#fbfcfa',selectionBackground:'#b9dcc680',
     black:'#1d2a23',red:'#c0392b',green:'#1f7a45',yellow:'#9a6a10',blue:'#2458b8',magenta:'#8a3fb3',cyan:'#137c8b',white:'#6b7a70',
     brightBlack:'#56695d',brightRed:'#d9534a',brightGreen:'#2b9a5a',brightYellow:'#b58318',brightBlue:'#3a6fd0',brightMagenta:'#a257c9',brightCyan:'#1a93a4',brightWhite:'#1d2a23'};
-  const isMac=/Mac/.test(navigator.platform);
-  function create(element,{archived=false,windowsBuild=0,light=false,api=window.agenthub,onSearch,onContextMenu}={}){
+  const isMac=/Mac/.test(navigator.platform),isWindows=/Win/.test(navigator.platform);
+  // Text size: the app keeps it with the saved view and passes it in (fontSize), so every terminal and window agree.
+  const FONT=13,fontOf=n=>Number.isInteger(n)&&n>=8&&n<=28?n:FONT;
+  const quotePath=p=>/^[\w@%+=:,./\\-]+$/.test(p)?p:isWindows?`"${p}"`:`'${p.replace(/'/g,`'\\''`)}'`;
+  function create(element,{archived=false,windowsBuild=0,light=false,api=window.agenthub,onSearch,onContextMenu,onZoom,fontSize=FONT}={}){
     const options={cursorBlink:!archived,disableStdin:archived,allowProposedApi:true,
       fontFamily:'"Cascadia Mono", "Cascadia Code", "SF Mono", "SFMono-Regular", Menlo, Consolas, "DejaVu Sans Mono", monospace',
-      fontSize:13,lineHeight:1.12,letterSpacing:0,scrollback:10000,smoothScrollDuration:0,minimumContrastRatio:1,
-      macOptionIsMeta:true,rightClickSelectsWord:false,drawBoldTextInBrightColors:false,fontWeightBold:'600',theme:light?LIGHT:THEME};
+      fontSize:fontOf(fontSize),lineHeight:1.12,letterSpacing:0,scrollback:10000,smoothScrollDuration:0,minimumContrastRatio:1,
+      macOptionIsMeta:true,macOptionClickForcesSelection:true,rightClickSelectsWord:false,drawBoldTextInBrightColors:false,fontWeightBold:'600',theme:light?LIGHT:THEME};
     if(windowsBuild)options.windowsPty={backend:'conpty',buildNumber:windowsBuild};
     const term=new window.Terminal(options);
     const fit=new window.FitAddon.FitAddon();term.loadAddon(fit);
@@ -25,11 +30,17 @@
     const search=window.SearchAddon?new window.SearchAddon.SearchAddon():null;if(search)term.loadAddon(search);
     if(window.WebLinksAddon&&api?.openLink)term.loadAddon(new window.WebLinksAddon.WebLinksAddon((event,uri)=>{if(event.ctrlKey||event.metaKey)api.openLink({url:uri}).catch(()=>{});}));
     term.open(element);
+    // The rows rarely fill the element exactly; the space below the last row takes the theme's background.
+    const paint=()=>{element.style.backgroundColor=term.options.theme.background;};paint();
     // WebGL needs the element in the page. If the GPU context is lost, fall back to DOM rendering.
     if(window.WebglAddon){try{const gl=new window.WebglAddon.WebglAddon();gl.onContextLoss(()=>gl.dispose());term.loadAddon(gl);}catch{}}
     // OSC 52 (programs writing to the clipboard) stays blocked.
     term.parser.registerOscHandler(52,()=>true);
-    const copy=()=>{const text=term.getSelection();if(text&&api?.clipboardWrite)api.clipboardWrite({text}).catch(()=>{});return !!text;};
+    // The last selection, kept for a short while: programs that redraw (spinners, status lines) can clear the selection
+    // between the right click and choosing Copy.
+    let kept={text:'',at:0};term.onSelectionChange(()=>{const text=term.getSelection();if(text)kept={text,at:Date.now()};});
+    const selection=()=>term.getSelection()||(Date.now()-kept.at<15000?kept.text:'');
+    const copy=(text=selection())=>{if(text&&api?.clipboardWrite)api.clipboardWrite({text}).catch(()=>{});return !!text;};
     const paste=()=>{if(archived||!api?.clipboardRead)return;api.clipboardRead().then(text=>{if(text)term.paste(text);}).catch(()=>{});};
     term.attachCustomKeyEventHandler(event=>{
       if(event.type!=='keydown')return true;
@@ -38,12 +49,17 @@
       if(mod&&(key==='v')){event.preventDefault();paste();return false;}
       if(mod&&!event.shiftKey&&key==='c'&&(isMac||term.hasSelection())){copy();term.clearSelection();return false;}
       if(mod&&key==='f'&&onSearch){event.preventDefault();onSearch();return false;}
+      if(mod&&!event.altKey&&['=','+','-','0'].includes(event.key)){event.preventDefault();zoom(event.key==='0'?0:event.key==='-'?-1:1);return false;}
       return true;
     });
     // Native paste (the Edit menu's Ctrl+V / Cmd+V accelerator, which the keydown handler never sees, or the system
     // paste command): handled here once, with the text from the event, so the terminal never ignores or doubles it.
     element.addEventListener('paste',event=>{event.preventDefault();event.stopImmediatePropagation();if(archived)return;
       const text=event.clipboardData?.getData('text/plain');if(text)term.paste(text.slice(0,1024*1024));else paste();},true);
+    // Dropped files: their paths, quoted for the shell.
+    element.addEventListener('dragover',event=>{if(event.dataTransfer?.types?.includes('Files')){event.preventDefault();event.dataTransfer.dropEffect='copy';}});
+    element.addEventListener('drop',event=>{const files=[...(event.dataTransfer?.files||[])];if(!files.length)return;event.preventDefault();event.stopPropagation();if(archived)return;
+      const paths=files.map(f=>{try{return api?.pathForFile?.(f)||'';}catch{return '';}}).filter(Boolean);if(paths.length){term.paste(paths.map(quotePath).join(' ')+' ');term.focus();}});
     // Right click: the app's menu when it has one; otherwise, and with Shift, copy the selection or paste when nothing is
     // selected (like Windows Terminal).
     element.addEventListener('contextmenu',event=>{event.preventDefault();event.stopPropagation();if(onContextMenu&&!event.shiftKey){onContextMenu(event);return;}if(!copy())paste();else term.clearSelection();});
@@ -54,8 +70,11 @@
       try{fit.fit();}catch{return false;}
       const size=`${term.cols}x${term.rows}`;if(size===last)return false;last=size;report?.(term.cols,term.rows);return true;
     }
-    const setLight=value=>{term.options.theme=value?LIGHT:THEME;};
-    return {term,fit,search,fitAndReport,copy,paste,setLight,resetSize:()=>{last='';}};
+    const setLight=value=>{term.options.theme=value?LIGHT:THEME;paint();};
+    // Text size, shared by every terminal: 0 resets.
+    function zoom(step){const size=step?Math.max(8,Math.min(28,term.options.fontSize+step)):FONT;setFont(size);onZoom?.(size);}
+    function setFont(size){if(term.options.fontSize===size)return;term.options.fontSize=size;last='';}
+    return {term,fit,search,fitAndReport,copy,paste,selection,setLight,setFont,resetSize:()=>{last='';}};
   }
   window.OpayaTerminal={create,THEME,LIGHT};
 })();

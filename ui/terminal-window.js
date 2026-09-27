@@ -5,7 +5,8 @@
   try{
     const pending=[];let ready=false,seq=0,exited=false;
     const item=await api.terminalAttach({id});seq=item.seq;exited=item.exited;
-    const core=window.OpayaTerminal.create(document.querySelector('#terminal'),{archived:exited,windowsBuild:item.windowsBuild||0}),{term}=core;
+    const fontSize=Number((await api.snapshot().catch(()=>null))?.view?.terminalFont)||13;
+    const core=window.OpayaTerminal.create(document.querySelector('#terminal'),{archived:exited,windowsBuild:item.windowsBuild||0,fontSize,onZoom:()=>core.fitAndReport(report)}),{term}=core;
     const event=e=>{if(e.id!==id)return;if(!ready){pending.push(e);return;}if(e.seq<=seq)return;seq=e.seq;if(e.type==='data')term.write(e.data);if(e.type==='exit'){exited=true;term.options.disableStdin=true;status.textContent='Session ended';}};
     api.onTerminal(event);
     api.onTerminal(e=>{if(e.id===id&&e.type==='renamed'){document.querySelector('#title').textContent=e.title;document.title=e.title;}});
