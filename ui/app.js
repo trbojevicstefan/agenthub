@@ -144,7 +144,8 @@
     $('#terminal-panel').hidden=false;
     if(stageAgent===a.id)return;stageAgent=a.id;
     const mine=[...terminalViews.values()].filter(v=>v.agentId===a.id&&!v.exited),cli=mine.find(v=>v.mode==='agent');
-    if(cli||mine[0]){activateTerminal((cli||mine[0]).id);return;}
+    // Someone typing in a form or dialog keeps the keyboard when the stage follows another agent.
+    if(cli||mine[0]){activateTerminal((cli||mine[0]).id,{focus:!typingElsewhere()});return;}
     if(stageOpening.has(a.id))return;stageOpening.add(a.id);
     openTerminal({agentId:a.id,mode:'agent'}).catch(error=>toast(error.message,true)).finally(()=>stageOpening.delete(a.id));
   }
