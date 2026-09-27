@@ -582,7 +582,7 @@ async function start({app, safeStorage}, root) {
     sshKeyCreate:x=>vps.createKey(x.name), hostTest:x=>vps.test(x.hostId?broker.host(x.hostId):schema.host(x.host||{})),
     saveSettings:x=>broker.saveSettings(x), cloneAgent:async x=>{
       const a=broker.agent(x.id),host=x.hostId?broker.host(x.hostId):null;
-      return startJob({kind:'clone',route:{from:a.name,fromWhere:a.transport==='ssh'?broker.host(a.hostId).name:'This computer',to:x.name||`${a.name}-clone`,toWhere:host?host.name:'This computer',toHostId:host?.id||'',provider:a.provider},title:`Cloning ${a.name}`,detail:`${a.name} to ${host?host.name:'this computer'} / ${x.runtime==='docker'?'Docker container':'Hermes profile'}`,steps:[['target','Check the target'],['source','Find the source'],['select','Choose files'],['copy','Copy'],...(x.runtime==='docker'?[['start','Start the container']]:[]),['save','Add to Opaya'],['connect','Connect']]},progress=>broker.cloneAgent(x,progress));
+      return startJob({kind:'clone',route:{from:a.name,fromWhere:a.transport==='ssh'?broker.host(a.hostId).name:'This computer',to:x.name||`${a.name}-clone`,toWhere:host?host.name:'This computer',toHostId:host?.id||'',provider:a.provider},title:`Cloning ${a.name}`,detail:`${a.name} to ${host?host.name:'this computer'} / ${x.runtime==='docker'?'Docker container':a.provider==='hermes'?'Hermes profile':'regular install'}`,steps:[['target','Check the target'],['source','Find the source'],['select','Choose files'],['copy','Copy'],...(x.runtime==='docker'?[['start','Start the container']]:[]),['save','Add to Opaya'],['connect','Connect']]},progress=>broker.cloneAgent(x,progress));
     },
     redeployAgent:async x=>{
       const a=broker.agent(x.id);if(!a.clone)throw new Error('This agent is not a clone.');

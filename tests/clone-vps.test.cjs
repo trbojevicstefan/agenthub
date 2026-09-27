@@ -29,7 +29,7 @@ test('clone copies exactly the chosen parts and never history, logs, OAuth login
   const skillsCron=await clone({agent,host:null,runtime:'regular',scope:'skills',keys:false,cron:true,name:'skills-cron'});
   assert.deepEqual(await tree(skillsCron.connection.hermesHome),['config.yaml','cron/jobs.json','skills/research/arxiv/SKILL.md']);
   assert.equal(all.connection.clone.cron,true,'Everything copies cron jobs by default');
-  await assert.rejects(()=>clone({agent:{...agent,provider:'claude'},host:null,scope:'skills',name:'x'}),/Hermes agents/);
+  await assert.rejects(()=>clone({agent:{...agent,provider:'claude'},host:null,scope:'skills',name:'x'}),/one setup per computer account/);
   await assert.rejects(()=>clone({agent,host:null,scope:'skills',name:'***'}),/name/);
 });
 test('broker clones, saves the connection with its recipe, and redeploys from the source',{skip},async t=>{

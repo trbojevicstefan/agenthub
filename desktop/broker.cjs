@@ -246,6 +246,8 @@ class Broker{
     const result=await cloner.clone({agent:a,sourceHost:a.transport==='ssh'?this.host(a.hostId):null,host,runtime,scope,keys,cron:cron===undefined?undefined:!!cron,name:name||`${a.name}-clone`,progress});
     progress({step:'save',state:'active',message:'Adding the clone to Opaya'});
     const saved=await this.saveAgent({agent:result.connection},{preapproved:true});
+    // An OpenClaw clone got the source's config, so its gateway token is the same one.
+    if(result.copyToken&&this.vault.has(a.id))await this.vault.set(saved.id,this.vault.get(a.id),true);
     progress({step:'save',state:'done',message:`${saved.name} added`});
     progress({step:'connect',state:'active',message:`Connecting to ${saved.name}`});
     try{await this.connect(saved.id);progress({step:'connect',state:'done',message:`${saved.name} is connected`});}
