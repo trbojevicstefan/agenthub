@@ -62,6 +62,9 @@
     const box=$('#toast');box.textContent=message;box.classList.toggle('error',error);box.hidden=false;
     clearTimeout(toastTimer);toastTimer=setTimeout(()=>box.hidden=true,error?8500:4500);
   }
+  // Yes/no questions go through a native dialog in the desktop app. window.confirm() in Electron can leave the page
+  // unable to take keyboard input afterwards (the chat box stops accepting typing until the window is refocused).
+  const ask=text=>api?.ask?api.ask({text}).catch(()=>false):Promise.resolve(confirm(text));
   async function action(fn) { try { return await fn(); } catch(error) {toast(error.message,true); return undefined;} }
   function format(text) { return window.OpayaMarkdown?window.OpayaMarkdown.render(text):esc(text); }
   // agentId adds a live line (running time, time since the last update) that updateTurnWatch() refreshes every second.
@@ -93,7 +96,12 @@
     const stage=!opayaView&&!playgroundView&&!overview&&!!a&&!manageId&&surfaceOf(a)==='terminal';
     if(stage!==document.body.classList.contains('terminal-stage')){document.body.classList.toggle('terminal-stage',stage);placePanes();}
     if(!stage)stageAgent='';
+    // A view can rebuild its chat box while someone is typing (a new chat gets its id, the agent's details change).
+    // The new box would not have focus, so keystrokes went nowhere: keep focus and the caret in the chat box.
+    const typing=document.activeElement?.id==='message-input'?document.activeElement:null,caret=typing&&[typing.value,typing.selectionStart,typing.selectionEnd];
     if(opayaView)renderOpaya();else if(playgroundView)renderPlayground();else if(overview||!a)renderOverview();else if(manageId)renderManage(a);else if(stage)renderAgentTerminal(a);else renderAgent(a);
+    const box=$('#message-input');
+    if(typing&&box&&box!==typing&&!box.disabled&&(!document.activeElement||document.activeElement===document.body)){box.focus({preventScroll:true});if(box.value===caret[0])box.setSelectionRange(caret[1],caret[2]);}
     $('#status-left').textContent=playgroundView?'Playground / ask two agents the same question':opayaView?'Opaya Agent / installs, connects and troubleshoots your agents':a&&!overview?`${labels[a.provider]} / ${a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase()} / ${location(a)}`:'One place. All your agents.';
     $('#status-right').textContent=state.agents.some(a=>a.busy)?`${state.agents.filter(a=>a.busy).length} agent working`:(state.service?.persistent?'Sessions protected / safe to close window':'Local workspace / no cloud account');
     updateTurnWatch();renderToolChip();
@@ -161,7 +169,7 @@
     $('#modal-root').innerHTML=`<dialog class="modal ${wide?'wide':''}" id="app-dialog"><div class="modal-header"><div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div><button class="icon-button" data-action="modal-close" aria-label="Close dialog">&#10005;</button></div><div class="modal-body">${body}</div></dialog>`;
     const d=$('#app-dialog');d.addEventListener('cancel',event=>{if(modalBusy)event.preventDefault();else closeModal();});d.showModal();
   }
-  function closeModal(){if(modalBusy)return;$('#app-dialog')?.close();$('#modal-root').innerHTML='';returnFocus?.focus?.();}
+  function closeModal(){if(modalBusy)return;$('#app-dialog')?.close();$('#modal-root').innerHTML='';const back=returnFocus?.isConnected?returnFocus:returnFocus?.id==='message-input'?$('#message-input'):null;if(back&&!back.disabled)back.focus?.();}
   function openAdd(){
     modal('Bring your agents together.','Choose where to look. Nothing connects until you approve it.',`<div class="connect-options"><button data-action="discover"><span class="option-symbol"><span class="radar-icon"></span></span><strong>Discover this computer</strong><p>Find Hermes profiles, Codex, Claude Code and local gateways.</p><small>Recommended to get started &#8594;</small></button><button data-action="hosts"><span class="option-symbol"><span class="machine-icon"></span></span><strong>Connect a remote machine</strong><p>Use your saved SSH config, key files or ssh-agent. No public API ports.</p><small>VPS, server or remote computer &#8594;</small></button><button data-action="install-catalog"><span class="option-symbol install-glyph">&#8595;</span><strong>Install a new agent</strong><p>One click installs Hermes, Claude Code, Codex, OpenClaw and more, here or on a VPS.</p><small>Local or remote &#8594;</small></button><button data-action="manual"><span class="option-symbol">+</span><strong>Add a connection manually</strong><p>Choose an agent preset, API endpoint, ACP command or native terminal.</p><small>For custom installations &#8594;</small></button></div><div class="modal-note"><span class="status-dot connected"></span> No Opaya account. No third-party routing. Your provider login stays where the agent runs.</div>`,true);
   }
@@ -441,12 +449,12 @@
     if(name==='new-vps'){openNewVps();return;}
     if(name==='job-restore'){const running=[...jobs.values()].filter(j=>j.status==='running');if(!jobs.has(jobShown))jobShown=(running[0]||[...jobs.values()].at(-1))?.id||'';jobMinimized=false;renderJobs();return;}
     if(name==='opaya-new'){action(async()=>{await api.opayaNewSession();opayaCount=-1;$('#message-input')?.focus();});return;}
-    if(name==='opaya-delete-session'){const o=opaya();if(!confirm('Delete this chat with the Opaya Agent?'))return;action(async()=>{await api.opayaDeleteSession({id:o.sessionId});opayaCount=-1;});return;}
+    if(name==='opaya-delete-session'){const o=opaya();action(async()=>{if(!await ask('Delete this chat with the Opaya Agent?'))return;await api.opayaDeleteSession({id:o.sessionId});opayaCount=-1;});return;}
     if(name==='discover-tab'){discover(id||undefined);return;}
     if(name==='discover-install'){if(button.dataset.host){confirmInstall(button.dataset.fw,button.dataset.host);return;}action(async()=>{const r=await api.installFramework({id:button.dataset.fw,hostId:button.dataset.host||undefined});closeModal();if(r?.kind==='toolchain'){onJob(r);toast('Opaya is installing it from the official download.');return;}toast('Installing in Terminal. Discover again when it finishes.');});return;}
     if(name==='clone-install'){action(async()=>{await api.installFramework({id:'hermes',hostId:button.dataset.host||undefined});toast('Installing Hermes in Terminal. Clone again when it finishes.');});return;}
     if(name==='itrust-agent'){const a=state.agents.find(x=>x.id===id);if(a)toggleAgentTrust(a);return;}
-    if(name==='opaya-itrust'){action(async()=>{const on=!state.settings?.itrustOpaya;if(on&&!confirm('Turn on iTrust for the Opaya Agent?\n\nIt will install, connect and change things without asking each time. Removing connections or machines still asks.'))return;await api.saveSettings({itrustOpaya:on});await refresh();toast(on?'iTrust is on for the Opaya Agent.':'iTrust is off for the Opaya Agent.');});return;}
+    if(name==='opaya-itrust'){action(async()=>{const on=!state.settings?.itrustOpaya;if(on&&!await ask('Turn on iTrust for the Opaya Agent?\n\nIt will install, connect and change things without asking each time. Removing connections or machines still asks.'))return;await api.saveSettings({itrustOpaya:on});await refresh();toast(on?'iTrust is on for the Opaya Agent.':'iTrust is off for the Opaya Agent.');});return;}
     if(name==='browser-open'||name==='browser-toggle'){const p=$('#browser-panel');if(name==='browser-toggle'&&!p.hidden){p.hidden=true;$('#browser-toggle')?.classList.remove('selected');return;}showBrowser();$('#browser-toggle')?.classList.add('selected');$('#browser-url').focus();return;}
     if(name==='projects-toggle'){toggleProjects();return;}
     if(name==='project-focus'){projectsExpanded.add(id);toggleProjects(true);return;}
@@ -485,7 +493,7 @@
     if(name==='backup-reveal'){action(()=>api.revealBackup({file:button.dataset.file}));return;}
     if(name==='backup-folder-open'){action(()=>api.revealBackup({folder:true}));return;}
     if(name==='backup-folder-change'){action(async()=>{const dir=await api.pick({kind:'directory'});if(!dir)return;await api.saveSettings({backupDir:dir});await refresh();backupLists.clear();const code=$('.backup-dest code');if(code)code.textContent=dir;toast('Backups now go to '+dir+'.');});return;}
-    if(name==='backup-delete'){if(!confirm('Delete this backup archive? This cannot be undone.'))return;action(async()=>{await api.backupRemove({file:button.dataset.file});const a=state.agents.find(x=>x.id===id);if(a)await loadBackups(a);toast('Backup deleted.');});return;}
+    if(name==='backup-delete'){action(async()=>{if(!await ask('Delete this backup archive? This cannot be undone.'))return;await api.backupRemove({file:button.dataset.file});const a=state.agents.find(x=>x.id===id);if(a)await loadBackups(a);toast('Backup deleted.');});return;}
     if(name==='edit-host'){openHosts(state.hosts.find(h=>h.id===id));return;}
     if(name==='settings'){openSettings();return;}
     if(name==='models'){action(openModels);return;}
@@ -649,9 +657,12 @@
     render();
   }
   // First launch: ask once how the user likes to work. Existing workspaces are asked too, once.
+  let lastTyped=-1e9;document.addEventListener('keydown',()=>{lastTyped=performance.now();},true);
   function askInterface(){
     if(state.settings?.interface||$('#app-dialog')||!initialized)return;
-    if(!state.agents.length||guideOn()){setTimeout(askInterface,5000);return;}
+    // Not in the middle of typing: the dialog would take the keyboard away from the chat box mid-sentence.
+    const typing=document.activeElement?.matches?.('textarea,input:not([type=checkbox]):not([type=radio]),[contenteditable="true"]')&&performance.now()-lastTyped<15000;
+    if(!state.agents.length||guideOn()||typing){setTimeout(askInterface,5000);return;}
     const card=(value,titleText,text,preview)=>`<button type="button" class="interface-option" data-action="interface" data-value="${value}"><span class="interface-preview ${value}" aria-hidden="true">${preview}</span><strong>${titleText}</strong><span>${text}</span></button>`;
     modal('How do you like to work?','Pick one now; switch any time in Settings, or per agent from its right-click menu.',`<div id="interface-chooser" class="interface-choice">
       ${card('chat','Chat','Conversations with every agent in one clean window: history, projects, models, files and the Opaya browser. Terminals are one click away.','<i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-bubble l short"></i><i class="ip-input"></i>')}
@@ -1367,11 +1378,11 @@
   async function toggleAgentTrust(a){
     if(state.settings?.itrustAll&&a.itrust===false){toast('iTrust is on for all agents in Settings.');return;}
     const on=!a.itrust;
-    if(on&&!confirm(`Turn on iTrust for ${title(a)}?\n\nIts tool requests (commands, file edits and other actions) will be approved automatically, without asking you.`))return;
+    if(on&&!await ask(`Turn on iTrust for ${title(a)}?\n\nIts tool requests (commands, file edits and other actions) will be approved automatically, without asking you.`))return;
     await action(async()=>{await api.updateAgentDisplay({id:a.id,itrust:on});await refresh();toast(on?`iTrust is on for ${title(a)}.`:`iTrust is off for ${title(a)}.`);});
   }
-  document.addEventListener('change',event=>{const key=event.target.dataset?.setting;if(!key)return;const on=event.target.checked;
-    if(on&&key==='itrustAll'&&!confirm('Turn on iTrust for all agents?\n\nEvery agent\'s tool requests will be approved automatically.')){event.target.checked=false;return;}
+  document.addEventListener('change',async event=>{const box=event.target,key=box.dataset?.setting;if(!key)return;const on=box.checked;
+    if(on&&key==='itrustAll'&&!await ask('Turn on iTrust for all agents?\n\nEvery agent\'s tool requests will be approved automatically.')){box.checked=false;return;}
     action(async()=>{await api.saveSettings({[key]:on});await refresh();});});
   async function openSkills(id){
     const a=state.agents.find(x=>x.id===id);if(!a)return;
@@ -1428,7 +1439,7 @@
       <div class="modal-footer"><div></div><div><button class="primary" id="mcp-add">Add MCP server</button></div></div>`}`,true);
     $('#mcp-add')&&($('#mcp-add').onclick=()=>openMcpManager('new'));
     for(const b of document.querySelectorAll('[data-mcp-edit]'))b.onclick=()=>openMcpManager(b.dataset.mcpEdit);
-    for(const b of document.querySelectorAll('[data-mcp-remove]'))b.onclick=()=>action(async()=>{const x=list.find(y=>y.id===b.dataset.mcpRemove);if(!confirm(`Remove MCP server ${x?.name}? Its saved secrets are deleted.`))return;await api.mcpRemove({id:b.dataset.mcpRemove});await refresh();openMcpManager();});
+    for(const b of document.querySelectorAll('[data-mcp-remove]'))b.onclick=()=>action(async()=>{const x=list.find(y=>y.id===b.dataset.mcpRemove);if(!await ask(`Remove MCP server ${x?.name}? Its saved secrets are deleted.`))return;await api.mcpRemove({id:b.dataset.mcpRemove});await refresh();openMcpManager();});
     const f=$('#mcp-form');if(!f)return;const el=n=>f.elements[n];
     const sync=()=>{const stdio=el('type').value==='stdio';f.querySelector('[data-mcp="stdio"]').hidden=!stdio;f.querySelector('[data-mcp="remote"]').hidden=stdio;f.querySelector('.mcp-agent-list').hidden=el('scope').value!=='some';};
     el('type').onchange=sync;for(const r of f.querySelectorAll('[name="scope"]'))r.onchange=sync;sync();
@@ -1590,7 +1601,7 @@
   }
   async function deleteChat(c){
     const a=state.agents.find(x=>x.id===c.agentId);
-    if(!confirm(`Delete "${c.title}"?\n\nOpaya deletes this ${chatKind(c)==='project'?'project chat':chatKind(c)==='playground'?'playground chat':'chat'} and its transcript${a?` with ${title(a)}`:''}. This cannot be undone.`))return;
+    if(!await ask(`Delete "${c.title}"?\n\nOpaya deletes this ${chatKind(c)==='project'?'project chat':chatKind(c)==='playground'?'playground chat':'chat'} and its transcript${a?` with ${title(a)}`:''}. This cannot be undone.`))return;
     await action(async()=>{await api.deleteConversation({id:c.id});await refresh();toast('Chat deleted.');});
   }
   // Condense: reads the whole chat and keeps only its essence. Uses the Opaya Agent's model API when it has a key,
@@ -1685,7 +1696,7 @@
       {icon:'&#9656;',label:'Browse files',run:()=>openFiles({hostId:p.hostId||undefined,path:p.path,label:`${p.name} / ${hostName(p.hostId)}`})},
       {icon:'&gt;_',label:'Terminal here',run:()=>projectTerminal(p)},
       {icon:'&#9998;',label:'Edit project...',run:()=>openProjectForm(p)},
-      {icon:'&#10005;',label:'Remove project',danger:true,run:async()=>{if(!confirm(`Remove project ${p.name}? Its chats stay with their agents; the folder is not touched.`))return;await api.projectRemove({id:p.id});await refresh();toast('Project removed.');}}];
+      {icon:'&#10005;',label:'Remove project',danger:true,run:async()=>{if(!await ask(`Remove project ${p.name}? Its chats stay with their agents; the folder is not touched.`))return;await api.projectRemove({id:p.id});await refresh();toast('Project removed.');}}];
   }
   // ---- Remote agents on local projects: one project; each agent on a machine or in a container gets its own copy -----
   const remoteOf=(a,p)=>(p.remotes||[]).find(r=>r.agentId===a.id)||null;
@@ -1699,8 +1710,8 @@
     {icon:'&#10005;',label:'Stop sharing...',danger:true,run:()=>stopSharing(p,a)}];};
   async function sendToRemote(p,a){
     const r=remoteOf(a,p);if(!r)return;let includeChanges=false;
-    if(r.mode==='git'){const info=await api.projectRemoteInfo({id:p.id}).catch(()=>null);if(info?.dirty)includeChanges=confirm(`You have ${info.dirty} uncommitted change${info.dirty===1?'':'s'}. Send them too?\n\nOK sends them along (your folder stays as it is); Cancel sends only your commits.`);}
-    else if(r.mode==='copy'&&!confirm(`Copy your folder to ${title(a)} again? Its files are replaced by yours; bring its changes back first if you have not.`))return;
+    if(r.mode==='git'){const info=await api.projectRemoteInfo({id:p.id}).catch(()=>null);if(info?.dirty)includeChanges=await ask(`You have ${info.dirty} uncommitted change${info.dirty===1?'':'s'}. Send them too?\n\nOK sends them along (your folder stays as it is); Cancel sends only your commits.`);}
+    else if(r.mode==='copy'&&!await ask(`Copy your folder to ${title(a)} again? Its files are replaced by yours; bring its changes back first if you have not.`))return;
     await api.projectRemoteSend({id:p.id,agentId:a.id,includeChanges});
   }
   async function bringFromRemote(p,a){await api.projectRemoteBring({id:p.id,agentId:a.id});}
@@ -1993,13 +2004,13 @@
       for(const n of preset.names||[]){const c=box.querySelector(`[name="skill"][value="${CSS.escape(n)}"]`);if(c)c.checked=true;}syncMode();
     },error=>{$('#transfer-skills').innerHTML=`<div class="message-error">${esc(error.message)}</div>`;});
     if(a.provider==='hermes')api.agentEnvKeys({id:a.id}).then(list=>{keys=list||[];drawKeys();},()=>{keys=[];drawKeys();});
-    f.onsubmit=event=>{event.preventDefault();const t=target(),picked=n=>[...f.querySelectorAll(`[name="${n}"]:checked`)].map(i=>i.value);
+    f.onsubmit=async event=>{event.preventDefault();const t=target(),picked=n=>[...f.querySelectorAll(`[name="${n}"]:checked`)].map(i=>i.value);
       const sm=mode('skillsMode'),km=f.querySelector('[name="keysMode"]')?mode('keysMode'):'none';
       const x={sourceId:a.id,targetId:t.id,skills:sm==='all'?'all':sm==='some'?picked('skill'):false,keys:km==='all'?'all':km==='some'?picked('key'):false,mcp:picked('mcp'),token:!!f.elements.token?.checked};
       if(Array.isArray(x.skills)&&!x.skills.length){toast('Select skills, or choose All or None.',true);return;}
       if(Array.isArray(x.keys)&&!x.keys.length){toast('Select API keys, or choose All or None.',true);return;}
       if(!x.skills&&!x.keys&&!x.mcp.length&&!x.token){toast('Choose what to transfer.',true);return;}
-      if(x.keys&&!confirm(`Copy ${x.keys==='all'?'all':x.keys.length} API key${x.keys.length===1?'':'s'} from ${title(a)} to ${title(t)}?\n\n${title(t)} will be able to use the same accounts and spend on them.`))return;
+      if(x.keys&&!await ask(`Copy ${x.keys==='all'?'all':x.keys.length} API key${x.keys.length===1?'':'s'} from ${title(a)} to ${title(t)}?\n\n${title(t)} will be able to use the same accounts and spend on them.`))return;
       action(async()=>{await api.transferStart(x);closeModal();});
     };
   }
@@ -2016,7 +2027,7 @@
       const boxes=()=>[...body.querySelectorAll('[data-lib]')],count=()=>{const n=boxes().filter(b=>b.checked).length;$('#library-count')&&($('#library-count').textContent=n?`${n} selected`:'');$('#library-install')&&($('#library-install').disabled=!n);};
       $('#library-all')?.addEventListener('change',e=>{for(const b of boxes())b.checked=e.target.checked;count();});
       for(const b of boxes())b.addEventListener('change',count);
-      for(const b of body.querySelectorAll('[data-lib-remove]'))b.onclick=event=>{event.preventDefault();const n=b.dataset.libRemove;if(!confirm(`Remove ${n} from the library?\n\nAgents that already have it keep their copy.`))return;action(async()=>{await api.libraryRemove({name:n});await drawLibrary();toast(`${n} removed from the library.`);});};
+      for(const b of body.querySelectorAll('[data-lib-remove]'))b.onclick=async event=>{event.preventDefault();const n=b.dataset.libRemove;if(!await ask(`Remove ${n} from the library?\n\nAgents that already have it keep their copy.`))return;action(async()=>{await api.libraryRemove({name:n});await drawLibrary();toast(`${n} removed from the library.`);});};
       $('#library-install')&&($('#library-install').onclick=()=>openLibraryInstall(boxes().filter(b=>b.checked).map(b=>b.dataset.lib)));
       $('#library-from-agent').onclick=()=>{const withSkills=state.agents;if(!withSkills.length){toast('Add an agent first.');return;}openLibraryImport();};
       $('#library-from-folder').onclick=()=>action(async()=>{const dir=await api.pick({kind:'directory'});if(!dir)return;const r=await api.libraryAddFolder({path:dir});await drawLibrary();toast(`Added ${plural(r.skills.length,'skill')} to the library.`);});
@@ -2070,7 +2081,7 @@
   }
   async function redeploy(a){
     const src=state.agents.find(x=>x.id===a.clone?.from);if(!src){toast('The source agent of this clone was removed.',true);return;}
-    if(!confirm(`Redeploy ${title(a)} from ${title(src)}?\n\nCopies ${CLONE_SCOPES.find(s=>s[0]===a.clone.scope)?.[1]||a.clone.scope}${(a.clone.cron??a.clone.scope==='everything')?' (with cron jobs)':' (without cron jobs)'} again over the clone${a.clone.container?' and restarts its container':''}. Chat history on the clone is kept.`))return;
+    if(!await ask(`Redeploy ${title(a)} from ${title(src)}?\n\nCopies ${CLONE_SCOPES.find(s=>s[0]===a.clone.scope)?.[1]||a.clone.scope}${(a.clone.cron??a.clone.scope==='everything')?' (with cron jobs)':' (without cron jobs)'} again over the clone${a.clone.container?' and restarts its container':''}. Chat history on the clone is kept.`))return;
     await action(async()=>{const job=await api.redeployAgent({id:a.id});onJob(job);});
   }
   // ---- New VPS: key, public key for the provider, connection test, save ------------------------------------------

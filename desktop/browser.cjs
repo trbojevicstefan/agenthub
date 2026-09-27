@@ -47,6 +47,8 @@ class BrowserPane{
     const view=this.ensure();const ok=[x,y,width,height].every(Number.isFinite)&&width>20&&height>20;
     this.visible=!!visible&&ok;
     if(ok)view.setBounds({x:Math.round(x),y:Math.round(y),width:Math.round(width),height:Math.round(height)});
+    // A hidden pane keeps keyboard focus if it had it, so typing in the chat box would go nowhere: hand focus back.
+    if(!this.visible&&view.webContents.isFocused()&&!this.win.isDestroyed())this.win.webContents.focus();
     view.setVisible(this.visible);return this.state();
   }
   async open(url){const view=this.ensure();const target=normalize(url);this.emit({...this.state(),request:'show'});view.webContents.loadURL(target).catch(()=>{});await this.settle();return this.state();}

@@ -160,6 +160,14 @@ if(hostMode){
           if(result.response!==1)return false;
           await updater.runInstaller();await quitForUpdate();return true;
         },
+        // Yes/no questions from the page. A native box instead of window.confirm(), which on Electron can leave the page
+        // unable to take keyboard input until the window is refocused. Focus goes back to the page either way.
+        ask:async x=>{
+          const text=String(x.text||'').slice(0,4000),at=text.indexOf('\n\n');
+          const result=await dialog.showMessageBox(win,{type:'question',buttons:['Cancel','OK'],defaultId:1,cancelId:0,noLink:true,message:at<0?text:text.slice(0,at),detail:at<0?'':text.slice(at+2)});
+          if(!win.isDestroyed())win.webContents.focus();
+          return result.response===1;
+        },
         // Local backups: show an archive (or the backup folder) in Finder / Explorer. The service checks the path.
         revealBackup:async x=>{const p=await client.call('backupPath',x);if(x.folder){await require('node:fs/promises').mkdir(p,{recursive:true});const error=await shell.openPath(p);if(error)throw new Error(error);}else shell.showItemInFolder(p);return true;},
         // Terminal helpers: text-only clipboard and http(s) links.
