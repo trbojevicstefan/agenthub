@@ -251,6 +251,13 @@
       footer:[{label:'Make it the default for new chats',run:async()=>{const pick=currentConversation()?.effort;if(!pick){toast('Choose an effort for this chat first.');return;}await api.selectEffort({id:a.id,effort:pick,scope:'default'});await refresh();toast(`${EFFORT_LABELS[pick]||pick} effort is now ${title(a)}'s default.`);}}],
       pick:async value=>{const chat=await chatFor(a);await api.selectEffort({id:a.id,effort:value,scope:'conversation',conversationId:chat.id});await refresh();toast(value?`${EFFORT_LABELS[value]||value} effort for this chat.`:'This chat uses the agent default effort.');}});
   }
+  // Manage > Model & reasoning: the effort new chats of this agent start with.
+  function openDefaultEffort(a){
+    const button=document.querySelector('[data-action="manage-run"][data-key="effort"]');if(!button)return;
+    openPicker(button,{title:`${title(a)}: default effort`,items:[{value:'',label:'Auto (the model decides)'},...a.efforts.map(l=>({value:l,label:EFFORT_LABELS[l]||l}))],current:a.effort||'',
+      note:'New chats start with this. Each chat can change it under its message box.',
+      pick:async value=>{await api.selectEffort({id:a.id,effort:value,scope:'default'});await refresh();toast(value?`New ${title(a)} chats use ${EFFORT_LABELS[value]||value} effort.`:`New ${title(a)} chats let the model decide the effort.`);}});
+  }
   // A small list that opens from a button: optional search, a check on the current value, extra actions below.
   let pickerFor=null;
   function closePicker(){$('#picker')?.remove();pickerFor?.classList.remove('menu-open');pickerFor=null;document.removeEventListener('pointerdown',pickerOutside,true);}
@@ -262,7 +269,7 @@
     document.body.append(el);
     const list=$('.picker-list',el),fill=q=>{const t=q.trim().toLowerCase(),shown=items.filter(x=>!t||x.label.toLowerCase().includes(t)||x.value.toLowerCase().includes(t)).slice(0,200);list.innerHTML=loading?list.innerHTML:shown.length?shown.map(x=>`<button type="button" role="option" aria-selected="${x.value===current}" data-value="${esc(x.value)}" class="${x.value===current?'current':''}"><span class="picker-check" aria-hidden="true">${x.value===current?'&#10003;':''}</span><span>${esc(x.label)}</span></button>`).join(''):'<p class="picker-empty">Nothing matches.</p>';};
     fill('');
-    const r=button.getBoundingClientRect(),w=Math.max(260,el.offsetWidth),h=el.offsetHeight;el.style.left=Math.max(8,Math.min(r.left,innerWidth-w-8))+'px';el.style.top=Math.max(8,r.top-h-6)+'px';
+    const r=button.getBoundingClientRect(),w=Math.max(260,el.offsetWidth),h=el.offsetHeight;el.style.left=Math.max(8,Math.min(r.left,innerWidth-w-8))+'px';el.style.top=(r.top-h-6>=8?r.top-h-6:Math.max(8,Math.min(r.bottom+6,innerHeight-h-8)))+'px';
     const input=$('.picker-search',el);if(input){input.addEventListener('input',()=>fill(input.value));input.focus();}else $('.picker-list button',el)?.focus();
     el.addEventListener('click',event=>{const b=event.target.closest('[data-value]');if(b&&pick){closePicker();action(()=>pick(b.dataset.value));return;}const f=event.target.closest('[data-foot]');if(f){closePicker();action(()=>footer[Number(f.dataset.foot)].run());}});
     el.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closePicker();button.focus();}else if(['ArrowDown','ArrowUp'].includes(event.key)){event.preventDefault();const all=[...el.querySelectorAll('.picker-list button')],at=all.indexOf(document.activeElement);all[(at+(event.key==='ArrowDown'?1:-1)+all.length)%all.length]?.focus();}else if(event.key==='Enter'&&document.activeElement===input){event.preventDefault();$('.picker-list button',el)?.click();}});
@@ -967,6 +974,7 @@
     const btn=(item,cls='secondary')=>item&&!item.disabled?`<button type="button" class="${item.danger?'danger-button ':''}${cls}" data-action="manage-run" data-key="${esc(item.key)}" ${item.disabled?'disabled':''} ${item.hint?`title="${esc(item.hint)}"`:''}><span class="manage-btn-icon" aria-hidden="true">${item.icon||''}</span>${esc(item.label.replace(/\.\.\.$/,''))}</button>`:'';
     const keyed=Object.fromEntries(Object.entries(x).filter(([,v])=>v).map(([k,v])=>[k,{...v,key:k}]));
     if(a.protocol!=='terminal')keyed.models={key:'models',icon:'&#9672;',label:'Choose model',run:()=>openModels()};
+    if(Array.isArray(a.efforts)&&a.efforts.length)keyed.effort={key:'effort',icon:'&#9889;',label:`Reasoning effort: ${a.effort?EFFORT_LABELS[a.effort]||a.effort:'auto'}`,run:()=>openDefaultEffort(a)};
     if(['hermes','openclaw'].includes(a.provider))keyed.gateway={key:'gateway',icon:'&#9889;',label:'Gateway status',run:()=>openGateway()};
     // The CLI when the agent has one; an API agent has only the shell (its own "shell" action), not a second copy of it.
     keyed.terminal={key:'terminal',icon:'&gt;_',label:hasCli(a)?`Open ${title(a)} CLI`:'Open shell',run:()=>openTerminal(hasCli(a)?{agentId:a.id,mode:'agent'}:{agentId:a.id})};
