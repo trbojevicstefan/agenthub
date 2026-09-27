@@ -4,7 +4,7 @@ const path=require('node:path');
 const {spawn}=require('node:child_process');
 const {randomUUID,createHash}=require('node:crypto');
 const {atomicJson,readJson}=require('./store.cjs');
-const SERVER_ARGS=new Set(['acp','--acp','--experimental-acp','app-server']);
+const SERVER_ARGS=new Set(['acp','--acp','app-server']);
 const {environment,findExecutable,windowsLaunch,sshArgs,target,remoteCommand,quote,dockerExecContainerIndex,dockerExecArgs,collect}=require('./process.cjs');
 const WINDOWS_BUILD=process.platform==='win32'?Number(os.release().split('.')[2])||0:0;
 function dimensions(cols,rows){

@@ -9,7 +9,6 @@ const AGENTS=[
   {id:'x1',name:'Hermes',provider:'hermes',protocol:'acp',transport:'local',command:'hermes',args:[]},
   {id:'x2',name:'Claude',provider:'claude',protocol:'claude',transport:'local',command:'claude',args:[]},
   {id:'x3',name:'Codex',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[]},
-  {id:'x4',name:'Gemini',provider:'custom',protocol:'acp',transport:'local',command:'gemini',args:['--acp']},
   {id:'x5',name:'OpenCode',provider:'custom',protocol:'acp',transport:'local',command:'opencode',args:['acp']}
 ];
 function commands(windows){
@@ -46,7 +45,7 @@ test('the setup guide only offers what each platform can install',()=>{
   for(const g of Object.values(guide.GOALS))for(const id of g.tools){const f=catalog.FRAMEWORKS.find(x=>x.id===id);assert(f&&f.posix&&f.windows,`${id} installs on every platform`);}
   // Codex needs Node.js and Claude Code on Windows needs Git: both come first in any plan.
   for(const platform of ['darwin','win32','linux']){
-    const steps=guide.plan({way:'chatgpt',goals:['all'],agents:['claude','gemini-cli','opencode'],facts:{tools:{},signedIn:{}},platform}).map(s=>s.tool);
+    const steps=guide.plan({way:'chatgpt',goals:['all'],agents:['claude','opencode'],facts:{tools:{},signedIn:{}},platform}).map(s=>s.tool);
     assert(steps.indexOf('node')<steps.indexOf('codex'));if(platform==='win32')assert(steps.indexOf('git')<steps.indexOf('claude'));
   }
 });

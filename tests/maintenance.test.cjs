@@ -14,7 +14,7 @@ test('installation kind follows how the agent runs',()=>{
   assert.deepEqual([m.kindOf(profile).kind,m.kindOf(profile).profile],['hermes-profile','writer']);
   const d=m.kindOf(container);assert.deepEqual([d.kind,d.container,d.managed],['docker','opaya-hermes-box',true]);
   assert.equal(m.kindOf(api).kind,'remote-api');
-  assert.equal(m.kindOf({provider:'custom',command:'/usr/local/bin/gemini',args:[],transport:'local'}).framework,'gemini-cli');
+  assert.equal(m.kindOf({provider:'custom',command:'/usr/local/bin/opencode',args:['acp'],transport:'local'}).framework,'opencode');
   assert.deepEqual(m.capabilities(api),{kind:'remote-api',label:'API connection',framework:'',update:false,uninstall:false,backup:false});
   assert.equal(m.capabilities(claude).backup,true);
   // Hermes profiles share one installation; containers do not.

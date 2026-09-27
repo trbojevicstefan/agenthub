@@ -18,9 +18,8 @@ const TEXT_ONLY=[
 ];
 function visionOf(agent,{model=''}={}){
   const m=String(model||agent?.activeModel||agent?.model||'').trim();
-  // The agent itself decides the model when none is set: Claude Code, Codex and Gemini CLI always use vision models.
-  const bin=String(agent?.command||'').split(/[\\/]/).pop().replace(/\.(exe|cmd)$/i,'').toLowerCase();
-  const native=agent?.provider==='claude'?'Claude':agent?.provider==='codex'?'GPT':bin==='gemini'?'Gemini':'';
+  // The agent itself decides the model when none is set: Claude Code and Codex always use vision models.
+  const native=agent?.provider==='claude'?'Claude':agent?.provider==='codex'?'GPT':'';
   if(m&&TEXT_ONLY.some(r=>r.test(m))&&!VISION.some(r=>r.test(m)&&/vl|vision|omni|v\b/i.test(m)))return {vision:false,model:m,reason:`${m} reads text only; it cannot see screenshots or images.`};
   if(m&&VISION.some(r=>r.test(m)))return {vision:true,model:m,reason:`${m} can see images.`};
   if(native&&(!m||/^(default|sonnet|opus|haiku|opusplan)$/i.test(m)))return {vision:true,model:m||native,reason:`${native} models can see images.`};

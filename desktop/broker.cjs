@@ -21,9 +21,8 @@ function safeError(error,token=''){
   if(token)value=value.split(token).join('[redacted]');
   return value.replace(/\x1b\[[0-9;]*[A-Za-z]/g,'').replace(/(Bearer\s+)[^\s]+/gi,'$1[redacted]').replace(/\bsk-[A-Za-z0-9_-]{12,}/g,'[redacted]').slice(0,2400);
 }
-// Agents whose vendor no longer accepts connections from other apps (Gemini Code Assist for individuals now points to
-// Antigravity). Their own CLI in a terminal is the way to use them, so Opaya switches them to it.
-const CLIENT_REFUSED=/(client is no longer supported|no longer supported for Gemini Code Assist|migrate to the Antigravity|antigravity\.google)/i;
+// Agents whose vendor no longer accepts connections from other apps. Their own CLI in a terminal is the way to use them, so Opaya switches them to it.
+const CLIENT_REFUSED=/client is no longer supported/i;
 class Broker{
   constructor({store,vault,emit,approve,adapterFactory=createAdapter}){
     Object.assign(this,{store,vault,emit,approve,adapterFactory});this.runtime=new Map();this.histories=new Map();this.turns=new Map();this.connecting=new Map();this.scanBusy=false;this.closing=false;
