@@ -17,10 +17,12 @@ const path=require('node:path');
 const {randomUUID}=require('node:crypto');
 const schema=require('./schema.cjs');
 const catalog=require('./catalog.cjs');
+const updates=require('./updates.cjs');
+const {previewOf}=require('./maintenance.cjs');
 const files=require('./files.cjs');
 const skills=require('./skills.cjs');
 const {atomicJson,readJson}=require('./store.cjs');
-const {quote,target,launch,primeShellPath,findExecutable,environment,terminate,dockerExecContainerIndex,collect}=require('./process.cjs');
+const {quote,target,launch,primeShellPath,findExecutable,environment,terminate,dockerExecContainerIndex,collect,opayaToolsRoot}=require('./process.cjs');
 const {Rpc}=require('./rpc.cjs');
 const {PROVIDERS}=require('./providers.cjs');
 const screen=require('./screen.cjs');
@@ -55,9 +57,8 @@ function openCommand(target,platform){
   return {file:url?'xdg-open':'gtk-launch',args:[target]};
 }
 const DIAGNOSTICS={
-  versions:{label:'Installed agent tools',
-    posix:"for c in hermes claude codex openclaw opencode goose aider ollama node npm python3 tmux ssh; do printf '%s: ' \"$c\"; if command -v \"$c\" >/dev/null 2>&1; then \"$c\" --version 2>&1 | head -1; else echo 'not installed'; fi; done",
-    windows:"foreach($c in 'hermes','claude','codex','openclaw','opencode','ollama','node','npm','python','ssh'){ $p=Get-Command $c -ErrorAction SilentlyContinue; if($p){ \"${c}: \"+$p.Source } else { \"${c}: not installed\" } }"},
+  // Versions with how each tool is installed and where (updates.cjs), the same detection update_framework uses.
+  versions:{label:'Installed agent tools',posix:updates.versionsCheck(),windows:updates.versionsCheck({windows:true})},
   ports:{label:'Listening agent ports',
     posix:"(ss -ltn 2>/dev/null || netstat -an 2>/dev/null) | grep -E ':(8642|8643|8644|8645|18789|11434|1234|8000|8080)\\b' || echo 'No known agent ports are listening.'",
     windows:"Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in 8642,8643,8644,8645,18789,11434,1234,8000,8080 } | Format-Table LocalAddress,LocalPort,OwningProcess -AutoSize"},
@@ -83,7 +84,7 @@ const INSTALL_PROCEDURE=[
   'Never ask the user to type or paste commands into a terminal. You have tools for installing, updating, onboarding (setup_agent), checks, answering installer questions, connections, machines, SSH keys and skills: use them. When none fits, use run_command yourself instead of handing over shell commands.',
   '1. run_diagnostic versions on the target (this computer or the machine) to see what is installed and which versions.',
   '2. Install missing dependencies first with install_framework (node, python, git, uv, tmux, gh, homebrew on macOS; or essentials when several are missing). Check list_frameworks for each agent\'s requires.',
-  '3. install_framework for the agent, or update_framework to bring an installed agent or dependency to its latest version (essentials updates all of them).',
+  '3. install_framework for the agent, or update_framework to bring an installed agent or dependency to its latest version (essentials updates all of them). update_framework finds how the tool is installed (Homebrew, npm of nvm, fnm, volta or Homebrew Node.js, npx, the native installer, uv, pipx, winget...) and updates that copy. When an update ends with exit code 0 but run_diagnostic versions still shows the old version, another copy comes first on PATH: compare the paths and update or remove the one that is used (update_framework how=...), never the same command again.',
   '4. Follow every terminal with wait_for_terminal until finished=true. When it reports question=true, read the output and answer with answer_prompt (usually enter for the default, or y). Keep waiting and answering until it finishes. When it fails (exit code not 0), read the output, fix the cause (usually a missing dependency or PATH) and retry once.',
   '5. Keys, tokens and passwords do not need the user at a terminal: when one is asked for (password=true), type one the user gave with answer_prompt answer=secret secret=S1, or first ask for it with request_secret (for sudo or SSH passwords too, unless the user prefers to type those there). Keys an agent reads from its config go there with store_secret. Only a browser sign-in needs the user: say exactly what to do and where, then continue.',
   '6. Before any sign-in, run_diagnostic logins on the same target: it shows what the user is already signed in to (ChatGPT through Codex, Claude Code, API keys by name, Hermes and OpenClaw providers), never the secrets. Reuse it: for OpenClaw prefer setup_agent use_claude_login or use_codex_login (no wizard); in a wizard pick that provider.',
@@ -131,7 +132,7 @@ const TOOLS=[
   fn('save_machine','Add or update a saved SSH machine. The user approves it first.',{machine:{type:'object',description:'Fields: id (to update), name, alias, hostname, username, port, identityFile.'}},['machine']),
   fn('remove_machine','Remove a saved SSH machine that no agent uses. The user approves it first.',{machine_id:{type:'string'}},['machine_id']),
   fn('install_framework','Install an agent framework, a dependency or the essentials bundle in a visible terminal, on this computer or a saved machine. The user approves the exact command first. Dependency commands skip what is already installed.',{framework_id:{type:'string',description:'An id from list_frameworks, for example codex, node, python or essentials.'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['framework_id']),
-  fn('update_framework','Update an installed agent framework or dependency (or every essential) to its latest version, in a visible terminal, on this computer or a saved machine. The user approves the exact command first. Check versions first with run_diagnostic versions.',{framework_id:{type:'string',description:'An id from list_frameworks, for example hermes, claude, codex, node or essentials.'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['framework_id']),
+  fn('update_framework','Update an installed agent framework or dependency (or every essential) to its latest version, in a visible terminal, on this computer or a saved machine. The user approves the exact command first. By default the script finds how the tool is installed (Homebrew formula or cask, npm with the Node.js that owns it, npx, pnpm, bun, yarn, volta, the vendor\'s own updater, uv, pipx, winget, scoop, choco, the system package manager) and updates that copy; its output starts with the method and path it found. Check versions first with run_diagnostic versions, which shows how each tool is installed.',{framework_id:{type:'string',description:'An id from list_frameworks, for example hermes, claude, codex, node or essentials.'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'},how:{type:'string',enum:['auto','npm','npx','bun','pnpm','yarn','volta','self','cask','brew','system','nvm','fnm','mise','uv','pipx','pip','winget','scoop','choco'],description:'Force one install method instead of detecting it (auto, the default). Use it only when detection picked the wrong copy, for example npm when a Homebrew cask is first on PATH. self runs the vendor\'s own updater or installer.'}},['framework_id']),
   fn('wait_for_terminal','Wait for an install, update, setup or command you started to finish (up to 180 seconds). Returns finished=true with the exit code when it ended; question=true when the program waits for an answer, with the screen and, for a select menu, menu (question, options, highlighted) so you can answer_prompt choose by text; password=true when it asks for a password, API key or token (type one the user gave with answer_prompt answer=secret).',{terminal_id:{type:'string'},seconds:{type:'integer',description:'Maximum seconds to wait, 5 to 180. Default 90.'}},['terminal_id']),
   fn('run_command','Run any command in a visible terminal on this computer or a saved machine, for what your other tools do not cover (for example finishing an onboarding, fixing a PATH or a config). The user sees it in a terminal (and approves it first when iTrust is off). Follow it with wait_for_terminal and answer_prompt. Prefer the specific tools when one fits. Never put API keys, passwords or tokens in a command (a [secret S1 ...] reference is refused): save them with store_secret, or start the program and type them into its prompt with answer_prompt answer=secret.',{command:{type:'string',description:'The shell command (sh on macOS, Linux and machines; PowerShell on Windows).'},why:{type:'string',description:'One sentence the user sees in the approval: what it does and why.'},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'}},['command','why']),
   fn('open_app','Open a website in the default browser, or start an app on this computer by name (for example System Settings, Docker, Terminal), for example to show the user a sign-in page.',{target:{type:'string',description:'An https:// link or an app name.'},why:{type:'string'}},['target','why']),
@@ -194,6 +195,13 @@ class OpayaAgent{
   }
   secretEntry(id){const want=secrets.secretId(id),s=this.secrets.find(x=>x.id===want);if(!s)throw new Error(`Opaya holds no secret ${want}. Use an id from a [secret S1 · ...] reference, or ask the user with request_secret.`);return s;}
   // Held values with their references (this chat's first), for hiding them in anything tools return.
+  // Whether the copy of a tool this computer runs first is the one Opaya's installer put there (then it updates it).
+  opayaOwned(id){
+    const s=updates.SPECS[id],bin=this.platform==='win32'?s?.win||s?.bin:s?.bin,p=bin&&findExecutable(bin,environment());if(!p)return false;
+    let r=p;try{r=require('node:fs').realpathSync(p);}catch{}
+    const low=f=>this.platform==='win32'?f.toLowerCase():f,root=low(path.resolve(opayaToolsRoot(this.platform))+path.sep);
+    return [p,r].some(f=>low(path.resolve(f)).startsWith(root));
+  }
   heldValues(){const all=this.secrets||[],mine=all.filter(s=>s.session===this.sessionId);return [...mine,...all.filter(s=>!mine.includes(s))].map(s=>({value:this.secretValue(s,true),ref:secrets.reference(s)})).filter(h=>h.value);}
   async holdSecret(value,{name='',source='chat'}={}){
     value=String(value??'');if(!value.trim())throw new Error('The secret is empty.');if(value.length>12000||value.includes('\0'))throw new Error('A secret can be up to 12000 characters.');
@@ -757,7 +765,14 @@ class OpayaAgent{
       }
       case 'remove_machine':{const h=b.host(args.machine_id);await this.ask(`Remove machine "${h.name}"?`,'Only the saved machine entry is removed. Nothing changes on the machine.',{always:true});await b.removeHost(h.id);return {removed:h.id};}
       case 'install_framework':case 'update_framework':{
-        const update=name==='update_framework',host=this.host(args.machine_id);const {framework,command}=catalog.command(String(args.framework_id||''),{remote:!!host,update});
+        const update=name==='update_framework',host=this.host(args.machine_id),how=update&&args.how?String(args.how):'auto';const {framework,command}=catalog.command(String(args.framework_id||''),{remote:!!host,update,how});
+        // An update of Node.js, Python, uv, GitHub CLI or Git that Opaya's installer put on this computer goes through that
+        // installer again (the update script stops for those copies with exit code 3).
+        if(!host&&update&&how==='auto'&&this.builtinInstall&&updates.SPECS[framework.id]?.opaya&&this.opayaOwned(framework.id)){
+          await this.ask(`Update ${framework.name} on this computer?`,"Opaya's installer put it there: Opaya downloads the latest official build, checks its checksum and replaces its copy (no administrator password).");
+          const r=await this.builtinInstall(framework.id,{update:true});
+          if(r)return {...r,finished:true};
+        }
         // On this computer, Node.js, Python, uv, GitHub CLI and Git come from Opaya's built-in installer (official
         // downloads, checksums verified, no administrator password), not from a package manager script.
         if(!host&&!update&&this.builtinInstall&&['node','python','uv','gh','git','essentials'].includes(framework.id)){
@@ -765,7 +780,7 @@ class OpayaAgent{
           const r=await this.builtinInstall(framework.id);
           if(r)return {...r,finished:true,next:'Open a new terminal (or restart programs) so they see the new PATH. Agents started from Opaya see it right away.'};
         }
-        await this.ask(`${update?'Update':'Install'} ${framework.name} ${host?`on ${host.name}`:'on this computer'}?`,`Runs in a visible terminal:\n\n${command}\n\n${framework.requires&&!update?`Requires ${framework.requires}.\n`:''}Afterwards: ${framework.after}`);
+        await this.ask(`${update?'Update':'Install'} ${framework.name} ${host?`on ${host.name}`:'on this computer'}?`,`Runs in a visible terminal:\n\n${update?previewOf(command):command}\n\n${framework.requires&&!update?`Requires ${framework.requires}.\n`:''}Afterwards: ${framework.after}`);
         const view=await this.runOwn({label:`${update?'Update':'Install'} ${framework.name}`,key:`${update?'update':'install'}_${framework.id}`,host,command,marked:true});
         return {terminal_id:view.id,started:true,next:framework.after,hint:'Call wait_for_terminal with this terminal_id to follow it to the end; answer installer questions with answer_prompt.',output:await this.terminalOutput(view.id,4000)};
       }

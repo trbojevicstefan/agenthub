@@ -707,7 +707,9 @@
     if(name==='updates'){openUpdates();return;}
     if(name==='tool-updates'){openToolUpdates();return;}
     if(name==='tool-check'){action(async()=>{button.disabled=true;button.textContent='Checking...';await api.toolCheckAll();await refresh();openToolUpdates();});return;}
-    if(name==='tool-update'){action(async()=>{const n=await api.toolUpdate({id,hostId:button.dataset.host||undefined});if(n){closeModal();toast(`${n===1?'Update':`${n} updates`} running in the terminal below. Opaya checks the versions again when ${n===1?'it finishes':'they finish'}.`);}});return;}
+    if(name==='tool-update'||name==='tool-update-selected'){
+      const ids=name==='tool-update-selected'?[...(button.closest('.tool-machine')?.querySelectorAll('input.tool-pick:checked')||[])].map(x=>x.dataset.id):null;if(ids&&!ids.length)return;
+      action(async()=>{const n=await api.toolUpdate(ids?{ids,hostId:button.dataset.host||undefined}:{id,hostId:button.dataset.host||undefined});if(n){closeModal();toast(`${n===1?'Update':`${n} updates`} running in the Updates terminal below. Opaya checks the versions afterwards; if one does not take, the Opaya Agent finishes it.`);}});return;}
     if(name==='dock-move'){moveDock(button.dataset.pane);return;}
     if(name==='new-vps'){openNewVps();return;}
     if(name==='job-restore'){const running=[...jobs.values()].filter(j=>j.status==='running');if(!jobs.has(jobShown))jobShown=(running[0]||[...jobs.values()].at(-1))?.id||'';jobMinimized=false;renderJobs();return;}
@@ -1417,9 +1419,17 @@
   function openToolUpdates(){
     const machines=toolMachines(),out=outdatedTools();
     for(const i of out)tipsSeen.add(`upd:${i.hostId||'local'}/${i.id}/${i.latest||'git'}`);saveView();if($('#opaya-nudge')&&String(nudgeId).startsWith('upd:'))$('#opaya-nudge').remove();
-    const rows=m=>(m.items||[]).map(i=>`<div class="tool-row ${i.outdated?'outdated':''}"><span class="tool-name">${esc(i.name)}${i.dependency?' <small>dependency</small>':''}</span><span class="tool-version">${versionText(i)}</span>${i.outdated?`<button type="button" class="secondary" data-action="tool-update" data-id="${esc(i.id)}" data-host="${esc(m.hostId||'')}">Update</button>`:`<span class="tool-ok">${i.latest?'Up to date':'Installed'}</span>`}</div>`).join('')||'<p class="field-help">Nothing found yet.</p>';
-    modal('Updates',out.length?`${out.length} update${out.length===1?'':'s'} available`:'Everything checked is up to date',`${machines.length?machines.map(m=>`<section class="tool-machine"><h3>${esc(m.name)} <small>${m.checkedAt?`checked ${esc(new Date(m.checkedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}`:''}</small>${(m.items||[]).some(i=>i.outdated)?`<button type="button" class="primary" data-action="tool-update" data-id="outdated" data-host="${esc(m.hostId||'')}">Update all here</button>`:''}</h3>${m.error?`<p class="field-help">Could not check: ${esc(m.error)}</p>`:''}${rows(m)}</section>`).join(''):'<p class="field-help">Opaya checks this computer and every machine with an agent once an hour.</p>'}
+    // Tick several (the outdated ones start ticked) and run them as one batch; the method shows what an update will use.
+    const updatable=i=>(state.frameworks||[]).some(f=>f.id===i.id),picks=m=>(m.items||[]).filter(i=>i.outdated&&updatable(i)).length;
+    const pick=i=>updatable(i)?`<input type="checkbox" class="tool-pick" data-id="${esc(i.id)}" aria-label="Select ${esc(i.name)}" ${i.outdated?'checked':''}>`:'<span class="tool-pick"></span>';
+    const rows=m=>(m.items||[]).map(i=>`<div class="tool-row ${i.outdated?'outdated':''}">${pick(i)}<span class="tool-name">${esc(i.name)}${i.dependency?' <small>dependency</small>':''}${i.how&&i.method!=='none'?` <small class="tool-how" title="${esc(i.path||'')}">${esc(i.how)}</small>`:''}</span><span class="tool-version">${versionText(i)}</span>${i.outdated?`<button type="button" class="secondary" data-action="tool-update" data-id="${esc(i.id)}" data-host="${esc(m.hostId||'')}">Update</button>`:`<span class="tool-ok">${i.latest?'Up to date':'Installed'}</span>`}</div>`).join('')||'<p class="field-help">Nothing found yet.</p>';
+    modal('Updates',out.length?`${out.length} update${out.length===1?'':'s'} available`:'Everything checked is up to date',`${machines.length?machines.map(m=>`<section class="tool-machine"><h3>${esc(m.name)} <small>${m.checkedAt?`checked ${esc(new Date(m.checkedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}`:''}</small>${(m.items||[]).some(updatable)?`<button type="button" class="secondary" data-action="tool-update-selected" data-host="${esc(m.hostId||'')}" ${picks(m)?'':'disabled'}>Update selected (${picks(m)})</button>`:''}${(m.items||[]).some(i=>i.outdated)?`<button type="button" class="primary" data-action="tool-update" data-id="outdated" data-host="${esc(m.hostId||'')}">Update all here</button>`:''}</h3>${m.error?`<p class="field-help">Could not check: ${esc(m.error)}</p>`:''}${rows(m)}</section>`).join(''):'<p class="field-help">Opaya checks this computer and every machine with an agent once an hour.</p>'}
       <div class="modal-footer"><span>Checked every hour. Change this in Settings.</span><button type="button" class="secondary" data-action="tool-check" ${state.toolUpdates?.checking?'disabled':''}>${state.toolUpdates?.checking?'Checking...':'Check now'}</button></div>`,true);
+    $('#app-dialog')?.addEventListener('change',e=>{
+      const box=e.target.closest?.('.tool-pick'),section=box?.closest('.tool-machine');if(!section)return;
+      const n=section.querySelectorAll('input.tool-pick:checked').length,button=section.querySelector('[data-action="tool-update-selected"]');
+      if(button){button.textContent=`Update selected (${n})`;button.disabled=!n;}
+    });
   }
   function renderToolChip(){
     const chip=$('#status-tools');if(!chip)return;const n=outdatedTools().length;
@@ -1440,11 +1450,13 @@
     if(n.level!=='error'){toast(n.text?`${n.title}. ${n.text}`:n.title);return;}
     document.getElementById('opaya-nudge')?.remove();
     const card=document.createElement('div');card.id='opaya-nudge';card.className='opaya-nudge urgent-notice';card.setAttribute('role','alert');
-    card.innerHTML=`<span class="opaya-mark small" aria-hidden="true"><img src="assets/opaya-logo.png" alt=""><i></i></span><div><strong>${esc(n.title)}</strong><p class="notice-error">${esc(n.text)}</p><div class="nudge-actions"><button type="button" class="text-button" data-notice="copy">Copy error</button>${n.agentId?'<button type="button" class="text-button" data-notice="log">Connection log</button>':''}<button type="button" class="text-button" data-notice="opaya">Opaya Agent</button><button type="button" class="text-button" data-notice="close">Close</button></div></div>`;
+    card.innerHTML=`<span class="opaya-mark small" aria-hidden="true"><img src="assets/opaya-logo.png" alt=""><i></i></span><div><strong>${esc(n.title)}</strong><p class="notice-error">${esc(n.text)}</p><div class="nudge-actions"><button type="button" class="text-button" data-notice="copy">Copy error</button>${n.agentId?'<button type="button" class="text-button" data-notice="log">Connection log</button>':''}${n.prompt?'<button type="button" class="text-button" data-notice="ask">Ask the Opaya Agent</button>':'<button type="button" class="text-button" data-notice="opaya">Opaya Agent</button>'}<button type="button" class="text-button" data-notice="close">Close</button></div></div>`;
     card.addEventListener('click',e=>{const b=e.target.closest('[data-notice]');if(!b)return;const act=b.dataset.notice;
       if(act==='copy'){action(()=>api.clipboardWrite({text:`${n.title}\n\n${n.text}`}));toast('Error copied.');return;}
       if(act==='log')openDiagnostics(n.agentId);
       if(act==='opaya'){overview=false;playgroundView=false;opayaView=true;render();saveView();}
+      // Updates that failed: the service wrote the hand-off (secrets hidden); the user sends it with this button.
+      if(act==='ask'){action(async()=>{await api.opayaSend({text:n.prompt});overview=false;playgroundView=false;opayaView=true;render();saveView();});}
       card.classList.add('leaving');setTimeout(()=>card.remove(),220);});
     document.body.append(card);
   });

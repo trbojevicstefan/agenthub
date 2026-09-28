@@ -47,35 +47,19 @@ const FRAMEWORKS = [
   {id:'homebrew', kind:'dependency', name:'Homebrew', provider:'custom', icon:'', description:'macOS package manager used to install the other dependencies.', docs:'https://brew.sh', after:'Follow the printed "Next steps" to add brew to PATH.', macOnly:true,
     posix:'command -v brew >/dev/null 2>&1 && echo "brew is already installed" || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"', windows:''}
 ];
-// Updates to the latest version. Same rules as installs: fixed vendor commands, nothing interpolated.
-const npmUp=pkg=>`npm install -g ${pkg}@latest || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g ${pkg}@latest; }`;
-const pkgUp=(bin,{brew=bin,apt=bin,dnf=bin}={})=>`if ! command -v ${bin} >/dev/null 2>&1; then echo '${bin} is not installed'; elif command -v brew >/dev/null 2>&1 && brew list ${brew} >/dev/null 2>&1; then brew upgrade ${brew} || true; elif command -v apt-get >/dev/null 2>&1; then sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --only-upgrade ${apt}; elif command -v dnf >/dev/null 2>&1; then sudo dnf upgrade -y ${dnf}; else echo 'Update ${bin} with your package manager.'; fi; ${bin} --version 2>&1 | head -1`;
-const wingetUp=(bin,wid)=>`if (Get-Command ${bin} -ErrorAction SilentlyContinue) { winget upgrade --id ${wid} -e --accept-source-agreements --accept-package-agreements; ${bin} --version } else { '${bin} is not installed' }`;
-const UPDATES={
-  hermes:{posix:'hermes update',windows:'hermes update'},
-  claude:{posix:'claude update',windows:'claude update'},
-  codex:{posix:npmUp('@openai/codex'),windows:'npm.cmd install -g @openai/codex@latest'},
-  openclaw:{posix:npmUp('openclaw'),windows:'npm.cmd install -g openclaw@latest'},
-  opencode:{posix:npmUp('opencode-ai'),windows:'npm.cmd install -g opencode-ai@latest'},
-  goose:{posix:'goose update',windows:''},
-  aider:{posix:'aider-install',windows:'aider-install'},
-  ollama:{posix:'curl -fsSL https://ollama.com/install.sh | sh',windows:"winget upgrade --id Ollama.Ollama -e --accept-source-agreements --accept-package-agreements"},
-  node:{posix:pkgUp('node',{brew:'node',apt:'nodejs',dnf:'nodejs'}),windows:wingetUp('node','OpenJS.NodeJS.LTS')},
-  python:{posix:pkgUp('python3',{brew:'python',apt:'python3',dnf:'python3'}),windows:wingetUp('py','Python.Python.3.12')},
-  git:{posix:pkgUp('git'),windows:wingetUp('git','Git.Git')},
-  uv:{posix:'uv self update',windows:'uv self update'},
-  tmux:{posix:pkgUp('tmux'),windows:''},
-  openssh:{posix:pkgUp('ssh',{brew:'openssh',apt:'openssh-client',dnf:'openssh-clients'}),windows:''},
-  gh:{posix:pkgUp('gh'),windows:wingetUp('gh','GitHub.cli')},
-  docker:{posix:pkgUp('docker',{brew:'docker',apt:'docker-ce docker-ce-cli containerd.io',dnf:'docker-ce docker-ce-cli containerd.io'}),windows:wingetUp('docker','Docker.DockerDesktop')},
-  homebrew:{posix:'brew update && brew upgrade',windows:''}
-};
+// Updates to the latest version. Same rules as installs: fixed commands, nothing interpolated. Each script finds how the
+// tool is installed on the machine (Homebrew, the npm that owns it, npx, the vendor's updater, uv, pipx, winget...) and
+// updates that copy (updates.cjs). `how` forces one method (the Opaya Agent, after the detected one failed).
+const updates=require('./updates.cjs');
+const UPDATES=Object.fromEntries(FRAMEWORKS.filter(f=>updates.SPECS[f.id]).map(f=>[f.id,{posix:updates.script(f.id),windows:updates.script(f.id,{windows:true})}]));
+// In sh like the other updates, so it works from any login shell (fish too) and leaves its PATH alone.
+UPDATES.homebrew={posix:`sh -c '${updates.TOOL_PATH}; brew update && brew upgrade'`,windows:''};
 const ESSENTIALS=['node','python','git','uv','tmux'];
 const available=(f,remote)=>remote||process.platform!=='win32'?!!f.posix&&!(f.macOnly&&(remote||process.platform!=='darwin')):!!f.windows;
 function list(){const containers=require('./containers.cjs');return [...FRAMEWORKS.map(({posix,windows,...f})=>({kind:'agent',...f,docker:containers.supported(f.id),builtin:require('./toolchain.cjs').supports(f.id)&&(f.id!=='git'||process.platform!=='linux'),local:available({posix,windows,...f},false),remote:available({posix,windows,...f},true),localCommand:process.platform==='win32'?windows:posix,remoteCommand:posix})),
   {id:'essentials',kind:'bundle',name:'All essentials',provider:'custom',icon:'',description:`Installs whatever is missing of ${ESSENTIALS.map(id=>FRAMEWORKS.find(f=>f.id===id)).filter(f=>available(f,false)).map(f=>f.name).join(', ')}.`,after:'Open a new terminal, then install agents.',local:true,remote:true,localCommand:command('essentials',{remote:false}).command,remoteCommand:command('essentials',{remote:true}).command}];}
-function command(id,{remote,update=false}){
-  if(update)return updateCommand(id,{remote});
+function command(id,{remote,update=false,how='auto'}){
+  if(update)return updateCommand(id,{remote,how});
   if(id==='essentials'){
     const parts=ESSENTIALS.map(id=>FRAMEWORKS.find(f=>f.id===id)).filter(f=>available(f,remote)).map(f=>remote||process.platform!=='win32'?f.posix:f.windows);
     return {framework:{id:'essentials',name:'All essentials',after:'Open a new terminal, then install agents.'},command:parts.map(p=>remote||process.platform!=='win32'?`(${p})`:`& {${p}}`).join(remote||process.platform!=='win32'?'; ':'; ')};
@@ -86,14 +70,14 @@ function command(id,{remote,update=false}){
   if(!value)throw new Error(`${f.name} has no native ${remote?'remote':'Windows'} installer. Install it on a Linux or macOS machine (or WSL) instead.`);
   return {framework:f,command:value};
 }
-function updateCommand(id,{remote}){
+function updateCommand(id,{remote,how='auto'}){
   const posix=remote||process.platform!=='win32';
   if(id==='essentials'){
     const parts=ESSENTIALS.map(e=>UPDATES[e]?.[posix?'posix':'windows']).filter(Boolean);
     return {framework:{id:'essentials',name:'All essentials',after:'Everything that was installed is now up to date.'},command:parts.map(p=>posix?`(${p})`:`& {${p}}`).join('; ')};
   }
   const f=FRAMEWORKS.find(f=>f.id===id);if(!f)throw new Error('Unknown agent framework.');
-  const value=UPDATES[id]?.[posix?'posix':'windows'];
+  const value=how&&how!=='auto'&&updates.SPECS[id]?updates.script(id,{windows:!posix,how}):UPDATES[id]?.[posix?'posix':'windows'];
   if(!value||!available(f,remote))throw new Error(`Opaya has no ${remote?'remote':posix?'':'Windows '}update command for ${f.name}. Install it again to get the latest version.`.replace('  ',' '));
   return {framework:{...f,after:`${f.name} is up to date.`},command:value};
 }
