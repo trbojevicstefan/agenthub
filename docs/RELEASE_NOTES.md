@@ -1,3 +1,8 @@
+# Opaya 0.21.4 - A key given to Opaya is global
+
+- **Global keys**: a key given with the Opaya Agent's key button goes to every agent by default ("Give it to every agent too"). Opaya writes it into the config of each agent that reads keys: Hermes (.env), OpenClaw (.env, also in Docker), Claude Code (settings.json) and Codex (OpenAI keys only). This covers every machine and container. Each connected agent is told in its chat. A summary shows who got it and why others were skipped, and API connections keep their own token. "All agents" next to a held key gives it again, for example after adding agents.
+- **Per-agent keys**: the key button in an agent's own chat still gives a key to that agent only.
+
 # Opaya 0.21.3 - Give any agent a key, and it knows
 
 - **Give secret for every agent**: the key button is now in every agent's chat, not only the Opaya Agent's. Type the variable name (or let Opaya guess it) and the key. Opaya keeps it in its encrypted vault and writes it where that agent reads keys: the .env of a Hermes home, OpenClaw's .env (inside its container when it runs in Docker), env in Claude Code's settings.json, Codex's sign-in, or the token Opaya sends to an API connection. This works on this computer, over SSH and in Docker.

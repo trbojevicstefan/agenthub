@@ -248,6 +248,24 @@ test('the key button in an agent\'s chat saves the key for that agent without as
   assert(!JSON.stringify([r,token]).includes(ROUTER_KEY.slice(9)));
   assert.deepEqual(agent.describe().secrets.find(s=>s.name==='OPENROUTER_API_KEY').stored.map(s=>s.agent),['Hermes','Groq']);
 });
+test('a key given to Opaya goes to every agent that reads keys; API connections keep their own token',async t=>{
+  const home=await temp(t),hermesHome=path.join(home,'.hermes');await fs.mkdir(hermesHome,{recursive:true});await fs.writeFile(path.join(hermesHome,'.env'),'');
+  await fs.mkdir(path.join(home,'.claude'),{recursive:true});await fs.writeFile(path.join(home,'.claude','settings.json'),'{}');
+  const {agent,broker,approvals,commands}=await fixture(t,[],{userHome:home});
+  await broker.saveAgent({agent:{name:'Hermes',provider:'hermes',protocol:'acp',transport:'local',command:'hermes',args:['acp'],hermesHome}},{preapproved:true});
+  await broker.saveAgent({agent:{name:'OpenClaw',provider:'openclaw',protocol:'openai',transport:'http',endpoint:'http://127.0.0.1:18789/v1',model:'openclaw'}});
+  await broker.saveAgent({agent:{name:'Claude',provider:'claude',protocol:'claude',transport:'local',command:'claude'}},{preapproved:true});
+  await broker.saveAgent({agent:{name:'Codex',provider:'codex',protocol:'codex',transport:'local',command:'codex'}},{preapproved:true});
+  const groq=await broker.saveAgent({agent:{name:'Groq',provider:'custom',protocol:'openai',transport:'http',endpoint:'https://api.groq.com/openai/v1',model:'llama'}},{token:'own'});
+  await broker.vault.set(groq.id,'own-token',false);approvals.length=0;
+  const held=await agent.holdFromUser({value:ROUTER_KEY}),r=await agent.giveToAll({id:held.id});
+  assert.deepEqual(r.stored.map(x=>x.agent),['Hermes','OpenClaw','Claude']);
+  assert.deepEqual(r.skipped.map(x=>x.agent),['Codex','Groq']);assert.match(r.skipped[0].reason,/OpenAI API key/);assert.match(r.skipped[1].reason,/keeps its own token/);
+  assert.match(await fs.readFile(path.join(hermesHome,'.env'),'utf8'),/OPENROUTER_API_KEY=/);assert.match(await fs.readFile(path.join(home,'.openclaw','.env'),'utf8'),/OPENROUTER_API_KEY=/);
+  assert.equal(JSON.parse(await fs.readFile(path.join(home,'.claude','settings.json'),'utf8')).env.OPENROUTER_API_KEY,ROUTER_KEY);
+  assert.equal(broker.vault.get(groq.id),'own-token');assert.equal(approvals.length,0);assert.equal(commands.length,0);assert.equal(r.told,0,'nothing connected in the fixture');
+  assert(!JSON.stringify(r).includes(ROUTER_KEY.slice(9)));assert.equal(agent.describe().secrets.find(s=>s.id===held.id).global,true);
+});
 test('store_secret signs Codex in with the key on its input, never on its command line',async t=>{
   const {EventEmitter}=require('node:events'),{PassThrough}=require('node:stream'),spawned=[];
   const spawnAgent=(a,args)=>{const child=new EventEmitter(),run={args,input:''};Object.assign(child,{stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),exitCode:null,signalCode:null});spawned.push(run);child.stdin.on('data',d=>{run.input+=d;});child.stdin.on('end',()=>setImmediate(()=>{child.exitCode=0;child.emit('close',0);}));return child;};
