@@ -184,7 +184,8 @@ function remoteCommand(agent, args, {interactive = false} = {}) {
   return prefix + cwd + (interactive ? '' : 'exec ') + home + [agent.command, ...args].map(quote).join(' ');
 }
 function launch(agent, args, host, overrides = {}) {
-  const env = environment(agent.hermesHome && agent.transport !== 'ssh' ? {HERMES_HOME: agent.hermesHome} : {});
+  // extraEnv: variables for a process on this computer only (Codex's .env keys, see adapters/codex.cjs).
+  const env = environment({...(agent.hermesHome && agent.transport !== 'ssh' ? {HERMES_HOME: agent.hermesHome} : {}), ...(agent.transport !== 'ssh' && agent.extraEnv || {})});
   args = dockerExecArgs(agent, args);
   if (agent.transport === 'ssh') {
     if (!host) throw new Error('This agent has no saved SSH host.');

@@ -3,6 +3,21 @@ const {Rpc}=require('../rpc.cjs');
 const {launch}=require('../process.cjs');
 const attach=require('../attachments.cjs');
 const levels=require('../effort.cjs');
+const fs=require('node:fs');
+const os=require('node:os');
+const path=require('node:path');
+const {parseEnv}=require('../secrets.cjs');
+// Keys Opaya saved for Codex on this computer are in CODEX_HOME/.env. Opaya puts them into the app server's own
+// environment (Codex versions and wrappers differ in whether they load that file), except CODEX_* names, which Codex
+// never takes from a .env either. On a machine or in a container Codex loads the file itself.
+function codexEnv(home=process.env.CODEX_HOME||path.join(os.homedir(),'.codex')){
+  let text='';try{const file=path.join(home,'.env');if(fs.statSync(file).size<=1048576)text=fs.readFileSync(file,'utf8');}catch{}
+  return Object.fromEntries(Object.entries(parseEnv(text)).filter(([k])=>!/^CODEX_/i.test(k)));
+}
+// Codex hides variables whose names contain KEY, SECRET or TOKEN from the commands it runs, unless told not to; the
+// keys the user gave Codex are meant for those commands.
+const SHELL_ENV=['-c','shell_environment_policy.ignore_default_excludes=true'];
+function codexLaunch(agent){return agent.transport==='ssh'||agent.command==='docker'?agent:{...agent,extraEnv:{...codexEnv(),...(agent.extraEnv||{})}};}
 // Opaya's own MCP servers (the vault, the browser) for Codex on this computer, as -c overrides; the user's servers are
 // in Codex's config.toml already (TOML values: a JSON string is a TOML string).
 // On a machine or in a container Codex reads them from its own config.toml, where Opaya writes them when turned on.
@@ -16,7 +31,7 @@ class CodexAdapter{
   // Reasoning effort levels of the agent's model as model/list reports them (read in the background on connect).
   get efforts(){return this.modelInfo.get(this.agent.model||this.defaultModel)?.efforts??levels.CODEX;}
   async connect(){
-    this.rpc=new Rpc(this.spawnAgent(this.agent,[...this.agent.args,...codexMcpArgs(this.agent,this.mcpServers()||[]),'app-server'],this.host),{jsonrpc:false,onRequest:async(method,params)=>{
+    this.rpc=new Rpc(this.spawnAgent(codexLaunch(this.agent),[...this.agent.args,...SHELL_ENV,...codexMcpArgs(this.agent,this.mcpServers()||[]),'app-server'],this.host),{jsonrpc:false,onRequest:async(method,params)=>{
       if(['item/commandExecution/requestApproval','item/fileChange/requestApproval'].includes(method)){
         if(!this.active||params.threadId!==this.active.threadId||(this.active.turnId&&params.turnId!==this.active.turnId)||this.active.signal.aborted)return {decision:'decline'};
         const pending=this.active;
@@ -104,4 +119,4 @@ class CodexAdapter{
     return [...new Set(out)];
   }
 }
-module.exports={CodexAdapter,codexMcpArgs};
+module.exports={CodexAdapter,codexMcpArgs,codexEnv,codexLaunch,SHELL_ENV};

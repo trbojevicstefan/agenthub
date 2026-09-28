@@ -297,6 +297,31 @@ test('agents take keys from the Opaya Vault themselves, after the user approves;
   assert.deepEqual(codexMcpArgs({transport:'ssh',command:'codex'},[{name:'opaya-vault',command:'x',args:[]}]),[]);
   void held;
 });
+test('a key given to a connected Codex restarts it with the key in its environment, and its chat lists keys by name',async t=>{
+  const home=await temp(t),{agent,broker}=await fixture(t,[],{userHome:home,trusted:true});
+  let connects=0;broker.adapterFactory=()=>({connect:async()=>{connects++;return {};},close(){},run:async()=>({})});
+  const codex=await broker.saveAgent({agent:{name:'Codex',provider:'codex',protocol:'codex',transport:'local',command:'codex'}},{preapproved:true});
+  await broker.connect(codex.id);const before=connects;
+  const r=await agent.giveToAgent({agentId:codex.id,name:'GROQ_API_KEY',value:ROUTER_KEY});
+  assert.equal(connects,before+1);assert.equal(broker.runtime.get(codex.id).status,'connected');
+  assert.equal(r.next.includes('restarted'),true);assert.match(r.note,/in your environment as \$GROQ_API_KEY/);
+  await fs.appendFile(path.join(home,'.codex','.env'),'MODEL_NAME=x\nexport CODEX_HOME=/tmp/elsewhere\n');
+  await agent.holdFromUser({name:'TAVILY_API_KEY',value:'tvly-AbCdEfGhIjKlMnOpQrStUvWx'});
+  const keys=await agent.agentKeys({agentId:codex.id});
+  assert.deepEqual(keys.keys.map(k=>[k.name,k.fromOpaya]),[['GROQ_API_KEY',true]]);assert.deepEqual(keys.vault.map(k=>k.name),['TAVILY_API_KEY']);
+  assert(!JSON.stringify(keys).includes(ROUTER_KEY.slice(6))&&!JSON.stringify(keys).includes('AbCdEf'));
+  // The app server gets Codex's .env keys (never CODEX_*) and lets the commands it runs see *_KEY variables.
+  const {codexEnv,codexLaunch,SHELL_ENV}=require('../desktop/adapters/codex.cjs');
+  assert.deepEqual(codexEnv(path.join(home,'.codex')),{GROQ_API_KEY:ROUTER_KEY,MODEL_NAME:'x'});
+  assert.deepEqual(SHELL_ENV,['-c','shell_environment_policy.ignore_default_excludes=true']);
+  assert.equal(codexLaunch({transport:'ssh',command:'codex'}).extraEnv,undefined);
+  // A key taken during a turn: Codex is restarted after that turn.
+  let finish;broker.turns.set(codex.id,{done:new Promise(res=>{finish=res;})});
+  const late=await agent.vaultTool({agentId:codex.id,op:'use',name:'TAVILY_API_KEY'});
+  assert.equal(late.loaded,'after');assert.match(late.next,/next message/);assert.equal(connects,before+1);
+  broker.turns.delete(codex.id);finish();for(let i=0;i<50&&connects===before+1;i++)await new Promise(res=>setTimeout(res,5));
+  assert.equal(connects,before+2);
+});
 test('store_secret signs Codex in with an OpenAI key on its input, never on its command line, and puts other keys in its .env',async t=>{
   const {EventEmitter}=require('node:events'),{PassThrough}=require('node:stream'),spawned=[];
   const spawnAgent=(a,args)=>{const child=new EventEmitter(),run={args,input:''};Object.assign(child,{stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),exitCode:null,signalCode:null});spawned.push(run);child.stdin.on('data',d=>{run.input+=d;});child.stdin.on('end',()=>setImmediate(()=>{child.exitCode=0;child.emit('close',0);}));return child;};

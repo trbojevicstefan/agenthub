@@ -1,3 +1,9 @@
+# Opaya 0.21.6 - Codex really gets its keys, and each chat shows the agent's keys
+
+- **Codex gets the keys you give it**: Opaya now puts the keys from Codex's .env straight into the Codex it starts, and lets the commands Codex runs see them (Codex hides variables named like *_KEY or *_TOKEN from its commands unless told otherwise). The model no longer has to find the file from inside its sandbox.
+- **Agents restart to pick up a new key**: when you give a key to Codex or an ACP agent (such as Hermes over ACP), Opaya restarts it when it is idle, or right after its current answer, so the key is in its environment. Claude Code has it from its next message. The note the agent gets says it is in its environment as $NAME.
+- **The key button in every agent's chat shows its keys**: the names of the keys the agent already has, read from the file it reads keys from (values are never shown), with the ones Opaya gave it marked. Insert puts $NAME into your message. Vault keys it does not have yet have a Give button, and New key opens the dialog to give it a new one.
+
 # Opaya 0.21.5 - Opaya Vault: every key in one place, and agents take what they need
 
 - **Opaya Vault**: every API key, token and password Opaya keeps, in one view. Open it from Vault in the sidebar, Settings, Machines, or the key dialogs in any chat.

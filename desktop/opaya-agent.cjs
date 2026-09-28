@@ -28,6 +28,7 @@ const {PROVIDERS}=require('./providers.cjs');
 const screen=require('./screen.cjs');
 const secrets=require('./secrets.cjs');
 const {place,sourceHome,isLocal}=require('./clone.cjs');
+const {codexEnv,SHELL_ENV}=require('./adapters/codex.cjs');
 
 const PRESETS={
   codex:{label:'Codex CLI (this computer)',kind:'codex',baseUrl:'',model:'',models:[]},
@@ -138,7 +139,7 @@ const TOOLS=[
   fn('open_app','Open a website in the default browser, or start an app on this computer by name (for example System Settings, Docker, Terminal), for example to show the user a sign-in page.',{target:{type:'string',description:'An https:// link or an app name.'},why:{type:'string'}},['target','why']),
   fn('answer_prompt','Answer a question in a terminal you started (install_framework, update_framework, setup_agent, run_command, run_diagnostic, install_skill). Menus (wait_for_terminal returns menu with its options): answer=choose with option=<the option text>; Opaya reads the screen, presses the arrow key exactly as many times as needed, checks the highlighted option and presses Enter (space in a checklist), and searches or opens "More..." when the option is further down. Never step through a menu with down one press at a time. Other answers: Enter for the default, y/n, yes/no, a number, up/down (with times), space, tab, esc, q or Ctrl+C; answer=text with text (typed, then Enter) for names, folders or model ids. Passwords, API keys and tokens: answer=secret with secret=<id> (for example S1) types a secret the user gave, then Enter, and only into a prompt that asks for one; never type such a value as text. Pick the safe default unless the user said otherwise.',{terminal_id:{type:'string'},answer:{type:'string',enum:['choose','enter','y','n','yes','no','1','2','3','4','5','6','7','8','9','up','down','space','tab','esc','q','ctrl_c','text','secret']},option:{type:'string',description:'Only with answer=choose: the menu option to pick, as shown (or a distinctive part of it, e.g. "OpenAI" or "Use existing credentials").'},text:{type:'string',description:'Only with answer=text: what to type (one line, no secrets).'},secret:{type:'string',description:'Only with answer=secret: the id of a secret the user gave, for example S1.'},times:{type:'integer',description:'Only with up or down: how many presses (1 to 60).'}},['terminal_id','answer']),
   fn('request_secret','Ask the user for an API key, token or password in Opaya\'s secure prompt (a password field in a dialog). The value goes into Opaya\'s encrypted vault and you get only a reference such as [secret S1 · OPENROUTER_API_KEY · sk-o…9f3a]; then store_secret puts it where an agent reads it, or answer_prompt answer=secret types it into a terminal prompt. given=false when the user cancels: do not ask for it in the chat then.',{name:{type:'string',description:'The variable it is for, for example OPENROUTER_API_KEY, TELEGRAM_BOT_TOKEN or SUDO_PASSWORD.'},why:{type:'string',description:'One or two sentences the user sees: what it is for and where to get it.'},agent_id:{type:'string',description:'The saved agent it is for, shown to the user. Omit for a terminal prompt or your own model key.'}},['name','why']),
-  fn('store_secret','Save a secret the user gave (by its id from a [secret S1 · ...] reference) where an agent reads it, without you ever seeing it. Hermes: NAME=value in the .env of its Hermes home. OpenClaw: ~/.openclaw/.env (in its Docker container /home/node/.openclaw/.env). Claude Code: env in ~/.claude/settings.json. Codex: codex login --with-api-key (OpenAI API keys). API connections: the token Opaya sends to its endpoint (into=connection_token, the default for plain API connections). agent_id opaya: your own model API key. Works on this computer, SSH machines and in containers; the value never goes through a command line or a log. The user approves it first unless iTrust is on. The result says whether the agent must reconnect or its gateway restart.',{secret:{type:'string',description:'The secret id, for example S1.'},agent_id:{type:'string',description:'The saved agent, or opaya for the Opaya Agent itself.'},name:{type:'string',description:'The variable name to save it as, for example OPENROUTER_API_KEY. Default: the name in its reference.'},into:{type:'string',enum:['agent_config','connection_token'],description:'agent_config: the agent\'s own .env, settings or login (default for Hermes, OpenClaw, Claude Code and Codex). connection_token: the token Opaya sends to a connection over an HTTP API, such as a gateway API key.'}},['secret','agent_id']),
+  fn('store_secret','Save a secret the user gave (by its id from a [secret S1 · ...] reference) where an agent reads it, without you ever seeing it. Hermes: NAME=value in the .env of its Hermes home. OpenClaw: ~/.openclaw/.env (in its Docker container /home/node/.openclaw/.env). Claude Code: env in ~/.claude/settings.json. Codex: codex login --with-api-key for OpenAI API keys, any other key in its .env (CODEX_HOME/.env). Opaya restarts Codex and ACP agents (Hermes over ACP) when they are idle, so the key is in their environment at once; Claude Code has it from its next message. API connections: the token Opaya sends to its endpoint (into=connection_token, the default for plain API connections). agent_id opaya: your own model API key. Works on this computer, SSH machines and in containers; the value never goes through a command line or a log. The user approves it first unless iTrust is on. The result says whether the agent must reconnect or its gateway restart.',{secret:{type:'string',description:'The secret id, for example S1.'},agent_id:{type:'string',description:'The saved agent, or opaya for the Opaya Agent itself.'},name:{type:'string',description:'The variable name to save it as, for example OPENROUTER_API_KEY. Default: the name in its reference.'},into:{type:'string',enum:['agent_config','connection_token'],description:'agent_config: the agent\'s own .env, settings or login (default for Hermes, OpenClaw, Claude Code and Codex). connection_token: the token Opaya sends to a connection over an HTTP API, such as a gateway API key.'}},['secret','agent_id']),
   fn('ssh_key','Create an ed25519 SSH key on this computer, or install a public key on a saved machine, in a visible terminal. The user approves it first. A passphrase or SSH password: the user types it there, or you type one they gave with answer_prompt answer=secret.',{action:{type:'string',enum:['generate','install']},key_name:{type:'string',description:'File name in ~/.ssh, letters, numbers, _ and -.'},machine_id:{type:'string'}},['action','key_name']),
   fn('list_directory','Read-only: list a folder on this computer or a saved machine (default: home folder).',{path:{type:'string'},machine_id:{type:'string'}}),
   fn('read_file','Read-only: read up to 256 KB of a text file on this computer or a saved machine. Secret files such as .env, keys and tokens are refused.',{path:{type:'string'},machine_id:{type:'string'}},['path']),
@@ -156,10 +157,12 @@ function score(id){const s=String(id).toLowerCase();if(/embed|whisper|tts|audio|
 const endpointName=name=>`${String(name).replace(/_(API_KEY|APIKEY|KEY|TOKEN|SECRET)$/,'')||'API'}_BASE_URL`;
 // What an agent's model is told after Opaya saved a key for it: the variable, where it is, never the value.
 function keyNote(r,name){
-  if(r.file)return `[Opaya] I added a new environment variable for you: ${r.name||name} is now set in ${r.file} ${r.where}.${r.endpointName?` Its API endpoint is in ${r.endpointName} (${r.endpoint}) in the same file.`:''} The value is not in this chat. Processes started from now on have it; if you are already running, read it from that file when you need it (never print it or write it anywhere else). Use it for what I ask next.`;
-  if(/login/i.test(r.where||''))return `[Opaya] I signed you in with a new ${name}: it is saved in ${r.where}. The value is not in this chat. It is used from your next start.`;
+  const n=r.name||name,env=r.loaded==='now'||r.loaded==='turn'?` It is already in your environment as $${n}, and the commands you run get it too.${r.endpointName?` So is $${r.endpointName}.`:''}`:r.loaded==='after'?` From your next message it is in your environment as $${n} (Opaya restarts you after this answer); until then read it from that file.`:' Processes started from now on have it; if you are already running, read it from that file when you need it.';
+  if(r.file)return `[Opaya] I added a new environment variable for you: ${n} is now set in ${r.file} ${r.where}.${r.endpointName?` Its API endpoint is in ${r.endpointName} (${r.endpoint}) in the same file.`:''} The value is not in this chat.${env} Never print it or write it anywhere else. Use it for what I ask next.`;
+  if(/login/i.test(r.where||''))return `[Opaya] I signed you in with a new ${name}: it is saved in ${r.where}. The value is not in this chat. ${r.loaded==='now'?'Opaya restarted you, so it is in use now.':'It is used from your next start.'}`;
   return `[Opaya] A new ${name} is saved as the token Opaya sends to your API from the next connection. The value is not in this chat.`;
 }
+const loadedText=(loaded,reconnect)=>({now:'Opaya restarted it, so the key is in its environment now.',after:'Opaya restarts it when its current answer finishes, so the key is in its environment from its next message.',turn:'It has the key from its next message.'})[loaded]||reconnect;
 const stripAnsi=text=>String(text||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)/g,'').replace(/\r/g,'');
 
 class OpayaAgent{
@@ -418,9 +421,10 @@ class OpayaAgent{
     if(this.spawnAgent===launch&&!findExecutable('codex'))throw new Error('The Codex CLI was not found on this computer. Install it (Install agents > Codex CLI, or ask with another model), run codex once in Terminal to sign in, then try again.');
     await fs.mkdir(this.home,{recursive:true}).catch(()=>{});
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
-    const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
+    agent.extraEnv=codexEnv(this.userHome?path.join(this.userHome,'.codex'):undefined);
+    const rpc=new Rpc(this.spawnAgent(agent,[...SHELL_ENV,'app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.21.5'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.21.6'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
@@ -656,7 +660,8 @@ class OpayaAgent{
       await ask(`Sign "${agent.name}" in with ${s.name}?`,`${ref}\n\nRuns codex login --with-api-key ${on}. Opaya gives the key on its input, never on the command line.`);
       await collect(this.spawnAgent(agent,[...(agent.args||[]).filter(x=>x!=='app-server'),'login','--with-api-key'],host),{timeout:60000,input:value+'\n'});
       await this.stored(s,{agentId:agent.id,agentName:agent.name,name:'Codex login',where:'codex login'});
-      return {stored:true,secret:s.id,agent:agent.name,where:`the Codex login ${on}`,next:`Codex keeps it in its login (auth.json). ${reconnect}`};
+      const loaded=await this.reloadForKey(agent);
+      return {stored:true,secret:s.id,agent:agent.name,where:`the Codex login ${on}`,loaded,next:`Codex keeps it in its login (auth.json). ${loadedText(loaded,reconnect)}`};
     }
     // A key saved with its endpoint also gets <NAME>_BASE_URL (OPENROUTER_API_KEY -> OPENROUTER_BASE_URL).
     const urlName=s.endpoint?endpointName(name):'',set=(text,k,v)=>kind==='claude'?secrets.setJsonEnv(text,k,v):secrets.setEnv(text,k,v);
@@ -667,13 +672,31 @@ class OpayaAgent{
     await this.stored(s,{agentId:agent.id,agentName:agent.name,name,where:file});
     const machine=host?` with machine_id ${host.id}`:'',win=!host&&this.platform==='win32';
     const restart=where.container?`run_command docker restart ${where.container}${machine}`:kind==='hermes'?`run_command ${agent.hermesHome?(win?`$env:HERMES_HOME=${quote(agent.hermesHome)}; `:`HERMES_HOME=${quote(agent.hermesHome)} `):''}hermes gateway restart${machine}`:`run_command openclaw gateway restart${machine} (or setup_agent start_gateway)`;
+    // Codex's app server and ACP agents keep running between messages: Opaya restarts them so the key is in their
+    // environment. Claude Code starts anew for each message, so it has the key from the next one.
+    const loaded=kind==='claude'&&agent.protocol!=='acp'?'turn':await this.reloadForKey(agent),then=loadedText(loaded,reconnect);
     const next={
-      hermes:`Hermes loads this .env when a Hermes process starts, and a running gateway picks up new provider keys on its next request. ${reconnect} When the key is for a channel (Telegram, Discord, Slack) or an API_SERVER_* setting, restart its gateway: ${restart}.`,
+      hermes:`Hermes loads this .env when a Hermes process starts, and a running gateway picks up new provider keys on its next request. ${then} When the key is for a channel (Telegram, Discord, Slack) or an API_SERVER_* setting, restart its gateway: ${restart}.`,
       openclaw:`OpenClaw loads this .env when its gateway starts (a variable already set in the gateway's own environment wins); its CLI commands see it at once. Restart the gateway: ${restart}, then disconnect_agent and connect_agent.`,
-      claude:`Claude Code loads env from settings.json when it starts, so new Claude Code sessions use it. ${reconnect} An interactive Claude Code may ask once whether to use a new ANTHROPIC_API_KEY.`,
-      codex:`Codex loads this .env when it starts. ${reconnect}`
+      claude:`Claude Code loads env from settings.json when it starts. ${then} An interactive Claude Code may ask once whether to use a new ANTHROPIC_API_KEY.`,
+      codex:`Codex loads this .env when it starts. ${then}`
     }[kind];
-    return {stored:true,secret:s.id,agent:agent.name,name,file,where:on,next,...(urlName?{endpointName:urlName,endpoint:s.endpoint}:{})};
+    return {stored:true,secret:s.id,agent:agent.name,name,file,where:on,loaded,next,...(urlName?{endpointName:urlName,endpoint:s.endpoint}:{})};
+  }
+  // An agent process that keeps running (Codex's app server, an ACP agent such as Hermes) reads its keys when it
+  // starts. Opaya restarts it when it is idle ('now'), or right after its current answer ('after'); a disconnected one
+  // loads the key when it connects ('next').
+  async reloadForKey(agent){
+    const b=this.broker;if(!['codex','acp'].includes(agent.protocol))return '';
+    if(b.runtime.get(agent.id)?.status!=='connected')return 'next';
+    const again=()=>{b.disconnect(agent.id);return b.connect(agent.id);};
+    const turn=b.turns.get(agent.id);
+    if(turn){
+      this.reloads??=new Set();if(this.reloads.has(agent.id))return 'after';this.reloads.add(agent.id);
+      turn.done.then(async()=>{this.reloads.delete(agent.id);if(!b.turns.has(agent.id)&&b.runtime.get(agent.id)?.status==='connected')await again();}).catch(()=>{});
+      return 'after';
+    }
+    try{await again();return 'now';}catch{return 'failed';}
   }
   // The key button in an agent's own chat: the user gives that agent a key. Opaya keeps it in its vault and writes it
   // where the agent reads keys (its .env, Claude Code's settings, Codex's login, or the connection's token). The user
@@ -689,7 +712,26 @@ class OpayaAgent{
     const reason=String(why||'').replace(/\s+/g,' ').trim().slice(0,300);
     if(!this.broker.isTrusted?.(agent.id)&&!await this.approve({name:agent.name},`Let ${agent.name} use ${s.name}?`,`${agent.name} asks for ${s.name} (${s.mask}) from the Opaya Vault${reason?`: ${reason}`:''}.\n\nOpaya writes it into the file this agent reads keys from. The value does not go into the chat.`))throw new Error('The user declined. Do not ask again for this key in this task.');
     const r=await this.storeSecret({secret:s.id,agent_id:agent.id,name:s.name},{approved:true});
-    return {name:r.name||s.name,file:r.file||undefined,where:r.where,endpoint_variable:r.endpointName,next:r.file?`It is in ${r.file}. Read it from there when you need it (for example, load that .env in the command that needs it); never print it.`:r.next};
+    return {name:r.name||s.name,file:r.file||undefined,where:r.where,endpoint_variable:r.endpointName,loaded:r.loaded||undefined,next:r.loaded==='after'?`It is in ${r.file||r.where}. From your next message it is in your environment as $${r.name||s.name} (Opaya restarts you after this answer). For this answer, load it from that file in the command that needs it; never print it.`:r.loaded==='now'||r.loaded==='turn'?`It is in your environment as $${r.name||s.name}${r.file?` (saved in ${r.file})`:''}; never print it.`:r.file?`It is in ${r.file}. Read it from there when you need it (for example, load that .env in the command that needs it); never print it.`:r.next};
+  }
+  // The key button in an agent's chat: the keys this agent has (names only), read from the file it reads keys from,
+  // with the ones Opaya gave it marked, plus the vault keys it does not have yet.
+  async agentKeys({agentId}={}){
+    const b=this.broker,agent=b.agent(schema.id(agentId)),host=agent.transport==='ssh'?b.host(agent.hostId):null;
+    const kind=agent.provider==='hermes'?'hermes':agent.provider==='openclaw'?'openclaw':agent.provider==='claude'||agent.protocol==='claude'?'claude':agent.provider==='codex'||agent.protocol==='codex'?'codex':'';
+    const given=new Map();
+    for(const s of this.secrets)for(const x of s.stored||[])if(x.agentId===agent.id)given.set(x.name==='Codex login'?s.name:x.name,{secret:s,where:x.where});
+    let file='',names=[],error='';
+    const remoteHttp=agent.transport==='http'&&!/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(agent.endpoint||'');
+    if(kind&&!remoteHttp){
+      try{const where=place({agent,host});file=await this.configFile(kind,agent,where);names=secrets.envNames(await secrets.readAt(where,file),kind==='claude');}
+      catch(e){error=String(e?.message||e).slice(0,200);}
+    }
+    const keyish=n=>secrets.secretName(n)||/_BASE_URL$/.test(n);
+    const keys=[...new Set([...names.filter(keyish),...given.keys()])].map(name=>{const g=given.get(name);return {name,fromOpaya:Boolean(g),global:Boolean(g?.secret.global),hint:g?.secret.mask,where:g?(g.where==='codex login'?'Codex login':g.where):file,inFile:names.includes(name)};});
+    const have=new Set(keys.map(k=>k.name));
+    const vault=this.secrets.filter(s=>(s.kept||s.global)&&!have.has(s.name)).map(s=>({id:s.id,name:s.name,hint:s.mask,global:Boolean(s.global),endpoint:s.endpoint||undefined}));
+    return {agent:agent.name,kind,file,error,keys,vault};
   }
   // A key already in the Opaya Vault, given to one agent.
   async giveHeldToAgent({id,agentId}={}){

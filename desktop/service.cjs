@@ -785,6 +785,7 @@ async function start({app, safeStorage}, root) {
   actions.opayaHoldSecret = x=>opaya.holdFromUser({name:x.name,value:x.value,endpoint:x.endpoint});
   actions.vaultTool = async x=>{const r=await opaya.vaultTool({agentId:x.agentId,op:x.op,name:x.name,why:x.why});emit();return r;};
   actions.vaultGiveAgent = async x=>{const r=await opaya.giveHeldToAgent({id:x.id,agentId:x.agentId});emit();return r;};
+  actions.agentKeys = x=>opaya.agentKeys({agentId:x.agentId});
   actions.opayaGiveAll = async x=>{const r=await opaya.giveToAll({id:x.id});emit();return r;};
   actions.agentGiveSecret = async x=>{const r=await opaya.giveToAgent({agentId:x.agentId,name:x.name,value:x.value,endpoint:x.endpoint});emit();return r;};
   actions.opayaForgetSecret = x=>opaya.forgetSecret(String(x.id||''));
