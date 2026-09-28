@@ -1,3 +1,8 @@
+# Opaya 0.21.3 - Give any agent a key, and it knows
+
+- **Give secret for every agent**: the key button is now in every agent's chat, not only the Opaya Agent's. Type the variable name (or let Opaya guess it) and the key. Opaya keeps it in its encrypted vault and writes it where that agent reads keys: the .env of a Hermes home, OpenClaw's .env (inside its container when it runs in Docker), env in Claude Code's settings.json, Codex's sign-in, or the token Opaya sends to an API connection. This works on this computer, over SSH and in Docker.
+- **The agent is told**: afterwards Opaya sends the agent a short note in the chat, with the variable name and the file it is in but never the value, so the model knows the key exists and where to read it. If you already typed a message, the note goes in front of it and you send it yourself.
+
 # Opaya 0.21.2 - Docker on every machine, OpenClaw in Docker is found, traffic lights stay in full screen
 
 - **Docker manager**: every machine in Machines (this computer and each server) has a Docker button. It lists the containers with their image, state and ports, and which Opaya agent uses each one. Start, stop, restart or remove a container, follow its logs, or open a shell in it in a terminal tab. Images are listed too and can be removed. Stopping a container an agent uses asks first.

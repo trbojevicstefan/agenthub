@@ -410,7 +410,7 @@ class OpayaAgent{
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.21.2'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.21.3'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
@@ -616,13 +616,14 @@ class OpayaAgent{
   // store_secret: a held value into the place an agent reads it, on this computer, an SSH machine or in a container.
   // Files are rewritten whole (other lines and keys kept) through a temporary file with mode 600; the value travels on
   // stdin to SSH machines and containers, never in a command line.
-  async storeSecret(args){
+  async storeSecret(args,{approved=false}={}){
+    const ask=(title,detail)=>approved?undefined:this.ask(title,detail);
     const s=this.secretEntry(args.secret),value=this.secretValue(s),b=this.broker,ref=secrets.reference(s),target=String(args.agent_id||'').trim(),name=secrets.envName(args.name||s.name);
     if(!target)throw new Error('Give agent_id: a saved agent\'s id, or opaya for your own model key.');
     if(args.into&&!['agent_config','connection_token'].includes(args.into))throw new Error('into is agent_config or connection_token.');
     if(/^opaya(-agent)?$/i.test(target)){
       if(this.cli())throw new Error(`The Opaya Agent runs on ${PRESETS[this.config.preset].label}, which uses its own sign-in, not an API key. The user changes that in Model settings.`);
-      await this.ask('Use this key for the Opaya Agent\'s model?',`${ref}\n\nOpaya keeps it in its vault as the API key for ${PRESETS[this.config.preset]?.label||'the model API'}${this.config.model?` (${this.config.model})`:''}.`);
+      await ask('Use this key for the Opaya Agent\'s model?',`${ref}\n\nOpaya keeps it in its vault as the API key for ${PRESETS[this.config.preset]?.label||'the model API'}${this.config.model?` (${this.config.model})`:''}.`);
       await this.vault.set(KEY,value,this.vault.available());await this.stored(s,{agentId:'opaya',agentName:'Opaya Agent',name:'model API key',where:'Opaya vault'});
       return {stored:true,secret:s.id,agent:'Opaya Agent',where:'your model API key (Opaya vault)',next:'Your next model request uses it.'};
     }
@@ -631,7 +632,7 @@ class OpayaAgent{
     const into=args.into||(api&&!['hermes','openclaw'].includes(agent.provider)?'connection_token':'agent_config');
     if(into==='connection_token'){
       if(!api)throw new Error(`${agent.name} does not connect over an HTTP API, so it has no connection token. Use into=agent_config.`);
-      await this.ask(`Save ${s.name} as the API token of "${agent.name}"?`,`${ref}\n\nOpaya keeps it in its vault and sends it to ${agent.endpoint} when it connects.`);
+      await ask(`Save ${s.name} as the API token of "${agent.name}"?`,`${ref}\n\nOpaya keeps it in its vault and sends it to ${agent.endpoint} when it connects.`);
       await this.vault.set(agent.id,value,this.vault.available());await this.stored(s,{agentId:agent.id,agentName:agent.name,name:'connection token',where:'Opaya vault'});
       return {stored:true,secret:s.id,agent:agent.name,where:'its connection token (Opaya vault)',next:`Opaya sends it from the next connection. ${reconnect}`};
     }
@@ -641,14 +642,14 @@ class OpayaAgent{
     if(agent.transport==='http'&&!/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(agent.endpoint||''))throw new Error(`Opaya reaches ${agent.name} only over HTTP (${agent.endpoint}), so it cannot write its config. Add its machine and a connection over SSH, or use into=connection_token for the key Opaya sends it.`);
     if(kind==='codex'){
       if(!/OPENAI|CODEX/.test(name)&&!/^(API_KEY|KEY|TOKEN|SECRET)$/.test(name))throw new Error(`Codex signs in with an OpenAI API key only (codex login --with-api-key), so ${name} cannot go there.`);
-      await this.ask(`Sign "${agent.name}" in with ${s.name}?`,`${ref}\n\nRuns codex login --with-api-key ${on}. Opaya gives the key on its input, never on the command line.`);
+      await ask(`Sign "${agent.name}" in with ${s.name}?`,`${ref}\n\nRuns codex login --with-api-key ${on}. Opaya gives the key on its input, never on the command line.`);
       await collect(this.spawnAgent(agent,[...(agent.args||[]).filter(x=>x!=='app-server'),'login','--with-api-key'],host),{timeout:60000,input:value+'\n'});
       await this.stored(s,{agentId:agent.id,agentName:agent.name,name:'Codex login',where:'codex login'});
       return {stored:true,secret:s.id,agent:agent.name,where:`the Codex login ${on}`,next:`Codex keeps it in its login (auth.json). ${reconnect}`};
     }
     const file=await this.configFile(kind,agent,where),write=text=>kind==='claude'?secrets.setJsonEnv(text,name,value):secrets.setEnv(text,name,value);
     write(await secrets.readAt(where,file)); // fails before asking: a value a .env cannot hold, a settings.json that is not JSON
-    await this.ask(`Save ${name} for "${agent.name}"?`,`${ref}\n\nOpaya writes ${name}=${s.mask} into ${file} ${on} (file mode 600). The value goes from Opaya's vault straight into the file, never through a command line, a log or the chat.`);
+    await ask(`Save ${name} for "${agent.name}"?`,`${ref}\n\nOpaya writes ${name}=${s.mask} into ${file} ${on} (file mode 600). The value goes from Opaya's vault straight into the file, never through a command line, a log or the chat.`);
     await secrets.writeAt(where,file,write(await secrets.readAt(where,file)));
     await this.stored(s,{agentId:agent.id,agentName:agent.name,name,where:file});
     const machine=host?` with machine_id ${host.id}`:'',win=!host&&this.platform==='win32';
@@ -659,6 +660,21 @@ class OpayaAgent{
       claude:`Claude Code loads env from settings.json when it starts, so new Claude Code sessions use it. ${reconnect} An interactive Claude Code may ask once whether to use a new ANTHROPIC_API_KEY.`
     }[kind];
     return {stored:true,secret:s.id,agent:agent.name,name,file,where:on,next};
+  }
+  // The key button in an agent's own chat: the user gives that agent a key. Opaya keeps it in its vault and writes it
+  // where the agent reads keys (its .env, Claude Code's settings, Codex's login, or the connection's token). The user
+  // chose the agent and the name, so this asks no second time. The note tells the agent's model what was added, where,
+  // and how to use it, without the value.
+  async giveToAgent({agentId,name,value}={}){
+    const agent=this.broker.agent(schema.id(agentId)),held=await this.holdFromUser({name,value});
+    const r=await this.storeSecret({secret:held.id,agent_id:agent.id,name:held.name},{approved:true});
+    const where=r.file?`${r.file} ${r.where}`:r.where;
+    const note=r.file
+      ?`[Opaya] I added a new environment variable for you: ${r.name} is now set in ${where}. The value is not in this chat. Processes started from now on have it; if you are already running, read it from that file when you need it (never print it or write it anywhere else). Use it for what I ask next.`
+      :/login/i.test(r.where)
+        ?`[Opaya] I signed you in with a new ${held.name}: it is saved in ${r.where}. The value is not in this chat. It is used from your next start.`
+        :`[Opaya] A new ${held.name} is saved as the token Opaya sends to your API from the next connection. The value is not in this chat.`;
+    return {id:held.id,name:r.name||held.name,file:r.file||'',where:r.where,next:r.next,note};
   }
   // Where each kind of agent reads keys on its machine: its Hermes home, OpenClaw's state folder, Claude Code's config.
   async configFile(kind,agent,where){

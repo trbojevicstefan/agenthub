@@ -780,6 +780,7 @@ async function start({app, safeStorage}, root) {
   };
   // Secrets the user gives the Opaya Agent with the key button next to its message box, and forgetting one.
   actions.opayaHoldSecret = x=>opaya.holdFromUser({name:x.name,value:x.value});
+  actions.agentGiveSecret = async x=>{const r=await opaya.giveToAgent({agentId:x.agentId,name:x.name,value:x.value});emit();return r;};
   actions.opayaForgetSecret = x=>opaya.forgetSecret(String(x.id||''));
   const token = randomBytes(32).toString('hex');
   listener = server({token,snapshot,scopes:()=>new Map([[browserToken,new Set(['browserTool'])],[toolsToken,new Set(['opayaToolList','opayaToolCall'])]]),

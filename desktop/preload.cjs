@@ -8,7 +8,7 @@ methods.push('agentModels','selectModel','gateway','updateAgentDisplay');
 methods.push('selectEffort','pickFiles','fileInfo');
 methods.push('projectRemoteInfo','projectRemoteStart','projectRemoteSend','projectRemoteBring','projectRemoteApply','projectRemoteStop','projectRemoteGithubLogin','guideScan','guidePlan','guideStart','toolVersions','toolCheckAll','toolUpdate','agentInstallInfo','agentMaintenanceCommand','agentUpdate','agentUpdateAll','agentBackup','agentBackups','backupRemove','agentUninstall','revealBackup');
 methods.push('opayaFreeModels','opayaFreeSetup','saveSettings','projectSave','projectRemove','projectInfo','projectBranches','projectGit','projectClone','mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaNewSession','opayaSelectSession','opayaDeleteSession','opayaStop','opayaClear','windowControl','ask');
-methods.push('opayaHoldSecret','opayaForgetSecret');
+methods.push('opayaHoldSecret','opayaForgetSecret','agentGiveSecret');
 methods.push('mcpCatalog','mcpInstall');
 methods.push('dockerList','dockerAction','dockerTerminal');
 for(const method of methods)api[method]=async input=>{

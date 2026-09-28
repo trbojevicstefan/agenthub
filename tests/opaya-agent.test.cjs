@@ -232,6 +232,22 @@ test('store_secret puts a key where each agent reads it, with approval and witho
   await assert.rejects(()=>agent.tool('store_secret',{secret:'S9',agent_id:hermes.id}),/holds no secret S9/);
   await assert.rejects(()=>agent.tool('run_command',{command:`export X=${router.reference}`,why:'no'}),/never carries a secret/);
 });
+test('the key button in an agent\'s chat saves the key for that agent without asking again, and writes a note without the value',async t=>{
+  const home=await temp(t),hermesHome=path.join(home,'.hermes');await fs.mkdir(hermesHome,{recursive:true});await fs.writeFile(path.join(hermesHome,'.env'),'API_SERVER_ENABLED=true\n');
+  const {agent,broker,approvals,commands}=await fixture(t,[],{userHome:home});
+  const hermes=await broker.saveAgent({agent:{name:'Hermes',provider:'hermes',protocol:'acp',transport:'local',command:'hermes',args:['acp'],hermesHome}},{preapproved:true});
+  const groq=await broker.saveAgent({agent:{name:'Groq',provider:'custom',protocol:'openai',transport:'http',endpoint:'https://api.groq.com/openai/v1',model:'llama'}});
+  approvals.length=0;
+  const r=await agent.giveToAgent({agentId:hermes.id,name:'openrouter api key',value:ROUTER_KEY});
+  assert.equal(await fs.readFile(path.join(hermesHome,'.env'),'utf8'),`API_SERVER_ENABLED=true\nOPENROUTER_API_KEY=${ROUTER_KEY}\n`);
+  assert.equal(r.name,'OPENROUTER_API_KEY');assert.equal(r.file,path.join(hermesHome,'.env'));
+  assert.match(r.note,/new environment variable for you: OPENROUTER_API_KEY is now set in .*\.env on this computer/);
+  const token=await agent.giveToAgent({agentId:groq.id,value:ROUTER_KEY});
+  assert.equal(broker.vault.get(groq.id),ROUTER_KEY);assert.match(token.note,/token Opaya sends to your API/);
+  assert.equal(approvals.length,0,'the user chose the agent in its chat: no second dialog');assert.equal(commands.length,0);
+  assert(!JSON.stringify([r,token]).includes(ROUTER_KEY.slice(9)));
+  assert.deepEqual(agent.describe().secrets.find(s=>s.name==='OPENROUTER_API_KEY').stored.map(s=>s.agent),['Hermes','Groq']);
+});
 test('store_secret signs Codex in with the key on its input, never on its command line',async t=>{
   const {EventEmitter}=require('node:events'),{PassThrough}=require('node:stream'),spawned=[];
   const spawnAgent=(a,args)=>{const child=new EventEmitter(),run={args,input:''};Object.assign(child,{stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),exitCode:null,signalCode:null});spawned.push(run);child.stdin.on('data',d=>{run.input+=d;});child.stdin.on('end',()=>setImmediate(()=>{child.exitCode=0;child.emit('close',0);}));return child;};
