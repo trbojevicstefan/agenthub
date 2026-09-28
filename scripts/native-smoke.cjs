@@ -1,5 +1,47 @@
 'use strict';
 const fs=require('node:fs/promises'),path=require('node:path'),assert=require('node:assert/strict');
+const PNG=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==','base64');
+const ANSI=/\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()#][0-9A-Za-z]|\x1b[=>78NMc]/g;
+// Paste on the real clipboard, soft, in a terminal of its own that the window shows: text and a small image with Cmd+V /
+// Ctrl+V (the image arrives as the path of its saved PNG), and text through the Edit menu's paste. It never fails or holds
+// up the run: 8 seconds at most, every problem recorded as text, the terminal closed again. The first terminal, the chat
+// and its draft are left alone; nothing is pasted unless the keyboard is in this terminal.
+async function pasteChecks({app,win,client}){
+  const {clipboard,nativeImage}=require('electron'),out={},started=Date.now(),end=started+7000;
+  const sleep=ms=>new Promise(r=>setTimeout(r,ms)),left=()=>Math.max(0,end-Date.now());
+  const bounded=(promise,ms=left())=>Promise.race([promise,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Timed out.')),ms))]);
+  async function until(test,ms){const stop=Math.min(end,Date.now()+ms);for(;;){try{if(await test())return true;}catch{}if(Date.now()>=stop)return false;await sleep(100);}}
+  let id='',before='';
+  // What the shell echoed, without colors and cursor moves.
+  const echoed=async()=>String((await bounded(client.call('terminalAttach',{id}))).buffer||'').replace(ANSI,'').replace(/[\r\n]/g,'');
+  // The first-launch question (How do you like to work?) would cover the terminal: it is put away, unanswered.
+  const focus=()=>bounded(win.webContents.executeJavaScript(`(()=>{if(!window.__smokeKey){window.__smokeKey='none';document.addEventListener('keydown',e=>{window.__smokeKey=[e.key,e.code,e.metaKey?'meta':'',e.ctrlKey?'ctrl':''].filter(Boolean).join(' ');},true);}
+    const ask=document.querySelector('#interface-chooser')?.closest('dialog');if(ask)ask.dispatchEvent(new Event('cancel'));
+    if(document.querySelector('dialog[open]')||!document.querySelector('#terminal-tabs .terminal-tab.selected [data-id=${JSON.stringify(JSON.stringify(id)).slice(1,-1)}]'))return false;
+    const pane=document.querySelector('#terminal-panes .terminal-pane.focused')||document.querySelector('#terminal-panes .terminal-pane'),input=pane&&pane.querySelector('.xterm-helper-textarea');
+    if(!input)return false;input.focus();return document.activeElement===input;})()`));
+  const press=()=>{const modifiers=[process.platform==='darwin'?'meta':'control'];for(const type of ['keyDown','keyUp'])win.webContents.sendInputEvent({type,keyCode:'V',modifiers});};
+  const step=async(name,run)=>{if(!left()){out[name]='Skipped: out of time.';return;}try{out[name]=await run();}catch(error){out[name]=String(error?.message||error).slice(0,300);}};
+  const away='The terminal did not take the keyboard.';
+  try{
+    before=clipboard.readText();
+    id=(await bounded(client.call('terminalOpen',{agentId:'smoke-agent',mode:'shell'}))).id;
+    win.webContents.send('hub:terminal',{type:'opened',id});
+    await until(async()=>/[>$%#]$/.test((await echoed()).trimEnd()),3000);// its prompt (typing ahead works too)
+    const marker=`OPAYA_PASTE_${started.toString(36).toUpperCase()}`,menu=`OPAYA_MENU_${started.toString(36).toUpperCase()}`;
+    await step('pasteText',async()=>{clipboard.writeText(marker);if(!await until(focus,1500))return away;press();return until(async()=>(await echoed()).includes(marker),2000);});
+    out.pasteKey=await bounded(win.webContents.executeJavaScript('window.__smokeKey'),500).catch(()=>'');
+    await step('pasteImage',async()=>{clipboard.writeImage(nativeImage.createFromBuffer(PNG));if(!await until(focus,1000))return away;press();const dir=path.join(app.getPath('userData'),'pasted');
+      return until(async()=>{const names=await fs.readdir(dir).catch(()=>[]),text=await echoed();return names.some(n=>text.includes(n));},2000);});
+    await step('pasteMenu',async()=>{clipboard.writeText(menu);if(!await until(focus,1000))return away;win.webContents.paste();return until(async()=>(await echoed()).includes(menu),1500);});
+  }catch(error){out.pasteError=String(error?.message||error).slice(0,300);}
+  finally{
+    if(id)await bounded(client.call('terminalClose',{id}),1000).catch(error=>{out.pasteClose=String(error?.message||error).slice(0,200);});
+    try{clipboard.writeText(before);}catch{}
+    out.pasteSeconds=Math.round((Date.now()-started)/100)/10;
+  }
+  return out;
+}
 async function run({app,win,client}){
   const output=process.env.AGENTHUB_SMOKE_OUTPUT;
   if(!output)throw new Error('AGENTHUB_SMOKE_OUTPUT is required for an isolated smoke test.');
@@ -22,6 +64,8 @@ async function run({app,win,client}){
     const state=await client.call('snapshot');
     await fs.writeFile(path.join(output,'restart-state.json'),JSON.stringify({pid:state.service.pid,conversationId:conversation.id,terminalId:terminal.id}));
     checks.nativePtyOutput=true;checks.servicePid=state.service.pid;
+    // Soft: pasting on the real clipboard, recorded here, never failing the run.
+    try{Object.assign(checks,await pasteChecks({app,win,client}));}catch(error){checks.pasteError=String(error?.message||error).slice(0,300);}
   }else{
     const previous=JSON.parse(await fs.readFile(path.join(output,'restart-state.json'),'utf8'));
     const state=await client.call('snapshot');

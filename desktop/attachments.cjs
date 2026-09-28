@@ -193,10 +193,11 @@ function placeOf(agent){
 }
 const placeName=(agent,host)=>placeOf(agent)==='docker'?`the ${agent.name||'agent'} container`:host?.name||'the server';
 // Copies one attachment to ~/.opaya/attachments/<conversation>/ where the agent runs. The content goes on stdin of ssh or
-// `docker exec -i`, the same way the agent itself is started; the remote shell prints the absolute path.
-async function upload(agent,host,item,conversationId,{signal,spawn=launch}={}){
-  const file=quote(`${randomUUID().slice(0,8)}-${item.name}`);
-  const script=`umask 077; d="$HOME/.opaya/attachments/${schema.id(conversationId)}" && mkdir -p "$d" && cat > "$d/"${file} && printf '%s' "$d/"${file}`;
+// `docker exec -i`, the same way the agent itself is started; the remote shell prints the absolute path. keep: files in
+// that folder older than this many days are removed first (terminal pastes share one folder that nothing else empties).
+async function upload(agent,host,item,conversationId,{signal,spawn=launch,keep=0}={}){
+  const file=quote(`${randomUUID().slice(0,8)}-${item.name}`),old=Number.isInteger(keep)&&keep>0?`{ find "$d" -type f -mtime +${keep} -exec rm -f {} \\; 2>/dev/null || :; } && `:'';
+  const script=`umask 077; d="$HOME/.opaya/attachments/${schema.id(conversationId)}" && mkdir -p "$d" && ${old}cat > "$d/"${file} && printf '%s' "$d/"${file}`;
   let child;
   if(placeOf(agent)==='docker'){
     // The agent's own docker exec options (user, environment, workdir), with stdin and without a terminal.
@@ -225,4 +226,4 @@ async function locate(agent,host,items,conversationId,{signal,onEvent=()=>{},spa
 }
 // A file:// URI for a path on this computer, or for a POSIX path on the agent's machine.
 const fileUri=(p,remote=false)=>remote?'file://'+p.split('/').map(encodeURIComponent).join('/'):pathToFileURL(p).href;
-module.exports={MAX_FILES,MAX_FILE,MAX_TOTAL,MAX_TEXT,INLINE_IMAGE,IMAGES,check,load,save,remove,stage,unstage,prune,folder,meta,inspect,plan,compose,earlier,base64,placeOf,upload,locate,fileUri,sniff,isText,safeName,mimeOf,size};
+module.exports={MAX_FILES,MAX_FILE,MAX_TOTAL,MAX_TEXT,INLINE_IMAGE,IMAGES,check,load,save,remove,stage,unstage,prune,folder,meta,inspect,plan,compose,earlier,base64,placeOf,placeName,upload,locate,fileUri,sniff,isText,safeName,mimeOf,size};

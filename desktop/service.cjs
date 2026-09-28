@@ -5,7 +5,7 @@ const path = require('node:path');
 const {randomBytes, randomUUID} = require('node:crypto');
 const {Store, Vault, atomicJson} = require('./store.cjs');
 const {Broker, safeError} = require('./broker.cjs');
-const {Terminals} = require('./terminal.cjs');
+const {Terminals, ...shells} = require('./terminal.cjs');
 const {server, endpoint} = require('./wire.cjs');
 const {PROVIDERS}=require('./providers.cjs');
 const {alive} = require('./host-client.cjs');
@@ -30,6 +30,7 @@ const remoteWork = require('./remote-work.cjs');
 const guide = require('./guide.cjs');
 const toolchain = require('./toolchain.cjs');
 const {visionOf, SUPPORTED:VISION_MODELS} = require('./vision.cjs');
+const pasting = require('./clipboard.cjs');
 async function start({app, safeStorage}, root) {
   let broker, terminals, listener, opaya, stopping = false, setupTrust = false;
   const startedAt = new Date().toISOString(), approvals = new Map();
@@ -111,8 +112,10 @@ async function start({app, safeStorage}, root) {
     return job;
   }
   // The pseudo agents behind "This computer" and a machine's own shell.
-  const localShell=()=>({id:'local-shell',name:'This computer',provider:'custom',transport:'local',command:'',args:[],cwd:app.getPath('home')});
-  const hostShell=hostId=>({id:`host_${schema.id(hostId)}`,name:broker.host(hostId).name,provider:'custom',transport:'ssh',hostId,command:'',args:[],cwd:''});
+  const localShell=()=>shells.localShell(app.getPath('home'));
+  const hostShell=hostId=>shells.hostShell(broker,hostId);
+  // The agent (or pseudo agent) a terminal session was opened for: to start it again, or to take pasted files there.
+  const sessionAgent=s=>shells.sessionAgent(s,{broker,home:app.getPath('home')});
   async function runInTerminal({label,key,host,command}){
     const pseudo={id:`svc_${key}_${host?host.id:'local'}`.slice(0,80),name:label,provider:'custom',transport:host?'ssh':'local',hostId:host?.id||'',command:'',args:[],cwd:host?'':app.getPath('home'),ephemeral:true,run:host?command:''};
     const reused=terminals.hasLive(pseudo.id,'shell'),view=terminals.open(pseudo,host,'shell',{cols:110,rows:30});
@@ -649,14 +652,16 @@ async function start({app, safeStorage}, root) {
     terminalRestart:async x=>{
       const s=terminals.describe().find(s=>s.id===schema.id(x.id));if(!s)throw new Error('This terminal was closed.');
       if(!s.exited)return terminals.attach(s.id);
-      let a;
-      if(s.agentId==='local-shell')a=localShell();
-      else if(s.agentId.startsWith('host_')){try{a=hostShell(s.agentId.slice(5));}catch{throw new Error('The machine of this terminal was removed from Opaya. Close the tab.');}}
-      // An install or diagnostics terminal gets a plain shell on its machine; the finished command does not run again.
-      else if(s.agentId.startsWith('svc_')){const host=s.remote?broker.data.hosts.find(h=>h.id===s.hostId||s.agentId.endsWith('_'+h.id)):null;if(s.remote&&!host)throw new Error('The machine of this terminal was removed from Opaya.');a={id:s.agentId,name:s.title,provider:'custom',transport:host?'ssh':'local',hostId:host?.id||'',command:'',args:[],cwd:host?'':app.getPath('home'),ephemeral:true};}
-      else{try{a=broker.agent(s.agentId);}catch{throw new Error('The agent of this terminal was removed from Opaya. Close the tab.');}}
+      const a=sessionAgent(s);
       if(s.mode==='agent'&&a.provider==='hermes'&&!terminals.hasLive(a.id,s.mode)&&!await approve(a,'Start a new Hermes CLI process?','This does not attach to an existing gateway. Do not run another writer against a Hermes profile already used by a gateway. Use its gateway API or existing tmux session instead.'))throw new Error('CLI launch cancelled.');
       const result=terminals.restart(s.id,a,a.transport==='ssh'?broker.host(a.hostId):null,{cols:x.cols||100,rows:x.rows||28});emit();return result;
+    },
+    // Files and images pasted or dropped into a terminal: a terminal on this computer types their paths as they are; one on
+    // a machine or in a container gets copies there first (~/.opaya/attachments/pasted) and types the copies' paths.
+    terminalPaste:async x=>{
+      const s=terminals.describe().find(s=>s.id===schema.id(x.id));if(!s)throw new Error('This terminal was closed.');
+      if(s.exited)throw new Error('This terminal session has ended. Press Enter in it to start it again.');
+      const a=sessionAgent(s);return pasting.place(a,a.transport==='ssh'?broker.host(a.hostId):null,x.paths,{root});
     },
     terminalAttach:x=>terminals.attach(schema.id(x.id)), terminalWrite:x=>terminals.write(schema.id(x.id),x.data),
     terminalResize:x=>terminals.resize(schema.id(x.id),x.cols,x.rows),
