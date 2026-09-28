@@ -1,3 +1,9 @@
+# Opaya 0.22.4 - model settings name the right agent
+
+- Choosing a model for DeepSeek Harness or another ACP agent no longer says "Hermes opens a session"; only Hermes says Hermes.
+- "Agent default" shows the model the agent is using now when Opaya has not set one (for example "deepseek-v4-flash (its own setting)"), in the model menu under the message box, the Model dialog and Manage.
+- DeepSeek Harness model names read as names (deepseek-v4-pro) in the Model dialog and its messages too.
+
 # Opaya 0.22.3 - DeepSeek Harness keys checked
 
 - Giving DeepSeek Harness a DEEPSEEK_API_KEY now checks it with DeepSeek first: a key DeepSeek refuses is not saved, and Opaya says so at once instead of the chat failing later with "Authentication Fails".
