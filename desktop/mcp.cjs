@@ -2,6 +2,7 @@
 // MCP server library. Opaya keeps the list and hands the servers to agents that accept them per session (ACP
 // session/new mcpServers, Claude --mcp-config). Environment values and HTTP headers can hold API keys, so they live in
 // the OS-encrypted vault and never appear in workspace.json, the renderer or the Opaya Agent.
+const path=require('node:path');
 const {randomUUID}=require('node:crypto');
 const {text,id}=require('./schema.cjs');
 const TYPES=new Set(['stdio','http','sse']);
@@ -58,6 +59,35 @@ function acpServers(list,agentId,readSecrets){
 function claudeConfig(servers){
   return {mcpServers:Object.fromEntries(servers.map(s=>[s.name,s.type&&s.type!=='stdio'?{type:s.type,url:s.url,headers:Object.fromEntries((s.headers||[]).map(h=>[h.name,h.value]))}:{command:s.command,args:s.args,env:Object.fromEntries((s.env||[]).map(e=>[e.name,e.value]))}]))};
 }
+// One-click servers. Opaya's own browser is turned on per agent (it gets a fresh token each session, so it is never
+// written into a config). The others are well-known servers started with npx or uvx on the machine where the agent
+// runs, or remote HTTPS servers. `secret` is what the user types once, in a masked field; it goes to the vault as an
+// environment variable or a header. `folder` is a path the server may use, on the agent's machine.
+const CATALOG=[
+  {id:'opaya-browser',title:'Opaya browser',own:true,description:'The browser pane in Opaya: the agent opens pages you watch, reads them, clicks and types. For agents on this computer with a model that sees images.'},
+  {id:'filesystem',name:'filesystem',title:'Files',description:'Read and write files in one folder you choose.',type:'stdio',command:'npx',args:['-y','@modelcontextprotocol/server-filesystem','{folder}'],folder:{label:'Folder the agent may use (on the machine where it runs)'},needs:'Node.js'},
+  {id:'fetch',name:'fetch',title:'Fetch',description:'Fetch web pages and read them as text.',type:'stdio',command:'uvx',args:['mcp-server-fetch'],needs:'uv'},
+  {id:'memory',name:'memory',title:'Memory',description:'A knowledge graph the agent keeps between chats.',type:'stdio',command:'npx',args:['-y','@modelcontextprotocol/server-memory'],needs:'Node.js'},
+  {id:'sequential-thinking',name:'sequential-thinking',title:'Sequential thinking',description:'Step-by-step problem solving with revisions.',type:'stdio',command:'npx',args:['-y','@modelcontextprotocol/server-sequential-thinking'],needs:'Node.js'},
+  {id:'playwright',name:'playwright',title:'Playwright',description:'A headless browser the agent drives on its own machine (Microsoft).',type:'stdio',command:'npx',args:['-y','@playwright/mcp@latest'],needs:'Node.js'},
+  {id:'github',name:'github',title:'GitHub',description:'Issues, pull requests and code, from GitHub\'s own remote server.',type:'http',url:'https://api.githubcopilot.com/mcp/',secret:{kind:'header',name:'Authorization',prefix:'Bearer ',label:'GitHub personal access token'}},
+  {id:'context7',name:'context7',title:'Context7',description:'Current documentation and examples for libraries and frameworks.',type:'http',url:'https://mcp.context7.com/mcp',secret:{kind:'header',name:'CONTEXT7_API_KEY',label:'Context7 API key (optional, for higher limits)',optional:true}},
+  {id:'brave-search',name:'brave-search',title:'Brave Search',description:'Web and news search.',type:'stdio',command:'npx',args:['-y','@brave/brave-search-mcp-server'],secret:{kind:'env',name:'BRAVE_API_KEY',label:'Brave Search API key'},needs:'Node.js'},
+  {id:'git',name:'git',title:'Git',description:'Read and work with local Git repositories.',type:'stdio',command:'uvx',args:['mcp-server-git'],needs:'uv'},
+  {id:'time',name:'time',title:'Time',description:'Current time and time zone conversions.',type:'stdio',command:'uvx',args:['mcp-server-time'],needs:'uv'}
+];
+const catalog=()=>CATALOG.map(({secret,folder,...c})=>({...c,...(secret?{secret:{label:secret.label,optional:!!secret.optional,kind:secret.kind,name:secret.name}}:{}),...(folder?{folder:{label:folder.label}}:{})}));
+// The server (and its secret as NAME=value text) for a catalog entry. Everything but the typed values comes from here.
+function fromCatalog(id,{secret='',folder='',agents='all',keep=false}={}){
+  const c=CATALOG.find(x=>x.id===id&&!x.own);if(!c)throw new Error('Unknown MCP server.');
+  const value=String(secret||'').trim();
+  if(c.secret&&!value&&!c.secret.optional&&!keep)throw new Error(`Enter the ${c.secret.label}.`); // keep: an update without a new key keeps the saved one
+  if(/[\0\r\n]/.test(value)||value.length>4000)throw new Error('Paste the key on one line.');
+  let args=c.args||[];
+  if(c.folder){const f=String(folder||'').trim();if(!f||f.length>1024||/[\0\r\n]/.test(f)||!(path.posix.isAbsolute(f)||path.win32.isAbsolute(f)))throw new Error('Choose the full path of the folder, for example /home/you/projects.');args=args.map(a=>a==='{folder}'?f:a);}
+  const line=c.secret&&value?`${c.secret.name}${c.secret.kind==='header'?': ':'='}${c.secret.prefix||''}${value}`:'';
+  return {server:{name:c.name,type:c.type,command:c.command||'',args,url:c.url||'',agents,note:c.title,enabled:true},env:c.secret?.kind==='env'?line:'',headers:c.secret?.kind==='header'?line:''};
+}
 // What the UI and the Opaya Agent may see: never values, only names.
 const publicView=s=>({id:s.id,name:s.name,type:s.type,command:s.command,args:s.args,url:s.url,envNames:s.envNames,headerNames:s.headerNames,agents:s.agents,enabled:s.enabled,note:s.note});
-module.exports={server,secrets,acpServers,claudeConfig,appliesTo,publicView,vaultKey};
+module.exports={server,secrets,acpServers,claudeConfig,appliesTo,publicView,vaultKey,CATALOG,catalog,fromCatalog};

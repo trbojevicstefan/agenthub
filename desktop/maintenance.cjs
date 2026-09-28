@@ -74,6 +74,8 @@ function frameworkOf(agent){
 // The installation kind decides which update, uninstall and backup apply.
 function kindOf(agent){
   const container=containerOf(agent),framework=frameworkOf(agent),profile=profileOf(agent);
+  // A profile Opaya added to a container another agent runs in: removing it removes only its folder there.
+  if(container&&agent.clone?.runtime==='profile')return {kind:'container-profile',label:`Profile "${agent.clone.profile||path.posix.basename(agent.clone.dir||'')}" in container ${container}`,framework,container,dir:agent.clone.dir||''};
   if(container)return {kind:'docker',label:'Docker container',framework,container,managed:!!agent.clone?.container&&agent.clone.container===container,dir:agent.clone?.dir||''};
   if(!framework)return {kind:'remote-api',label:agent.protocol==='openai'?'API connection':'Custom command',framework:''};
   if(profile)return {kind:'hermes-profile',label:`Hermes profile "${profile.name}"`,framework,profile:profile.name,dir:profile.dir};
@@ -91,6 +93,7 @@ const withPreview=fn=>(...args)=>{const r=fn(...args);return {...r,preview:previ
 function updateCommand(agent,{remote,windows=process.platform==='win32'}){
   const k=kindOf(agent),posix=remote||!windows;
   if(k.kind==='remote-api')throw new Error('This is an API connection: the provider updates it. There is nothing to install here.');
+  if(k.kind==='container-profile')throw new Error(`${agent.name} is a profile in container ${k.container}. Update the agent that runs the container; the profile uses the same installation.`);
   if(k.kind==='docker'){
     const c=k.container;
     if(k.managed&&k.dir){
@@ -176,6 +179,10 @@ function windowsUninstall(t,id,{data}){
 function uninstallCommand(agent,{remote,data=false,windows=process.platform==='win32'}){
   const k=kindOf(agent),posix=remote||!windows;
   if(k.kind==='remote-api')throw new Error('This is an API connection. There is nothing installed to remove; remove the connection instead.');
+  if(k.kind==='container-profile'){
+    const cmd=require('./profiles.cjs').removeCommand(agent);
+    return {title:`Delete profile ${agent.clone.profile||path.posix.basename(k.dir)} in ${k.container}`,summary:`Deletes ${k.dir} in container ${k.container}: its config, memory, skills and sessions${k.framework==='openclaw'?', and the OpenClaw agent entry':''}. The container and its other agents stay.`,command:posix?posixScript([cmd]):cmd};
+  }
   if(k.kind==='docker'){
     const c=k.container,dir=data&&k.managed&&k.dir?deletable(k.dir):'';
     // OpenClaw containers from Install agents keep their data in the volume <container>-data.
@@ -209,7 +216,7 @@ function uninstallCommand(agent,{remote,data=false,windows=process.platform==='w
 // Read-only: which installers own the agent, its path, version and data size. Parsed from key=value lines.
 function detectScript(agent,{windows}){
   const k=kindOf(agent),t=TOOLS[k.framework]||{};
-  if(k.kind==='docker')return windows?null:`docker inspect -f 'image={{.Config.Image}}' ${q(k.container)} 2>/dev/null; docker inspect -f 'state={{.State.Status}}' ${q(k.container)} 2>/dev/null; v=$(docker exec ${q(k.container)} sh -c 'hermes --version 2>/dev/null | head -1' 2>/dev/null); [ -n "$v" ] && echo "version=$v"; true`;
+  if(k.kind==='docker'||k.kind==='container-profile')return windows?null:`docker inspect -f 'image={{.Config.Image}}' ${q(k.container)} 2>/dev/null; docker inspect -f 'state={{.State.Status}}' ${q(k.container)} 2>/dev/null; v=$(docker exec ${q(k.container)} sh -c 'hermes --version 2>/dev/null | head -1' 2>/dev/null); [ -n "$v" ] && echo "version=$v"; true`;
   if(!t.bin)return null;
   if(windows)return [`$p=(Get-Command ${t.bin} -ErrorAction SilentlyContinue).Source; "path=$p"`,`if ($p) { "version=" + ((& ${t.bin} --version 2>&1 | Select-Object -First 1)) }`,
     ...(t.npm?[`npm ls -g --depth=0 ${t.npm} *> $null; if ($LASTEXITCODE -eq 0) { 'method=npm' }`]:[]),
@@ -254,7 +261,7 @@ async function backupSpec(agent,where){
     return {base,dirs:['.'],files:[],skip:HERMES_SKIP,history:HISTORY.hermes,secrets:SECRETS.hermes,label:k.kind==='hermes-profile'?`Hermes profile ${k.profile}`:'Hermes home'};
   }
   const spec=BACKUP[k.framework];if(!spec)throw new Error('Opaya does not know where this agent keeps its data, so it cannot back it up.');
-  const base=isLocal(where)?os.homedir():(await run(where,'printf %s "$HOME"')).trim();
+  const base=k.kind==='container-profile'&&k.dir?k.dir:isLocal(where)?os.homedir():(await run(where,'printf %s "$HOME"')).trim();
   return {base,...spec,skip:[],history:HISTORY[k.framework]||[],secrets:SECRETS[k.framework]||[],label:`${TOOLS[k.framework]?.name||k.framework} data`};
 }
 // Top-level entries of each data folder, minus what the user left out. Returns tar member paths relative to base.
@@ -337,12 +344,12 @@ async function removeBackup(file,settings){
 // What the UI may offer for an agent, without touching the machine.
 function capabilities(agent){
   const k=kindOf(agent),posix=agent.transport==='ssh'||process.platform!=='win32';
-  const update=k.kind==='docker'||k.framework==='hermes'||!!catalog.UPDATES[k.framework]?.[posix?'posix':'windows'];
-  return {kind:k.kind,label:k.label,framework:k.framework,update:k.kind!=='remote-api'&&update,uninstall:k.kind!=='remote-api'&&(k.kind!=='docker'||!!k.container),backup:agent.provider==='hermes'||!!BACKUP[k.framework]};
+  const update=k.kind!=='container-profile'&&(k.kind==='docker'||k.framework==='hermes'||!!catalog.UPDATES[k.framework]?.[posix?'posix':'windows']);
+  return {kind:k.kind,label:k.label,framework:k.framework,...(k.container?{container:k.container}:{}),update:k.kind!=='remote-api'&&update,uninstall:k.kind!=='remote-api'&&(k.kind!=='docker'||!!k.container),backup:agent.provider==='hermes'||!!BACKUP[k.framework]};
 }
 // Agents that share one installation: updating or uninstalling it affects all of them.
 function sharing(agent,agents){
-  const k=kindOf(agent);if(k.kind==='docker'||k.kind==='remote-api')return [];
+  const k=kindOf(agent);if(['docker','container-profile','remote-api'].includes(k.kind))return [];
   return agents.filter(a=>a.id!==agent.id&&a.transport===agent.transport&&(a.hostId||'')===(agent.hostId||'')&&!containerOf(a)&&frameworkOf(a)===k.framework).map(a=>a.id);
 }
 module.exports={TOOLS,kindOf,capabilities,frameworkOf,containerOf,profileOf,previewOf,updateCommand:withPreview(updateCommand),uninstallCommand:withPreview(uninstallCommand),detect,backup,backupDir,listBackups,removeBackup,insideBackups,sharing};

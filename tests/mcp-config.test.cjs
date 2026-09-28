@@ -1,0 +1,72 @@
+'use strict';
+const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const path=require('node:path');
+const cfg=require('../desktop/mcp-config.cjs');const mcp=require('../desktop/mcp.cjs');
+const {Broker}=require('../desktop/broker.cjs');const {Store,Vault}=require('../desktop/store.cjs');const {temp,secure}=require('./helpers.cjs');
+const skip=process.platform==='win32'?'uses the POSIX home folder layout':false;
+const stdio={name:'fs',type:'stdio',command:'npx',args:['-y','@modelcontextprotocol/server-filesystem','/srv/p']};
+const http={name:'github',type:'http',url:'https://api.githubcopilot.com/mcp/'};
+test('each agent gets MCP servers its own way',()=>{
+  const m=a=>cfg.mode({transport:'local',args:[],...a});
+  assert.equal(m({provider:'hermes',protocol:'acp'}),'session');assert.equal(m({provider:'custom',protocol:'acp',command:'opencode'}),'session');
+  assert.equal(m({provider:'claude',protocol:'claude',command:'claude'}),'flag');assert.equal(m({provider:'claude',protocol:'claude',transport:'ssh'}),'claude');assert.equal(m({provider:'claude',protocol:'claude',command:'docker'}),'claude');
+  assert.equal(m({provider:'codex',protocol:'codex'}),'codex');assert.equal(m({provider:'openclaw',protocol:'openai'}),'openclaw');
+  assert.equal(m({provider:'custom',protocol:'terminal',command:'goose'}),'');assert.equal(m({provider:'hermes',protocol:'openai'}),'');
+});
+test('Claude Code: user servers in .claude.json, everything else kept, broken JSON never overwritten',()=>{
+  const text='{"numStartups":3,"mcpServers":{"other":{"type":"stdio","command":"x","args":[]}}}';
+  const added=JSON.parse(cfg.setClaude(text,'fs',cfg.claudeEntry(stdio,{env:{TOKEN:'t'}})));
+  assert.equal(added.numStartups,3);assert.deepEqual(added.mcpServers.fs,{type:'stdio',command:'npx',args:stdio.args,env:{TOKEN:'t'}});assert(added.mcpServers.other);
+  assert.deepEqual(cfg.claudeEntry(http,{headers:{Authorization:'Bearer x'}}),{type:'http',url:http.url,headers:{Authorization:'Bearer x'}});
+  const removed=JSON.parse(cfg.setClaude(JSON.stringify(added),'fs',null));assert.deepEqual(Object.keys(removed.mcpServers),['other']);
+  assert.equal(cfg.setClaude(text,'missing',null),text);
+  assert.throws(()=>cfg.setClaude('{broken','fs',{}),/not valid JSON/);assert.throws(()=>cfg.setClaude('{"mcpServers":[]}','fs',{}),/not an object/);
+});
+test('Codex: [mcp_servers.<name>] tables are replaced or removed, the rest of config.toml stays',()=>{
+  const text='model = "o3"\n\n[mcp_servers.fs]\ncommand = "old"\n\n[mcp_servers.fs.env]\nA = "1"\n\n[mcp_servers.keep]\ncommand = "k"\n\n[profiles.fast]\ninstructions = """\n[mcp_servers.fs]\n"""\n';
+  const block=cfg.codexBlock('fs',stdio,{env:{TOKEN:'a"b'}});
+  assert.equal(block,'[mcp_servers.fs]\ncommand = "npx"\nargs = ["-y", "@modelcontextprotocol/server-filesystem", "/srv/p"]\nenv = { "TOKEN" = "a\\"b" }');
+  const next=cfg.setCodex(text,'fs',block);
+  assert.equal(next,'model = "o3"\n\n[mcp_servers.keep]\ncommand = "k"\n\n[profiles.fast]\ninstructions = """\n[mcp_servers.fs]\n"""\n\n'+block+'\n');
+  assert.equal(cfg.setCodex(next,'fs',null),'model = "o3"\n\n[mcp_servers.keep]\ncommand = "k"\n\n[profiles.fast]\ninstructions = """\n[mcp_servers.fs]\n"""\n');
+  assert.equal(cfg.codexBlock('gh',http,{headers:{Authorization:'Bearer x'}}),'[mcp_servers.gh]\nurl = "https://api.githubcopilot.com/mcp/"\nhttp_headers = { "Authorization" = "Bearer x" }');
+  assert.throws(()=>cfg.codexBlock('s',{...http,type:'sse'}),/not SSE/);
+  assert.throws(()=>cfg.setCodex('mcp_servers.fs.command = "x"\n','fs',block),/does not edit/);
+  assert.equal(cfg.setCodex('','fs',block),block+'\n');
+});
+test('the one-click catalog fills in everything but the key and the folder',()=>{
+  const gh=mcp.fromCatalog('github',{secret:' ghp_abc123 '});
+  assert.deepEqual(gh,{server:{name:'github',type:'http',command:'',args:[],url:'https://api.githubcopilot.com/mcp/',agents:'all',note:'GitHub',enabled:true},env:'',headers:'Authorization: Bearer ghp_abc123'});
+  assert.equal(mcp.fromCatalog('brave-search',{secret:'k'}).env,'BRAVE_API_KEY=k');
+  assert.throws(()=>mcp.fromCatalog('github'),/Enter the GitHub personal access token/);assert.equal(mcp.fromCatalog('context7').headers,'');
+  assert.deepEqual(mcp.fromCatalog('filesystem',{folder:'/home/me/p'}).server.args,['-y','@modelcontextprotocol/server-filesystem','/home/me/p']);
+  assert.throws(()=>mcp.fromCatalog('filesystem',{folder:'relative'}),/full path/);assert.throws(()=>mcp.fromCatalog('opaya-browser'),/Unknown/);
+  assert.throws(()=>mcp.fromCatalog('github',{secret:'a\nb'}),/one line/);
+  for(const c of mcp.catalog())assert(!JSON.stringify(c).includes('prefix'));
+  for(const c of mcp.CATALOG.filter(c=>!c.own))mcp.server(mcp.fromCatalog(c.id,{secret:'x',folder:'/tmp'}).server);
+});
+test('turning a server on for Codex writes its config after one approval; off and removal ask and take it out',{skip},async t=>{
+  const root=await temp(t),home=process.env.HOME,codexHome=process.env.CODEX_HOME;process.env.HOME=root;delete process.env.CODEX_HOME;
+  t.after(()=>{process.env.HOME=home;if(codexHome!==undefined)process.env.CODEX_HOME=codexHome;});
+  const approvals=[];let allow=true;
+  const broker=new Broker({store:new Store(path.join(root,'data')),vault:new Vault(path.join(root,'data'),secure()),emit:()=>{},approve:async(_a,title)=>{approvals.push(title);return allow;},adapterFactory:()=>({connect:async()=>({}),close(){},run:async()=>({})})});
+  await broker.init();t.after(()=>broker.close());
+  const file=path.join(root,'.codex/config.toml');await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'model = "o3"\n');
+  const codex=await broker.saveAgent({agent:{name:'codex',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[]}});
+  const hermes=await broker.saveAgent({agent:{name:'hermes',provider:'hermes',protocol:'acp',transport:'local',command:'hermes',args:[]}});
+  approvals.length=0;const s=await broker.installMcp({id:'github',secret:'ghp_secret123',agents:[hermes.id]});
+  assert.deepEqual(approvals,[]);assert.equal(await fs.readFile(file,'utf8'),'model = "o3"\n');
+  assert(!(await fs.readFile(path.join(root,'data/workspace.json'),'utf8')).includes('ghp_secret123'));
+  await broker.setAgentMcp({agentId:codex.id,serverId:s.id,enabled:true});
+  assert.deepEqual(approvals,["Write MCP server github into codex's config?"]);
+  assert.equal(await fs.readFile(file,'utf8'),'model = "o3"\n\n[mcp_servers.github]\nurl = "https://api.githubcopilot.com/mcp/"\nhttp_headers = { "Authorization" = "Bearer ghp_secret123" }\n');
+  assert.equal((await fs.stat(file)).mode&0o777,0o600);
+  // A new key rewrites the entry where the server is on; the saved one is kept when none is typed.
+  await broker.installMcp({id:'github',secret:'ghp_newer456',agents:[hermes.id,codex.id]});assert.match(await fs.readFile(file,'utf8'),/Bearer ghp_newer456/);
+  await broker.installMcp({id:'github',agents:[hermes.id,codex.id]});assert.match(await fs.readFile(file,'utf8'),/Bearer ghp_newer456/);
+  allow=false;await assert.rejects(()=>broker.setAgentMcp({agentId:codex.id,serverId:s.id,enabled:false}),/cancelled/);assert.match(await fs.readFile(file,'utf8'),/mcp_servers\.github/);
+  assert(mcp.appliesTo(broker.data.mcpServers[0],codex.id));
+  allow=true;await broker.setAgentMcp({agentId:codex.id,serverId:s.id,enabled:false});assert.equal(await fs.readFile(file,'utf8'),'model = "o3"\n');
+  await broker.setAgentMcp({agentId:codex.id,serverId:s.id,enabled:true});
+  await broker.removeMcpServer(s.id);assert.equal(await fs.readFile(file,'utf8'),'model = "o3"\n');assert.match(approvals.at(-1),/^Remove MCP server github from codex\?/);
+  assert.equal(broker.data.mcpServers.length,0);
+});

@@ -24,6 +24,7 @@ const maintenance = require('./maintenance.cjs');
 const versions = require('./versions.cjs');
 const diagnostics = require('./diagnostics.cjs');
 const containers = require('./containers.cjs');
+const mcp = require('./mcp.cjs');
 const remoteWork = require('./remote-work.cjs');
 const guide = require('./guide.cjs');
 const toolchain = require('./toolchain.cjs');
@@ -626,15 +627,19 @@ async function start({app, safeStorage}, root) {
     sshKeyCreate:x=>vps.createKey(x.name), hostTest:x=>vps.test(x.hostId?broker.host(x.hostId):schema.host(x.host||{})),
     saveSettings:x=>broker.saveSettings(x), cloneAgent:async x=>{
       const a=broker.agent(x.id),host=x.hostId?broker.host(x.hostId):null;
-      return startJob({kind:'clone',route:{from:a.name,fromWhere:a.transport==='ssh'?broker.host(a.hostId).name:'This computer',to:x.name||`${a.name}-clone`,toWhere:host?host.name:'This computer',toHostId:host?.id||'',provider:a.provider},title:`Cloning ${a.name}`,detail:`${a.name} to ${host?host.name:'this computer'} / ${x.runtime==='docker'?'Docker container':a.provider==='hermes'?'Hermes profile':'regular install'}`,steps:[['target','Check the target'],['source','Find the source'],['select','Choose files'],['copy','Copy'],...(x.runtime==='docker'?[['start','Start the container']]:[]),['save','Add to Opaya'],['connect','Connect']]},progress=>broker.cloneAgent(x,progress));
+      const profile=x.runtime==='profile',container=profile?String(x.container||''):'';
+      return startJob({kind:'clone',route:{from:a.name,fromWhere:a.transport==='ssh'?broker.host(a.hostId).name:'This computer',to:x.name||`${a.name}-clone`,toWhere:`${host?host.name:'This computer'}${container?` / ${container}`:''}`,toHostId:host?.id||'',provider:a.provider},title:`Cloning ${a.name}`,detail:`${a.name} to ${host?host.name:'this computer'} / ${profile?`profile in container ${container}`:x.runtime==='docker'?'Docker container':a.provider==='hermes'?'Hermes profile':'regular install'}`,steps:[['target','Check the target'],['source','Find the source'],['select','Choose files'],['copy','Copy'],...(x.runtime==='docker'?[['start','Start the container']]:profile&&maintenance.frameworkOf(a)==='openclaw'?[['start','Add the agent to OpenClaw']]:[]),['save','Add to Opaya'],['connect','Connect']]},progress=>broker.cloneAgent({...x,container},progress));
     },
     redeployAgent:async x=>{
       const a=broker.agent(x.id);if(!a.clone)throw new Error('This agent is not a clone.');
       const src=broker.data.agents.find(s=>s.id===a.clone.from);
-      return startJob({kind:'redeploy',route:{from:src?.name||'source',fromWhere:src?.transport==='ssh'?broker.host(src.hostId).name:'This computer',to:a.name,toWhere:a.transport==='ssh'?broker.host(a.hostId).name:'This computer',provider:a.provider},title:`Redeploying ${a.name}`,detail:`From ${broker.data.agents.find(s=>s.id===a.clone.from)?.name||'source'}`,steps:[['source','Find the source'],['select','Choose files'],['copy','Copy'],...(a.clone.container?[['start','Restart the container']]:[]),['connect','Reconnect']]},progress=>broker.redeployAgent(a.id,progress));
+      return startJob({kind:'redeploy',route:{from:src?.name||'source',fromWhere:src?.transport==='ssh'?broker.host(src.hostId).name:'This computer',to:a.name,toWhere:a.transport==='ssh'?broker.host(a.hostId).name:'This computer',provider:a.provider},title:`Redeploying ${a.name}`,detail:`From ${broker.data.agents.find(s=>s.id===a.clone.from)?.name||'source'}`,steps:[['source','Find the source'],['select','Choose files'],['copy','Copy'],...(a.clone.container&&a.clone.runtime!=='profile'?[['start','Restart the container']]:[]),['connect','Reconnect']]},progress=>broker.redeployAgent(a.id,progress));
     },
-    // Transfer between agents: skills (all or chosen), Hermes API keys, Opaya's MCP servers and the Opaya API token.
-    agentEnvKeys:async x=>{const a=broker.agent(x.id);return moves.envKeys(a,a.transport==='ssh'?broker.host(a.hostId):null);},
+    // Transfer between agents: skills (all or chosen), API keys between any agents, Opaya's MCP servers and the Opaya API token.
+    // Key names (never values) an agent has, and with targetId where each would go on that agent.
+    agentEnvKeys:async x=>{const a=broker.agent(x.id),keys=await moves.envKeys(a,a.transport==='ssh'?broker.host(a.hostId):null,{vault:broker.vault});
+      if(!x.targetId)return keys;const t=broker.agent(x.targetId),kind=moves.keyKind(t);
+      return {keys,target:{kind,plan:kind?moves.planKeys(kind,keys.map(k=>k.name),{endpoint:t.endpoint}).map(({name,to,why})=>({name,to:to||'',why:why||''})):[]},source:{kind:moves.keyKind(a)}};},
     transferStart:async x=>{
       const src=broker.agent(x.sourceId),dst=broker.agent(x.targetId);if(src.id===dst.id)throw new Error('Choose a different agent to receive them.');
       const hostOf=a=>a.transport==='ssh'?broker.host(a.hostId):null;
@@ -643,7 +648,7 @@ async function start({app, safeStorage}, root) {
       return startJob({kind:'transfer',route:{from:src.name,fromWhere:src.transport==='ssh'?hostOf(src).name:'This computer',to:dst.name,toWhere:dst.transport==='ssh'?hostOf(dst).name:'This computer',provider:src.provider},title:`Transferring to ${dst.name}`,detail:`${parts.join(', ')} from ${src.name}`,steps},async progress=>{
         const result={};
         if(x.skills)result.skills=(await moves.transferSkills({source:src,sourceHost:hostOf(src),target:dst,targetHost:hostOf(dst),names:x.skills==='all'?'all':[].concat(x.skills).map(String),progress})).skills;
-        if(x.keys)result.keys=(await moves.transferEnv({source:src,sourceHost:hostOf(src),target:dst,targetHost:hostOf(dst),keys:x.keys==='all'?'all':[].concat(x.keys).map(String),progress})).keys;
+        if(x.keys){const r=await moves.transferKeys({source:src,sourceHost:hostOf(src),target:dst,targetHost:hostOf(dst),keys:x.keys==='all'?'all':[].concat(x.keys).map(String),vault:broker.vault,progress});result.keys=r.keys;result.skippedKeys=r.skipped;if(moves.keyKind(dst)==='token')broker.disconnect(dst.id);}
         if(x.mcp?.length){progress({step:'mcp',state:'active',message:'Sharing MCP servers'});const names=[];for(const id of x.mcp){const sv=await broker.setAgentMcp({agentId:dst.id,serverId:id,enabled:true});names.push(sv.name);}progress({step:'mcp',state:'done',message:`${dst.name} now uses ${names.join(', ')}. New conversations pick them up.`});result.mcp=names;}
         if(x.token){progress({step:'token',state:'active',message:'Copying the Opaya API token'});const token=broker.vault.get(src.id);if(!token)throw new Error(`${src.name} has no saved API token.`);await broker.vault.set(dst.id,token,true);broker.disconnect(dst.id);progress({step:'token',state:'done',message:`Token copied. Reconnect ${dst.name} to use it.`});result.token=true;}
         if(result.skills)progress({message:'New conversations with the agent load the new skills.'});
@@ -669,6 +674,8 @@ async function start({app, safeStorage}, root) {
     opayaToolCall:async x=>opaya.bridgeCall(String(x?.name||''),x?.args),
     browserTool, browserResult:async x=>{const c=browserCalls.get(x.id);if(!c)return false;clearTimeout(c.timer);browserCalls.delete(x.id);x.ok?c.resolve(x.value):c.reject(new Error(String(x.error||'Browser action failed.')));return true;},
     mcpSave:x=>broker.saveMcpServer(x), mcpRemove:x=>broker.removeMcpServer(x.id), agentMcp:x=>broker.setAgentMcp(x), agentSkills:x=>broker.skills(x.id),
+    // One-click MCP servers: Opaya's catalog (no secrets in it) and installing one with the key typed in a masked field.
+    mcpCatalog:async()=>mcp.catalog(), mcpInstall:x=>broker.installMcp({id:x.id,secret:typeof x.secret==='string'?x.secret:'',folder:typeof x.folder==='string'?x.folder:'',agents:x.agents==='all'?'all':[].concat(x.agents||[]).map(String)}),
     // Hermes and OpenClaw skills: browse the hub or install one with the agent's CLI in a visible terminal.
     skillAction:async x=>{
       const a=broker.agent(x.agentId),host=a.transport==='ssh'?broker.host(a.hostId):null;

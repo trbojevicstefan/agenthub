@@ -75,8 +75,10 @@ function avatar(value) {
 // How a cloned agent was made, so it can be redeployed from its source.
 function cloneRecipe(c) {
   if (!c || typeof c !== 'object') return null;
-  if (!['skills', 'memory', 'personality', 'everything'].includes(c.scope) || !['regular', 'docker'].includes(c.runtime)) return null;
-  return {from: id(c.from), scope: c.scope, keys: Boolean(c.keys), ...(c.cron === undefined ? {} : {cron: Boolean(c.cron)}), runtime: c.runtime, dir: text(c.dir, 'clone folder', 2048), container: text(c.container || '', 'container', 120), ...(['claude', 'codex', 'opencode', 'openclaw', 'goose'].includes(c.framework) ? {framework: c.framework} : {})};
+  if (!['skills', 'memory', 'personality', 'everything'].includes(c.scope) || !['regular', 'docker', 'profile'].includes(c.runtime)) return null;
+  // runtime 'profile': a profile in a container another agent runs in; `profile` is its name there.
+  const profile = c.runtime === 'profile' && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(c.profile || '') ? {profile: c.profile} : {};
+  return {from: id(c.from), scope: c.scope, keys: Boolean(c.keys), ...(c.cron === undefined ? {} : {cron: Boolean(c.cron)}), runtime: c.runtime, dir: text(c.dir, 'clone folder', 2048), container: text(c.container || '', 'container', 120), ...profile, ...(['claude', 'codex', 'opencode', 'openclaw', 'goose'].includes(c.framework) || c.runtime === 'profile' && c.framework === 'hermes' ? {framework: c.framework} : {})};
 }
 // Reasoning effort: '' (the agent's own setting) or a level name such as low, high or xhigh.
 function effort(value) {

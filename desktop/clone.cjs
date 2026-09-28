@@ -19,13 +19,19 @@ const SCOPES={
 const EXCLUDE=new Set(['state.db','state.db-wal','state.db-shm','sessions','logs','backups','checkpoints','state-snapshots','auth.json','profiles','hermes-agent','git','bin','venv','cache','node','.install','python']);
 const IMAGE='nousresearch/hermes-agent';
 const slug=value=>String(value||'').toLowerCase().replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,40);
-// Where files are read or written: this computer, an SSH machine, or a container on either.
+// Where files are read or written: this computer, an SSH machine, or a container on either. A profile in a container
+// runs with its own HOME (docker exec -e HOME=...), so commands there see the same home folder the agent does.
+function execHome(args=[]){
+  const end=dockerExecContainerIndex(args);
+  for(let j=1;j<end;j++){const a=args[j],v=a==='-e'||a==='--env'?args[j+1]:/^--env=/.test(a)?a.slice(6):'';if(/^HOME=\//.test(v||''))return v.slice(5);}
+  return '';
+}
 function place({agent,host}){
-  const i=agent.command==='docker'?dockerExecContainerIndex(agent.args||[]):-1;
-  return {host:agent.transport==='ssh'?host:null,container:i>=0?agent.args[i]:''};
+  const i=agent.command==='docker'?dockerExecContainerIndex(agent.args||[]):-1,home=i>=0?execHome(agent.args):'';
+  return {host:agent.transport==='ssh'?host:null,container:i>=0?agent.args[i]:'',...(home?{home}:{})};
 }
 function shell(where,script,{compress=false}={}){
-  const env=environment();
+  const env=environment();if(where.container&&where.home)script=`export HOME=${quote(where.home)}; ${script}`;
   if(where.host){
     const ssh=findExecutable('ssh',env);if(!ssh)throw new Error('OpenSSH client is not installed.');
     const remote=where.container?`docker exec -i ${quote(where.container)} sh -c ${quote(script)}`:script;
@@ -141,8 +147,10 @@ async function copyParts({agent,sourceHost,scope,keys,cron,to,dest,progress}){
 }
 const fmt=n=>n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
 // Clone `agent` (from `sourceHost`) to `host` (null = this computer). Returns the new agent connection to save.
-async function clone({agent,sourceHost,host,runtime='regular',scope='everything',keys=true,cron=cronDefault(scope),name,progress=()=>{}}){
+// runtime 'profile': into the container `into` (an agent Opaya runs in Docker) runs in, next to it (profiles.cjs).
+async function clone({agent,sourceHost,host,runtime='regular',scope='everything',keys=true,cron=cronDefault(scope),name,into=null,confirm,progress=()=>{}}){
   cron=!!cron;
+  if(runtime==='profile')return require('./profiles.cjs').clone({agent,sourceHost,into,host,scope,keys,cron,name,confirm,progress});
   if(agent.provider!=='hermes')return require('./clone-cli.cjs').clone({agent,sourceHost,host,runtime,scope,keys,name,progress});
   const id=slug(name);if(!id)throw new Error('Give the clone a name with letters or numbers.');
   progress({step:'target',state:'active',message:`Checking ${host?host.name:'this computer'} for ${runtime==='docker'?'Docker':'Hermes'}`});
@@ -161,10 +169,11 @@ async function clone({agent,sourceHost,host,runtime='regular',scope='everything'
 // Copy the same parts again from the source into an existing clone; containers restart to pick them up.
 async function redeploy({agent,source,sourceHost,host,progress=()=>{}}){
   const c=agent.clone;if(!c)throw new Error('This agent is not a clone.');
+  if(c.runtime==='profile')return require('./profiles.cjs').redeploy({agent,source,sourceHost,host,progress});
   if(c.framework&&c.framework!=='hermes')return require('./clone-cli.cjs').redeploy({agent,source,sourceHost,host,progress});
   const to={host:host||null,container:''};
   const paths=await copyParts({agent:source,sourceHost,scope:c.scope,keys:c.keys,cron:c.cron??cronDefault(c.scope),to,dest:c.dir,progress});
   if(c.container){progress({step:'start',state:'active',message:`Restarting container ${c.container}`});await startContainer(to,c.dir,c.container);progress({step:'start',state:'done',message:`Container ${c.container} restarted`});}
   return {copied:paths};
 }
-module.exports={clone,redeploy,SCOPES,EXCLUDE,slug,selection,transfer,measure,place,shell,run,sourceHome,isLocal,fmt};
+module.exports={clone,redeploy,SCOPES,EXCLUDE,slug,selection,transfer,measure,place,execHome,shell,run,sourceHome,isLocal,fmt,copyParts,cronDefault};

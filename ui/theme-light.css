@@ -279,6 +279,10 @@
 :where(body[data-theme="light"]) .skill-row p{color:#44514a}
 :where(body[data-theme="light"]) .mcp-form label small{color:#546359}
 :where(body[data-theme="light"]) .mcp-agents{border:1px solid #cbd7cf}
+:where(body[data-theme="light"]) .mcp-card{border:1px solid #cbd7cf;background:#e2eae6}
+:where(body[data-theme="light"]) .mcp-card.own{border-color:#aec6b8}
+:where(body[data-theme="light"]) .mcp-card em{color:#275135}
+:where(body[data-theme="light"]) .mcp-card small{color:#546359}
 :where(body[data-theme="light"]) .slash-menu{border:1px solid #b7c5bb;background:#e3ebe6}
 :where(body[data-theme="light"]) .slash-menu button{color:#18231b}
 :where(body[data-theme="light"]) .slash-menu button.active,:where(body[data-theme="light"]) .slash-menu button:hover{background:#cfddd4}
