@@ -265,6 +265,8 @@
 :where(body[data-theme="light"]) button.sidebar-section-label:hover{background:#d9e0de;color:#27332c}
 :where(body[data-theme="light"]) .group-count{color:#515b5e}
 :where(body[data-theme="light"]) button.sidebar-section-label.drop-into{background:#badecc22;color:#071a0f}
+:where(body[data-theme="light"]) .manage-pick.selected{border-color:#b3c5bc}
+:where(body[data-theme="light"]) .mini-agent.selected{border-color:#b3c5bc}
 :where(body[data-theme="light"]) .tag-chip{border:1px solid #becbc5;background:#d9e2de;color:#203227}
 :where(body[data-theme="light"]) button.tag-chip:hover{border-color:#7cc09f88}
 :where(body[data-theme="light"]) .tag-chip.active{background:#badecc26;border-color:#7cc09f;color:#05120b}

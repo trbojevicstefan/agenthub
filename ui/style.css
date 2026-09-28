@@ -221,7 +221,7 @@ body[data-theme="light"] .orbit-signal{background:#0f8a57;box-shadow:0 0 0 5px #
 /* Frameless window: Opaya draws its own controls on Windows, Linux and macOS. */
 body.frameless .topbar,body.frameless .sidebar{-webkit-app-region:drag}
 body.frameless .topbar :is(button,select,input,a,.status-pill),body.frameless .sidebar :is(button,input,a,.agent-list,.agent-nav-row),dialog,.context-menu,.toast,.window-controls button{-webkit-app-region:no-drag}
-body.frameless:not([data-platform="darwin"]) .topbar{padding-right:156px}
+body.frameless:not([data-platform="darwin"]) .topbar{padding-right:268px}
 .window-controls{position:fixed;z-index:10002;display:flex;-webkit-app-region:no-drag}
 .window-controls:empty{display:none}
 .window-controls.win{top:0;right:0;height:40px}
@@ -240,6 +240,23 @@ body.window-fullscreen .window-controls.mac{opacity:0;transition:opacity .2s}bod
 body[data-theme="light"] .window-controls.win button{color:#4b5752}
 body[data-theme="light"] .window-controls.win button:hover{background:#e3e9e4;color:#111}
 body[data-theme="light"] .window-controls.win button.wc-close:hover{background:#c42b1c;color:#fff}
+/* Title bar: the sidebar toggle and the chat / terminal switch, right after the traffic lights on a Mac and left of the
+   window buttons elsewhere. Without the sidebar the top bar makes room for them on a Mac. */
+.title-controls{position:fixed;z-index:10002;display:flex;align-items:center;gap:6px;-webkit-app-region:no-drag}
+.title-controls:empty{display:none}
+.title-controls.mac{top:8px;left:84px}
+.title-controls.win{top:6px;right:146px}
+.title-controls button{-webkit-app-region:no-drag}
+.title-controls svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}
+.title-btn{width:28px;height:28px;min-width:0;padding:0;border:0;border-radius:7px;color:var(--muted)}
+.title-btn:hover,.title-btn:focus-visible{background:var(--hover);color:var(--text)}
+.surface-switch{display:flex;gap:2px;padding:2px;border:1px solid var(--border);border-radius:9px;background:var(--bg)}
+.surface-switch button{width:30px;height:24px;min-width:0;padding:0;border:0;border-radius:6px;color:var(--muted)}
+.surface-switch button:hover,.surface-switch button:focus-visible{background:var(--hover);color:var(--text)}
+.surface-switch button.active{background:var(--hover);color:var(--accent);box-shadow:inset 0 0 0 1px var(--border)}
+body.sidebar-hidden .sidebar{display:none}
+body.sidebar-hidden[data-platform="darwin"] .topbar{padding-left:212px}
+body[data-theme="light"] .surface-switch button.active{color:#1f7a45}
 body[data-theme="light"].window-blurred .window-controls.mac button{background:#d7ddd8;border-color:#c5ccc7}
 
 /* Opaya Agent entry in the sidebar. */
@@ -411,6 +428,22 @@ button.sidebar-section-label.collapsed .group-chevron{transform:rotate(-90deg)}
 button.sidebar-section-label .status-dot{width:5px;height:5px}
 button.sidebar-section-label.drop-into{background:#4fe39a22;color:#d9f7e6;box-shadow:inset 0 0 0 1px #4fe39a88}
 .sidebar-group{animation:op-fade-up .22s ease both}
+/* A collapsed section keeps every agent in view as a small icon with its status. */
+.manage-switch{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 16px}
+.manage-switch>span{color:var(--faint);font-size:10px;font-weight:650;letter-spacing:.09em;text-transform:uppercase;margin-right:4px}
+.manage-pick{height:32px;padding:3px 10px 3px 4px;gap:7px;border:1px solid var(--border);border-radius:9px;background:var(--panel);color:var(--muted);font-size:12px}
+.manage-pick:hover,.manage-pick:focus-visible{background:var(--hover);color:var(--text)}
+.manage-pick.selected{border-color:#40554a;background:var(--hover);color:var(--text)}
+.manage-pick .agent-avatar{width:22px;height:22px;border-radius:6px}
+body[data-theme="light"] .manage-pick.selected{border-color:#9fc7ab}
+.ws-showing{margin:-6px 0 14px;color:var(--muted);font-size:12px}.ws-showing .text-button{font-size:12px}
+.collapsed-strip{display:flex;flex-wrap:wrap;gap:3px;padding:2px 4px 6px 6px}
+.mini-agent{position:relative;width:32px;height:32px;min-width:0;padding:0;border:1px solid transparent;border-radius:8px}
+.mini-agent:hover,.mini-agent:focus-visible{background:var(--hover)}
+.mini-agent.selected{background:var(--hover);border-color:#40554a}
+.mini-agent .agent-avatar{width:24px;height:24px;border-radius:6px}
+.mini-agent .status-dot{position:absolute;right:2px;bottom:2px;width:7px;height:7px;box-shadow:0 0 0 2px var(--sidebar)}
+body[data-theme="light"] .mini-agent.selected{border-color:#9fc7ab}
 body[data-theme="light"] button.sidebar-section-label:hover{background:#e3ebe5;color:#26382e}
 body[data-theme="light"] button.sidebar-section-label.drop-into{background:#dff2e6;color:#0f5a37;box-shadow:inset 0 0 0 1px #0f8a57}
 body[data-theme="light"] .agent-nav-row.drop-before:before,body[data-theme="light"] .agent-nav-row.drop-after:after{background:#0f8a57;box-shadow:none}
