@@ -79,6 +79,9 @@ async function start({app, safeStorage}, root) {
   // Opaya browser for agents: the MCP bridge gets a token that can only call browserTool, forwarded to the Opaya window.
   const browserToken = randomBytes(32).toString('hex'), browserCalls = new Map();
   const toolsToken = randomBytes(32).toString('hex');
+  // Opaya Vault for agents on this computer: the MCP bridge gets a token that can only call vaultTool.
+  const vaultToken = randomBytes(32).toString('hex');
+  broker.vaultBridge = {command:process.execPath, args:[path.join(__dirname,'vault-mcp.cjs')], env:{ELECTRON_RUN_AS_NODE:'1',OPAYA_VAULT_ENDPOINT:endpoint(root),OPAYA_VAULT_TOKEN:vaultToken}};
   broker.browserBridge = {command:process.execPath, args:[path.join(__dirname,'browser-mcp.cjs')], env:{ELECTRON_RUN_AS_NODE:'1',OPAYA_BROWSER_ENDPOINT:endpoint(root),OPAYA_BROWSER_TOKEN:browserToken}};
   function browserTool(input){
     const socket=[...(listener?.clients||[])].at(-1);
@@ -779,12 +782,14 @@ async function start({app, safeStorage}, root) {
     shutdown
   };
   // Secrets the user gives the Opaya Agent with the key button next to its message box, and forgetting one.
-  actions.opayaHoldSecret = x=>opaya.holdFromUser({name:x.name,value:x.value});
+  actions.opayaHoldSecret = x=>opaya.holdFromUser({name:x.name,value:x.value,endpoint:x.endpoint});
+  actions.vaultTool = async x=>{const r=await opaya.vaultTool({agentId:x.agentId,op:x.op,name:x.name,why:x.why});emit();return r;};
+  actions.vaultGiveAgent = async x=>{const r=await opaya.giveHeldToAgent({id:x.id,agentId:x.agentId});emit();return r;};
   actions.opayaGiveAll = async x=>{const r=await opaya.giveToAll({id:x.id});emit();return r;};
-  actions.agentGiveSecret = async x=>{const r=await opaya.giveToAgent({agentId:x.agentId,name:x.name,value:x.value});emit();return r;};
+  actions.agentGiveSecret = async x=>{const r=await opaya.giveToAgent({agentId:x.agentId,name:x.name,value:x.value,endpoint:x.endpoint});emit();return r;};
   actions.opayaForgetSecret = x=>opaya.forgetSecret(String(x.id||''));
   const token = randomBytes(32).toString('hex');
-  listener = server({token,snapshot,scopes:()=>new Map([[browserToken,new Set(['browserTool'])],[toolsToken,new Set(['opayaToolList','opayaToolCall'])]]),
+  listener = server({token,snapshot,scopes:()=>new Map([[browserToken,new Set(['browserTool'])],[toolsToken,new Set(['opayaToolList','opayaToolCall'])],[vaultToken,new Set(['vaultTool'])]]),
     dispatch:async (method,input)=>{if(!Object.hasOwn(actions,method))throw new Error('Unsupported desktop action.');try{return await actions[method](input||{});}catch(error){throw new Error(safeError(error));}},
     onApproval:(socket,message)=>{const a=approvals.get(message.id);if(a?.socket===socket)a.finish(message.allow===true,message.value);},
     onDetach:socket=>{for(const a of approvals.values())if(a.socket===socket)a.finish(false);}

@@ -286,6 +286,9 @@ class Broker{
     // Built-in: Opaya's browser pane, for agents on this computer that were given it (right-click > Opaya browser).
     const a=this.data.agents.find(x=>x.id===agentId),b=this.browserBridge;
     // A text-only model cannot use a browser: it would read pages but miss everything shown as pictures.
+    // Built-in: the Opaya Vault, so an agent on this computer can take a key it needs (the user approves each one).
+    const v=this.vaultBridge;
+    if(a&&v&&a.transport!=='ssh'&&a.command!=='docker'&&a.protocol!=='openai'&&a.protocol!=='terminal'&&this.data.settings?.vaultMcp!==false)list.push({name:'opaya-vault',command:v.command,args:v.args,env:[...Object.entries(v.env).map(([name,value])=>({name,value})),{name:'OPAYA_VAULT_AGENT',value:a.id}]});
     if(a?.browser&&b&&browserCapable(a)&&visionOf({...a,activeModel:this.runtimeFor(a.id).adapter?.currentModel}).vision!==false)list.push({name:'opaya-browser',command:b.command,args:b.args,env:Object.entries(b.env).map(([name,value])=>({name,value}))});
     return list;
   }

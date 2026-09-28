@@ -1,3 +1,17 @@
+# Opaya 0.21.5 - Opaya Vault: every key in one place, and agents take what they need
+
+- **Opaya Vault**: every API key, token and password Opaya keeps, in one view. Open it from Vault in the sidebar, Settings, Machines, or the key dialogs in any chat.
+  - Add a key there, give it to one agent or to all of them, or forget it.
+  - Each key shows where it went.
+  - The agents' own connection tokens are listed too, with Change.
+  - Keys given with a key button now stay in the Vault until you forget them, instead of going away with their chat.
+- **Optional endpoint**: new keys ask only for a name and the key. Tick "This API needs an endpoint" to add a base URL. It is saved next to the key as NAME_BASE_URL (for example OPENROUTER_API_KEY gets OPENROUTER_BASE_URL), and the agent's note mentions it.
+- **Agents take keys themselves**: Claude Code, Codex and ACP agents on this computer get an Opaya Vault tool.
+  - vault_list shows the names in the Vault, never the values.
+  - vault_use asks you in Opaya, then writes the key into the file that agent reads keys from.
+  - The agent gets the variable name and the file, never the value.
+- **Codex takes any key**: an OpenAI key still signs Codex in, and every other key now goes into Codex's .env (~/.codex/.env) instead of being refused.
+
 # Opaya 0.21.4 - A key given to Opaya is global
 
 - **Global keys**: a key given with the Opaya Agent's key button goes to every agent by default ("Give it to every agent too"). Opaya writes it into the config of each agent that reads keys: Hermes (.env), OpenClaw (.env, also in Docker), Claude Code (settings.json) and Codex (OpenAI keys only). This covers every machine and container. Each connected agent is told in its chat. A summary shows who got it and why others were skipped, and API connections keep their own token. "All agents" next to a held key gives it again, for example after adding agents.

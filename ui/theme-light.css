@@ -533,3 +533,4 @@
 :where(body[data-theme="light"]) .guide-plan.live li.error{border-color:#ca9191}
 :where(body[data-theme="light"]) .guide-plan.live li.error .guide-n{background:#debaba;border-color:#ca9191;color:#170707}
 :where(body[data-theme="light"]) .guide-callout{border:1px solid #d3c7a4;background:#efeadd;color:#3e3312}
+:where(body[data-theme="light"]) .vault-badge{border:1px solid #9fc0aa;color:#193e25}

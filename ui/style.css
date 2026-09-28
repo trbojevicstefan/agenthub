@@ -1463,3 +1463,11 @@ body[data-theme="light"] .bring-M{color:#9a6a10}body[data-theme="light"] .bring-
 .docker-main{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}.docker-main strong{font-size:13px;overflow-wrap:anywhere}.docker-main small,.docker-main code{flex-basis:100%;color:var(--muted);overflow-wrap:anywhere}.docker-main code{font-size:10px}
 .docker-agent{height:22px;padding:0 7px 0 2px;gap:5px;border:1px solid var(--border);border-radius:6px;font-size:10px}.docker-agent .agent-avatar{width:16px;height:16px;min-width:16px;font-size:8px}
 .docker-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:4px;flex:none;max-width:52%}.docker-btn{padding:4px 9px;font-size:11px}
+/* Opaya Vault */
+.vault-icon{display:inline-block;width:14px;height:12px;border:1.3px solid currentColor;border-radius:3px;position:relative;flex-shrink:0;margin-top:3px}.vault-icon:before{content:"";position:absolute;width:6px;height:6px;border:1.3px solid currentColor;border-bottom:0;border-radius:4px 4px 0 0;left:2.5px;top:-6px}.vault-icon:after{content:"";position:absolute;width:2px;height:3px;background:currentColor;left:5px;top:3px;border-radius:1px}
+.vault-add{border:1px solid var(--border);border-radius:9px;padding:16px 16px 4px;margin-bottom:18px}.vault-add h3{font-size:12px;margin-bottom:12px}.vault-add-foot{display:flex;justify-content:flex-end;padding:0 0 12px}
+.vault-row{display:flex;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid var(--border)}.vault-row:last-child{border-bottom:0}
+.vault-main{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px}.vault-main strong{font-size:13px;overflow-wrap:anywhere}.vault-main code{font-size:10px;color:var(--muted)}.vault-main small{flex-basis:100%;color:var(--muted);overflow-wrap:anywhere}
+.vault-badge{font-style:normal;font-size:9px;border:1px solid #466b53;color:#a9dcb9;border-radius:4px;padding:0 5px}.vault-badge.muted{border-color:var(--border);color:var(--muted)}
+.vault-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:4px;flex:none;max-width:60%}.vault-actions select{font-size:11px;padding:4px 22px 4px 8px;max-width:190px}
+body[data-theme="light"] .vault-badge{border-color:#8fbf9f;color:#2f6b45}

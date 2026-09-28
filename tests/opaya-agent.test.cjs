@@ -259,22 +259,55 @@ test('a key given to Opaya goes to every agent that reads keys; API connections 
   const groq=await broker.saveAgent({agent:{name:'Groq',provider:'custom',protocol:'openai',transport:'http',endpoint:'https://api.groq.com/openai/v1',model:'llama'}},{token:'own'});
   await broker.vault.set(groq.id,'own-token',false);approvals.length=0;
   const held=await agent.holdFromUser({value:ROUTER_KEY}),r=await agent.giveToAll({id:held.id});
-  assert.deepEqual(r.stored.map(x=>x.agent),['Hermes','OpenClaw','Claude']);
-  assert.deepEqual(r.skipped.map(x=>x.agent),['Codex','Groq']);assert.match(r.skipped[0].reason,/OpenAI API key/);assert.match(r.skipped[1].reason,/keeps its own token/);
+  assert.deepEqual(r.stored.map(x=>x.agent),['Hermes','OpenClaw','Claude','Codex']);
+  assert.deepEqual(r.skipped.map(x=>x.agent),['Groq']);assert.match(r.skipped[0].reason,/keeps its own token/);
+  assert.match(await fs.readFile(path.join(home,'.codex','.env'),'utf8'),/OPENROUTER_API_KEY=/);
   assert.match(await fs.readFile(path.join(hermesHome,'.env'),'utf8'),/OPENROUTER_API_KEY=/);assert.match(await fs.readFile(path.join(home,'.openclaw','.env'),'utf8'),/OPENROUTER_API_KEY=/);
   assert.equal(JSON.parse(await fs.readFile(path.join(home,'.claude','settings.json'),'utf8')).env.OPENROUTER_API_KEY,ROUTER_KEY);
   assert.equal(broker.vault.get(groq.id),'own-token');assert.equal(approvals.length,0);assert.equal(commands.length,0);assert.equal(r.told,0,'nothing connected in the fixture');
   assert(!JSON.stringify(r).includes(ROUTER_KEY.slice(9)));assert.equal(agent.describe().secrets.find(s=>s.id===held.id).global,true);
 });
-test('store_secret signs Codex in with the key on its input, never on its command line',async t=>{
+test('Opaya Vault keys keep an optional endpoint as NAME_BASE_URL and outlive their chat',async t=>{
+  const home=await temp(t),hermesHome=path.join(home,'.hermes');await fs.mkdir(hermesHome,{recursive:true});await fs.writeFile(path.join(hermesHome,'.env'),'');
+  const {agent,broker}=await fixture(t,[],{userHome:home});
+  const hermes=await broker.saveAgent({agent:{name:'Hermes',provider:'hermes',protocol:'acp',transport:'local',command:'hermes',args:['acp'],hermesHome}},{preapproved:true});
+  await assert.rejects(()=>agent.holdFromUser({value:ROUTER_KEY,endpoint:'ftp://x'}),/full http/);
+  const held=await agent.holdFromUser({name:'OPENROUTER_API_KEY',value:ROUTER_KEY,endpoint:'https://openrouter.ai/api/v1'});
+  const r=await agent.giveHeldToAgent({id:held.id,agentId:hermes.id});
+  assert.equal(await fs.readFile(path.join(hermesHome,'.env'),'utf8'),`OPENROUTER_API_KEY=${ROUTER_KEY}\nOPENROUTER_BASE_URL=https://openrouter.ai/api/v1\n`);
+  assert.match(r.note,/endpoint is in OPENROUTER_BASE_URL \(https:\/\/openrouter\.ai\/api\/v1\)/);
+  await agent.newSession();agent.messages.push({role:'user',content:'x'});await agent.newSession();
+  const kept=agent.describe().secrets.find(s=>s.id===held.id);assert.equal(kept.kept,true);assert.equal(kept.endpoint,'https://openrouter.ai/api/v1');
+});
+test('agents take keys from the Opaya Vault themselves, after the user approves; Codex keeps other keys in its .env',async t=>{
+  const home=await temp(t),{agent,broker,approvals}=await fixture(t,[],{userHome:home});
+  const codex=await broker.saveAgent({agent:{name:'Codex',provider:'codex',protocol:'codex',transport:'local',command:'codex'}},{preapproved:true});
+  const held=await agent.holdFromUser({name:'asd',value:ROUTER_KEY,endpoint:'https://api.example.com/v1'});
+  const list=await agent.vaultTool({agentId:codex.id,op:'list'});
+  assert.deepEqual(list.keys.map(k=>[k.name,k.hint,k.endpoint,k.you_have_it]),[['asd','sk-o…cdef','https://api.example.com/v1',false]]);
+  approvals.length=0;
+  const r=await agent.vaultTool({agentId:codex.id,op:'use',name:'asd',why:'call the example API'});
+  assert.equal(approvals.length,1);assert.match(approvals[0].title,/Let Codex use asd/);assert.match(approvals[0].detail,/call the example API/);
+  assert.equal(await fs.readFile(path.join(home,'.codex','.env'),'utf8'),`asd=${ROUTER_KEY}\nasd_BASE_URL=https://api.example.com/v1\n`);
+  assert.equal(r.endpoint_variable,'asd_BASE_URL');assert(!JSON.stringify([list,r]).includes(ROUTER_KEY.slice(9)));
+  assert.equal((await agent.vaultTool({agentId:codex.id,op:'list'})).keys[0].you_have_it,true);
+  await assert.rejects(()=>agent.vaultTool({agentId:codex.id,op:'use',name:'NOPE'}),/has no NOPE/);
+  const {codexMcpArgs}=require('../desktop/adapters/codex.cjs');
+  assert.deepEqual(codexMcpArgs({transport:'local',command:'codex'},[{name:'opaya-vault',command:'/opt/Opaya',args:['vault-mcp.cjs'],env:[{name:'OPAYA_VAULT_AGENT',value:'a1'}]},{name:'github',command:'npx'}]),['-c','mcp_servers.opaya-vault.command="/opt/Opaya"','-c','mcp_servers.opaya-vault.args=["vault-mcp.cjs"]','-c','mcp_servers.opaya-vault.env={OPAYA_VAULT_AGENT="a1"}']);
+  assert.deepEqual(codexMcpArgs({transport:'ssh',command:'codex'},[{name:'opaya-vault',command:'x',args:[]}]),[]);
+  void held;
+});
+test('store_secret signs Codex in with an OpenAI key on its input, never on its command line, and puts other keys in its .env',async t=>{
   const {EventEmitter}=require('node:events'),{PassThrough}=require('node:stream'),spawned=[];
   const spawnAgent=(a,args)=>{const child=new EventEmitter(),run={args,input:''};Object.assign(child,{stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),exitCode:null,signalCode:null});spawned.push(run);child.stdin.on('data',d=>{run.input+=d;});child.stdin.on('end',()=>setImmediate(()=>{child.exitCode=0;child.emit('close',0);}));return child;};
-  const {agent,broker}=await fixture(t,[],{spawnAgent,trusted:true});
+  const home=await temp(t),{agent,broker}=await fixture(t,[],{spawnAgent,trusted:true,userHome:home});
   const codex=await broker.saveAgent({agent:{name:'Codex',provider:'codex',protocol:'codex',transport:'local',command:'codex'}},{preapproved:true});
   const key=await agent.holdFromUser({value:OPENAI_KEY}),other=await agent.holdFromUser({value:ROUTER_KEY});
   const r=await agent.tool('store_secret',{secret:key.id,agent_id:codex.id});
   assert.deepEqual(spawned.map(s=>s.args),[['login','--with-api-key']]);assert.equal(spawned[0].input,OPENAI_KEY+'\n');assert.match(r.next,/connect_agent/);
-  await assert.rejects(()=>agent.tool('store_secret',{secret:other.id,agent_id:codex.id}),/OpenAI API key only/);
+  // Any other key goes into Codex's .env, which it loads when it starts.
+  await agent.tool('store_secret',{secret:other.id,agent_id:codex.id});assert.equal(spawned.length,1);
+  assert.equal(await fs.readFile(path.join(home,'.codex','.env'),'utf8'),`OPENROUTER_API_KEY=${ROUTER_KEY}\n`);
 });
 test('request_secret asks in the secure prompt and the model gets only a reference',async t=>{
   const asked=[],answers=['xai-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789',null];
@@ -296,10 +329,11 @@ test('everything a tool returns has held keys replaced, also a key a terminal wr
   agent.broker.diagnostics=async()=>{throw new Error(`agent said: bad key ${OPENAI_KEY}`);};
   await assert.rejects(()=>agent.tool('agent_diagnostics',{agent_id:'a1'}),error=>!error.message.includes(OPENAI_KEY)&&error.message.includes(held.reference));
 });
-test('secrets are forgotten with their chat or on request, and survive a restart as references',async t=>{
+test('chat secrets are forgotten with their chat, vault keys on request, and both survive a restart as references',async t=>{
   const {agent,broker,root}=await fixture(t,[]),first=agent.sessionId;
   agent.messages.push({id:'m1',role:'user',content:'first chat',createdAt:new Date().toISOString()});
-  const a=await agent.holdFromUser({value:OPENAI_KEY}),vaultKey=agent.secrets[0].key;
+  // A key pasted into a chat lives as long as that chat; keys given with a key button stay in the Opaya Vault.
+  const pasted=await agent.holdSecret(OPENAI_KEY,{name:'OPENAI_API_KEY'}),a={id:pasted.id,reference:`[secret ${pasted.id} · ${pasted.name} · ${pasted.mask}]`},vaultKey=agent.secrets[0].key;
   await agent.newSession();const b=await agent.holdFromUser({name:'sudo password',value:'hunter2!'});
   assert.deepEqual([b.id,b.name,b.mask],['S2','SUDO_PASSWORD','•••']);
   const again=new OpayaAgent({root,vault:broker.vault,broker,terminals:{describe:()=>[]},approve:async()=>true,emit:()=>{},runInTerminal:async()=>({id:'x'}),trusted:()=>true});await again.init();

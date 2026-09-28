@@ -3,12 +3,20 @@ const {Rpc}=require('../rpc.cjs');
 const {launch}=require('../process.cjs');
 const attach=require('../attachments.cjs');
 const levels=require('../effort.cjs');
+// Opaya's own MCP servers (the vault, the browser) for Codex on this computer, as -c overrides; the user's servers are
+// in Codex's config.toml already (TOML values: a JSON string is a TOML string).
+// On a machine or in a container Codex reads them from its own config.toml, where Opaya writes them when turned on.
+function codexMcpArgs(agent,servers){
+  if(agent.transport==='ssh'||agent.command==='docker')return [];
+  const toml=v=>Array.isArray(v)?`[${v.map(toml).join(',')}]`:JSON.stringify(String(v));
+  return servers.filter(s=>(!s.type||s.type==='stdio')&&/^opaya-[a-z]+$/.test(s.name)).flatMap(s=>['-c',`mcp_servers.${s.name}.command=${toml(s.command)}`,'-c',`mcp_servers.${s.name}.args=${toml(s.args||[])}`,...(s.env?.length?['-c',`mcp_servers.${s.name}.env={${s.env.map(e=>`${/^[A-Za-z_][A-Za-z0-9_]*$/.test(e.name)?e.name:JSON.stringify(e.name)}=${toml(e.value)}`).join(',')}}`]:[])]);
+}
 class CodexAdapter{
   constructor({agent,host,approve,spawnAgent=launch,trusted=()=>false,mcpServers=()=>[],onChange=()=>{}}){this.trusted=trusted;this.mcpServers=mcpServers;this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.onChange=onChange;this.threads=new Map();this.threadModels=new Map();this.modelInfo=new Map();this.defaultModel='';this.active=null;}
   // Reasoning effort levels of the agent's model as model/list reports them (read in the background on connect).
   get efforts(){return this.modelInfo.get(this.agent.model||this.defaultModel)?.efforts??levels.CODEX;}
   async connect(){
-    this.rpc=new Rpc(this.spawnAgent(this.agent,[...this.agent.args,'app-server'],this.host),{jsonrpc:false,onRequest:async(method,params)=>{
+    this.rpc=new Rpc(this.spawnAgent(this.agent,[...this.agent.args,...codexMcpArgs(this.agent,this.mcpServers()||[]),'app-server'],this.host),{jsonrpc:false,onRequest:async(method,params)=>{
       if(['item/commandExecution/requestApproval','item/fileChange/requestApproval'].includes(method)){
         if(!this.active||params.threadId!==this.active.threadId||(this.active.turnId&&params.turnId!==this.active.turnId)||this.active.signal.aborted)return {decision:'decline'};
         const pending=this.active;
@@ -96,4 +104,4 @@ class CodexAdapter{
     return [...new Set(out)];
   }
 }
-module.exports={CodexAdapter};
+module.exports={CodexAdapter,codexMcpArgs};
