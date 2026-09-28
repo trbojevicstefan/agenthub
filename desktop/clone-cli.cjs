@@ -76,7 +76,7 @@ async function startContainer(id,where,container,dir){
 async function copy({agent,sourceHost,id,scope,keys,to,dest,backup,progress}){
   const from=place({agent,host:sourceHost});
   progress({step:'source',state:'active',message:`Finding ${agent.name}'s folders`});
-  const home=from.container?'/root':await homeOf(from);
+  const home=from.home||(from.container?'/root':await homeOf(from)); // a profile in a container has its own HOME
   const {wanted,excludes}=plan(id,scope,keys);
   const paths=await existing(from,home,wanted);
   if(!paths.length)throw new Error(`Nothing to copy: ${agent.name} has none of ${wanted.join(', ')}.`);

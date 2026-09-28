@@ -976,7 +976,7 @@
   const fmtSize=n=>!n?'0 B':n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
   const whenText=iso=>{const d=new Date(iso);return isNaN(d)?'':d.toLocaleString([],{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});};
   // Other agents that use the same installation on the same machine (Hermes profiles share one Hermes).
-  const sharedWith=a=>a.install?.kind==='docker'||a.install?.kind==='remote-api'?[]:state.agents.filter(b=>b.id!==a.id&&b.transport===a.transport&&(b.hostId||'')===(a.hostId||'')&&b.install?.kind!=='docker'&&b.install?.framework===a.install?.framework);
+  const sharedWith=a=>['docker','container-profile','remote-api'].includes(a.install?.kind)?[]:state.agents.filter(b=>b.id!==a.id&&b.transport===a.transport&&(b.hostId||'')===(a.hostId||'')&&!['docker','container-profile'].includes(b.install?.kind)&&b.install?.framework===a.install?.framework);
   async function loadInstallInfo(a,force=false){
     if(!force&&installInfo.has(a.id)&&installInfo.get(a.id)!=='loading')return installInfo.get(a.id);
     installInfo.set(a.id,'loading');if(manageId===a.id)render();
@@ -1000,13 +1000,13 @@
     $('#backup-form').addEventListener('submit',event=>{event.preventDefault();const f=event.target;action(async()=>{await api.agentBackup({id:a.id,history:f.elements.history.checked,keys:f.elements.keys.checked});closeModal();backupLists.delete(a.id);});});
   }
   async function openUninstall(a){
-    const cap=a.install||{},shared=sharedWith(a),profile=cap.kind==='hermes-profile',docker=cap.kind==='docker';
-    const what=profile?'Delete this Hermes profile':docker?'Remove this container':`Uninstall ${labels[cap.framework]||cap.label||'this agent'}`;
+    const cap=a.install||{},shared=sharedWith(a),profile=cap.kind==='hermes-profile'||cap.kind==='container-profile',docker=cap.kind==='docker';
+    const what=cap.kind==='container-profile'?'Delete this profile':profile?'Delete this Hermes profile':docker?'Remove this container':`Uninstall ${labels[cap.framework]||cap.label||'this agent'}`;
     modal(what,`${title(a)} / ${location(a)} / ${cap.label||''}`,`<form id="uninstall-form" class="maintenance-form">
       <div class="uninstall-kind"><span class="status-dot ${installInfo.get(a.id)&&installInfo.get(a.id)!=='loading'?'connected':'working'}"></span><div id="uninstall-detected">Checking how it is installed...</div></div>
       ${shared.length&&!profile&&!docker?`<div class="inline-notice error-notice"><span>!</span><div><strong>Shared installation</strong><p>${esc(shared.map(title).join(', '))} ${shared.length===1?'uses':'use'} the same ${esc(cap.label)} on ${esc(location(a))} and will stop working too.</p></div></div>`:''}
       <label class="switch-row"><input type="checkbox" name="backup" ${cap.backup?'checked':'disabled'}><span class="switch" aria-hidden="true"></span><span>Back up to this computer first <small>${cap.backup?'(with history and keys)':'(not available for this agent)'}</small></span></label>
-      ${profile?'<p class="field-help">A profile is its data: deleting it removes its config, memory, skills and sessions. Hermes and other profiles stay.</p>':docker&&!a.clone?.container?`<p class="field-help">${(a.args||[]).some(x=>/^opaya-/.test(x))?'Its data folder (~/opaya-agents or ~/opaya-hermes) stays on the machine; delete it there if you no longer need it.':'Opaya did not create this container, so its volumes and data stay where they are.'}</p>`:`<label class="switch-row"><input type="checkbox" name="data" checked><span class="switch" aria-hidden="true"></span><span>Remove everything, its data too <small>(${docker?'the container data folder':cap.framework==='hermes'?'the whole Hermes home, every profile':'settings, logins, memory'})</small></span></label>`}
+      ${profile?`<p class="field-help">A profile is its data: deleting it removes its config, memory, skills and sessions. ${cap.kind==='container-profile'?'The container and its other agents stay.':'Hermes and other profiles stay.'}</p>`:docker&&!a.clone?.container?`<p class="field-help">${(a.args||[]).some(x=>/^opaya-/.test(x))?'Its data folder (~/opaya-agents or ~/opaya-hermes) stays on the machine; delete it there if you no longer need it.':'Opaya did not create this container, so its volumes and data stay where they are.'}</p>`:`<label class="switch-row"><input type="checkbox" name="data" checked><span class="switch" aria-hidden="true"></span><span>Remove everything, its data too <small>(${docker?'the container data folder':cap.framework==='hermes'?'the whole Hermes home, every profile':'settings, logins, memory'})</small></span></label>`}
       <label class="switch-row"><input type="checkbox" name="remove" checked><span class="switch" aria-hidden="true"></span><span>Remove the connection from Opaya when it finishes</span></label>
       <p class="field-help">This runs on ${esc(location(a))} in a visible terminal, where you answer the uninstaller's questions:</p><pre class="install-command" id="uninstall-command">Loading...</pre>
       <div class="modal-footer"><span>You confirm the exact command once more.</span><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="submit" class="primary danger-button">${esc(what)}</button></div></div></form>`);
@@ -1785,8 +1785,10 @@
   }
   // ---- Skills, tools and MCP servers ------------------------------------------------------------------------------
   const skillCache=new Map();
-  const mcpSupport=a=>a.provider==='openclaw'?'Written to OpenClaw\'s own config (mcp.servers) where it runs; its gateway picks them up.':a.protocol==='acp'?'Passed to new sessions. Start a new conversation after changing them.':a.protocol==='claude'?(a.transport==='ssh'?'Not passed over SSH. Add them on that machine with claude mcp add.':'Passed to Claude with every message.'):a.provider==='hermes'?'This Hermes connection uses its gateway API, which takes MCP servers from its own config. Use hermes mcp on that machine.':a.protocol==='codex'?'Codex reads MCP servers from ~/.codex/config.toml.':'This connection type does not accept MCP servers from Opaya.';
-  const mcpPassed=a=>a.protocol==='acp'||a.protocol==='claude'&&a.transport!=='ssh'||a.provider==='openclaw';
+  // How each agent gets Opaya's MCP servers: with each ACP session, per message (Claude Code here), or written into its
+  // own config where it runs (Claude Code elsewhere, Codex, OpenClaw), which asks first.
+  const mcpSupport=a=>a.provider==='openclaw'?'Written to OpenClaw\'s own config (mcp.servers) where it runs; its gateway picks them up.':a.protocol==='acp'?'Passed to new sessions. Start a new conversation after changing them.':a.protocol==='claude'?(a.transport==='ssh'||a.command==='docker'?'Written to ~/.claude.json where it runs (Opaya asks first). New Claude sessions load them.':'Passed to Claude with every message.'):a.protocol==='codex'?'Written to ~/.codex/config.toml [mcp_servers] where it runs (Opaya asks first); program and HTTP servers, not SSE. Reconnect Codex to load them.':a.provider==='hermes'?'This Hermes connection uses its gateway API, which takes MCP servers from its own config. Use hermes mcp on that machine.':(a.install?.framework||'')==='goose'?'Goose keeps extensions in its own config: add them with goose configure.':(a.install?.framework||'')==='aider'?'Aider does not use MCP servers.':'This connection type does not accept MCP servers from Opaya.';
+  const mcpPassed=a=>['acp','claude','codex'].includes(a.protocol)||a.provider==='openclaw';
   const usesMcp=(s,a)=>s.enabled&&(s.agents==='all'||s.agents.includes(a.id));
   async function loadSkills(id,force=false){if(!force&&skillCache.has(id))return skillCache.get(id);const r=await api.agentSkills({id});skillCache.set(id,r);return r;}
   function useCommand(a,name){
@@ -1854,10 +1856,14 @@
       <label>Note<input name="note" maxlength="300" value="${esc(s?.note||'')}" placeholder="What this server is for"></label>
       <label class="check-row inline"><input type="checkbox" name="enabled" ${!s||s.enabled?'checked':''}> Enabled</label>
       <div class="modal-footer"><div></div><div><button type="button" class="secondary" id="mcp-cancel">Back</button><button class="primary" type="submit">Save server</button></div></div></form>`:'';
-    modal('MCP servers','Tools your agents can call. Opaya passes them to ACP agents such as Hermes and to Claude Code.',`${adding||s?form:`<div class="skill-list">${list.map(x=>`<div class="skill-row"><div><strong>${esc(x.name)}</strong><em>${esc(x.type)}${x.enabled?'':' / off'}</em><p>${esc(x.type==='stdio'?`${x.command} ${x.args.join(' ')}`:x.url)}</p><p>${x.agents==='all'?'All agents':`${x.agents.length} agent${x.agents.length===1?'':'s'}`}${x.envNames.length||x.headerNames.length?` / secrets: ${esc([...x.envNames,...x.headerNames].join(', '))}`:''}</p></div><div class="row-actions"><button class="secondary small" data-mcp-edit="${esc(x.id)}">Edit</button><button class="text-button danger-text" data-mcp-remove="${esc(x.id)}">Remove</button></div></div>`).join('')||'<p class="field-help">No MCP servers yet.</p>'}</div>
-      <div class="mcp-examples"><p class="field-help">Examples: <code>npx -y @modelcontextprotocol/server-filesystem C:\\Projects</code>, <code>uvx mcp-server-fetch</code>, or an HTTPS server such as <code>https://mcp.context7.com/mcp</code>.</p></div>
-      <div class="modal-footer"><div></div><div><button class="primary" id="mcp-add">Add MCP server</button></div></div>`}`,true);
+    const added=new Set(list.map(x=>x.name)),cat=mcpCatalogCache||[];
+    const oneClick=cat.length?`<h3 class="mcp-head">Add with one click</h3><div class="mcp-catalog">${cat.map(c=>{const on=c.own?state.agents.filter(x=>x.browser).length:added.has(c.name);return `<div class="mcp-card${c.own?' own':''}"><div><strong>${esc(c.title)}</strong>${c.own?'<em>Opaya</em>':c.secret&&!c.secret.optional?'<em>needs a key</em>':''}<p>${esc(c.description)}</p>${c.needs?`<small>Needs ${esc(c.needs)} where the agent runs.</small>`:''}</div><button class="${on?'secondary':'primary'} small" data-mcp-install="${esc(c.id)}">${c.own?(on?`On for ${on}`:'Turn on'):on?'Added':'Add'}</button></div>`;}).join('')}</div><h3 class="mcp-head">Your MCP servers</h3>`:'';
+    modal('MCP servers','Tools your agents can call. Add one with a click: Opaya passes it to Hermes and other ACP agents and writes it into Claude Code, Codex and OpenClaw configs.',`${adding||s?form:`${oneClick}<div class="skill-list">${list.map(x=>`<div class="skill-row"><div><strong>${esc(x.name)}</strong><em>${esc(x.type)}${x.enabled?'':' / off'}</em><p>${esc(x.type==='stdio'?`${x.command} ${x.args.join(' ')}`:x.url)}</p><p>${x.agents==='all'?'All agents':`${x.agents.length} agent${x.agents.length===1?'':'s'}`}${x.envNames.length||x.headerNames.length?` / secrets: ${esc([...x.envNames,...x.headerNames].join(', '))}`:''}</p></div><div class="row-actions"><button class="secondary small" data-mcp-edit="${esc(x.id)}">Edit</button><button class="text-button danger-text" data-mcp-remove="${esc(x.id)}">Remove</button></div></div>`).join('')||'<p class="field-help">No MCP servers yet.</p>'}</div>
+      <div class="mcp-examples"><p class="field-help">Another server: <code>npx -y some-mcp-server</code>, <code>uvx mcp-server-fetch</code>, or an HTTPS server such as <code>https://mcp.example.com/mcp</code>.</p></div>
+      <div class="modal-footer"><div></div><div><button class="secondary" id="mcp-add">Add another server by hand</button></div></div>`}`,true);
     $('#mcp-add')&&($('#mcp-add').onclick=()=>openMcpManager('new'));
+    if(!mcpCatalogCache&&!adding&&!s)api.mcpCatalog?.().then(c=>{mcpCatalogCache=c||[];if(!$('#mcp-form')&&document.querySelector('[data-mcp-edit],#mcp-add'))openMcpManager();}).catch(()=>{mcpCatalogCache=[];});
+    for(const b of document.querySelectorAll('[data-mcp-install]'))b.onclick=()=>{const c=cat.find(x=>x.id===b.dataset.mcpInstall);if(c)openMcpInstall(c);};
     for(const b of document.querySelectorAll('[data-mcp-edit]'))b.onclick=()=>openMcpManager(b.dataset.mcpEdit);
     for(const b of document.querySelectorAll('[data-mcp-remove]'))b.onclick=()=>action(async()=>{const x=list.find(y=>y.id===b.dataset.mcpRemove);if(!await ask(`Remove MCP server ${x?.name}? Its saved secrets are deleted.`))return;await api.mcpRemove({id:b.dataset.mcpRemove});await refresh();openMcpManager();});
     const f=$('#mcp-form');if(!f)return;const el=n=>f.elements[n];
@@ -1869,6 +1875,32 @@
       modalBusy=true;try{await api.mcpSave({server:{id:s?.id,name:el('name').value.trim(),type:el('type').value,command:el('command').value.trim(),args:el('args').value,url:el('url').value.trim(),agents,note:el('note').value,enabled:el('enabled').checked},env:el('env').value,headers:el('headers').value});}finally{modalBusy=false;}
       await refresh();toast('MCP server saved. New conversations use it.');openMcpManager();
     });};
+  }
+  let mcpCatalogCache=null;
+  // One click: the server comes from Opaya's catalog; the user only picks agents and, when needed, types a key (masked,
+  // straight to the vault) or a folder. Opaya's own browser is turned on per agent instead.
+  function openMcpInstall(c){
+    const own=c.own,agents=own?state.agents.filter(x=>browserCapable(x)):state.agents,existing=(state.mcpServers||[]).find(x=>x.name===c.name);
+    modal(own?'Opaya browser':`Add ${c.title}`,c.description,`<form id="mcp-install" class="mcp-form">
+      ${c.secret?`<label>${esc(c.secret.label)}<input name="secret" type="password" autocomplete="off" spellcheck="false" ${c.secret.optional||existing?.envNames?.length||existing?.headerNames?.length?'':'required'} placeholder="${existing&&(existing.envNames.length||existing.headerNames.length)?'Saved. Leave empty to keep it.':'Paste it here'}"><small class="field-help">Stored encrypted in Opaya's vault; it is never shown again.</small></label>`:''}
+      ${c.folder?`<label>${esc(c.folder.label)}<span class="input-row"><input name="folder" required placeholder="/home/you/projects" value="${esc(existing?.args?.at(-1)||'')}"><button type="button" class="secondary small" id="mcp-folder">Browse...</button></span></label>`:''}
+      ${own?'':`<fieldset class="mcp-agents"><legend>Use with</legend><label class="check-row inline"><input type="radio" name="scope" value="some" checked> Chosen agents</label><label class="check-row inline"><input type="radio" name="scope" value="all"> All agents</label></fieldset>`}
+      <div class="pick-list">${agents.map(x=>`<label class="pick-item"><input type="checkbox" name="agent" value="${esc(x.id)}" ${own?(x.browser?'checked':''):(existing?usesMcp(existing,x):x.id===selected()?.id)?'checked':''} ${!own&&!mcpPassed(x)?'disabled':''}><span><strong>${esc(title(x))}</strong><small>${esc(own?(x.vision?.vision===false?'Its model cannot see images.':x.vision?.reason||''):mcpSupport(x))}</small></span></label>`).join('')||'<p class="field-help">No agent on this computer can use the Opaya browser.</p>'}</div>
+      ${own?'<p class="field-help">The Opaya browser runs in this window, so it works for agents on this computer (ACP agents and Claude Code). It starts with their next conversation.</p>':`<p class="field-help">${c.type==='stdio'?`Runs <code>${esc(c.command)}</code> on the machine where each agent runs. `:`Connects to ${esc(c.url||'')}. `}Opaya asks before it writes anything into an agent's config.</p>`}
+      <div class="modal-footer"><div><button type="button" class="text-button" id="mcp-back">Back</button></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">${own?'Save':existing?'Update':'Add'}</button></div></div></form>`,true);
+    const f=$('#mcp-install');$('#mcp-back').onclick=()=>openMcpManager();
+    $('#mcp-folder')&&($('#mcp-folder').onclick=()=>action(async()=>{const dir=await api.pick({kind:'directory'});if(dir)f.elements.folder.value=dir;}));
+    const sync=()=>{const all=f.querySelector('[name="scope"]:checked')?.value==='all';for(const i of f.querySelectorAll('[name="agent"]'))i.closest('label').hidden=all&&!own;};
+    for(const r of f.querySelectorAll('[name="scope"]'))r.onchange=sync;sync();
+    f.onsubmit=event=>{event.preventDefault();const picked=[...f.querySelectorAll('[name="agent"]:checked')].map(i=>i.value);
+      action(async()=>{
+        if(own){for(const x of agents)if(!!x.browser!==picked.includes(x.id))await api.updateAgentDisplay({id:x.id,browser:picked.includes(x.id)});await refresh();toast(picked.length?`The Opaya browser is on for ${plural(picked.length,'agent')} from their next conversation.`:'The Opaya browser is off.');openMcpManager();return;}
+        const scope=f.querySelector('[name="scope"]:checked')?.value==='all'?'all':picked;
+        if(Array.isArray(scope)&&!scope.length){toast('Choose at least one agent.',true);return;}
+        modalBusy=true;let r;try{r=await api.mcpInstall({id:c.id,secret:f.elements.secret?.value||'',folder:f.elements.folder?.value||'',agents:scope});}finally{modalBusy=false;}
+        if(f.elements.secret)f.elements.secret.value='';
+        await refresh();toast(r?.warnings?.length?`${c.title} saved, with problems: ${r.warnings.join(' ')}`:`${c.title} added. New conversations use it.`,!!r?.warnings?.length);openMcpManager();
+      });};
   }
   // "/" in the message box lists the agent's commands and installed skills.
   let slash={items:[],index:0,open:false};
@@ -2397,7 +2429,7 @@
     modal(`Transfer from ${title(a)}`,'Copy skills, API keys and tools to another agent. Nothing is removed from this one.',`<form id="transfer-form" class="mcp-form">
       <label>Agent that receives them<select name="targetId">${others.map(x=>`<option value="${esc(x.id)}" ${preset.targetId===x.id?'selected':''}>${esc(title(x))} / ${esc(labels[x.provider]||x.provider)} / ${esc(location(x))}</option>`).join('')}</select></label>
       <fieldset class="transfer-part"><legend>Skills <small id="transfer-skill-count"></small></legend>${modeRow('skillsMode',preset.skills||'all')}<div id="transfer-skills"><p class="field-help">Loading skills...</p></div></fieldset>
-      <fieldset class="transfer-part" id="transfer-keys-part"><legend>Credentials <small>API keys from .env, names only</small></legend><div id="transfer-keys"></div></fieldset>
+      <fieldset class="transfer-part" id="transfer-keys-part"><legend>API keys <small>names only, values are never shown</small></legend><div id="transfer-keys"></div></fieldset>
       <fieldset class="transfer-part"><legend>Tools &amp; MCP servers</legend>${mcps.length?pickList('mcp',mcps.map(s=>({value:s.id,label:s.name,help:s.type==='stdio'?s.command:s.url})),true):`<p class="field-help">${esc(title(a))} uses no Opaya MCP servers. <button type="button" class="text-button" data-action="mcp-manage">Manage MCP servers</button></p>`}<p class="field-help" id="transfer-mcp-note"></p></fieldset>
       ${a.hasToken?`<label class="check-row inline"><input type="checkbox" name="token"> Also copy the saved gateway API token <small>(stays encrypted, never shown)</small></label>`:''}
       <p class="field-help">Skills are folders with a SKILL.md, so they work across Hermes, Claude Code, Codex and OpenClaw. Existing skills with the same folder name are replaced.</p>
@@ -2406,13 +2438,20 @@
     const mode=n=>f.querySelector(`[name="${n}"]:checked`)?.value||'none';
     const syncMode=()=>{for(const l of f.querySelectorAll('.transfer-mode label'))l.classList.toggle('selected',l.querySelector('input').checked);
       $('#transfer-skills').classList.toggle('collapsed',mode('skillsMode')!=='some');$('#transfer-keys-list')?.classList.toggle('collapsed',mode('keysMode')!=='some');};
+    // Keys move between any agents: each goes where the target reads it (.env, settings.json, codex login, OpenCode
+    // auth.json or the connection token); the service reads and writes the values, the page only sees names.
     const drawKeys=()=>{const t=target(),box=$('#transfer-keys');
-      if(a.provider!=='hermes'||t?.provider!=='hermes'){box.innerHTML=`<p class="field-help">API keys move between Hermes agents. ${a.provider!=='hermes'?`${esc(title(a))} is not Hermes.`:`${esc(title(t))} is not Hermes.`}</p>`;return;}
       if(!keys){box.innerHTML='<p class="field-help">Reading key names...</p>';return;}
-      box.innerHTML=keys.length?`${modeRow('keysMode',preset.keys||'none')}<div id="transfer-keys-list" class="collapsed">${pickList('key',keys.map(k=>({value:k,label:k})))}</div><p class="field-help">Values are copied by the session service and never shown. Keys with the same name on ${esc(title(t))} are replaced.</p>`:'<p class="field-help">No API keys in this agent\'s .env.</p>';
+      if(keys.error){box.innerHTML=`<div class="message-error">${esc(keys.error)}</div>`;return;}
+      if(!keys.source?.kind){box.innerHTML=`<p class="field-help">Opaya does not know where ${esc(title(a))} keeps API keys, so it cannot copy them.</p>`;return;}
+      if(!keys.target?.kind){box.innerHTML=`<p class="field-help">Opaya does not know where ${esc(title(t))} reads API keys. Use its own sign-in, or give the key to the Opaya Agent.</p>`;return;}
+      if(!keys.keys.length){box.innerHTML=`<p class="field-help">${esc(title(a))} has no API keys Opaya can read.</p>`;return;}
+      const plan=new Map(keys.target.plan.map(p=>[p.name,p]));
+      box.innerHTML=`${modeRow('keysMode',preset.keys||'none')}<div id="transfer-keys-list" class="collapsed">${pickList('key',keys.keys.map(k=>{const p=plan.get(k.name);return {value:k.name,label:k.name,help:`From ${k.from}. ${p?.to?`Goes to ${p.to}.`:`Not copied: ${p?.why||'unknown'}.`}`};}))}</div><p class="field-help">Values are copied by the session service and never shown. A key ${esc(title(t))} already has is replaced; keys it cannot use are left out.</p>`;
       syncMode();};
+    const loadKeys=()=>{keys=null;drawKeys();const id=f.elements.targetId.value;api.agentEnvKeys({id:a.id,targetId:id}).then(r=>{if(f.elements.targetId.value!==id)return;keys=r;drawKeys();},e=>{keys={error:e.message};drawKeys();});};
     const drawNote=()=>{const t=target();$('#transfer-mcp-note').textContent=t&&!mcpPassed(t)&&mcps.length?`${title(t)}: ${mcpSupport(t)}`:'';};
-    f.addEventListener('change',event=>{if(event.target.name==='targetId'){drawKeys();drawNote();}syncMode();$('#transfer-skill-count').textContent=mode('skillsMode')==='some'?`${f.querySelectorAll('[name="skill"]:checked').length} of ${skills.length} selected`:skills.length?plural(skills.length,'skill'):'';});
+    f.addEventListener('change',event=>{if(event.target.name==='targetId'){loadKeys();drawNote();}syncMode();$('#transfer-skill-count').textContent=mode('skillsMode')==='some'?`${f.querySelectorAll('[name="skill"]:checked').length} of ${skills.length} selected`:skills.length?plural(skills.length,'skill'):'';});
     drawKeys();drawNote();syncMode();
     // Bundled skills (OpenClaw's own) come with the agent and have no folder to copy.
     loadSkills(a.id).then(r=>{skills=(r.skills||[]).filter(s=>s.path);const box=$('#transfer-skills');if(!box)return;
@@ -2422,14 +2461,15 @@
       $('#transfer-filter')?.addEventListener('input',e=>{const q=e.target.value.toLowerCase();for(const l of box.querySelectorAll('.pick-item'))l.hidden=!l.textContent.toLowerCase().includes(q);});
       for(const n of preset.names||[]){const c=box.querySelector(`[name="skill"][value="${CSS.escape(n)}"]`);if(c)c.checked=true;}syncMode();
     },error=>{$('#transfer-skills').innerHTML=`<div class="message-error">${esc(error.message)}</div>`;});
-    if(a.provider==='hermes')api.agentEnvKeys({id:a.id}).then(list=>{keys=list||[];drawKeys();},()=>{keys=[];drawKeys();});
+    loadKeys();
     f.onsubmit=async event=>{event.preventDefault();const t=target(),picked=n=>[...f.querySelectorAll(`[name="${n}"]:checked`)].map(i=>i.value);
       const sm=mode('skillsMode'),km=f.querySelector('[name="keysMode"]')?mode('keysMode'):'none';
       const x={sourceId:a.id,targetId:t.id,skills:sm==='all'?'all':sm==='some'?picked('skill'):false,keys:km==='all'?'all':km==='some'?picked('key'):false,mcp:picked('mcp'),token:!!f.elements.token?.checked};
       if(Array.isArray(x.skills)&&!x.skills.length){toast('Select skills, or choose All or None.',true);return;}
       if(Array.isArray(x.keys)&&!x.keys.length){toast('Select API keys, or choose All or None.',true);return;}
       if(!x.skills&&!x.keys&&!x.mcp.length&&!x.token){toast('Choose what to transfer.',true);return;}
-      if(x.keys&&!await ask(`Copy ${x.keys==='all'?'all':x.keys.length} API key${x.keys.length===1?'':'s'} from ${title(a)} to ${title(t)}?\n\n${title(t)} will be able to use the same accounts and spend on them.`))return;
+      const places=[...new Set((keys?.target?.plan||[]).filter(p=>p.to&&(x.keys==='all'||x.keys?.includes?.(p.name))).map(p=>p.to.replace(/ as .*| env .*/,'')))];
+      if(x.keys&&!await ask(`Copy ${x.keys==='all'?'all':x.keys.length} API key${x.keys.length===1?'':'s'} from ${title(a)} to ${title(t)}?\n\nThey go to ${places.join(', ')||'where it reads them'} on ${location(t)}. ${title(t)} will be able to use the same accounts and spend on them.`))return;
       action(async()=>{await api.transferStart(x);closeModal();});
     };
   }
@@ -2480,10 +2520,19 @@
   // Hermes and the CLI agents Opaya knows (their program plus their folders) can be cloned; API connections cannot.
   const CLONE_CLI={claude:'Claude Code',codex:'Codex CLI',opencode:'OpenCode',openclaw:'OpenClaw',goose:'Goose'},CLONE_DOCKER=['claude','codex','opencode'];
   const cloneable=a=>a.provider==='hermes'||Object.hasOwn(CLONE_CLI,a.install?.framework||'');
+  // Containers Opaya runs an agent in, and whether a framework can live there as a profile (the service checks again).
+  const CLONE_NPM=['claude','codex','opencode'],fwName=f=>f==='hermes'?'Hermes':CLONE_CLI[f]||f||'Unknown';
+  const cloneFit=(from,into)=>from==='hermes'?(into==='hermes'?'':'Needs a Hermes container'):from==='openclaw'?(into==='openclaw'?'':'Needs an OpenClaw gateway container'):CLONE_NPM.includes(from)?(CLONE_NPM.includes(into)?'':'Needs a Claude Code, Codex or OpenCode container'):`${fwName(from)} cannot run as a profile in a container`;
+  function cloneContainers(){
+    const out=new Map();
+    for(const x of state.agents){const c=x.install?.container;if(!c)continue;const key=`${x.transport==='ssh'?x.hostId:''}|${c}`,base=x.clone?.runtime!=='profile';if(!out.has(key)||base&&!out.get(key).base)out.set(key,{key,hostId:x.transport==='ssh'?x.hostId:'',container:c,framework:x.install.framework,agent:x,base});}
+    return [...out.values()];
+  }
+  const PROFILE_HOW={hermes:'a Hermes profile (its own HERMES_HOME in the container)',openclaw:'another agent of the same OpenClaw gateway (openclaw agents add)',claude:'Claude Code with its own home folder in the container',codex:'Codex with its own home folder in the container',opencode:'OpenCode with its own home folder in the container'};
   function openClone(a,preset={}){
     if(!cloneable(a)){toast('This is an API connection: there is nothing installed to clone.');return;}
     const local=state.hosts.length===0,hermes=a.provider==='hermes',fw=a.install?.framework||'',cliName=CLONE_CLI[fw]||'',docker=hermes||CLONE_DOCKER.includes(fw);
-    const here=a.transport==='ssh'?a.hostId:'';
+    const here=a.transport==='ssh'?a.hostId:'',from=hermes?'hermes':fw,boxes=cloneContainers();
     const scopes=hermes?CLONE_SCOPES:CLONE_SCOPES.map(([id,label])=>[id,label,{everything:'Settings, skills, memory and instructions. No chat history.',personality:'Skills, instructions and personality files, plus settings.',skills:'Skills, commands and agents, plus settings.',memory:'Memory and instruction files, plus settings.'}[id]]);
     modal(`Clone ${title(a)}`,hermes?'Copy this agent to this computer or a VPS, as a Hermes profile or a Docker container.':`Copy ${cliName} with its settings, skills and memory to another machine (Opaya installs it there if needed)${docker?' or into a Docker container':''}.`,`<form id="clone-form" class="mcp-form">
       <label>Name of the clone<input name="name" required maxlength="40" value="${esc(preset.name||`${a.name}-clone`.replace(/\s+/g,'-').toLowerCase())}" autocomplete="off"></label>
@@ -2491,21 +2540,27 @@
       <label class="check-row inline"><input type="checkbox" name="keys" ${preset.keys===false?'':'checked'}> ${hermes?'Include API keys (.env)':'Include logins and API keys'} so the clone works right away</label>
       <label class="check-row inline clone-cron" ${hermes?'':'hidden'}><input type="checkbox" name="cron" ${preset.cron??(preset.scope||'everything')==='everything'?'checked':''}> Include cron jobs (scheduled tasks) <small>They will run on both agents, for example posting to Slack twice.</small></label>
       <fieldset class="clone-choice"><legend>Where</legend><div class="clone-where"><label class="choice-card small"><input type="radio" name="hostId" value="" ${!preset.hostId?'checked':''}><span><strong>This computer</strong><small>${!hermes&&!here?'Docker only (it is already here)':'Local'}</small></span></label>${state.hosts.map(h=>`<label class="choice-card small"><input type="radio" name="hostId" value="${esc(h.id)}" ${preset.hostId===h.id?'checked':''}><span><strong>${esc(h.name)}</strong><small>Remote / ${esc(h.alias||h.hostname)}</small></span></label>`).join('')}<button type="button" class="choice-card small add" data-action="new-vps"><span><strong>+ New VPS</strong><small>Create a key and connect</small></span></button></div></fieldset>
-      <fieldset class="clone-choice"><legend>Run as</legend><div class="clone-where"><label class="choice-card small"><input type="radio" name="runtime" value="regular" ${preset.runtime!=='docker'?'checked':''}><span><strong>${hermes?'Hermes profile':'Regular install'}</strong><small>${hermes?'Needs Hermes installed there':`Installs ${esc(cliName)} there if missing`}</small></span></label>${docker?`<label class="choice-card small"><input type="radio" name="runtime" value="docker" ${preset.runtime==='docker'?'checked':''}><span><strong>Docker container</strong><small>${hermes?esc('nousresearch/hermes-agent'):'Node.js container'}, auto-restarts</small></span></label>`:''}</div></fieldset>
+      <fieldset class="clone-choice"><legend>Run as</legend><div class="clone-where"><label class="choice-card small"><input type="radio" name="runtime" value="regular" ${preset.runtime!=='docker'?'checked':''}><span><strong>${hermes?'Hermes profile':'Regular install'}</strong><small>${hermes?'Needs Hermes installed there':`Installs ${esc(cliName)} there if missing`}</small></span></label>${docker?`<label class="choice-card small"><input type="radio" name="runtime" value="docker" ${preset.runtime==='docker'?'checked':''}><span><strong>Docker container</strong><small>${hermes?esc('nousresearch/hermes-agent'):'Node.js container'}, auto-restarts</small></span></label>`:''}${boxes.length?`<label class="choice-card small"><input type="radio" name="runtime" value="profile" ${preset.runtime==='profile'?'checked':''}><span><strong>Profile in a container</strong><small>Next to an agent in a container you already have</small></span></label>`:''}</div></fieldset>
+      <fieldset class="clone-choice" id="clone-containers" hidden><legend>Container</legend><div class="clone-where">${boxes.map(t=>{const why=cloneFit(from,t.framework),h=state.hosts.find(x=>x.id===t.hostId);return `<label class="choice-card small"><input type="radio" name="container" value="${esc(t.key)}" ${why?'disabled':''} ${preset.container===t.key&&!why?'checked':''}><span><strong>${esc(t.container)}</strong><small>${esc(h?h.name:'This computer')} / ${esc(title(t.agent))} (${esc(fwName(t.framework))})</small>${why?`<small>${esc(why)}</small>`:''}</span></label>`;}).join('')}</div>
+        <p class="field-help">${PROFILE_HOW[from]?`${esc(fwName(from))} joins the container as ${esc(PROFILE_HOW[from])}, inside its data folder, so it survives an image update. The container and its agent keep running; Opaya asks once more before it changes anything.`:`${esc(fwName(from))} cannot live as a profile in someone else's container. Clone it to a machine instead.`}</p></fieldset>
       <p class="field-help">${hermes?'Chat history and OAuth logins are not copied.':`Chat history is not copied. ${esc(cliName)} keeps one setup per computer account, so a regular clone goes to another machine; what is already there is kept as a .before-clone copy.`} Later, right-click the clone &gt; Redeploy to copy the same parts again.${local?' Add a VPS to clone to a server.':''}</p>
       <div id="clone-status"></div>
       <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Clone</button></div></div></form>`,true);
     const f=$('#clone-form');let cronTouched=preset.cron!==undefined;
+    const syncRun=()=>{const profile=f.querySelector('[name="runtime"]:checked')?.value==='profile';$('#clone-containers').hidden=!profile;f.querySelector('.clone-where').closest('fieldset').hidden=profile;};
+    for(const r of f.querySelectorAll('[name="runtime"]'))r.addEventListener('change',syncRun);syncRun();
     f.elements.cron.addEventListener('change',()=>{cronTouched=true;});
     for(const r of f.querySelectorAll('[name="scope"]'))r.addEventListener('change',()=>{if(!cronTouched)f.elements.cron.checked=r.value==='everything';});
     f.onsubmit=event=>{event.preventDefault();const data=Object.fromEntries(new FormData(f));
       // The clone runs as a background job with its own window; this dialog closes right away.
-      action(async()=>{const job=await api.cloneAgent({id:a.id,name:data.name,hostId:data.hostId||'',runtime:data.runtime,scope:data.scope,keys:!!data.keys,cron:!!data.cron});closeModal();onJob(job);});
+      const box=data.runtime==='profile'?boxes.find(t=>t.key===data.container):null;
+      if(data.runtime==='profile'&&!box){toast('Choose a container for the profile.',true);return;}
+      action(async()=>{const job=await api.cloneAgent({id:a.id,name:data.name,hostId:box?box.hostId:data.hostId||'',runtime:data.runtime,container:box?.container||'',scope:data.scope,keys:!!data.keys,cron:!!data.cron});closeModal();onJob(job);});
     };
   }
   async function redeploy(a){
     const src=state.agents.find(x=>x.id===a.clone?.from);if(!src){toast('The source agent of this clone was removed.',true);return;}
-    if(!await ask(`Redeploy ${title(a)} from ${title(src)}?\n\nCopies ${CLONE_SCOPES.find(s=>s[0]===a.clone.scope)?.[1]||a.clone.scope}${(a.clone.cron??a.clone.scope==='everything')?' (with cron jobs)':' (without cron jobs)'} again over the clone${a.clone.container?' and restarts its container':''}. Chat history on the clone is kept.`))return;
+    if(!await ask(`Redeploy ${title(a)} from ${title(src)}?\n\nCopies ${CLONE_SCOPES.find(s=>s[0]===a.clone.scope)?.[1]||a.clone.scope}${(a.clone.cron??a.clone.scope==='everything')?' (with cron jobs)':' (without cron jobs)'} again over the clone${a.clone.container&&a.clone.runtime!=='profile'?' and restarts its container':''}. Chat history on the clone is kept.`))return;
     await action(async()=>{const job=await api.redeployAgent({id:a.id});onJob(job);});
   }
   // ---- New VPS: key, public key for the provider, connection test, save ------------------------------------------

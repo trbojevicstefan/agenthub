@@ -38,8 +38,9 @@ class ClaudeAdapter{
     const effort=this.noEffort?'':levels.nearest(ctx.effort||'',levels.CLAUDE);if(effort)args.push('--effort',effort);
     const dirs=[...new Set([...where.values()].map(p=>(remote?path.posix:path).dirname(p)))];if(dirs.length)args.push('--add-dir',...dirs);
     const servers=this.mcpServers()||[];let config=null;
-    if(servers.length&&this.agent.transport==='ssh')ctx.onEvent({type:'activity',text:'MCP servers from Opaya are not passed to Claude over SSH. Add them on that machine with `claude mcp add`.'});
-    else if(servers.length){config=mcpFile(servers);args.push('--mcp-config',config.file);}
+    // On a machine or in a container Claude reads Opaya's servers from its own ~/.claude.json, where Opaya writes them
+    // when they are turned on (mcp-config.cjs); a file on this computer would not be there.
+    if(servers.length&&this.agent.transport!=='ssh'&&this.agent.command!=='docker'){config=mcpFile(servers);args.push('--mcp-config',config.file);}
     try{
       // The prompt goes on stdin: plain text, or one stream-json user message when it carries images.
       const input=images.length?JSON.stringify({type:'user',message:{role:'user',content:[{type:'text',text},...await Promise.all(images.map(async i=>({type:'image',source:{type:'base64',media_type:i.mime,data:await attach.base64(i)}})))]}})+'\n':text;

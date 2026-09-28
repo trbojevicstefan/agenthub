@@ -11,6 +11,9 @@ const attach=require('./attachments.cjs');
 const {importGatewayToken}=require('./credentials.cjs');
 const {gatewayOperation}=require('./management.cjs');
 const mcp=require('./mcp.cjs');
+const mcpConfig=require('./mcp-config.cjs');
+// What a written config entry depends on: a change rewrites it on the agents that use the server.
+const mcpDefinition=s=>JSON.stringify([s.name,s.type,s.command,s.args,s.url,s.envNames,s.headerNames]);
 const {listSkills}=require('./skills.cjs');
 const projects=require('./projects.cjs');
 const files=require('./files.cjs');
@@ -249,13 +252,18 @@ class Broker{
     }
   }
   // ---- Clone and redeploy (Hermes) ------------------------------------------------------------------------------
-  async cloneAgent({id,name,hostId='',runtime='regular',scope='everything',keys=true,cron},progress=()=>{}){
+  async cloneAgent({id,name,hostId='',runtime='regular',scope='everything',keys=true,cron,container=''},progress=()=>{}){
     const a=this.agent(id),host=hostId?this.host(hostId):null;
-    const result=await cloner.clone({agent:a,sourceHost:a.transport==='ssh'?this.host(a.hostId):null,host,runtime,scope,keys,cron:cron===undefined?undefined:!!cron,name:name||`${a.name}-clone`,progress});
+    // A profile goes into a container Opaya already runs an agent in, on that machine; it asks before changing it.
+    const into=runtime==='profile'?require('./profiles.cjs').targets(this.data.agents).find(t=>t.container===container&&t.hostId===(host?.id||'')):null;
+    if(runtime==='profile'&&!into)throw new Error('Choose a container Opaya runs an agent in.');
+    const result=await cloner.clone({agent:a,sourceHost:a.transport==='ssh'?this.host(a.hostId):null,host,runtime,scope,keys,cron:cron===undefined?undefined:!!cron,name:name||`${a.name}-clone`,
+      into:into&&this.agent(into.agentId),confirm:(title,detail)=>this.approve({name:'Opaya'},title,detail),progress});
     progress({step:'save',state:'active',message:'Adding the clone to Opaya'});
     const saved=await this.saveAgent({agent:result.connection},{preapproved:true});
-    // An OpenClaw clone got the source's config, so its gateway token is the same one.
-    if(result.copyToken&&this.vault.has(a.id))await this.vault.set(saved.id,this.vault.get(a.id),true);
+    // An OpenClaw clone got the source's config, so its gateway token is the same one; a profile uses its container's gateway.
+    const tokenFrom=into?into.agentId:a.id;
+    if(result.copyToken&&this.vault.has(tokenFrom))await this.vault.set(saved.id,this.vault.get(tokenFrom),true);
     progress({step:'save',state:'done',message:`${saved.name} added`});
     progress({step:'connect',state:'active',message:`Connecting to ${saved.name}`});
     try{await this.connect(saved.id);progress({step:'connect',state:'done',message:`${saved.name} is connected`});}
@@ -285,7 +293,7 @@ class Broker{
     const existing=input?.id?this.data.mcpServers.find(s=>s.id===input.id):null;
     const saved=existing?this.mcpSecrets(existing.id):{env:{},headers:{}};
     // Empty text keeps the saved values; a line per variable replaces them all.
-    const next=mcp.secrets({env,headers});
+    const next=mcp.secrets({env,headers}),newSecrets=typeof env==='string'&&!!env.trim()||typeof headers==='string'&&!!headers.trim();
     const secret={env:typeof env==='string'&&env.trim()?next.env:saved.env,headers:typeof headers==='string'&&headers.trim()?next.headers:saved.headers};
     const s=mcp.server({...(existing||{}),...input,envNames:Object.keys(secret.env),headerNames:Object.keys(secret.headers)});
     if(this.data.mcpServers.some(x=>x.name===s.name&&x.id!==s.id))throw new Error(`An MCP server named ${s.name} already exists.`);
@@ -296,21 +304,52 @@ class Broker{
     const hasSecrets=Object.keys(secret.env).length||Object.keys(secret.headers).length;
     if(hasSecrets)await this.vault.set(mcp.vaultKey(s.id),JSON.stringify(secret),true);else if(existing)await this.vault.remove(mcp.vaultKey(s.id));
     this.data.mcpServers=existing?this.data.mcpServers.map(x=>x.id===s.id?s:x):[...this.data.mcpServers,s];
-    await this.persist();return mcp.publicView(s);
+    await this.persist();
+    const warnings=await this.syncMcpConfigs(existing,s,{changed:newSecrets||!existing||mcpDefinition(existing)!==mcpDefinition(s)});
+    return {...mcp.publicView(s),...(warnings.length?{warnings}:{})};
+  }
+  // A one-click server from Opaya's catalog: only the typed key (masked in the page) and the folder come from the user.
+  async installMcp({id,secret='',folder='',agents='all'}){
+    const name=mcp.CATALOG.find(c=>c.id===id)?.name,existing=this.data.mcpServers.find(s=>s.name===name);
+    const {server,env,headers}=mcp.fromCatalog(String(id||''),{secret,folder,agents,keep:!!existing&&(existing.envNames.length+existing.headerNames.length>0)});
+    return this.saveMcpServer({server:{...server,...(existing?{id:existing.id}:{})},env,headers});
   }
   async removeMcpServer(id){
-    id=schema.id(id);if(!this.data.mcpServers.some(s=>s.id===id))throw new Error('MCP server not found.');
-    this.data.mcpServers=this.data.mcpServers.filter(s=>s.id!==id);await this.vault.remove(mcp.vaultKey(id));await this.persist();return true;
+    id=schema.id(id);const s=this.data.mcpServers.find(x=>x.id===id);if(!s)throw new Error('MCP server not found.');
+    const warnings=await this.syncMcpConfigs(s,null,{cancel:true});
+    this.data.mcpServers=this.data.mcpServers.filter(x=>x.id!==id);await this.vault.remove(mcp.vaultKey(id));await this.persist();return warnings.length?{removed:true,warnings}:true;
   }
-  // Turn one server on or off for one agent. Changes apply to the agent's next new conversation or reconnect.
+  // Turn one server on or off for one agent. ACP agents and Claude Code on this computer get it with their next new
+  // conversation; Claude Code elsewhere, Codex and OpenClaw read it from their own config, where it is written now.
   async setAgentMcp({agentId,serverId,enabled}){
     const a=this.agent(agentId),s=this.data.mcpServers.find(x=>x.id===schema.id(serverId));if(!s)throw new Error('MCP server not found.');
     let list=s.agents==='all'?this.data.agents.map(x=>x.id):[...s.agents];
     list=enabled?[...new Set([...list,a.id])]:list.filter(x=>x!==a.id);
-    // OpenClaw takes MCP servers from its own config (mcp.servers), so they are written there where it runs.
-    if(a.provider==='openclaw')await require('./openclaw.cjs').setMcp(a,a.transport==='ssh'?this.host(a.hostId):null,s,this.mcpSecrets(s.id),enabled);
-    s.agents=list.length===this.data.agents.length&&this.data.agents.every(x=>list.includes(x.id))?'all':list;if(enabled)s.enabled=true;
-    await this.persist();return mcp.publicView(s);
+    const after={...s,agents:list.length===this.data.agents.length&&this.data.agents.every(x=>list.includes(x.id))?'all':list,enabled:enabled?true:s.enabled};
+    await this.syncMcpConfigs(s,after,{cancel:true,strict:true});
+    Object.assign(s,after);await this.persist();return mcp.publicView(s);
+  }
+  // Write a server into (or remove it from) the config of agents that read MCP servers only from there, after one
+  // approval for all of them. before/after: the server as it was and is (null when new or removed). Returns warnings;
+  // cancel: a declined approval throws; strict: a failed write throws.
+  async syncMcpConfigs(before,after,{changed=false,cancel=false,strict=false}={}){
+    const uses=s=>s?this.data.agents.filter(a=>mcp.appliesTo(s,a.id)&&mcpConfig.written(a)):[];
+    const was=uses(before),now=uses(after),renamed=!!(before&&after&&before.name!==after.name);
+    const on=now.filter(a=>changed||renamed||!was.includes(a)),off=was.filter(a=>renamed||!now.includes(a));
+    if(!on.length&&!off.length)return [];
+    const host=a=>a.transport==='ssh'?this.host(a.hostId):null,at=a=>`${a.name}${host(a)?` on ${host(a).name}`:''}`;
+    const lines=[...off.map(a=>`Remove "${before.name}" from ${mcpConfig.LABEL[mcpConfig.mode(a)]} of ${at(a)}`),...on.map(a=>`Add "${after.name}" to ${mcpConfig.LABEL[mcpConfig.mode(a)]} of ${at(a)}`)];
+    const n=new Set([...on,...off]).size,one=[...on,...off][0];
+    const title=off.length&&!on.length?`Remove MCP server ${before.name} from ${n===1?one.name:`${n} agents`}?`:`Write MCP server ${after.name} into ${n===1?`${one.name}'s`:`${n} agents'`} config?`;
+    if(!await this.approve({name:(after||before).name},title,`${lines.join('\n')}\n\nThese agents read MCP servers only from their own config. Keys and tokens go from Opaya's vault into the file (mode 600), never into a command line or the chat. Other entries stay as they are.`)){
+      if(cancel)throw new Error('MCP change cancelled.');return ['Not written into agent configs: declined.'];
+    }
+    const warnings=[],secret=after?this.mcpSecrets(after.id):{};
+    for(const [list,server,enabled] of [[off,before,false],[on,after,true]])for(const a of list){
+      try{await mcpConfig.write({agent:a,host:host(a),server,secret:enabled?secret:{},enabled});}
+      catch(error){if(strict)throw error;warnings.push(`${a.name}: ${safeError(error)}`);}
+    }
+    return warnings;
   }
   async skills(id){const a=this.agent(id);return listSkills(a,a.transport==='ssh'?this.host(a.hostId):null);}
   async connectAll({ids}={}){
