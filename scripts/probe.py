@@ -116,6 +116,16 @@ if docker:
                 continue
             container_id, name, image, ports, command = parts[:5]
             haystack = " ".join([name, image, command]).lower()
+            # OpenClaw: the gateway container (Opaya's own or the official docker compose setup). One-off CLI
+            # containers without a gateway are skipped. Chat goes through the gateway port published on this machine.
+            if "openclaw" in haystack and re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}", name):
+                published = re.findall(r"(?:[\d.]+|\[[0-9a-fA-F:]*\]|localhost):(\d+)->18789/tcp", ports)
+                if published:
+                    port = published[0]
+                    agents.append({"name": ("OpenClaw Docker / " + name)[:80], "provider": "openclaw", "protocol": "openai", "command": "docker", "args": ["exec", "-i", name, "openclaw"], "cwd": "", "endpoint": "http://127.0.0.1:%s/v1" % port, "model": "openclaw", "readiness": "running", "detail": ("OpenClaw gateway in Docker container " + name + " on port " + port + ". Opaya can import its gateway token from the container.")[:500]})
+                elif "gateway" in haystack:
+                    warnings.append(("OpenClaw runs in Docker container " + name + ", but its gateway port 18789 is not published on this machine. Publish it (-p 127.0.0.1:18789:18789) and scan again.")[:300])
+                continue
             if "hermes" not in haystack:
                 continue
             matches = re.findall(r"(?:127\.0\.0\.1|localhost|\[::1\]):(\d+)->8642/tcp", ports)

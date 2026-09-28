@@ -1,3 +1,9 @@
+# Opaya 0.21.2 - Docker on every machine, OpenClaw in Docker is found, traffic lights stay in full screen
+
+- **Docker manager**: every machine in Machines (this computer and each server) has a Docker button. It lists the containers with their image, state and ports, and which Opaya agent uses each one. Start, stop, restart or remove a container, follow its logs, or open a shell in it in a terminal tab. Images are listed too and can be removed. Stopping a container an agent uses asks first.
+- **OpenClaw in Docker is found**: Discover now finds OpenClaw gateways running in Docker, on this computer (Docker Desktop) and on servers over SSH, including the official docker compose setup and containers Opaya made. They connect through the gateway port the container publishes, and the gateway token is imported from the container. A gateway container that does not publish its port is listed in the discovery notes with the fix.
+- **Traffic lights stay in full screen on a Mac**: after the green button puts Opaya in full screen, close, minimize and exit full screen stay visible instead of fading out.
+
 # Opaya 0.21.1 - The chat and terminal switch sits top left on Windows too
 
 - **Top left on every system**: on Windows and Linux the sidebar button and the chat and terminal switch now sit at the top left, above the Opaya Agent, as they do on a Mac after the traffic lights. The top bar gets its space back on the right, next to minimize, maximize and close.

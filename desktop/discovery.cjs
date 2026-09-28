@@ -134,6 +134,7 @@ async function scanLocal({home = os.homedir(), extraHomes = [], probe = true} = 
       found.push(candidate({name: a.name || `OpenClaw / ${agentId}`, provider: 'openclaw', protocol: 'openai', transport: 'http', command: openclaw, args: [], cwd: home, endpoint: `http://127.0.0.1:${port}/v1`, model: `openclaw/${agentId}`}, 'Enable gateway.http.endpoints.chatCompletions and enter the gateway token.', 'setup'));
     }
   }
+  found.push(...await dockerOpenclaw(binary('docker'), warnings));
   if (probe) {
     const existing = new Set(found.map(a => a.endpoint));
     // Bounded loopback probes only. No LAN, subnet or Internet scan.
@@ -156,6 +157,27 @@ async function scanLocal({home = os.homedir(), extraHomes = [], probe = true} = 
     }
   }
   return {agents: found, hosts: await sshConfigHosts(home), warnings, machine: {hostname: os.hostname(), home}, scope: 'Known install folders, PATH, SSH aliases and four loopback API ports. No secrets imported.'};
+}
+// OpenClaw gateways running in Docker on this computer (Docker Desktop, or Opaya's own containers): each container
+// that publishes the gateway port 18789 is added over that port, with its gateway token imported from the container.
+function dockerOpenclawFrom(output, warnings = []) {
+  const found = [];
+  for (const line of String(output || '').slice(0, 32768).split(/\r?\n/).slice(0, 128)) {
+    const [, name = '', image = '', ports = '', command = ''] = line.split('\t');
+    const haystack = `${name} ${image} ${command}`.toLowerCase();
+    if (!haystack.includes('openclaw') || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/.test(name)) continue;
+    const port = ports.match(/(?:[\d.]+|\[[0-9a-fA-F:]*\]|localhost):(\d+)->18789\/tcp/)?.[1];
+    if (port) found.push(candidate({name: `OpenClaw Docker / ${name}`.slice(0, 80), provider: 'openclaw', protocol: 'openai', transport: 'http', command: 'docker', args: ['exec', '-i', name, 'openclaw'], cwd: '', endpoint: `http://127.0.0.1:${port}/v1`, model: 'openclaw'}, `OpenClaw gateway in Docker container ${name} on port ${port}. Opaya can import its gateway token from the container.`, 'running'));
+    else if (haystack.includes('gateway')) warnings.push(`OpenClaw runs in Docker container ${name}, but its gateway port 18789 is not published on this computer. Publish it (-p 127.0.0.1:18789:18789) and scan again.`);
+  }
+  return found;
+}
+async function dockerOpenclaw(docker, warnings) {
+  if (!docker) return [];
+  try {
+    const child = spawn(docker, ['ps', '--format', '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Command}}'], {env: environment(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']});
+    return dockerOpenclawFrom(await collect(child, {timeout: 5000, maxBytes: 65536}), warnings);
+  } catch { return []; }
 }
 async function limitedBody(response, max) {
   if (!response.body) return '';
@@ -185,4 +207,4 @@ async function scanRemote(host, {signal} = {}) {
   });
   return {agents, hosts: [], warnings: result.warnings || [], machine: result.machine, scope: 'Read-only inspection of the selected SSH account. No services installed or restarted; no .env values returned.'};
 }
-module.exports = {scanLocal, scanRemote, parseSSH, sshConfigHosts, envMetadata, fingerprint, candidate, limitedBody};
+module.exports = {scanLocal, scanRemote, dockerOpenclawFrom, parseSSH, sshConfigHosts, envMetadata, fingerprint, candidate, limitedBody};

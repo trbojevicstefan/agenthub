@@ -148,6 +148,7 @@ if(hostMode){
       const forwards=['projectRemoteInfo','projectRemoteStart','projectRemoteSend','projectRemoteBring','projectRemoteApply','projectRemoteStop','projectRemoteGithubLogin','guideScan','guidePlan','guideStart','toolVersions','toolCheckAll','agentInstallInfo','agentMaintenanceCommand','agentUpdate','agentUpdateAll','agentBackup','agentBackups','backupRemove','agentUninstall','opayaFreeModels','opayaFreeSetup','agentEnvKeys','transferStart','renameConversation','deleteConversation','condenseConversation','conversationMarkdown','libraryList','libraryImport','libraryInstall','libraryRemove','libraryAddFolder','jobs','jobDismiss','sshKeyCreate','hostTest','saveSettings','projectSave','projectRemove','projectInfo','projectBranches','projectGit','projectClone','mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaNewSession','opayaSelectSession','opayaDeleteSession','opayaStop','opayaClear','snapshot','saveAgent','reorderAgents','updateAgentDisplay','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
       forwards.push('selectEffort','fileInfo');
       forwards.push('mcpCatalog','mcpInstall');
+      forwards.push('dockerList','dockerTerminal');
       const handlers=Object.fromEntries(forwards.map(method=>[method,input=>client.call(method,input)]));
       // Attachments: the native picker (several files), and pasted files (base64) written to Opaya's data folder here so
       // only their paths go to the session service, whose messages are limited to 24 MB. Removed again if the send fails.
@@ -159,6 +160,8 @@ if(hostMode){
       for(const method of ['cloneAgent','redeployAgent'])handlers[method]=input=>client.call(method,input,20*60*1000);
       // These wait for the user's approval, which can take up to ten minutes.
       for(const method of ['agentUpdate','agentUpdateAll','agentUninstall','toolUpdate','installFramework','projectRemoteStop','guideStart','terminalRestart'])handlers[method]=input=>client.call(method,input,11*60*1000);
+      // Stopping or removing a container can take a while (Docker waits for the process to exit).
+      handlers.dockerAction=input=>client.call('dockerAction',input,3*60*1000);
       // Files pasted into a terminal on another machine are copied there first: minutes on a slow link.
       handlers.terminalPaste=input=>client.call('terminalPaste',input,11*60*1000);
       handlers.terminalRename=async input=>{const title=await client.call('terminalRename',input);terminalWindows.get(input.id)?.setTitle(title);return title;};

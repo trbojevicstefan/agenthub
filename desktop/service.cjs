@@ -26,6 +26,7 @@ const updates = require('./updates.cjs');
 const secrets = require('./secrets.cjs');
 const diagnostics = require('./diagnostics.cjs');
 const containers = require('./containers.cjs');
+const dockerManager = require('./docker-manager.cjs');
 const mcp = require('./mcp.cjs');
 const remoteWork = require('./remote-work.cjs');
 const guide = require('./guide.cjs');
@@ -704,6 +705,10 @@ async function start({app, safeStorage}, root) {
       const p=await broker.saveProject({name:x.name||name,path:folder,hostId:host?.id||'',agentIds:x.agentIds||[]});
       await runInTerminal({label:`Clone ${name}`,key:`clone_${p.id}`.slice(0,60),host,command});return p;
     },
+    // Docker manager for one machine: containers and images, start/stop/restart/remove, and logs or a shell in a terminal.
+    dockerList:x=>dockerManager.list(x.hostId?broker.host(x.hostId):null),
+    dockerAction:async x=>{const host=x.hostId?broker.host(x.hostId):null;const r=await dockerManager.act(host,{container:x.container,action:x.action});emit();return r;},
+    dockerTerminal:async x=>{const host=x.hostId?broker.host(x.hostId):null,command=dockerManager.terminalCommand(x);const view=await runInTerminal({label:`${x.kind==='logs'?'Logs':'Shell'}: ${x.container}`.slice(0,60),key:`docker_${x.kind==='logs'?'logs':'sh'}_${String(x.container).replace(/[^a-zA-Z0-9_-]/g,'_')}`.slice(0,60),host,command});return {id:view.id};},
     sshKeyCreate:x=>vps.createKey(x.name), hostTest:x=>vps.test(x.hostId?broker.host(x.hostId):schema.host(x.host||{})),
     saveSettings:x=>broker.saveSettings(x), cloneAgent:async x=>{
       const a=broker.agent(x.id),host=x.hostId?broker.host(x.hostId):null;
