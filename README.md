@@ -4,7 +4,7 @@
 
 Opaya is a local-first desktop app for your own AI agents: **Hermes, Claude Code, Codex, OpenClaw**, and any other CLI or OpenAI-compatible API. It works with agents on this computer, on your VPS machines over SSH, and in Docker containers. Chat with them, watch their terminals, give them a browser, and share skills and tools between them, all from one window. Opaya needs no hosted account, collects no telemetry and sends nothing through a third-party relay.
 
-**Current version: 0.20.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
+**Current version: 0.21.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
 
 ## Download
 
@@ -53,7 +53,8 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 
 ### Terminals
 - Integrated xterm.js terminals come with tabs, search, rename and **pop-out windows**.
-- You can open a shell or the agent's native CLI.
+- You can open a shell or the agent's native CLI. The switch next to the window buttons opens the selected agent as a chat or in its terminal.
+- **Paste** text, screenshots (as the path of a saved PNG) and files copied in Finder or Explorer (as quoted paths). On an SSH machine or in a container the files are copied there first.
 - Terminals keep running when you close the window.
 - Remote terminals use **tmux**, so they survive a dropped SSH connection.
 
@@ -67,10 +68,10 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 
 ### Skills, tools and MCP servers
 - **Skills** (agent header) lists an agent's skills and commands and installs Hermes skills.
-- **MCP servers:** add stdio or HTTP servers once in Settings, then choose which agents use them. Opaya passes them to Hermes over ACP and to Claude Code.
+- **MCP servers:** add the Opaya browser, GitHub, Context7, Playwright, Files, Fetch, Memory, Brave Search and more with one click (or any stdio or HTTP server by hand), then choose which agents use them. Opaya passes them to Hermes and other ACP agents per session, and writes them into the config of Claude Code, Codex and OpenClaw after you approve.
 - **Transfer to another agent** (right-click an agent):
   - **Skills:** all of them or only the ones you select. They work across Hermes, Claude Code, Codex and OpenClaw, local or remote.
-  - **Credentials:** all or selected API keys from a Hermes `.env`. The UI shows only key names, never values.
+  - **Credentials:** all or selected API keys, between any agents: each key goes where the other agent reads it (.env, Claude Code settings, Codex sign-in, OpenCode, an API connection's token). The UI shows only key names, never values.
   - **MCP servers** the agent uses, and optionally its saved gateway token.
 - **Skills library:** global skills kept by Opaya.
   - Add skills from any agent or from a folder.
@@ -80,7 +81,7 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 - Right-click a Hermes agent and choose **Clone**. You pick:
   - **What to copy:** Everything, Skills + personality (SOUL.md, USER.md), Skills, or Memory. You can also include API keys.
   - **Where:** this computer or any saved VPS.
-  - **How it runs:** as a Hermes profile or a Docker container.
+  - **How it runs:** as a Hermes profile, a Docker container, or a profile in a Docker container you already have (Hermes as a profile, OpenClaw as another agent of the same gateway, Claude Code, Codex or OpenCode with their own home).
 - A progress window shows the route, a live percentage, speed, time left, each step and a log. You can minimize it to the status bar.
 - **Redeploy** copies the same parts again with one click. Chat history and OAuth logins are never copied.
 
@@ -99,6 +100,7 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
   - agents: Hermes Agent, Claude Code, Codex, OpenClaw, OpenCode, Goose, Aider or Ollama;
   - dependencies: Node.js, Python, Git, uv, tmux, OpenSSH, Homebrew, or **All essentials**.
 - You see the exact vendor command first, and it runs in a terminal you can watch.
+- **Updates** use the way each tool was installed (Homebrew, npm under nvm, fnm or volta, npx, pnpm, bun, the vendor's updater, uv, pipx, winget, scoop or choco). Tick several and update them together; whatever fails, the Opaya Agent finishes.
 
 ### iTrust mode
 - Approves an agent's tool requests (commands, file edits and other actions) automatically.
@@ -124,7 +126,9 @@ It acts only through Opaya's own tools and terminals you can watch, and every ch
 - Official agent logos, an icon library or your own icon.
 - Dark and light themes.
 - System notifications while Opaya is not in front: an agent or the Opaya Agent replied, an approval is waiting or a long job finished. Click one to open that chat. Each kind can be turned off in Settings.
-- **Workspace** filters agents by status and place, and each card has Connect, Chat, Terminal, Manage and Fix. **Manage** in the sidebar opens every option for the selected agent.
+- **Workspace** filters agents by status and place, and each card has Connect, Chat, Terminal, Manage and Fix. **Manage** in the sidebar opens every option for the selected agent, with a row of all agents to switch between.
+- Hide or show the sidebar with the button next to the window buttons or **Cmd/Ctrl+B**.
+- **Files:** mention a file or folder in the chat or in a terminal on the same machine.
 - **Settings:** theme, Enter or Ctrl/Cmd+Enter to send, terminal text size and position, start Opaya when you sign in, connect agents at start, notifications, tips and keyboard shortcuts.
 - A **Connection log** for every agent.
 

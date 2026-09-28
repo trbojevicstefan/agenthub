@@ -1,3 +1,25 @@
+# Opaya 0.21.0 - Chat or terminal next to the window buttons, paste that works, updates that finish, keys and MCP for every agent
+
+- **Chat or terminal, next to the window buttons**: after the traffic lights on a Mac (left of minimize, maximize and close on Windows) there is a sidebar button and a two-icon switch. The first icon opens the selected agent as a chat, the second in its own terminal. They replace the Terminal, Chat and Open chat buttons in the middle of the top bar. Right-click the terminal icon for the CLI below the chat, a shell, or a terminal on this computer. From a project chat the CLI starts in the project's folder. Cmd+B / Ctrl+B hides or shows the sidebar, and Opaya remembers it.
+- **Paste in the terminal works**:
+  - A screenshot or copied image pastes as the path of a saved PNG, so Claude Code and Codex attach it.
+  - Files copied in Finder or Explorer paste as full, quoted paths instead of bare file names.
+  - In a terminal on an SSH machine or in a Docker container, pasted or dropped files are copied there first (up to 20 MB), and the terminal gets their paths there.
+  - Cmd+V / Ctrl+V also work with Cyrillic and other non-Latin keyboard layouts, and a paste that does nothing (empty clipboard, an error, an ended session) always says why.
+- **Updates that finish**:
+  - Opaya finds how each agent and tool is installed and updates that copy: Homebrew (formula or cask), npm under nvm, fnm, volta or Homebrew Node.js, npx, pnpm, bun, the vendor's own updater, uv, pipx, winget, scoop or choco. This fixes updates that "finished" on a Mac without changing anything.
+  - An npm folder that needs administrator rights says so and asks for your password in the terminal.
+  - Tick several tools in Updates and run them with one approval (Update selected). Each row shows how the tool is installed.
+  - If an update fails, or ends but the old version still runs, the Opaya Agent takes over and finishes every one of them.
+- **Clone into a Docker container you already have, as a profile**: Hermes as a Hermes profile, OpenClaw as another agent of the same gateway, Claude Code, Codex or OpenCode with their own home in an Opaya container. Deleting such a profile removes only its folder.
+- **Share API keys between any agents**, not only Hermes: Transfer shows where each key goes on the other agent (.env, Claude Code settings, Codex sign-in, OpenCode, an API connection's token). Values are never shown.
+- **MCP servers in one click**: add the Opaya browser, GitHub, Context7, Playwright, Files, Fetch, Memory, Brave Search and more with an Add button. A key goes into a masked field and is stored encrypted. Turning a server on for Claude Code on a machine or in a container, Codex or OpenClaw writes it into that agent's own config after you approve; turning it off takes it out.
+- **Every agent in view**:
+  - A collapsed sidebar section shows all of its agents as small icons, not only the selected one.
+  - Manage has a row with every agent to switch between them.
+  - Workspace filters count what each one would show with the other filters kept, and "Showing 3 of 5 agents" appears with Show all when filters hide some.
+- **Mention in terminal**: in Files, a file or folder can be mentioned in the chat or in a terminal on the same machine, and every row has a right-click menu (Preview, Mention in chat, Mention in terminal, Copy path).
+
 # Opaya 0.20.0 - Model, reasoning and files under every chat, secrets the Opaya Agent can take, and everything in view
 
 - **Model, reasoning effort and files under every chat**: the message box now has a model chip, a reasoning effort chip and a paperclip.
