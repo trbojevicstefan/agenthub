@@ -4,7 +4,7 @@
 
 Opaya is a local-first desktop app for your own AI agents: **Hermes, Claude Code, Codex, OpenClaw**, and any other CLI or OpenAI-compatible API. It works with agents on this computer, on your VPS machines over SSH, and in Docker containers. Chat with them, watch their terminals, give them a browser, and share skills and tools between them, all from one window. Opaya needs no hosted account, collects no telemetry and sends nothing through a third-party relay.
 
-**Current version: 0.18.1.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
+**Current version: 0.19.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
 
 ## Download
 
@@ -109,6 +109,8 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 The **Opaya Agent** at the top of the sidebar is a built-in assistant for Opaya itself:
 - It installs agents, connects and repairs them, manages machines and keys, and runs diagnostics when an agent hangs.
 - It keeps its own chat sessions, and offers a friendly tip now and then when something useful applies.
+- **Threads (0.19):** its chat stays a conversation. Work that changes something (installs, updates, fixes, connections) runs in a **thread**: a card in the chat that opens on the right with the task, a checklist of steps, how long it has been working, what it waits for, and a box to steer it. Tool calls are under **Details**. Several threads can work at once, and **Threads** lists them all.
+- **It fixes problems by itself:** when an agent does not connect, drops its connection, answers with an error, or a job or install fails, Opaya first runs the fix it knows (updates what is too old, starts a Hermes or OpenClaw gateway that is down, opens the first-time setup or sign-in an agent still needs) and then hands anything left to the Opaya Agent in a thread of its own. A setup guide that did not finish is picked up as soon as the Opaya Agent has a model. Turn it off in Settings > Agents and tools > **Fix problems automatically**.
 
 **Start free**: one click installs Ollama and a free open model (Qwen3 or Llama) on this computer and connects the Opaya Agent. No account, no key. If Ollama already runs with a model that can use tools, it connects by itself. Free tiers with an account are marked in Model settings: Ollama Cloud, OpenRouter `:free` models, Groq, Cerebras, Gemini and Mistral.
 

@@ -524,3 +524,29 @@
 :where(body[data-theme="light"]) .guide-plan.live li.error{border-color:#ca9191}
 :where(body[data-theme="light"]) .guide-plan.live li.error .guide-n{background:#debaba;border-color:#ca9191;color:#170707}
 :where(body[data-theme="light"]) .guide-callout{border:1px solid #d3c7a4;background:#efeadd;color:#3e3312}
+:where(body[data-theme="light"]) .threads-button.selected{color:#144526;background:#d4e0d9}
+:where(body[data-theme="light"]) .count-badge{background:#badeca;color:#0a2313}
+:where(body[data-theme="light"]) .thread-card{border:1px solid #d0d7d5;background:#e3e8e6}
+:where(body[data-theme="light"]) .thread-card:hover,:where(body[data-theme="light"]) .thread-card.current{background:#dce3e0;border-color:#bccac3}
+:where(body[data-theme="light"]) .thread-dot{background:#c8ced0}
+:where(body[data-theme="light"]) .thread-card.working .thread-dot,:where(body[data-theme="light"]) .thread-card.queued .thread-dot{background:#6fd49a}
+:where(body[data-theme="light"]) .thread-card.waiting .thread-dot{background:#e6c77a}
+:where(body[data-theme="light"]) .thread-card.done .thread-dot{background:#6fd49a}
+:where(body[data-theme="light"]) .thread-card.failed .thread-dot{background:#f28b82}
+:where(body[data-theme="light"]) .thread-card.waiting .thread-card-text small{color:#58461a}
+:where(body[data-theme="light"]) .thread-card.failed .thread-card-text small{color:#3c1611}
+:where(body[data-theme="light"]) .thread-auto{background:#e3e3d5;color:#58461a}
+:where(body[data-theme="light"]) .chat-notice-icon{color:#4d1b16}
+:where(body[data-theme="light"]) .chat-notice.info .chat-notice-icon{color:#58461a}
+:where(body[data-theme="light"]) .thread-msg.task,:where(body[data-theme="light"]) .thread-msg.user{background:#d8dedc;border:1px solid #d0d7d5}
+:where(body[data-theme="light"]) .thread-msg-label{color:#58461a}
+:where(body[data-theme="light"]) .thread-steps{border:1px solid #d0d7d5;background:#e5e9e8}
+:where(body[data-theme="light"]) .thread-steps li.failed{color:#3c1611}
+:where(body[data-theme="light"]) .step-mark{border:1.5px dashed #9aa5aa}
+:where(body[data-theme="light"]) .thread-steps li.done .step-mark{background:#6fd49a}
+:where(body[data-theme="light"]) .thread-steps li.done .step-mark::after{border:solid #e3e6e8}
+:where(body[data-theme="light"]) .thread-steps li.active .step-mark{border:1.5px solid #6fd49a}
+:where(body[data-theme="light"]) .thread-steps li.failed .step-mark{background:#f28b82}
+:where(body[data-theme="light"]) .thread-waiting{background:#e8e4d5;border:1px solid #dfd9bd;color:#403413}
+:where(body[data-theme="light"]) .thread-status.failed{color:#3c1611}
+:where(body[data-theme="light"]) .thread-compose{border:1px solid #ced5d3;background:#e4e8e7}

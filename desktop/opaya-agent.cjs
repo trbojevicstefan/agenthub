@@ -87,7 +87,8 @@ const APP_GUIDE=`Opaya app guide (tell the user where things are; you cannot cli
 - iTrust: Settings > iTrust mode for all agents or the Opaya Agent, or right-click an agent: its tool requests are approved automatically. For you, removals still ask.
 - Settings: theme (dark or light), iTrust, Updates, Skills library, MCP servers. Updates: Opaya checks GitHub releases, downloads with checksum verification and installs in place (Update in the status bar, then Install and restart).
 - Connection log (right-click an agent): protocol messages, stderr, running tools, pending approvals and Hermes log tail; your agent_diagnostics tool reads the same.
-- Your chats: New chat and earlier chats at the top of your panel; Model settings chooses your model and API key.`;
+- Your chats: New chat and earlier chats at the top of your panel; Model settings chooses your model and API key.
+- Your threads: work you do (installs, updates, fixes, connections) runs in threads: a card in your chat opens the thread on the right with its task, the checklist of steps, how long it has worked, what it waits for, your answers, Details (every tool call) and a box where the user can steer it; Stop ends one thread. The Threads button lists them all. Opaya starts a thread by itself (marked auto) when an agent does not connect, drops, answers with an error, or a job or install fails, after trying the fixes it knows: updating what is too old, starting a gateway that is down, opening an agent's first-time setup or sign-in.`;
 const fn=(name,description,properties={},required=[])=>({type:'function',function:{name,description,parameters:{type:'object',properties,required,additionalProperties:false}}});
 const TOOLS=[
   fn('get_workspace','Read all saved agent connections (with live status and last error), SSH machines and open terminals. Start here.'),
@@ -116,7 +117,7 @@ const TOOLS=[
   fn('install_skill','Install a Hermes skill with `hermes skills install` in a visible terminal. The user approves it first. Use hub ids such as official/security/1password or skills-sh/owner/repo/skill, or an https link to a SKILL.md.',{agent_id:{type:'string'},skill:{type:'string'}},['agent_id','skill']),
   fn('list_projects','Read-only: saved projects (a folder on this computer or a machine, and the agents that work in it). Use project_info with the folder for git state. The user runs git actions from the Projects panel.'),
   fn('list_mcp_servers','Read-only: MCP servers saved in Opaya and which agents use them. Values of environment variables and headers are never shown. The user adds or edits servers in Settings > MCP servers.'),
-  fn('agent_gateway','Status, start or restart of the gateway (API server) of a Hermes or OpenClaw agent. When such an agent does not connect because its gateway is not running or not answering: status first, then start (not running) or restart (running but stuck). Opaya reconnects the agent afterwards. Start and restart ask the user first.',{agent_id:{type:'string'},action:{type:'string',enum:['status','start','restart']}},['agent_id','action']),
+  fn('agent_gateway','Status, install, start or restart of the gateway (API server) of a Hermes or OpenClaw agent. When such an agent does not connect because its gateway is not installed, not running or not answering: status first, then install (the gateway service is not installed), start (not running) or restart (running but stuck). Opaya reconnects the agent after a start or restart. Everything but status asks the user first.',{agent_id:{type:'string'},action:{type:'string',enum:['status','install','start','restart']}},['agent_id','action']),
   fn('read_notes','Read your notes file in your home folder.'),
   fn('write_notes','Replace your notes file in your home folder (max 20000 characters). Use it to remember setup decisions.',{content:{type:'string'}},['content'])
 ];
@@ -163,7 +164,8 @@ class OpayaAgent{
     this.threads=(Array.isArray(threads)?threads:[]).filter(t=>t&&typeof t.id==='string').slice(-THREAD_KEEP).map(t=>({...t,inbox:[],waiting:'',...(['working','queued'].includes(t.status)?{status:'stopped',error:'Opaya was closed while this thread was working. Write in the thread to continue.'}:{})}));
   }
   saveThreads(){
-    const copy=structuredClone(this.threads.slice(-THREAD_KEEP).map(({inbox,runId,hold,...t})=>t));
+    // On disk a thread keeps its recent model history, with long tool results shortened.
+    const copy=structuredClone(this.threads.slice(-THREAD_KEEP).map(({inbox,runId,hold,history,...t})=>({...t,history:(history||[]).slice(-60).map(m=>m.role==='tool'?{...m,content:String(m.content).slice(0,4000)}:m)})));
     this.writes=this.writes.catch(()=>{}).then(()=>atomicJson(path.join(this.home,'threads.json'),copy));return this.writes.catch(()=>{});
   }
   saveIndex(){return atomicJson(path.join(this.home,'sessions.json'),{current:this.sessionId,sessions:this.sessions});}
@@ -192,8 +194,13 @@ class OpayaAgent{
   describe(){
     const shown=this.messages.filter(m=>m.role==='user'||m.summary).slice(-80).map(({id,role,content,activity,createdAt,error,threadId,level,title})=>({id,role,content:content||'',activity:activity||[],createdAt,error,threadId,level,title}));
     return {configured:this.configured(),config:this.config,hasKey:!this.cli()&&this.vault.has(KEY),presets:PRESETS,busy:this.busy,status:this.status,error:this.error,messages:shown,live:this.liveReply?{...this.liveReply}:null,
-      threads:this.threads.slice(-30).map(t=>this.threadView(t)),working:this.threads.filter(t=>t.runId).length,
+      threads:this.shownThreads().map(t=>this.threadView(t)),working:this.threads.filter(t=>t.runId).length,
       home:this.home,sessionId:this.sessionId,sessions:(this.sessions||[]).slice().reverse().map(({id,title,updatedAt})=>({id,title,updatedAt}))};
+  }
+  // The threads of the chat that is open, the most recent ones of other chats, and every one that works or waits.
+  shownThreads(){
+    const keep=new Set([...this.threads.filter(t=>t.sessionId===this.sessionId).slice(-40),...this.threads.slice(-20),...this.threads.filter(t=>t.runId||t.status==='queued')]);
+    return this.threads.filter(t=>keep.has(t));
   }
   threadView(t){
     const run=t.runId?this.runs.get(t.runId):null,active=t.steps.find(x=>x.state==='active');
@@ -275,7 +282,7 @@ class OpayaAgent{
       'Projects: list_projects shows saved project folders and their agents; chats started from a project open the agent in that folder. Git and GitHub CLI actions are in the Projects panel (right-click a project). '+
       'Skills: list_skills shows what an agent has; users run one with /name in its chat. Install Hermes skills with install_skill. MCP servers are added by the user in Settings > MCP servers (list_mcp_servers shows them); Opaya passes them to Hermes over ACP and to Claude Code. ',
       'When an agent hangs or does not answer, call agent_diagnostics first and explain what it shows: a pending approval, a tool that is still running, stderr errors or Hermes log errors. A Hermes log full of repeated "slack_bolt ... Session is closed" tracebacks is a known Hermes gateway bug in its Slack reconnect (NousResearch/hermes-agent#83662); it only affects the gateway and Slack, and restarting the Hermes gateway clears it. For agents that fail: read the connection and error, run diagnostics, check that the endpoint/port or executable exists, reconnect, and only then propose an edited connection. Do not remove connections unless asked.',
-      'When a Hermes or OpenClaw agent does not connect because its gateway is not running or not answering, use agent_gateway: status, then start or restart.',
+      'When a Hermes or OpenClaw agent does not connect because its gateway is not installed, not running or not answering, use agent_gateway: status, then install, start or restart.',
       ...where,
       run.kind==='chat'?'':INSTALL_PROCEDURE,
       'To understand a project or config, use list_directory, read_file and project_info (read-only).',
@@ -388,7 +395,7 @@ class OpayaAgent{
         run.reply={id:randomUUID(),role:'assistant',content:'',activity:[],createdAt:now()};run.status='Thinking...';
         if(this.cli()){const text=t.inbox.splice(0).join('\n\n');await (this.config.preset==='codex'?this.runCodex(run,text):this.runClaude(run,text));}
         else await this.loop(run,[{role:'system',content:this.system(run)},...recent(t.history,60)],t.history);
-        if(t.history.length>400)t.history.splice(0,t.history.length-400);
+        if(t.history.length>160)t.history.splice(0,t.history.length-160);
         if(run.reply.content)t.messages.push({id:run.reply.id,role:'assistant',content:run.reply.content,createdAt:now()});
       }
       t.status=run.controller.signal.aborted?'stopped':'done';t.summary=firstLine(t.messages.filter(m=>m.role==='assistant').at(-1)?.content)||t.summary;
@@ -439,7 +446,7 @@ class OpayaAgent{
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{for(const turn of [...this.codexTurns.values()])turn.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.18.1'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.19.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   // Codex runs the main chat and every thread as its own Codex thread; tool calls and events carry its id.
   async codexRequest(method,params){
@@ -673,9 +680,9 @@ class OpayaAgent{
       case 'read_notes':return {notes:await fs.readFile(path.join(this.home,'notes.md'),'utf8').catch(()=>'')};
       case 'write_notes':{const content=String(args.content??'');if(content.length>20000||content.includes('\0'))throw new Error('Notes must be under 20000 characters.');await fs.writeFile(path.join(this.home,'notes.md'),content,{mode:0o600});return {saved:true};}
       case 'agent_gateway':{
-        const a=b.agent(args.agent_id),op=String(args.action||'status');if(!['status','start','restart'].includes(op))throw new Error('Unknown gateway action.');
+        const a=b.agent(args.agent_id),op=String(args.action||'status');if(!['status','install','start','restart'].includes(op))throw new Error('Unknown gateway action.');
         if(!['hermes','openclaw'].includes(a.provider))throw new Error(`${a.name} has no gateway that Opaya manages.`);
-        if(op!=='status')await this.ask(`${op==='start'?'Start':'Restart'} the gateway of ${a.name}?`,`Runs "${a.provider} gateway ${op}" ${a.transport==='ssh'?'on '+b.host(a.hostId).name:'on this computer'}, then reconnects ${a.name}.`,{},run);
+        if(op!=='status')await this.ask(`${op[0].toUpperCase()+op.slice(1)} the gateway of ${a.name}?`,`Runs "${a.provider} gateway ${op}" ${a.transport==='ssh'?'on '+b.host(a.hostId).name:'on this computer'}, then reconnects ${a.name}.`,{},run);
         const r=await b.gatewayRun(a.id,op);return {...r,output:stripAnsi(r.output).slice(-3000),status:b.runtimeFor(a.id).status};
       }
       case 'start_thread':{

@@ -92,7 +92,7 @@
     render();
   }
   function render() {
-    queueMicrotask(()=>{ensureProjectsToggle();renderProjects();const sel=selected()?.id||'';if(historyOpen&&sel!==historyFollow&&historyAgent&&sel)historyAgent=sel;historyFollow=sel;renderHistory();});
+    queueMicrotask(()=>{ensureProjectsToggle();renderProjects();const sel=selected()?.id||'';if(historyOpen&&sel!==historyFollow&&historyAgent&&sel)historyAgent=sel;historyFollow=sel;renderHistory();renderThread();});
     $('#agent-count').textContent=state.agents.length;
     $('#host-count').textContent=state.hosts.length;
     $('.nav-overview').classList.toggle('selected',overview&&!opayaView&&!playgroundView);$('.nav-playground')?.classList.toggle('selected',playgroundView);$('.nav-opaya').classList.toggle('selected',opayaView);renderOpayaNav();
@@ -263,7 +263,7 @@
   }
   function openSettings(){
     const localCount=state.agents.filter(a=>a.transport!=='ssh').length,remoteCount=state.agents.filter(a=>a.transport==='ssh').length,dockerCount=state.agents.filter(isDocker).length;
-    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section class="settings-wide"><h3>Workspace style</h3><p class="settings-copy">How agents open when you select them. Each agent can differ: right-click it &gt; Open as chat / Open as terminal. API connections always chat.</p><div class="theme-options"><button class="theme-option ${(state.settings?.interface||'chat')==='chat'?'selected':''}" data-action="interface" data-value="chat"><span class="interface-preview chat mini" aria-hidden="true"><i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-input"></i></span><strong>Chat</strong><small>Conversations, history and projects</small></button><button class="theme-option ${state.settings?.interface==='terminal'?'selected':''}" data-action="interface" data-value="terminal"><span class="interface-preview terminal mini" aria-hidden="true"><i class="ip-line"></i><i class="ip-line w2"></i><i class="ip-cursor"></i></span><strong>Terminal</strong><small>Each agent's own CLI, full size</small></button></div></section><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section class="itrust-settings"><h3>iTrust mode</h3><p class="settings-copy">Approve tool requests automatically: commands, file edits and other actions agents ask permission for. Works for Hermes and other ACP agents, Codex and Claude Code. Turn it on only for agents you trust with this computer.</p><label class="switch-row"><input type="checkbox" data-setting="itrustAll" ${state.settings?.itrustAll?'checked':''}><span class="switch" aria-hidden="true"></span><span>All agents</span></label><label class="switch-row"><input type="checkbox" data-setting="itrustOpaya" ${state.settings?.itrustOpaya?'checked':''}><span class="switch" aria-hidden="true"></span><span>Opaya Agent <small>(removals still ask)</small></span></label><p class="field-help">Per agent: right-click an agent &gt; Turn on iTrust.</p></section><section><h3>Updates</h3><p class="settings-copy">Installed: Opaya ${esc(update.current||'')}. ${update.status==='available'?`Version ${esc(update.latest?.version||'')} is ready to download.`:'Opaya checks GitHub for new versions.'}</p><button class="secondary" data-action="updates">${update.status==='available'?'Update now':'Check for updates'}</button></section><section><h3>Agents and tools</h3><p class="settings-copy">Opaya checks your agents, CLIs and tools such as Node.js and Python on every machine once an hour and tells you when an update is out.</p><label class="switch-row"><input type="checkbox" data-setting="updateChecks" ${state.settings?.updateChecks!==false?'checked':''}><span class="switch" aria-hidden="true"></span><span>Check for updates every hour</span></label><label class="switch-row"><input type="checkbox" data-setting="autoFix" ${state.settings?.autoFix!==false?'checked':''}><span class="switch" aria-hidden="true"></span><span>Fix "version too old" errors automatically <small>(update, reconnect, then ask the Opaya Agent)</small></span></label><button class="secondary" data-action="tool-updates">See updates</button></section><section><h3>Skills library</h3><p class="settings-copy">Global skills kept by Opaya. Install them to any agent, local or on a VPS.</p><button class="secondary" data-action="library">Open skills library</button></section><section><h3>MCP servers</h3><p class="settings-copy">${(state.mcpServers||[]).length} saved. Tools such as GitHub, a browser or a database that Opaya passes to Hermes (ACP) and Claude Code.</p><button class="secondary" data-action="mcp-manage">Manage MCP servers</button></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
+    modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid"><section class="settings-wide"><h3>Workspace style</h3><p class="settings-copy">How agents open when you select them. Each agent can differ: right-click it &gt; Open as chat / Open as terminal. API connections always chat.</p><div class="theme-options"><button class="theme-option ${(state.settings?.interface||'chat')==='chat'?'selected':''}" data-action="interface" data-value="chat"><span class="interface-preview chat mini" aria-hidden="true"><i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-input"></i></span><strong>Chat</strong><small>Conversations, history and projects</small></button><button class="theme-option ${state.settings?.interface==='terminal'?'selected':''}" data-action="interface" data-value="terminal"><span class="interface-preview terminal mini" aria-hidden="true"><i class="ip-line"></i><i class="ip-line w2"></i><i class="ip-cursor"></i></span><strong>Terminal</strong><small>Each agent's own CLI, full size</small></button></div></section><section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section><section><h3>Agent badges</h3><p class="settings-copy">Provider marks identify Hermes, OpenClaw, Codex and Claude. Environment chips show Local, VPS and Docker at a glance.</p><div class="settings-badges">${Object.keys(labels).filter(k=>k!=='custom').map(provider=>badge({provider})).join('')}</div></section><section><h3>Workspace</h3><div class="settings-stats"><span>${localCount} local</span><span>${remoteCount} VPS</span><span>${dockerCount} Docker</span><span>${state.hosts.length} machines</span></div></section><section class="itrust-settings"><h3>iTrust mode</h3><p class="settings-copy">Approve tool requests automatically: commands, file edits and other actions agents ask permission for. Works for Hermes and other ACP agents, Codex and Claude Code. Turn it on only for agents you trust with this computer.</p><label class="switch-row"><input type="checkbox" data-setting="itrustAll" ${state.settings?.itrustAll?'checked':''}><span class="switch" aria-hidden="true"></span><span>All agents</span></label><label class="switch-row"><input type="checkbox" data-setting="itrustOpaya" ${state.settings?.itrustOpaya?'checked':''}><span class="switch" aria-hidden="true"></span><span>Opaya Agent <small>(removals still ask)</small></span></label><p class="field-help">Per agent: right-click an agent &gt; Turn on iTrust.</p></section><section><h3>Updates</h3><p class="settings-copy">Installed: Opaya ${esc(update.current||'')}. ${update.status==='available'?`Version ${esc(update.latest?.version||'')} is ready to download.`:'Opaya checks GitHub for new versions.'}</p><button class="secondary" data-action="updates">${update.status==='available'?'Update now':'Check for updates'}</button></section><section><h3>Agents and tools</h3><p class="settings-copy">Opaya checks your agents, CLIs and tools such as Node.js and Python on every machine once an hour and tells you when an update is out.</p><label class="switch-row"><input type="checkbox" data-setting="updateChecks" ${state.settings?.updateChecks!==false?'checked':''}><span class="switch" aria-hidden="true"></span><span>Check for updates every hour</span></label><label class="switch-row"><input type="checkbox" data-setting="autoFix" ${state.settings?.autoFix!==false?'checked':''}><span class="switch" aria-hidden="true"></span><span>Fix problems automatically <small>(update what is too old, start gateways, open unfinished setups, then hand the rest to the Opaya Agent in a thread)</small></span></label><button class="secondary" data-action="tool-updates">See updates</button></section><section><h3>Skills library</h3><p class="settings-copy">Global skills kept by Opaya. Install them to any agent, local or on a VPS.</p><button class="secondary" data-action="library">Open skills library</button></section><section><h3>MCP servers</h3><p class="settings-copy">${(state.mcpServers||[]).length} saved. Tools such as GitHub, a browser or a database that Opaya passes to Hermes (ACP) and Claude Code.</p><button class="secondary" data-action="mcp-manage">Manage MCP servers</button></section><section><h3>Terminal restore</h3><p class="settings-copy">Closed terminals now reopen as read-only saved output. Use New shell when you want a live prompt again.</p></section></div>`,true);
   }
   function switcher(){
     modal('Jump to an agent.','Search by name, provider or machine.',`<input id="switcher-search" class="switcher-search" placeholder="Search agents..." aria-label="Search agents"><div id="switcher-list"></div>`);
@@ -471,6 +471,8 @@
     if(name==='mcp-manage'){openMcpManager();return;}
     if(name==='library'){openLibrary();return;}
     if(name==='history-toggle'){toggleHistory();return;}
+    if(name==='threads'){if(threadPanel.open&&threadPanel.list)closeThreadPanel();else openThreads();return;}
+    if(name==='thread-open'){openThread(id);return;}
     if(name==='transfer'){const a=state.agents.find(x=>x.id===button.dataset.id);if(a)openTransfer(a);return;}
     if(name==='playground'){overview=false;opayaView=false;playgroundView=true;closeModal();render();saveView();$('#message-input')?.focus();return;}
     if(name==='pg-swap'){pgAgents.reverse();render();return;}
@@ -884,7 +886,7 @@
   const opayaModelLabel=o=>o.config?.model||o.presets?.[o.config?.preset]?.label||'Ready';
   let opayaDraft='',opayaSeen=new Map(),opayaCount=-1;
   function renderOpayaNav(){
-    const o=opaya(),label=o.busy?'Working...':o.configured?opayaModelLabel(o):'Set up';document.body.classList.toggle('opaya-busy',!!o.busy);
+    const o=opaya(),label=o.busy?'Working...':o.working?`${o.working} thread${o.working===1?'':'s'} working`:o.configured?opayaModelLabel(o):'Set up';document.body.classList.toggle('opaya-busy',!!(o.busy||o.working));
     const el=$('#opaya-nav-status');if(el&&el.textContent!==label)el.textContent=label;
     $('.nav-opaya')?.classList.toggle('busy',!!o.busy);
   }
@@ -952,7 +954,7 @@
     const steps=`<ol class="guide-plan live">${j.steps.map((s,i)=>`<li class="${s.state||'pending'}"><span class="guide-n">${s.state==='done'?'&#10003;':s.state==='error'?'!':i+1}</span><div><strong>${esc(s.label)}</strong>${s.state==='active'?`<small>${esc((j.log||[]).filter(l=>l.text).at(-1)?.text||'Working...')}</small>`:''}</div>${s.state==='active'?'<span class="status-dot working"></span>':''}</li>`).join('')}</ol>`;
     if(j.status==='running')return `${warn?`<div class="guide-callout">&#9888; ${esc(last.text)}</div>`:''}${steps}<p class="field-help">You can watch every step in the <strong>Opaya setup</strong> terminal below.</p>`;
     if(j.status==='error')return `${steps}<div class="inline-notice error-notice">${esc(j.error)}</div><div class="guide-actions"><button type="button" class="primary" data-guide="start">Try again</button>${opaya().configured?'<button type="button" class="secondary" data-guide="ask-fix">Ask the Opaya Agent to fix it</button>':''}<button type="button" class="secondary" data-guide="script">Continue without AI</button></div>`;
-    if(j.result?.handoff)return `${steps}<p><strong>I have a brain now.</strong> The Opaya Agent is finishing the setup: installing the rest, checking versions and fixing problems. Follow along below.</p><div class="guide-actions"><button type="button" class="primary" data-guide="close">Watch the Opaya Agent</button></div>`;
+    if(j.result?.handoff)return `${steps}<p><strong>I have a brain now.</strong> The Opaya Agent is finishing the setup in a thread: installing the rest, checking versions and fixing problems.</p><div class="guide-actions"><button type="button" class="primary" data-guide="watch" data-value="${esc(j.result.threadId||'')}">Watch the Opaya Agent</button></div>`;
     return `${steps}<p><strong>Your computer is ready.</strong>${opaya().configured?'':' When you get an AI account or key, come back here to connect it.'}</p><div class="guide-actions"><button type="button" class="primary" data-guide="projects">Start a project</button>${state.agents.length?`<button type="button" class="secondary" data-guide="chat">Chat with ${esc(title(state.agents[0]))}</button>`:''}<button type="button" class="secondary" data-guide="close">Close the guide</button></div>`;
   }
   function guideHtml(){
@@ -1007,6 +1009,7 @@
     else if(act==='ask-fix'){const j=jobs.get(g.jobId);closeGuide();action(()=>api.opayaSend({text:`The setup guide stopped with this problem: ${j?.error||'unknown'}. Look at the "Opaya setup" terminal, find out what went wrong and fix it, then finish the setup. Explain simply.`}));return;}
     else if(act==='back'){g.step=b.dataset.to==='way'?'way':b.dataset.to;if(b.dataset.to==='way'){g.way='';g.answers={};}g.plan=null;}
     else if(act==='close'){closeGuide();return;}
+    else if(act==='watch'){closeGuide();if(v)openThread(v);return;}
     else if(act==='projects'){closeGuide();toggleProjects(true);openProjectForm();return;}
     else if(act==='chat'){const a=state.agents[0];closeGuide();if(a)action(()=>selectAgent(a.id));return;}
     renderOpaya();
@@ -1024,7 +1027,7 @@
   }
   function renderOpaya(){
     const o=opaya(),entering=renderKey!=='opaya';
-    $('#topbar').innerHTML=`<div class="breadcrumb">Opaya <span>/</span> <strong>Opaya Agent</strong></div><div class="topbar-actions"><button type="button" class="itrust-toggle ${state.settings?.itrustOpaya?'on':''}" data-action="opaya-itrust" title="iTrust: let the Opaya Agent act without asking each time (removals still ask)"><span class="itrust-switch" aria-hidden="true"></span>iTrust</button>${o.configured?`<span class="status-pill ${o.busy?'connecting':'connected'}">${o.busy?'<span class="status-dot working"></span>Working':'<span class="status-dot connected"></span>'+esc(opayaModelLabel(o))}</span>`:''}<button class="subtle" data-action="files-local" title="Browse folders on this computer"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="install-catalog" title="Install agent frameworks locally or on a machine"><span class="install-glyph">&#8595;</span> Install agents</button><button class="subtle" data-action="guide-open" title="Step-by-step setup of this computer">Setup guide</button><button class="secondary" data-action="opaya-config" title="Choose the model the Opaya Agent uses">Model settings</button></div>`;
+    $('#topbar').innerHTML=`<div class="breadcrumb">Opaya <span>/</span> <strong>Opaya Agent</strong></div><div class="topbar-actions"><button type="button" class="itrust-toggle ${state.settings?.itrustOpaya?'on':''}" data-action="opaya-itrust" title="iTrust: let the Opaya Agent act without asking each time (removals still ask)"><span class="itrust-switch" aria-hidden="true"></span>iTrust</button>${o.configured?`<span class="status-pill ${o.busy?'connecting':'connected'}">${o.busy?'<span class="status-dot working"></span>Working':'<span class="status-dot connected"></span>'+esc(opayaModelLabel(o))}</span>`:''}<button class="subtle tb-optional" data-action="files-local" title="Browse folders on this computer"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="install-catalog" title="Install agent frameworks locally or on a machine"><span class="install-glyph">&#8595;</span> Install agents</button><button class="subtle tb-optional" data-action="guide-open" title="Step-by-step setup of this computer">Setup guide</button><button class="subtle threads-button ${threadPanel.open?'selected':''}" data-action="threads" title="Work the Opaya Agent does in threads beside the chat"><span class="thread-glyph" aria-hidden="true"></span> Threads${o.working?` <span class="count-badge">${o.working}</span>`:''}</button><button class="secondary" data-action="opaya-config" title="Choose the model the Opaya Agent uses">Model settings</button></div>`;
     contentKind('conversation opaya-view');
     if(entering){
       $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity"><span class="agent-avatar large opaya-avatar"><span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""><i></i></span></span><div><h1>Opaya Agent</h1><p>Installs, connects, maintains and troubleshoots your agents and machines.</p><div class="identity-meta"><span class="agent-meta"><span class="meta-icon local-mark" aria-hidden="true"></span><span>Lives in Opaya's home folder</span><span class="meta-divider">/</span><span>Changes only with your approval</span></span></div></div></div><div class="conversation-controls"><select id="opaya-sessions" aria-label="Opaya Agent chats" title="Earlier chats with the Opaya Agent"></select><button class="icon-button" data-action="opaya-new" title="New chat" aria-label="New chat">+</button><button class="icon-button" data-action="opaya-delete-session" title="Delete this chat" aria-label="Delete this chat">&#10005;</button></div></div><div id="opaya-banner"></div><div id="opaya-messages" class="message-list"></div><div class="compose-area"><form id="message-form" class="opaya-form"><textarea id="message-input" class="opaya-input" rows="2" maxlength="80000" aria-label="Message the Opaya Agent" placeholder="Ask the Opaya Agent to install, connect or fix an agent..."></textarea><div class="compose-bottom"><div><span class="compose-provider">Opaya Agent</span><span id="compose-hint"></span></div><button type="button" id="opaya-stop" class="stop-button" data-action="opaya-stop" hidden><span>&#9632;</span> Stop</button><button id="opaya-send" type="submit" class="send-button" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption">Every change and command asks for your approval <span>&#183;</span> It never sees your API tokens <span>&#183;</span> It cannot modify the app itself</p></div>`;
@@ -1043,7 +1046,8 @@
       if(!guide)startGuide();
       $('#opaya-banner').innerHTML='';const list=$('#opaya-messages'),html=guideHtml();
       if(list.dataset.guide!==html){const keep=list.querySelector('[name="apiKey"]')?.value||'',atEnd=list.scrollHeight-list.scrollTop-list.clientHeight<140;list.innerHTML=html;list.dataset.guide=html;const k=list.querySelector('[name="apiKey"]');if(k&&keep)k.value=keep;if(atEnd||entering)list.scrollTop=list.scrollHeight;}
-      const send=$('#opaya-send');send.disabled=true;$('#opaya-stop').hidden=true;$('#message-input').disabled=true;$('#compose-hint').textContent=o.configured?'The setup guide is running. Close it to chat.':'Chat opens when the Opaya Agent has a model: the guide gets you one.';
+      // The message box always takes typing: sending closes the guide (or asks for a model first).
+      const send=$('#opaya-send');send.disabled=false;send.hidden=false;$('#opaya-stop').hidden=true;$('#message-input').disabled=false;$('#compose-hint').textContent=o.configured?'Sending a message closes the setup guide.':'Chat needs a model for the Opaya Agent: the guide gets you one.';
       return;
     }
     $('#opaya-messages').dataset.guide='';
@@ -1051,16 +1055,99 @@
     const list=$('#opaya-messages'),atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<110,now=performance.now();
     if(opayaCount<0)o.messages.forEach(m=>opayaSeen.set(m.id,-1e9));opayaCount=o.messages.length;
     const live=o.live||{content:'',activity:[],status:'streaming'};live.status='streaming';
-    const busyRow=o.busy?`<article class="message assistant-message"><div class="message-avatar opaya-avatar"><span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""><i></i></span></div><div class="message-body"><div class="message-meta"><strong>Opaya Agent</strong><span class="stream-label"><span class="status-dot working"></span> ${esc(o.status||'Working')}</span></div>${activityMarkup(live)}<div class="message-text">${format(live.content)}${!live.content?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}</div></div></article>`:'';
-    list.innerHTML=o.messages.length||o.busy?o.messages.map(m=>`<article class="message ${m.role==='user'?'user-message':'assistant-message'} ${fresh(opayaSeen,m.id,now,450)?'message-enter':''}"><div class="message-avatar ${m.role==='user'?'you-avatar':'opaya-avatar'}">${m.role==='user'?'S':'<span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""></span>'}</div><div class="message-body"><div class="message-meta"><strong>${m.role==='user'?'You':'Opaya Agent'}</strong><time>${esc(new Date(m.createdAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}</time></div>${activityMarkup(m)}<div class="message-text">${format(m.content)}</div>${m.error?`<div class="message-error">${esc(m.error)}</div>`:''}</div></article>`).join('')+busyRow:o.configured?`<div class="chat-empty"><span class="agent-avatar large opaya-avatar"><span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""><i></i></span></span><h2>How can I help with your agents?</h2><p>I can install frameworks, connect agents, manage machines and SSH keys, and find out why an agent is not working.</p><div class="starter-prompts">${OPAYA_STARTERS.map(([label,text])=>`<button data-action="opaya-starter" data-text="${esc(text)}">${esc(label)} <span>&#8599;</span></button>`).join('')}</div></div>`:'';
+    // The chat is a conversation: messages and answers, the threads it started as cards, and notices. Tool calls and
+    // logs stay in the threads.
+    const busyRow=o.busy?`<article class="message assistant-message"><div class="message-avatar opaya-avatar"><span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""><i></i></span></div><div class="message-body"><div class="message-meta"><strong>Opaya Agent</strong><span class="stream-label"><span class="status-dot working"></span> Thinking</span></div><div class="message-text">${format(live.content)}${!live.content?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}</div></div></article>`:'';
+    const threads=new Map((o.threads||[]).map(t=>[t.id,t]));
+    const item=m=>{const enter=fresh(opayaSeen,m.id,now,450)?'message-enter':'';
+      if(m.role==='thread')return threadCard(threads.get(m.threadId),m.threadId,enter);
+      if(m.role==='notice')return `<div class="chat-notice ${esc(m.level||'error')} ${enter}"${m.threadId?` data-action="thread-open" data-id="${esc(m.threadId)}" role="button" tabindex="0"`:''}><span class="chat-notice-icon" aria-hidden="true">&#9888;</span><div><strong>${esc(m.title||'Something went wrong')}</strong>${m.content?`<p>${esc(m.content)}</p>`:''}</div></div>`;
+      return `<article class="message ${m.role==='user'?'user-message':'assistant-message'} ${enter}"><div class="message-avatar ${m.role==='user'?'you-avatar':'opaya-avatar'}">${m.role==='user'?'S':'<span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""></span>'}</div><div class="message-body"><div class="message-meta"><strong>${m.role==='user'?'You':'Opaya Agent'}</strong><time>${esc(new Date(m.createdAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}</time></div><div class="message-text">${format(m.content)}</div>${m.error?`<div class="message-error">${esc(m.error)}</div>`:''}</div></article>`;};
+    list.innerHTML=o.messages.length||o.busy?o.messages.map(item).join('')+busyRow:o.configured?`<div class="chat-empty"><span class="agent-avatar large opaya-avatar"><span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""><i></i></span></span><h2>How can I help with your agents?</h2><p>I can install frameworks, connect agents, manage machines and SSH keys, and find out why an agent is not working.</p><div class="starter-prompts">${OPAYA_STARTERS.map(([label,text])=>`<button data-action="opaya-starter" data-text="${esc(text)}">${esc(label)} <span>&#8599;</span></button>`).join('')}</div></div>`:'';
     if(atBottom||o.busy)list.scrollTop=list.scrollHeight;
-    const send=$('#opaya-send');send.disabled=!o.configured||o.busy;send.hidden=!!o.busy;$('#opaya-stop').hidden=!o.busy;$('#message-input').disabled=!o.configured;
-    $('#compose-hint').textContent=o.busy?(o.status||'Working'):o.configured?`${o.presets?.[o.config.preset]?.label||'Model'}${o.config.model?' / '+o.config.model:''}`:'Connect a model to start';
+    const send=$('#opaya-send');send.disabled=!!o.busy;send.hidden=!!o.busy;$('#opaya-stop').hidden=!o.busy;$('#message-input').disabled=false;
+    $('#compose-hint').textContent=o.busy?'Thinking':o.configured?`${o.presets?.[o.config.preset]?.label||'Model'}${o.config.model?' / '+o.config.model:''}`:'Connect a model to start';
   }
   async function sendOpaya(){
     const input=$('#message-input'),text=input?.value.trim();if(!text||opaya().busy)return;
-    await action(async()=>{await api.opayaSend({text});opayaDraft='';input.value='';input.style.height='auto';});
+    if(!opaya().configured){toast('Connect a model for the Opaya Agent first: Start free, or Model settings.');openOpayaConfig();return;}
+    if(guide)closeGuide();
+    await action(async()=>{await api.opayaSend({text});opayaDraft='';const box=$('#message-input');if(box){box.value='';box.style.height='auto';}});
   }
+  // ---- Opaya Agent threads: work beside the chat ------------------------------------------------------------------
+  // Each thread is a card in the chat and opens in the panel on the right: its task, the checklist of steps, how long it
+  // has been working, what it waits for, its answers, and a box to steer it. Tool calls are under Details.
+  const threadPanel={open:false,list:false,id:'',html:'',compose:''};
+  const THREAD_STATUS={queued:'Waiting to start',working:'Working',done:'Done',failed:'Failed',stopped:'Stopped'};
+  const threadOf=id=>(opaya().threads||[]).find(t=>t.id===id);
+  function elapsed(from,to){const s=Math.max(0,Math.round(((to?new Date(to).getTime():Date.now())-new Date(from).getTime())/1000));if(!Number.isFinite(s))return '';const h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h?`${h}h ${m}m`:m?`${m}m ${s%60}s`:`${s}s`;}
+  const threadState=t=>t.waiting&&t.status==='working'?'waiting':t.status;
+  function threadCard(t,id,enter=''){
+    if(!t)return `<div class="thread-card gone ${enter}"><span class="thread-dot" aria-hidden="true"></span><span class="thread-card-text"><strong>Thread</strong><small>No longer kept.</small></span></div>`;
+    const done=t.steps.filter(x=>x.state==='done').length,st=threadState(t),live=t.status==='working';
+    const meta=[t.steps.length?`${done}/${t.steps.length} steps`:'',live?`<time data-since="${esc(t.turnStartedAt||t.startedAt)}">${esc(elapsed(t.turnStartedAt||t.startedAt))}</time>`:t.finishedAt&&t.startedAt?esc(elapsed(t.startedAt,t.finishedAt)):''].filter(Boolean).join(' <span aria-hidden="true">&#183;</span> ');
+    return `<button type="button" class="thread-card ${esc(st)} ${threadPanel.open&&threadPanel.id===t.id?'current':''} ${enter}" data-action="thread-open" data-id="${esc(id)}" title="Open this thread"><span class="thread-dot" aria-hidden="true"></span><span class="thread-card-text"><strong>${esc(t.title)}</strong><small>${esc(t.waiting&&live?t.waiting:t.summary||t.error||THREAD_STATUS[t.status]||'')}</small></span><span class="thread-card-meta">${t.origin==='auto'?'<em class="thread-auto">auto</em>':''}${meta}</span></button>`;
+  }
+  function openThread(id){if(!id)return;threadPanel.open=true;threadPanel.list=false;if(threadPanel.id!==id){threadPanel.id=id;threadPanel.html='';threadPanel.compose='';}closeOtherPanels();renderThread(true);}
+  function openThreads(){threadPanel.open=true;threadPanel.list=true;threadPanel.html='';closeOtherPanels();renderThread(true);}
+  function closeThreadPanel(){if(!threadPanel.open)return;threadPanel.open=false;threadPanel.html='';renderThread();}
+  function closeOtherPanels(){if(historyOpen){historyOpen=false;renderHistory();}if(projectsOpen){projectsOpen=false;renderProjects();saveProjectsView();}}
+  function renderThread(force=false){
+    const box=$('#thread-panel');if(!box)return;
+    box.hidden=!threadPanel.open;document.body.classList.toggle('thread-panel-open',threadPanel.open);
+    for(const b of document.querySelectorAll('[data-action="threads"]'))b.classList.toggle('selected',threadPanel.open);
+    for(const c of document.querySelectorAll('.thread-card[data-id]'))c.classList.toggle('current',threadPanel.open&&!threadPanel.list&&c.dataset.id===threadPanel.id);
+    if(!threadPanel.open){box.innerHTML='';return;}
+    const o=opaya(),all=(o.threads||[]).slice().reverse();
+    if(threadPanel.list){
+      const html=`<div class="projects-header"><strong>Threads</strong><small>${o.working?`${o.working} working`:all.length?`${all.length}`:''}</small><span class="spacer"></span><button type="button" class="term-icon" data-thread="close" title="Close" aria-label="Close threads">&#10005;</button></div>
+        <div class="projects-list thread-list">${all.length?all.map(t=>`<div class="thread-row">${threadCard(t,t.id)}${t.status!=='working'&&t.status!=='queued'?`<button type="button" class="term-icon danger" data-thread="remove" data-id="${esc(t.id)}" title="Delete this thread" aria-label="Delete this thread">&#10005;</button>`:''}</div>`).join(''):'<p class="field-help thread-empty">When the Opaya Agent installs, connects or fixes something, the work runs in a thread you can watch here. Opaya also starts one by itself when an agent stops working.</p>'}</div>`;
+      if(force||html.replace(/<time data-since="[^"]*">[^<]*<\/time>/g,'')!==threadPanel.html.replace(/<time data-since="[^"]*">[^<]*<\/time>/g,'')){box.innerHTML=html;threadPanel.html=html;}
+      return;
+    }
+    const t=threadOf(threadPanel.id);
+    if(!t){box.innerHTML=`<div class="projects-header"><button type="button" class="text-button" data-thread="list">Threads</button><span class="spacer"></span><button type="button" class="term-icon" data-thread="close" aria-label="Close">&#10005;</button></div><p class="field-help thread-empty">This thread is no longer kept.</p>`;threadPanel.html='';return;}
+    const live=t.status==='working',queued=t.status==='queued';
+    const bubble=m=>m.role==='assistant'?`<article class="thread-msg assistant"><div class="message-text">${format(m.content)}</div></article>`:`<article class="thread-msg ${m.role==='task'?'task':'user'}">${m.role==='task'&&t.origin!=='chat'?`<span class="thread-msg-label">${t.origin==='auto'?'Opaya found a problem':'From the setup guide'}</span>`:''}<div class="message-text">${esc(m.content)}</div></article>`;
+    const steps=t.steps.length?`<ol class="thread-steps">${t.steps.map(x=>`<li class="${esc(x.state)}"><span class="step-mark" aria-hidden="true"></span><span>${esc(x.text)}</span></li>`).join('')}</ol>`:'';
+    const status=live?`<div class="thread-status working"><span class="thinking-dots"><i></i><i></i><i></i></span> Opaya Agent is working <time data-since="${esc(t.turnStartedAt||t.startedAt)}">${esc(elapsed(t.turnStartedAt||t.startedAt))}</time></div>`
+      :queued?'<div class="thread-status"><span class="status-dot"></span> Waiting to start</div>'
+      :`<div class="thread-status ${esc(t.status)}"><span class="status-dot ${t.status==='done'?'connected':t.status==='failed'?'error':''}"></span> ${esc(THREAD_STATUS[t.status]||t.status)}${t.startedAt&&t.finishedAt?` in ${esc(elapsed(t.startedAt,t.finishedAt))}`:''}</div>`;
+    const html=`<div class="projects-header thread-head"><button type="button" class="text-button thread-crumb" data-thread="list">Threads</button><span class="thread-sep" aria-hidden="true">&#8250;</span><strong title="${esc(t.title)}">${esc(t.title)}</strong><span class="spacer"></span>${live||queued?`<button type="button" class="term-icon danger" data-thread="stop" title="Stop this thread" aria-label="Stop this thread"><span class="term-stop-glyph" aria-hidden="true"></span></button>`:''}<button type="button" class="term-icon" data-thread="close" title="Close" aria-label="Close thread">&#10005;</button></div>
+      <div class="thread-body" id="thread-body">${t.messages.map(bubble).join('')}${steps}
+        ${live&&t.live?.content?`<article class="thread-msg assistant live"><div class="message-text">${format(t.live.content)}</div></article>`:''}
+        ${t.waiting&&live?`<div class="thread-waiting"><span aria-hidden="true">&#9888;</span> ${esc(t.waiting)}</div>`:''}
+        ${t.error&&!live?`<div class="message-error">${esc(t.error)}</div>`:''}
+        ${status}
+        ${t.activity.length?`<details class="thread-log" ${threadPanel.log?'open':''}><summary>Details <small>${t.activity.length}</small></summary><ol>${t.activity.map(a=>`<li><time>${esc(new Date(a.at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}))}</time> ${esc(a.text)}</li>`).join('')}</ol></details>`:''}
+      </div>
+      <form class="thread-compose" id="thread-form"><textarea id="thread-input" rows="1" maxlength="80000" placeholder="${live?'Steer this thread...':'Write to continue this thread...'}" aria-label="Message this thread"></textarea><button type="submit" class="send-button" aria-label="Send to this thread">&#8593;</button></form>`;
+    // Working times tick on their own (see below): they do not count as a change.
+    const same=x=>String(x).replace(/<time data-since="[^"]*">[^<]*<\/time>/g,'');
+    if(!force&&same(html)===same(threadPanel.html))return;
+    const body=$('#thread-body'),atEnd=!body||body.scrollHeight-body.scrollTop-body.clientHeight<120,input=$('#thread-input'),typing=document.activeElement===input,text=input?.value??threadPanel.compose,at=input?.selectionStart;
+    box.innerHTML=html;threadPanel.html=html;
+    const nb=$('#thread-body');if(atEnd||force)nb.scrollTop=nb.scrollHeight;
+    const ni=$('#thread-input');ni.value=text||'';if(typing){ni.focus();if(at!=null)ni.setSelectionRange(at,at);}
+    ni.addEventListener('input',()=>{threadPanel.compose=ni.value;ni.style.height='auto';ni.style.height=Math.min(ni.scrollHeight,160)+'px';});
+    ni.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();sendThread();}});
+    $('#thread-form').addEventListener('submit',e=>{e.preventDefault();sendThread();});
+    $('.thread-log')?.addEventListener('toggle',e=>{threadPanel.log=e.target.open;});
+  }
+  async function sendThread(){
+    const input=$('#thread-input'),text=input?.value.trim(),id=threadPanel.id;if(!text||!id)return;
+    await action(async()=>{await api.opayaThreadSend({id,text});threadPanel.compose='';const box=$('#thread-input');if(box){box.value='';box.style.height='auto';}});
+  }
+  $('#thread-panel').addEventListener('click',event=>{
+    const b=event.target.closest('[data-thread]');if(!b)return;const act=b.dataset.thread;
+    if(act==='close'){closeThreadPanel();return;}
+    if(act==='list'){openThreads();return;}
+    if(act==='stop'){action(()=>api.opayaThreadStop({id:threadPanel.id}));return;}
+    if(act==='remove'){action(async()=>{if(!await ask('Delete this thread?\n\nIts card leaves the chat too.',{ok:'Delete',danger:true}))return;await api.opayaThreadRemove({id:b.dataset.id});});}
+  });
+  document.addEventListener('keydown',event=>{if(event.key==='Enter'&&event.target.matches?.('.chat-notice[data-action="thread-open"]')){event.preventDefault();openThread(event.target.dataset.id);}});
+  // Working times tick every second without redrawing anything else.
+  setInterval(()=>{for(const el of document.querySelectorAll('time[data-since]'))el.textContent=elapsed(el.dataset.since);},1000);
   // Free local model: one click installs Ollama (if needed) and a small open model, then connects the Opaya Agent.
   async function openFreeModel(){
     let info;try{info=await api.opayaFreeModels();}catch(error){toast(error.message,true);return;}
@@ -1111,7 +1198,7 @@
     card.addEventListener('click',e=>{const b=e.target.closest('[data-notice]');if(!b)return;const act=b.dataset.notice;
       if(act==='copy'){action(()=>api.clipboardWrite({text:`${n.title}\n\n${n.text}`}));toast('Error copied.');return;}
       if(act==='log')openDiagnostics(n.agentId);
-      if(act==='opaya'){overview=false;playgroundView=false;opayaView=true;render();saveView();}
+      if(act==='opaya'){overview=false;playgroundView=false;opayaView=true;render();saveView();if(n.threadId)openThread(n.threadId);}
       card.classList.add('leaving');setTimeout(()=>card.remove(),220);});
     document.body.append(card);
   });
@@ -1492,7 +1579,7 @@
   const fitsProject=(a,p)=>!!(p.remotes||[]).some(r=>r.agentId===a.id)||fitsHere(a,p);
   const ago=iso=>{const s=Math.max(0,(Date.now()-new Date(iso).getTime())/1000);return s<60?'now':s<3600?`${Math.floor(s/60)}m`:s<86400?`${Math.floor(s/3600)}h`:s<604800?`${Math.floor(s/86400)}d`:new Date(iso).toLocaleDateString([],{month:'short',day:'numeric'});};
   const saveProjectsView=()=>saveView();
-  function toggleProjects(force){projectsOpen=force??!projectsOpen;if(projectsOpen&&historyOpen){historyOpen=false;renderHistory();}renderProjects();saveProjectsView();if(projectsOpen)refreshProjectGit();}
+  function toggleProjects(force){projectsOpen=force??!projectsOpen;if(projectsOpen&&historyOpen){historyOpen=false;renderHistory();}if(projectsOpen)closeThreadPanel();renderProjects();saveProjectsView();if(projectsOpen)refreshProjectGit();}
   async function loadProjectGit(p){
     const entry=projectGit.get(p.id)||{};if(entry.loading)return;entry.loading=true;projectGit.set(p.id,entry);
     try{const info=await api.projectInfo({id:p.id});projectGit.set(p.id,{info,at:Date.now()});}catch(error){projectGit.set(p.id,{error:error.message,at:Date.now()});}
@@ -1539,7 +1626,7 @@
   const chatLabel=c=>{const p=projectOf(c);return p?`[${p.name}] ${c.title}`:chatKind(c)==='playground'?c.title:c.title;};
   function toggleHistory(force,agentId){
     historyOpen=force??!historyOpen;
-    if(historyOpen){historyAgent=agentId??selected()?.id??'';historyFollow=selected()?.id||'';if(projectsOpen){projectsOpen=false;renderProjects();saveProjectsView();}}
+    if(historyOpen){historyAgent=agentId??selected()?.id??'';historyFollow=selected()?.id||'';if(projectsOpen){projectsOpen=false;renderProjects();saveProjectsView();}closeThreadPanel();}
     historyHtml='';renderHistory();
   }
   function renderHistory(){

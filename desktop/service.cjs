@@ -209,7 +209,7 @@ async function start({app, safeStorage}, root) {
   // fix it knows (update what is too old, start a gateway that is down, open the setup or sign-in an agent still
   // needs), then hands whatever is left to the Opaya Agent in a thread of its own, which the user can watch. Without a
   // model the user gets the error and what to do. One automatic fix per agent and problem every 30 minutes, so a fix
-  // that fails never loops. Settings > Agents and tools > automatic fixes turns all of it off.
+  // that fails never loops. Settings > Agents and tools > Fix problems automatically turns all of it off.
   const fixing=new Map(),inFlight=new Map();
   const autoFixOn=()=>broker.data.settings?.autoFix!==false;
   function once(key){if(fixing.has(key)&&Date.now()-fixing.get(key)<30*60*1000)return false;fixing.set(key,Date.now());return true;}
@@ -256,14 +256,16 @@ async function start({app, safeStorage}, root) {
     try{await broker.connect(a.id,{quiet:true});notice({level:'done',kind:'fixed',title:`${a.name} is updated and connected`,text:c.title||'',agentId:a.id});}
     catch(e){hand(`Opaya updated it (${c.title||'update'}), but it still does not connect: ${safeError(e)}.`);}
   }
-  // A Hermes or OpenClaw gateway that does not answer: check it, start it and reconnect.
+  // A Hermes or OpenClaw gateway that does not answer: check it, install its service when it has none, start it and
+  // reconnect.
   async function fixGateway(a,error,hand){
-    notice({level:'info',kind:'fixing',title:`Starting the gateway of ${a.name}`,text:`${a.name} did not answer (${String(error).slice(0,160)}). Opaya starts its gateway and reconnects.`,agentId:a.id});
+    notice({level:'info',kind:'fixing',title:`Starting the gateway of ${a.name}`,text:`${a.name} did not answer (${String(error).slice(0,160)}). Opaya checks its gateway, starts it and reconnects.`,agentId:a.id});
     let status='';try{status=(await broker.gatewayRun(a.id,'status')).output;}catch(e){status=safeError(e);}
-    if(autofix.MISSING.test(status))return hand(`${a.provider} itself was not found ${a.transport==='ssh'?`on ${whereName(a)}`:'on this computer'} ("${status.slice(-300)}"): install it (install_framework), set it up, start its gateway (agent_gateway) and connect.`);
-    let r;try{r=await broker.gatewayRun(a.id,'start');}catch(e){r={connected:false,error:safeError(e),output:''};}
-    if(r.connected){notice({level:'done',kind:'fixed',title:`${a.name} is connected again`,text:'Opaya started its gateway.',agentId:a.id});return;}
-    hand(`Opaya checked its gateway ("${status.slice(-500)}") and tried to start it ("${String(r.output||r.error||'').slice(-500)}"), but it still does not connect. The gateway may not be installed or enabled, or its port or token may be wrong.`);
+    if(autofix.EXEC_MISSING.test(status))return hand(`${a.provider} itself was not found ${a.transport==='ssh'?`on ${whereName(a)}`:'on this computer'} ("${status.slice(-300)}"): install it (install_framework), set it up, start its gateway (agent_gateway) and connect.`);
+    const ops=autofix.GATEWAY_MISSING.test(status)?['install','start']:['start'],done=[];let r={connected:false};
+    for(const op of ops){try{r=await broker.gatewayRun(a.id,op);done.push(`${op}: ${String(r.output||'').slice(-400)}`);}catch(e){r={connected:false,error:safeError(e)};done.push(`${op}: ${r.error.slice(-400)}`);break;}}
+    if(r.connected){notice({level:'done',kind:'fixed',title:`${a.name} is connected again`,text:ops.includes('install')?'Opaya installed and started its gateway.':'Opaya started its gateway.',agentId:a.id});return;}
+    hand(`Opaya checked its gateway ("${status.slice(-500)}") and ran ${ops.join(' and ')} (${done.join(' / ')}), but it still does not connect. The gateway may not be enabled, or its port or token may be wrong.`);
   }
   // An agent whose first-time setup or sign-in is not finished: open it in a visible terminal where the agent runs,
   // then reconnect when the person is done.

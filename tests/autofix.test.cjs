@@ -48,3 +48,13 @@ test('a quiet connect does not report its error again',async t=>{
   await assert.rejects(()=>b.connect(a.id,{quiet:true}),/ECONNREFUSED/);assert.equal(seen.length,0);
   await assert.rejects(()=>b.connect(a.id),/ECONNREFUSED/);assert.deepEqual(seen,['ECONNREFUSED']);
 });
+test('gateways can be installed and started, and a container\'s s6 service is brought up',()=>{
+  const {gatewayArgs}=require('../desktop/management.cjs');
+  assert.deepEqual(gatewayArgs({provider:'hermes',command:'hermes',args:[]},'install'),['gateway','install']);
+  assert.deepEqual(gatewayArgs({provider:'openclaw',command:'openclaw',args:['--profile','w']},'start'),['--profile','w','gateway','start']);
+  const boxed=gatewayArgs({provider:'hermes',command:'docker',args:['exec','-i','box','hermes'],hermesHome:'/opt/data'},'install');
+  assert(boxed.some(x=>x.includes('/command/s6-svc -u "$service"')));assert(boxed.some(x=>x.includes('gateway start')));
+  assert.throws(()=>gatewayArgs({provider:'hermes',command:'hermes',args:[]},'delete'),/Unsupported/);
+  assert(autofix.GATEWAY_MISSING.test('Gateway service is not installed. Run: hermes gateway install'));
+  assert(!autofix.EXEC_MISSING.test('Gateway service is not installed.'));assert(autofix.EXEC_MISSING.test('spawn hermes ENOENT'));
+});

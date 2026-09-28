@@ -1,3 +1,19 @@
+# Opaya 0.19.0 - Threads for the Opaya Agent, and it fixes problems by itself
+
+- **Threads**: the Opaya Agent's chat is now a conversation, like a chat should be: your messages and its answers. Work that changes something (installing, updating, connecting, repairing) runs in a **thread** beside the chat.
+  - A thread shows up as a card in the chat. Click it to open it on the right: the task, a checklist of steps that fills in as it goes, "Opaya Agent is working 3m 45s", what it is waiting for (your approval, a password in the terminal), and its answer. Every tool call is under **Details**.
+  - **Steer this thread**: write in a thread while it works and it takes your message in at its next step; write in a finished thread to continue it. **Stop** ends only that thread.
+  - Several threads can work at once, with every model: API models, Codex CLI and Claude Code. **Threads** in the top bar lists them all.
+- **The Opaya Agent hears about every problem and fixes it**: when an agent does not connect, loses its connection, answers with an error, or a clone, backup, install or other job fails, Opaya acts by itself:
+  - **Too old**: it updates the agent (or Node.js / Python) and reconnects, as before.
+  - **Gateway down**: for Hermes and OpenClaw it checks the gateway, starts it and reconnects.
+  - **Setup or sign-in not finished**: it opens the agent's first-time setup or sign-in in a terminal (`hermes setup`, `openclaw onboard`, `codex login`, Claude Code's sign-in, `opencode auth login`), on the machine or in the container where the agent runs, and reconnects when you are done.
+  - Anything else, and any fix that did not work, goes to the Opaya Agent in a thread of its own (marked **auto**), with a short note in its chat. One thread per problem; the same problem is not picked up again for a while, so nothing loops.
+  - A setup guide that did not finish is picked up by the Opaya Agent as soon as it has a model. Settings > Agents and tools > **Fix problems automatically** turns all of this off.
+  - The Opaya Agent can now check, start and restart Hermes and OpenClaw gateways itself.
+- **Fixed: sometimes you could not type in the message box.** Terminals that opened, were renamed or ended in the background (installs, checks, automatic fixes) took the keyboard away from the chat box. They no longer do; a terminal gets the keyboard only when you open or click it. Opaya also no longer uses the system's confirm and prompt dialogs, which on Windows could leave text fields unable to take typing until you switched windows. The Opaya Agent's message box is never locked: while the setup guide is open, sending a message closes it.
+- **Gemini CLI is gone**: Google no longer lets other apps use it, so Opaya does not offer, find, install, update or add it anymore. Gemini CLI connections you had are removed. Google's Gemini models through an API key still work as before.
+
 # Opaya 0.18.1 - Works on a bare computer: no winget, npm or Homebrew needed
 
 - **Opaya brings the basics itself**: Node.js (with npm), Python 3 (with pip), uv, GitHub CLI and, on Windows, Git (with Git Bash for Claude Code) are downloaded by Opaya from their official sources, checked against their published SHA-256 checksums, and installed for your user, with no administrator password. winget, Homebrew, apt and npm are no longer needed to get started. The setup guide, Install agents and the Opaya Agent all use it on this computer.

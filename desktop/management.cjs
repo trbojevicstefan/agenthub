@@ -1,7 +1,7 @@
 'use strict';
 const path=require('node:path');
 const {launch,collect,dockerExecContainerIndex}=require('./process.cjs');
-const OPERATIONS=['status','start','restart'];
+const OPERATIONS=['status','install','start','restart'];
 function gatewayArgs(agent,operation){
   if(!OPERATIONS.includes(operation))throw new Error('Unsupported gateway operation.');
   if(!['hermes','openclaw'].includes(agent.provider)||!agent.command)throw new Error('This connection has no managed gateway.');
@@ -10,7 +10,9 @@ function gatewayArgs(agent,operation){
     if(index<0)throw new Error('Docker container is not configured.');
     const executable=agent.args.slice(index+1).filter(arg=>!['acp','app-server'].includes(arg));
     if(!executable.length)throw new Error('Configure the gateway executable inside this container.');
-    // The official Hermes image runs the gateway as an s6 service: -t restarts it, -u brings it up.
+    // The official Hermes image runs the gateway as an s6 service: -t restarts it, -u brings it up (it is always
+    // installed there, so install brings it up too).
+    if(operation==='install'&&agent.provider==='hermes')operation='start';
     if(operation!=='status'&&agent.provider==='hermes'){
       const profile=path.posix.basename(path.posix.dirname(agent.hermesHome||''))==='profiles'?path.posix.basename(agent.hermesHome):'default';
       if(!/^[a-zA-Z0-9_.-]+$/.test(profile))throw new Error('Unsupported gateway profile name.');

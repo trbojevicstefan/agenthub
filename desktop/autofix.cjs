@@ -7,6 +7,10 @@ const {fixTarget}=require('./versions.cjs');
 const {quote,dockerExecContainerIndex}=require('./process.cjs');
 const UNREACHABLE=/ECONNREFUSED|connection refused|fetch failed|ETIMEDOUT|timed? ?out|socket hang up|ECONNRESET|EHOSTUNREACH|ENOTFOUND|\b50[234]\b|bad gateway|service unavailable|could not connect|failed to connect|not reachable|unreachable|tunnel (closed|failed|exited)/i;
 const MISSING=/ENOENT|command not found|not recognized as|no such file or directory|executable (was )?not found|is not installed|was not found on this computer/i;
+// The program itself is missing, as opposed to its gateway service.
+const EXEC_MISSING=/ENOENT|command not found|not recognized as|no such file or directory/i;
+// A gateway whose service was never installed (Hermes and OpenClaw run it as a user service).
+const GATEWAY_MISSING=/not installed|no such service|could not be found|not loaded|not registered|install it|run .*gateway install/i;
 // Agents that still need their first-time setup or sign-in say so in their own words.
 const ONBOARDING={
   codex:/not logged in|login required|please (run )?(`?codex login`?|log ?in)|no (credentials|auth)|auth\.json|401 unauthorized/i,
@@ -47,4 +51,4 @@ function signIn(agent,{windows=false}={}){
   }
   return {program:cli,command,note:NOTE[cli]};
 }
-module.exports={classify,signIn,program,gatewayAgent,UNREACHABLE,MISSING};
+module.exports={classify,signIn,program,gatewayAgent,UNREACHABLE,MISSING,EXEC_MISSING,GATEWAY_MISSING};
