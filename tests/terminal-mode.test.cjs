@@ -62,3 +62,19 @@ test('terminal input reaches the service in pieces it accepts, and an ended sess
   assert.match(endedNote({agentId:'svc_install_codex_local'},0),/Press Enter for a new shell here\./);
   assert.match(endedNote({agentId:'local-shell'}),/Saved output from an ended session\./);assert.match(endedNote({remote:true},'detached'),/Session detached\. Press Enter to connect again\./);
 });
+test('DeepSeek Harness has no terminal chat: its CLI opens a shell where it runs, with a hint',async()=>{
+  const spawned=[],terminals=new Terminals(()=>{},{ptyFactory:{spawn:(command,args)=>{spawned.push({command,args});return {onData(){},onExit(){},write(){},resize(){},kill(){}};}}});
+  const view=terminals.open({id:'d',name:'DeepSeek Harness',provider:'custom',protocol:'acp',transport:'local',command:'dsh',args:['--profile','acp'],cwd:require('node:os').tmpdir()},null,'agent');
+  assert.equal(view.mode,'shell');assert.match(view.buffer,/dsh headless/);assert(!spawned[0].args.includes('--profile'));
+  // Asked again, the same shell comes back.
+  assert.equal(terminals.open({id:'d',name:'DeepSeek Harness',provider:'custom',protocol:'acp',transport:'local',command:'dsh',args:['--profile','acp'],cwd:require('node:os').tmpdir()},null,'agent').id,view.id);
+});
+test('the dsh Opaya starts on this computer gets no stale variable its credential store holds',{skip:process.platform==='win32'},async t=>{
+  const fs=require('node:fs/promises'),path=require('node:path'),dir=await temp(t);
+  await fs.writeFile(path.join(dir,'.credentials.yaml'),'version: 1\nrefs:\n  DEEPSEEK_API_KEY: "sk-new"\n',{mode:0o600});
+  const old={DSH_HOME:process.env.DSH_HOME,DEEPSEEK_API_KEY:process.env.DEEPSEEK_API_KEY};process.env.DSH_HOME=dir;process.env.DEEPSEEK_API_KEY='sk-old-ece';
+  t.after(()=>{for(const [k,v] of Object.entries(old))if(v===undefined)delete process.env[k];else process.env[k]=v;});
+  const {launch}=require('../desktop/process.cjs'),{collect}=require('../desktop/process.cjs');
+  const script=path.join(dir,'dsh');await fs.writeFile(script,'#!/bin/sh\nprintf "[%s]" "$DEEPSEEK_API_KEY"\n',{mode:0o755});
+  assert.equal(await collect(launch({transport:'local',command:script,args:[]},[],null),{timeout:5000}),'[]');
+});

@@ -183,9 +183,19 @@ function remoteCommand(agent, args, {interactive = false} = {}) {
   const home = agent.hermesHome ? `env HERMES_HOME=${quote(agent.hermesHome)} ` : '';
   return prefix + cwd + (interactive ? '' : 'exec ') + home + [agent.command, ...args].map(quote).join(' ');
 }
+// DeepSeek Harness takes a key from the environment it starts in before its credential store, so a stale variable of
+// the user's (an old DEEPSEEK_API_KEY) would hide the key Opaya or its Web UI saved. The dsh Opaya starts on this
+// computer gets no variable that its store (~/.dsh/.credentials.yaml refs) holds.
+function dshStoreNames(env) {
+  try {
+    const text = fs.readFileSync(path.join(env.DSH_HOME || path.join(os.homedir(), '.dsh'), '.credentials.yaml'), 'utf8');
+    return require('./secrets.cjs').yamlRefs(text);
+  } catch { return []; }
+}
 function launch(agent, args, host, overrides = {}) {
   // extraEnv: variables for a process on this computer only (Codex's .env keys, see adapters/codex.cjs).
   const env = environment({...(agent.hermesHome && agent.transport !== 'ssh' ? {HERMES_HOME: agent.hermesHome} : {}), ...(agent.transport !== 'ssh' && agent.extraEnv || {})});
+  if (agent.transport !== 'ssh' && /(^|[\\/])dsh(\.cmd|\.exe)?$/i.test(agent.command || '')) for (const name of dshStoreNames(env)) delete env[name];
   args = dockerExecArgs(agent, args);
   if (agent.transport === 'ssh') {
     if (!host) throw new Error('This agent has no saved SSH host.');

@@ -73,6 +73,7 @@ const SETUP={
   openclaw:{install:'Install agents > OpenClaw',onboard:'`openclaw onboard`',setup:'openclaw, sign_in, then enable_api',token:true,gateway:'`openclaw gateway status`; start it with `openclaw gateway`, and enable gateway.http.endpoints.chatCompletions',gatewaySetup:'openclaw, status, then enable_api and start_gateway'},
   claude:{install:'Install agents > Claude Code',onboard:'a first `claude` run to sign in (Run native CLI)',setup:'claude, sign_in'},
   codex:{install:'Install agents > Codex',onboard:'`codex login` (Run native CLI)',setup:'codex, sign_in'},
+  dsh:{install:'Install agents > DeepSeek Harness',onboard:'a DeepSeek API key: its key is wrong or missing, so ask the user for DEEPSEEK_API_KEY (request_secret, or vault op=list and op=give when it is in the Opaya Vault) and store_secret it for this agent (Opaya writes ~/.dsh/.credentials.yaml and ~/.dsh/.env and restarts it); also tell the user the key button in its chat does the same, and that an empty balance on platform.deepseek.com fails too',key:true},
 };
 const KINDS=[
   ['ssh',/host key|permission denied \(publickey|could not resolve hostname|ssh: |ssh exited|no route to host/i],
@@ -82,13 +83,13 @@ const KINDS=[
   ['gateway',/gateway|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ETIMEDOUT|fetch failed|socket hang up|connection refused|refused to connect|unreachable|not reachable|HTTP 5\d\d|timed? ?out|did not (?:answer|respond|start)|closed|exited/i],
 ];
 function classify(error,agent={}){
-  const text=String(error||''),s=SETUP[agent.provider]||{};
+  const text=String(error||''),s=SETUP[agent.provider]||SETUP[agent.install?.framework]||(/(^|[\\/])dsh(\.cmd|\.exe)?$/i.test(agent.command||'')||agent.command==='docker'&&(agent.args||[]).includes('dsh')?SETUP.dsh:{});
   const id=(KINDS.find(([,re])=>re.test(text))||['other'])[0];
   const hint={
     ssh:'the SSH connection to its machine fails. Check the machine in Machines (host key, user, key) before the agent itself.',
     'not-installed':`the agent or a program it needs is not installed where it runs${s.install?` (${s.install})`:''}, or its path changed.`,
     'rate-limit':'its model provider is rate limiting or out of quota. Usually temporary; check the account, plan or model it uses.',
-    onboarding:`its onboarding or sign-in is not finished, or its token is missing or wrong${s.onboard?`; finish it with ${s.onboard}`:''}${s.setup?`. Run it yourself with setup_agent (${s.setup})`:''}${s.token?`; a missing or wrong gateway token: save_connection with import_gateway_token`:'. Tokens are entered by the user in the connection form'}.`,
+    onboarding:`its onboarding or sign-in is not finished, or its token is missing or wrong${s.onboard?`; finish it with ${s.onboard}`:''}${s.setup?`. Run it yourself with setup_agent (${s.setup})`:''}${s.token?`; a missing or wrong gateway token: save_connection with import_gateway_token`:s.key?'':'. Tokens are entered by the user in the connection form'}.`,
     gateway:`its gateway or server is not running, not installed or not reachable${s.gateway?` (${s.gateway})`:''}${s.gatewaySetup?`. Fix it with setup_agent (${s.gatewaySetup})`:''}.`,
     other:'no known pattern. Read its diagnostics and logs to find the cause.',
   }[id];

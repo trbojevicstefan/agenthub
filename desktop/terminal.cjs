@@ -30,6 +30,7 @@ function dockerShellArgs(agent){
   const options=agent.args.slice(1,index).filter(x=>!['-i','-t','-it','-ti','--interactive','--tty'].includes(x));
   return ['exec','-it',...options,agent.args[index],'sh','-l'];
 }
+const isDsh=agent=>agent.install?.framework==='dsh'||/(^|[\\/])dsh(\.cmd|\.exe)?$/i.test(agent.command||'')||(agent.command==='docker'&&(agent.args||[]).includes('dsh'));
 // The pseudo agents behind "This computer" and a machine's own shell.
 const localShell=home=>({id:'local-shell',name:'This computer',provider:'custom',transport:'local',command:'',args:[],cwd:home});
 const hostShell=(broker,hostId)=>({id:`host_${schema.id(hostId)}`,name:broker.host(hostId).name,provider:'custom',transport:'ssh',hostId,command:'',args:[],cwd:''});
@@ -73,6 +74,9 @@ class Terminals{
   // into: an ended session to start again in place (restart).
   open(agent,host,mode='shell',size={cols:100,rows:28},{cwd='',title='',into=null}={}){
     if(!['shell','agent'].includes(mode))throw new Error('Invalid terminal mode.');
+    // DeepSeek Harness has no terminal chat yet (its profiles are acp, web and headless): its CLI is a shell where it runs.
+    const dshHint=mode==='agent'&&isDsh(agent)?'\x1b[90mDeepSeek Harness has no terminal chat yet. Chat with it in Opaya or its Web UI; here, dsh headless "task" runs one task.\x1b[0m\r\n':'';
+    if(dshHint)mode='shell';
     if(typeof cwd!=='string'||cwd.length>2048||/[\0\r\n]/.test(cwd))throw new Error('Invalid terminal folder.');
     const previous=[...this.sessions.values()].find(s=>s!==into&&s.agentId===agent.id&&s.mode===mode&&(s.cwd||'')===cwd&&!s.exited);
     if(previous)return this.attach(previous.id);
@@ -117,6 +121,7 @@ class Terminals{
     // old program left on are reset first (soft reset, main screen, no mouse reporting): otherwise clicks or a paste could
     // type escape codes into the new prompt.
     if(into){const note=`\x1b[!p\x1b[?1047l\x1b[?1000l\x1b[?1006l\r\n\x1b[90m[${sessionName?'Reconnecting':'Started again'}]\x1b[0m\r\n`;item.buffer=(item.buffer+note).slice(-200000);item.seq++;this.emit({id,type:'restarted',seq:item.seq});item.seq++;this.emit({id,type:'data',data:note,seq:item.seq});}
+    if(dshHint&&!into){item.buffer+=dshHint;item.seq++;this.emit({id,type:'data',data:dshHint,seq:item.seq});}
     // Events from a process this session no longer runs (killed on detach, replaced by a restart) are ignored.
     processPty.onData(data=>{if(item.process!==processPty)return;item.buffer=(item.buffer+data).slice(-200000);item.seq++;this.emit({id,type:'data',data,seq:item.seq});this.checkpoint();});
     processPty.onExit(({exitCode})=>{if(item.process!==processPty||item.detaching)return;item.exited=true;item.seq++;this.emit({id,type:'exit',exitCode,seq:item.seq});this.checkpoint();});

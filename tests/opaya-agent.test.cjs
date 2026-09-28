@@ -356,7 +356,15 @@ test('DeepSeek Harness: installed, found, run in Docker, given keys in ~/.dsh/.e
   const home=await temp(t),{agent,broker}=await fixture(t,[],{userHome:home,trusted:true});
   const saved=await broker.saveAgent({agent:{...local,command:'dsh'}},{preapproved:true});
   const r=await agent.giveToAgent({agentId:saved.id,name:'DEEPSEEK_API_KEY',value:ROUTER_KEY});
-  assert.equal(await fs.readFile(path.join(home,'.dsh','.env'),'utf8'),`DEEPSEEK_API_KEY=${ROUTER_KEY}\n`);assert.match(r.next,/~\/.dsh\/.env/);
+  assert.equal(await fs.readFile(path.join(home,'.dsh','.env'),'utf8'),`DEEPSEEK_API_KEY=${ROUTER_KEY}\n`);
+  // ...and into its credential store, which wins over the .env files: an old key saved in its Web UI is replaced.
+  assert.equal(await fs.readFile(path.join(home,'.dsh','.credentials.yaml'),'utf8'),`version: 1\n\nrefs:\n  DEEPSEEK_API_KEY: "${ROUTER_KEY}"\n`);assert.match(r.next,/credentials\.yaml/);
+  await fs.writeFile(path.join(home,'.dsh','.credentials.yaml'),'version: 1\n# saved in its Web UI\nrefs:\n  OPENAI_API_KEY: sk-o\n  DEEPSEEK_API_KEY: sk-old-ece\nrecords: {}\n');
+  await agent.giveToAgent({agentId:saved.id,name:'DEEPSEEK_API_KEY',value:ROUTER_KEY});
+  assert.equal(await fs.readFile(path.join(home,'.dsh','.credentials.yaml'),'utf8'),`version: 1\n# saved in its Web UI\nrefs:\n  OPENAI_API_KEY: sk-o\n  DEEPSEEK_API_KEY: "${ROUTER_KEY}"\nrecords: {}\n`);
+  assert.deepEqual((await agent.agentKeys({agentId:saved.id})).keys.map(k=>k.name).sort(),['DEEPSEEK_API_KEY','OPENAI_API_KEY']);
+  // An auth failure is an onboarding problem whose first guess is a new DeepSeek key.
+  assert.match(require('../desktop/diagnostics.cjs').classify('turn failed: Authentication Fails, Your api key: ****ece is invalid',local).hint,/DEEPSEEK_API_KEY/);
 });
 test('store_secret signs Codex in with an OpenAI key on its input, never on its command line, and puts other keys in its .env',async t=>{
   const {EventEmitter}=require('node:events'),{PassThrough}=require('node:stream'),spawned=[];

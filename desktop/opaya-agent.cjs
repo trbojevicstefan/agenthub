@@ -119,7 +119,7 @@ const APP_GUIDE=`Opaya app guide (tell the user where things are; you cannot cli
 - Secrets: keys pasted into your chat and those typed in Opaya's secure prompt stay in Opaya's encrypted vault; you only see references such as [secret S1 · NAME · mask]. A key given to Opaya with "Give it to every agent" is written into every agent that reads keys; API connections keep their own token.
 - Opaya Vault (Vault in the sidebar, Settings, Machines, the key button next to your message box, or the key button in any agent's chat): every key the user keeps in Opaya, encrypted. Add a key (name and key; tick "This API needs an endpoint" to add a base URL, saved as NAME_BASE_URL), give it to one agent, to all agents, or forget it. The key button next to your message box opens the Vault with Insert, which puts a key's reference into the message to you. Keys pasted as text into your chat are temporary. Your vault tool does the same: list, give, give_all, forget.
 - Keys in an agent's chat: the key button lists the keys that agent has (names only, read from the file it reads keys from), Insert puts $NAME into the message, Give hands it a vault key, New key gives it one only it gets. Codex and ACP agents restart when idle so a new key is in their environment; Claude Code has it from its next message. Local Claude Code, Codex and ACP agents also have vault_list and vault_use to ask for a key themselves.
-- DeepSeek Harness (dsh, developer preview): installed with npm (@deepseek-ai/dsh, Node.js 22.19+) on this computer, a machine or in a Docker container; Opaya chats with it over ACP (dsh --profile acp) and its Web UI button (above its chat) starts dsh web where it runs and opens it in the Opaya browser (through an SSH tunnel for a machine). Its keys are in ~/.dsh/.env (DEEPSEEK_API_KEY for DeepSeek; a key saved in its own Web UI goes to ~/.dsh/.credentials.yaml and wins); other providers and models are set in its Web UI. Its data is ~/.dsh.
+- DeepSeek Harness (dsh, developer preview): installed with npm (@deepseek-ai/dsh, Node.js 22.19+) on this computer, a machine or in a Docker container; Opaya chats with it over ACP (dsh --profile acp) and its Web UI button (above its chat) starts dsh web where it runs and opens it in the Opaya browser (through an SSH tunnel for a machine). Keys: it looks in the environment it was started with first, then ~/.dsh/.credentials.yaml (its Web UI saves there), then .env in its working folder, then ~/.dsh/.env. Opaya writes a key given to it into both ~/.dsh/.credentials.yaml and ~/.dsh/.env, and starts dsh on this computer without a same-named variable from the environment, so Opaya's key wins. "Authentication Fails ... api key is invalid" means the key it found is wrong: ask the user for the right DEEPSEEK_API_KEY (request_secret, or vault op=give) and store_secret it; its account at platform.deepseek.com needs balance too. Other providers and models are set in its Web UI. It has no terminal chat yet (profiles: acp, web, headless), so its CLI button opens a shell where dsh headless "task" runs one task. Its data is ~/.dsh.
 - Docker manager (Docker on a machine card in Machines): containers with state, image and ports, start, stop, restart, remove, logs and a shell, and images. Your docker tool does the same on any machine. Discover also finds OpenClaw gateways running in Docker (the published port of 18789) on this computer and machines.
 - Doing it yourself: for backup, uninstall, update, clone, transfer, MCP servers, Docker and keys you have tools (backup_agent, uninstall_agent, update_agent, clone_agent, transfer, mcp_server, docker, vault) and jobs to follow a running job. Use them instead of telling the user where to click, unless the user wants to do it. When something the user started fails (a job, a Docker action, giving a key, an install), Opaya hands it to you: find the cause and finish it.`;
 const fn=(name,description,properties={},required=[])=>({type:'function',function:{name,description,parameters:{type:'object',properties,required,additionalProperties:false}}});
@@ -443,7 +443,7 @@ class OpayaAgent{
     agent.extraEnv=codexEnv(this.userHome?path.join(this.userHome,'.codex'):undefined);
     const rpc=new Rpc(this.spawnAgent(agent,[...SHELL_ENV,'app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.22.1'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.22.2'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
@@ -686,8 +686,13 @@ class OpayaAgent{
     const urlName=s.endpoint?endpointName(name):'',set=(text,k,v)=>kind==='claude'?secrets.setJsonEnv(text,k,v):secrets.setEnv(text,k,v);
     const file=await this.configFile(kind,agent,where),write=text=>urlName?set(set(text,name,value),urlName,s.endpoint):set(text,name,value);
     write(await secrets.readAt(where,file)); // fails before asking: a value a .env cannot hold, a settings.json that is not JSON
-    await ask(`Save ${name} for "${agent.name}"?`,`${ref}\n\nOpaya writes ${name}=${s.mask}${urlName?` and ${urlName}=${s.endpoint}`:''} into ${file} ${on} (file mode 600). The value goes from Opaya's vault straight into the file, never through a command line, a log or the chat.`);
+    // DeepSeek Harness: also in its credential store, which wins over its .env files (a key saved in its Web UI goes
+    // there too, so a new key from Opaya replaces an old one instead of losing to it); the .env keeps it for its tools.
+    const store=kind==='dsh'?file.replace(/\.env$/,'.credentials.yaml'):'',storeWrite=text=>secrets.setYamlRef(urlName?secrets.setYamlRef(text,urlName,s.endpoint):text,name,value);
+    if(store)storeWrite(await secrets.readAt(where,store));
+    await ask(`Save ${name} for "${agent.name}"?`,`${ref}\n\nOpaya writes ${name}=${s.mask}${urlName?` and ${urlName}=${s.endpoint}`:''} into ${file}${store?` and ${store}`:''} ${on} (file mode 600). The value goes from Opaya's vault straight into the file, never through a command line, a log or the chat.`);
     await secrets.writeAt(where,file,write(await secrets.readAt(where,file)));
+    if(store)await secrets.writeAt(where,store,storeWrite(await secrets.readAt(where,store)));
     await this.stored(s,{agentId:agent.id,agentName:agent.name,name,where:file});
     const machine=host?` with machine_id ${host.id}`:'',win=!host&&this.platform==='win32';
     const restart=where.container?`run_command docker restart ${where.container}${machine}`:kind==='hermes'?`run_command ${agent.hermesHome?(win?`$env:HERMES_HOME=${quote(agent.hermesHome)}; `:`HERMES_HOME=${quote(agent.hermesHome)} `):''}hermes gateway restart${machine}`:`run_command openclaw gateway restart${machine} (or setup_agent start_gateway)`;
@@ -699,7 +704,7 @@ class OpayaAgent{
       openclaw:`OpenClaw loads this .env when its gateway starts (a variable already set in the gateway's own environment wins); its CLI commands see it at once. Restart the gateway: ${restart}, then disconnect_agent and connect_agent.`,
       claude:`Claude Code loads env from settings.json when it starts. ${then} An interactive Claude Code may ask once whether to use a new ANTHROPIC_API_KEY.`,
       codex:`Codex loads this .env when it starts. ${then}`,
-      dsh:`DeepSeek Harness loads ~/.dsh/.env when it starts (a key saved in its Web UI wins over it). ${then}`
+      dsh:`DeepSeek Harness takes it from its credential store (~/.dsh/.credentials.yaml, where its Web UI saves keys too) on its next request; the same name set in the environment Opaya or a shell starts it from would win, and Opaya does not pass such a stale one to the dsh it starts. ${then}`
     }[kind];
     return {stored:true,secret:s.id,agent:agent.name,name,file,where:on,loaded,next,...(urlName?{endpointName:urlName,endpoint:s.endpoint}:{})};
   }
@@ -745,7 +750,8 @@ class OpayaAgent{
     const remoteHttp=agent.transport==='http'&&!/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(agent.endpoint||'');
     if(kind&&!remoteHttp){
       // The same reader as Transfer (Codex: its login and its .env); file is where a new key would go.
-      try{file=await this.configFile(kind,agent,place({agent,host}));names=(await transfer.envKeys(agent,host,{vault:b.vault})).map(k=>k.name);}
+      try{file=await this.configFile(kind,agent,place({agent,host}));names=(await transfer.envKeys(agent,host,{vault:b.vault})).map(k=>k.name);
+        if(kind==='dsh')names.push(...secrets.yamlRefs(await secrets.readAt(place({agent,host}),file.replace(/\.env$/,'.credentials.yaml')).catch(()=>'')));}
       catch(e){error=String(e?.message||e).slice(0,200);}
     }
     const keys=[...new Set([...names,...given.keys()])].map(name=>{const g=given.get(name);return {name,fromOpaya:Boolean(g),global:Boolean(g?.secret.global),hint:g?.secret.mask,where:g?(g.where==='codex login'?'Codex login':g.where):file,inFile:names.includes(name)};});

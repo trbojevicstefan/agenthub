@@ -1,3 +1,10 @@
+# Opaya 0.22.2 - DeepSeek Harness keys and CLI
+
+- **Key that works**: a key given to DeepSeek Harness (key button in its chat, the Opaya Vault or the Opaya Agent) now also goes into its credential store, ~/.dsh/.credentials.yaml, as well as ~/.dsh/.env. dsh prefers that store over its .env files, so an old key saved in its Web UI no longer wins over the new one.
+- The dsh Opaya starts on this computer no longer gets an old key of the same name from your environment (such as an old DEEPSEEK_API_KEY), which dsh would otherwise use first.
+- A chat error about an API key ("Authentication Fails ... api key is invalid") has a **Give it a key** button, and the Opaya Agent knows the fix: a new DEEPSEEK_API_KEY (and a balance on platform.deepseek.com).
+- **CLI**: DeepSeek Harness has no terminal chat yet (its modes are ACP, Web UI and headless), so its CLI button opens a shell where it runs, with a hint; `dsh headless "task"` runs one task there. 0.22.1's plain `dsh` stopped with "--profile <name> is required".
+
 # Opaya 0.22.1 - DeepSeek Harness CLI opens
 
 - Opening DeepSeek Harness's CLI (the terminal button) no longer stops with "option '--profile <name>' argument missing": Opaya now starts plain dsh there, on this computer, a machine or in a container, instead of dropping only the acp from its chat command.

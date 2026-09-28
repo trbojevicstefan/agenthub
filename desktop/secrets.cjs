@@ -208,6 +208,29 @@ function setJsonEnv(text,name,value){
   if(data.env!==undefined&&(!data.env||typeof data.env!=='object'||Array.isArray(data.env)))throw new Error('settings.json has an env that is not an object, so Opaya does not change it.');
   data.env={...(data.env||{}),[name]:value};return JSON.stringify(data,null,2)+'\n';
 }
+// DeepSeek Harness's credential store (~/.dsh/.credentials.yaml): refs.NAME set, the rest of the file as it is. A key
+// stored there wins over both .env files, and dsh picks a changed one up on its next request. The value is written as a
+// double-quoted YAML scalar; an entry written over more than one line is replaced whole.
+function setYamlRef(text,name,value){
+  if(!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name))throw new Error(`${name} is not a key name DeepSeek Harness accepts.`);
+  const v=JSON.stringify(String(value)),lines=String(text||'').replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').split('\n');if(lines.at(-1)==='')lines.pop();
+  if(!lines.some(l=>l.trim()&&!l.trim().startsWith('#')))return `version: 1\n\nrefs:\n  ${name}: ${v}\n`;
+  let at=lines.findIndex(l=>/^refs:\s*(\{\s*\})?\s*(#.*)?$/.test(l));
+  if(at<0){lines.push('refs:');at=lines.length-1;}else lines[at]='refs:';
+  let end=at+1;while(end<lines.length&&(!lines[end].trim()||/^\s/.test(lines[end])))end++;
+  const block=lines.slice(at+1,end),indent=(block.find(l=>l.trim()&&!l.trim().startsWith('#'))||'  ').match(/^\s*/)[0]||'  ';
+  const i=block.findIndex(l=>new RegExp(`^\\s+["']?${name}["']?\\s*:`).test(l));
+  if(i<0){lines.splice(at+1,0,`${indent}${name}: ${v}`);return lines.join('\n')+'\n';}
+  const own=block[i].match(/^\s*/)[0].length;let j=i+1;while(j<block.length&&(!block[j].trim()||block[j].match(/^\s*/)[0].length>own))j++;
+  while(j>i+1&&!block[j-1].trim())j--;
+  lines.splice(at+1+i,j-i,`${indent}${name}: ${v}`);return lines.join('\n')+'\n';
+}
+// The key names under refs: in that file (never values).
+function yamlRefs(text){
+  const lines=String(text||'').replace(/\r\n/g,'\n').split('\n'),at=lines.findIndex(l=>/^refs:/.test(l)),out=[];if(at<0)return out;
+  for(let k=at+1;k<lines.length&&(!lines[k].trim()||/^\s/.test(lines[k]));k++){const m=/^(\s+)["']?([A-Za-z_][A-Za-z0-9_]*)["']?\s*:/.exec(lines[k]);if(m&&m[1].length===(lines.slice(at+1).find(l=>/^\s+\S/.test(l)&&!l.trim().startsWith('#'))||'').match(/^\s*/)[0].length)out.push(m[2]);}
+  return out;
+}
 // Files where an agent runs: this computer, an SSH machine or a container (see clone.cjs place()). dirAt resolves a
 // fixed shell expression there, such as ${OPENCLAW_STATE_DIR:-$HOME/.openclaw}.
 async function dirAt(where,expr='$HOME'){const dir=String(await run(where,`printf %s "${expr}"`)).trim();if(!dir.startsWith('/'))throw new Error('Could not find the home folder there.');return dir;}
@@ -227,4 +250,4 @@ async function writeAt(where,file,content){
   const script=`umask 077; f=${quote(file)}; [ -L "$f" ] && f=$(readlink -f -- "$f" 2>/dev/null || printf %s "$f"); mkdir -p -- "$(dirname -- "$f")" && cat > "$f.opaya-tmp" && chmod 600 "$f.opaya-tmp" && mv -f -- "$f.opaya-tmp" "$f"`;
   await collect(shell(where,script),{timeout:30000,input:content});
 }
-module.exports={PATTERNS,REF,detect,replaceSpans,guessName,patternName,contextName,envName,secretName,plausible,keyLike,mask,reference,secretId,conceal,shieldOutput,deep,envValue,setEnv,setJsonEnv,parseEnv,dirAt,readAt,writeAt};
+module.exports={PATTERNS,REF,detect,replaceSpans,guessName,patternName,contextName,envName,secretName,plausible,keyLike,mask,reference,secretId,conceal,shieldOutput,deep,envValue,setEnv,setJsonEnv,setYamlRef,yamlRefs,parseEnv,dirAt,readAt,writeAt};
