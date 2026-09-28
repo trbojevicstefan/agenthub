@@ -141,7 +141,10 @@ test('a root-owned npm prefix is updated visibly with sudo and says why',{skip},
   // Not writable for the user who runs it: as root, the test runs the script as nobody.
   if(root){for(let d=m.home;d!==path.dirname(m.root);d=path.dirname(d))await fs.chmod(d,0o755);await fs.chmod(m.home,0o777);}
   else await fs.chmod(path.join(m.home,'npm/lib/node_modules'),0o555);
-  const r=m.run('codex',root?{uid:65534}:{});assert.equal(r.code,0,r.out);
+  let r;try{r=m.run('codex',root?{uid:65534}:{});}
+  // Writable again, or the temporary folder cannot be removed afterwards (macOS CI).
+  finally{if(!root)await fs.chmod(path.join(m.home,'npm/lib/node_modules'),0o755);}
+  assert.equal(r.code,0,r.out);
   assert.match(r.out,/belongs to another user \(usually root\), so npm needs administrator rights/);
   const lines=(await r.log()).trim().split('\n');
   assert.match(lines[0],/^sudo env PATH=/);assert.equal(lines[1],`npm install -g --prefix ${path.join(m.home,'npm')} @openai/codex@latest`);
