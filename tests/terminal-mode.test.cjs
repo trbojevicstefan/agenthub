@@ -44,6 +44,9 @@ test('the native CLI is the agent command without its chat-server arguments',()=
   assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'goose',args:['--acp']}),[]);
   assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'opencode',args:['acp']}),[]);
   assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'opencode',args:['acp','--yolo']}),['--yolo']);
+  // DeepSeek Harness picks ACP with a flag and its value; its CLI is plain dsh (the flag alone fails to start).
+  assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'dsh',args:['--profile','acp']}),[]);
+  assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'docker',args:['exec','-i','-w','/root','opaya-d','dsh','--profile','acp']}),['exec','-it','-w','/root','-e','TERM=xterm-256color','opaya-d','dsh']);
   assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'docker',args:['exec','-i','-w','/root','opaya-o','opencode','acp']}),['exec','-it','-w','/root','-e','TERM=xterm-256color','opaya-o','opencode']);
   assert.deepEqual(t.cliArgs({provider:'custom',protocol:'terminal',command:'aider',args:['--model','x']}),['--model','x'],'terminal agents keep their arguments');
 });

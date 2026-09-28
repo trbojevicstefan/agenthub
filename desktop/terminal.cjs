@@ -7,6 +7,8 @@ const {randomUUID,createHash}=require('node:crypto');
 const {atomicJson,readJson}=require('./store.cjs');
 const schema=require('./schema.cjs');
 const SERVER_ARGS=new Set(['acp','--acp','app-server']);
+// The arguments without the protocol-server ones; a server chosen by a flag and its value (dsh --profile acp) goes whole.
+function withoutServer(args){const out=[];for(let i=0;i<args.length;i++){if(args[i]==='--profile'&&SERVER_ARGS.has(args[i+1])){i++;continue;}if(!SERVER_ARGS.has(args[i]))out.push(args[i]);}return out;}
 const {environment,findExecutable,windowsLaunch,sshArgs,target,remoteCommand,quote,dockerExecContainerIndex,dockerExecArgs,collect}=require('./process.cjs');
 const WINDOWS_BUILD=process.platform==='win32'?Number(os.release().split('.')[2])||0:0;
 function dimensions(cols,rows){
@@ -126,13 +128,13 @@ class Terminals{
   cliArgs(agent){ // the interactive CLI: the connection's command without the protocol-server arguments
     if(agent.command==='docker'&&dockerExecContainerIndex(agent.args)>=0){
       const index=dockerExecContainerIndex(agent.args),before=agent.args.slice(1,index).filter(x=>!['-i','-t','-it','-ti','--interactive','--tty'].includes(x));
-      const tail=agent.args.slice(index).filter(x=>!SERVER_ARGS.has(x));
+      const tail=withoutServer(agent.args.slice(index));
       if(agent.provider==='openclaw'&&!tail.includes('tui'))tail.push('tui');
       return ['exec','-it',...before,'-e','TERM=xterm-256color',...tail];
     }
     if(agent.provider==='openclaw')return ['tui'];
     // Chat connections start the agent as a protocol server (acp, --acp, app-server); its CLI is the same program without them.
-    if(['hermes','claude','codex'].includes(agent.provider)||agent.protocol==='acp')return agent.args.filter(x=>!SERVER_ARGS.has(x));
+    if(['hermes','claude','codex'].includes(agent.provider)||agent.protocol==='acp')return withoutServer(agent.args);
     return agent.args;
   }
   write(id,data){

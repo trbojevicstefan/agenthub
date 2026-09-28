@@ -1,3 +1,7 @@
+# Opaya 0.22.1 - DeepSeek Harness CLI opens
+
+- Opening DeepSeek Harness's CLI (the terminal button) no longer stops with "option '--profile <name>' argument missing": Opaya now starts plain dsh there, on this computer, a machine or in a container, instead of dropping only the acp from its chat command.
+
 # Opaya 0.22.0 - DeepSeek Harness
 
 - **DeepSeek Harness (dsh)**: DeepSeek's open-source agent harness (developer preview) is now an Opaya agent, everywhere the others are.
