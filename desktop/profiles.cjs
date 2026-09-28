@@ -9,9 +9,9 @@ const path=require('node:path');
 const {quote}=require('./process.cjs');
 const {run,transfer,measure,place,copyParts,slug,fmt,cronDefault}=require('./clone.cjs');
 const containers=require('./containers.cjs');
-const NPM=['claude','codex','opencode'];
-const NAMES={hermes:'Hermes',openclaw:'OpenClaw',claude:'Claude Code',codex:'Codex CLI',opencode:'OpenCode',goose:'Goose',aider:'Aider'};
-const BIN={claude:'claude',codex:'codex',opencode:'opencode'};
+const NPM=['claude','codex','opencode','dsh'];
+const NAMES={hermes:'Hermes',openclaw:'OpenClaw',claude:'Claude Code',codex:'Codex CLI',opencode:'OpenCode',dsh:'DeepSeek Harness',goose:'Goose',aider:'Aider'};
+const BIN={claude:'claude',codex:'codex',opencode:'opencode',dsh:'dsh'};
 const frameworkOf=agent=>require('./maintenance.cjs').frameworkOf(agent);
 const containerOf=agent=>require('./maintenance.cjs').containerOf(agent);
 // Why `from` cannot live in a container that runs `into` ('' when it can).

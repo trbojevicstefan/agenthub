@@ -1,6 +1,6 @@
 'use strict';
 // Installing an agent on a machine as a Docker container instead of a regular install. Hermes and OpenClaw use their
-// official images; the npm CLIs (Claude Code, Codex, OpenCode) are installed into a Node.js container. Each container
+// official images; the npm CLIs (Claude Code, Codex, OpenCode, DeepSeek Harness) are installed into a Node.js container. Each container
 // keeps its data in a folder in the machine's home (~/opaya-hermes/<name> or ~/opaya-agents/<name>; OpenClaw in the
 // Docker volume opaya-<name>-data), restarts with the machine, and is added to Opaya as a `docker exec` agent (OpenClaw
 // over its gateway API, published on the machine's 127.0.0.1 only and reached through the SSH tunnel). Names are
@@ -11,6 +11,8 @@ const NODE_IMAGE='node:24-bookworm';
 const HERMES_IMAGE='nousresearch/hermes-agent';
 const OPENCLAW_IMAGE='ghcr.io/openclaw/openclaw:latest';
 // OpenClaw's gateway port on the machine: fixed per container name, so updates and Opaya's connection agree.
+// A Web UI inside a container (DeepSeek Harness) is published on the machine's 127.0.0.1 at a port fixed per name.
+const webPort=container=>13100+(require('node:crypto').createHash('sha256').update(container).digest().readUInt16BE(0)%800);
 const openclawPort=container=>18800+(require('node:crypto').createHash('sha256').update(container).digest().readUInt16BE(0)%800);
 // The OpenClaw container runs its gateway as the main process (official image, user node). The token comes from the
 // environment ($tok in the script), is written to no file on the machine and is imported into Opaya's vault.
@@ -25,6 +27,8 @@ const PLANS={
     connection:c=>({provider:'codex',protocol:'codex',command:'docker',args:['exec','-i','-w','/root',c,'codex'],cwd:'/root'})},
   openclaw:{name:'OpenClaw',image:OPENCLAW_IMAGE,gateway:true,signIn:'openclaw onboard --mode local --no-install-daemon --skip-health',signInNote:'OpenClaw onboarding asks for your model provider and its sign-in or API key.',
     connection:(c,port)=>({provider:'openclaw',protocol:'openai',endpoint:`http://127.0.0.1:${port}/v1`,model:'openclaw',command:'docker',args:['exec','-i',c,'openclaw'],cwd:''})},
+  dsh:{name:'DeepSeek Harness',npm:'@deepseek-ai/dsh',web:3080,signIn:"echo 'DeepSeek Harness has no sign-in: give it DEEPSEEK_API_KEY with the key button in its chat or from the Opaya Vault.'",signInNote:'Give it DEEPSEEK_API_KEY from its chat in Opaya when it is added.',
+    connection:c=>({provider:'custom',protocol:'acp',command:'docker',args:['exec','-i','-w','/root',c,'dsh','--profile','acp'],cwd:'/root',avatar:'lib:deepseek'})},
   opencode:{name:'OpenCode',npm:'opencode-ai',signIn:'opencode auth login',signInNote:'OpenCode asks for a provider and key.',
     connection:c=>({provider:'custom',protocol:'acp',command:'docker',args:['exec','-i','-w','/root',c,'opencode','acp'],cwd:'/root',avatar:'lib:opencode'})}
 };
@@ -73,7 +77,7 @@ function plan(id,{name}={}){
     `  docker image inspect ${image} >/dev/null 2>&1 || { echo 'Downloading ${image} (the first time can take a few minutes)'; docker pull ${image} || exit 1; }`,
     p.image
       ?`  docker run -d --name ${q(container)} --restart unless-stopped -v "$dir:${mount}" -e HERMES_HOME=${q(mount)} --entrypoint sleep ${image} infinity >/dev/null || exit 1`
-      :`  docker run -d --name ${q(container)} --restart unless-stopped -v "$dir:${mount}" -w ${q(mount)} ${image} sleep infinity >/dev/null || exit 1`,
+      :`  docker run -d --name ${q(container)} --restart unless-stopped -v "$dir:${mount}" -w ${q(mount)}${p.web?` -p 127.0.0.1:${webPort(container)}:${p.web}`:''} ${image} sleep infinity >/dev/null || exit 1`,
     'fi',
     ...(p.npm?[`echo 'Installing ${p.name} in the container'`,`docker exec ${q(container)} npm install -g ${p.npm}@latest || exit 1`]:[]),
     `echo; echo '${p.name} runs in container ${container}. Data: '"$dir"`,
@@ -85,4 +89,4 @@ function plan(id,{name}={}){
   return {framework:{id,name:p.name},container,folder:`~/${folder}/${n}`,image,command:`sh -c ${q(lines.join('\n'))}`,preview:lines.join('\n'),
     connection:{name:`${p.name} (Docker)`,transport:'ssh',tags:['docker'],...p.connection(container)}};
 }
-module.exports={PLANS,supported,plan,EXIT,slug,openclawRun,openclawPort,OPENCLAW_IMAGE};
+module.exports={PLANS,supported,plan,EXIT,slug,openclawRun,openclawPort,webPort,OPENCLAW_IMAGE};

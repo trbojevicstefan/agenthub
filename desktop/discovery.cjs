@@ -121,6 +121,9 @@ async function scanLocal({home = os.homedir(), extraHomes = [], probe = true} = 
   // OpenCode chats over ACP, like Hermes.
   const opencode = binary('opencode');
   if (opencode) found.push(candidate({name: 'OpenCode', provider: 'custom', protocol: 'acp', transport: 'local', command: opencode, args: ['acp'], cwd: home, avatar: 'lib:opencode'}, 'Chats over ACP (opencode acp). Sign in once with opencode auth login in Terminal.'));
+  // DeepSeek Harness chats over ACP too (dsh --profile acp); its Web UI opens from Opaya.
+  const dsh = binary('dsh');
+  if (dsh) found.push(candidate({name: 'DeepSeek Harness', provider: 'custom', protocol: 'acp', transport: 'local', command: dsh, args: ['--profile','acp'], cwd: home, avatar: 'lib:deepseek'}, 'Chats over ACP (dsh --profile acp). Give it DEEPSEEK_API_KEY from its chat (key button) or the Opaya Vault.'));
   const openclaw = binary('openclaw');
   const openclawRoot = path.join(home,'.openclaw');
   if (!openclaw && await fs.stat(openclawRoot).catch(() => null)) warnings.push(`OpenClaw is not installed; its old data is still in ${openclawRoot}.`);

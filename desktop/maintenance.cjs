@@ -25,13 +25,14 @@ const TOOLS={
   codex:{name:'Codex CLI',bin:'codex',npm:'@openai/codex',brew:'codex',files:[],data:['.codex'],win:{data:['.codex']}},
   openclaw:{name:'OpenClaw',bin:'openclaw',npm:'openclaw',brew:'openclaw',files:[],data:['.openclaw'],win:{data:['.openclaw']}},
   opencode:{name:'OpenCode',bin:'opencode',npm:'opencode-ai',brew:'opencode',files:['.opencode'],data:['.config/opencode','.local/share/opencode'],win:{data:['.config\\opencode','.local\\share\\opencode']}},
+  dsh:{name:'DeepSeek Harness',bin:'dsh',npm:'@deepseek-ai/dsh',files:[],data:['.dsh'],win:{data:['.dsh']}},
   goose:{name:'Goose',bin:'goose',brew:'block-goose-cli',files:['.local/bin/goose'],data:['.config/goose']},
   aider:{name:'Aider',bin:'aider',uv:'aider-chat',pipx:'aider-chat',pip:'aider-chat',files:['.local/bin/aider'],data:['.aider.conf.yml','.aider.model.settings.yml'],win:{pip:'aider-chat',data:['.aider.conf.yml']}},
   ollama:{name:'Ollama',bin:'ollama',brew:'ollama',files:['Applications/Ollama.app'],system:true,data:['.ollama'],win:{winget:'Ollama.Ollama',data:['.ollama']}}
 };
 // What a local backup holds. `dirs` are copied entry by entry so history and keys can be left out by name.
-const HISTORY={hermes:['state.db','state.db-wal','state.db-shm','sessions','logs','checkpoints','state-snapshots'],claude:['projects','todos','shell-snapshots','statsig'],codex:['sessions','history.jsonl','log'],openclaw:['sessions','logs'],opencode:['log','snapshot']};
-const SECRETS={hermes:['.env','auth.json'],claude:['.credentials.json'],codex:['auth.json'],openclaw:['credentials','.env'],opencode:['auth.json']};
+const HISTORY={hermes:['state.db','state.db-wal','state.db-shm','sessions','logs','checkpoints','state-snapshots'],claude:['projects','todos','shell-snapshots','statsig'],codex:['sessions','history.jsonl','log'],openclaw:['sessions','logs'],dsh:['sessions','logs','cache','attachments'],opencode:['log','snapshot']};
+const SECRETS={hermes:['.env','auth.json'],claude:['.credentials.json'],codex:['auth.json'],openclaw:['credentials','.env'],dsh:['.credentials.yaml','.env'],opencode:['auth.json']};
 // Never part of a backup: the Hermes installation itself, caches and other profiles (they are agents of their own).
 const HERMES_SKIP=['hermes-agent','venv','node','python','git','bin','cache','.install','profiles','backups'];
 const BACKUP={
@@ -39,6 +40,7 @@ const BACKUP={
   codex:{dirs:['.codex'],files:[]},
   openclaw:{dirs:['.openclaw'],files:[]},
   opencode:{dirs:['.config/opencode','.local/share/opencode'],files:[]},
+  dsh:{dirs:['.dsh'],files:[]},
   goose:{dirs:['.config/goose'],files:[]}
 };
 const CONTAINER=/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
@@ -70,10 +72,10 @@ function frameworkOf(agent){
   // In a container the program is the one `docker exec` runs, right after the container name.
   const i=agent.command==='docker'?dockerExecContainerIndex(agent.args||[]):-1;
   const bin=path.basename(String(i>=0?agent.args[i+1]||'':agent.command||'')).replace(/\.(exe|cmd|bat|ps1)$/i,'').toLowerCase();
-  return {opencode:'opencode',goose:'goose',aider:'aider',ollama:'ollama'}[bin]||'';
+  return {opencode:'opencode',dsh:'dsh',goose:'goose',aider:'aider',ollama:'ollama'}[bin]||'';
 }
 // Agents started with npx (`npx -y @openai/codex app-server`) have no installation: npx keeps them in its cache.
-const NPX_PACKAGES={'@openai/codex':'codex','@anthropic-ai/claude-code':'claude','opencode-ai':'opencode','openclaw':'openclaw'};
+const NPX_PACKAGES={'@openai/codex':'codex','@anthropic-ai/claude-code':'claude','opencode-ai':'opencode','openclaw':'openclaw','@deepseek-ai/dsh':'dsh'};
 function npxOf(agent){
   if(!/^npx(\.cmd)?$/i.test(path.basename(String(agent.command||''))))return '';
   for(const a of agent.args||[]){if(String(a).startsWith('-'))continue;const name=String(a).replace(/(.)@[^/@]*$/,'$1');return NPX_PACKAGES[name]||'';}

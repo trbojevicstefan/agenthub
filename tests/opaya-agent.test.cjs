@@ -340,6 +340,24 @@ test('the Opaya Agent manages the Vault, jobs and app actions with its own tools
   const j=await agent.tool('jobs',{});assert.deepEqual(j.jobs[0],{job_id:'j1',kind:'backup',title:'Backing up Claude',status:'error',error:'disk full',steps:['Copy: error'],log:['disk full'],result:undefined});
   approvals.length=0;await agent.tool('vault',{op:'forget',key:held.id});assert.equal(approvals.length,1);assert.equal((await agent.tool('vault',{op:'list'})).keys.length,0);
 });
+test('DeepSeek Harness: installed, found, run in Docker, given keys in ~/.dsh/.env and opened in its Web UI',async t=>{
+  const dsh=catalog.list().find(f=>f.id==='dsh');assert.equal(dsh.docker,true);assert.match(dsh.localCommand||catalog.command('dsh',{remote:true}).command,/@deepseek-ai\/dsh/);
+  const maintenance=require('../desktop/maintenance.cjs'),containers=require('../desktop/containers.cjs'),web=require('../desktop/dsh-web.cjs');
+  const local={id:'d',name:'DeepSeek Harness',provider:'custom',protocol:'acp',transport:'local',command:'/usr/local/bin/dsh',args:['--profile','acp'],cwd:'/tmp'};
+  assert.equal(maintenance.frameworkOf(local),'dsh');
+  const plan=containers.plan('dsh',{name:'ds'});assert.match(plan.command,new RegExp(`-p 127\\.0\\.0\\.1:${containers.webPort('opaya-ds')}:3080`));
+  assert.deepEqual(plan.connection.args,['exec','-i','-w','/root','opaya-ds','dsh','--profile','acp']);assert.equal(maintenance.frameworkOf(plan.connection),'dsh');
+  // The Web UI: dsh web on a port, or inside the container on 3080 for the published port; the printed URL keeps its token.
+  assert.equal(web.command(local,{port:4101}),"'/usr/local/bin/dsh' web --no-open --port 4101");
+  assert.equal(web.command(plan.connection,{trusted:['127.0.0.1:13200']}),"docker 'exec' '-t' '-i' '-w' '/root' 'opaya-ds' dsh web --no-open --host 0.0.0.0 --port 3080 --trusted-host 127.0.0.1:13200");
+  const url=web.printedUrl('starting\r\n\x1b[32mdsh web: http://0.0.0.0:3080/?token=abc_-1\x1b[0m\r\n');assert.equal(url,'http://0.0.0.0:3080/?token=abc_-1');
+  assert.equal(web.atAddress(url,13200),'http://127.0.0.1:13200/?token=abc_-1');
+  // Keys go into ~/.dsh/.env, which dsh loads when it starts.
+  const home=await temp(t),{agent,broker}=await fixture(t,[],{userHome:home,trusted:true});
+  const saved=await broker.saveAgent({agent:{...local,command:'dsh'}},{preapproved:true});
+  const r=await agent.giveToAgent({agentId:saved.id,name:'DEEPSEEK_API_KEY',value:ROUTER_KEY});
+  assert.equal(await fs.readFile(path.join(home,'.dsh','.env'),'utf8'),`DEEPSEEK_API_KEY=${ROUTER_KEY}\n`);assert.match(r.next,/~\/.dsh\/.env/);
+});
 test('store_secret signs Codex in with an OpenAI key on its input, never on its command line, and puts other keys in its .env',async t=>{
   const {EventEmitter}=require('node:events'),{PassThrough}=require('node:stream'),spawned=[];
   const spawnAgent=(a,args)=>{const child=new EventEmitter(),run={args,input:''};Object.assign(child,{stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),exitCode:null,signalCode:null});spawned.push(run);child.stdin.on('data',d=>{run.input+=d;});child.stdin.on('end',()=>setImmediate(()=>{child.exitCode=0;child.emit('close',0);}));return child;};

@@ -18,6 +18,9 @@ const FRAMEWORKS = [
   {id:'opencode', name:'OpenCode', provider:'custom', icon:'opencode', command:'opencode', description:'Open-source coding agent for the terminal.',
     docs:'https://opencode.ai/docs/', after:'Run `opencode auth login`. Discover adds it; Opaya chats with it over ACP.', requires:'Node.js 18+',
     posix:'npm install -g opencode-ai || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g opencode-ai; }', windows:'npm.cmd install -g opencode-ai'},
+  {id:'dsh', name:'DeepSeek Harness', provider:'custom', icon:'deepseek', command:'dsh', description:'DeepSeek\'s open-source agent harness (developer preview): chat over ACP, its own Web UI.',
+    docs:'https://github.com/deepseek-ai/deepseek-harness', after:'Give it DEEPSEEK_API_KEY (key button in its chat, or the Opaya Vault). Discover adds it; Opaya chats with it over ACP and opens its Web UI.', requires:'Node.js 22.19+',
+    posix:'npm install -g @deepseek-ai/dsh || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g @deepseek-ai/dsh; }', windows:'npm.cmd install -g @deepseek-ai/dsh'},
   {id:'goose', name:'Goose', provider:'custom', icon:'goose', command:'goose', description:'Extensible open-source agent from Block.',
     docs:'https://block.github.io/goose/', after:'Run `goose configure`. Add it as a terminal agent.',
     posix:'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash', windows:''},
@@ -115,6 +118,9 @@ const SETUP={
     sign_in:{posix:'codex login',remote:'codex login --device-auth',windows:'codex.cmd login',note:'On this computer a browser page opens for the ChatGPT sign-in; on a machine Codex shows a link and a code to enter on any device.'},
     status:{posix:'codex login status',windows:'codex.cmd login status'}},
   opencode:{sign_in:{posix:'opencode auth login',windows:'opencode auth login',note:'OpenCode asks for a provider and its key.'},status:{posix:'opencode auth list',windows:'opencode auth list'}},
+  // DeepSeek Harness has no sign-in: it reads DEEPSEEK_API_KEY (or other providers' keys) from ~/.dsh/.env, which the
+  // key button and the Opaya Vault write. Other providers and models are set in its Web UI.
+  dsh:{status:{posix:'dsh --version && ls ~/.dsh 2>/dev/null',windows:'dsh --version'}},
   goose:{sign_in:{posix:'goose configure',windows:'',note:'Goose asks for a provider and its key.'}}
 };
 const SETUP_STEPS=['sign_in','model','use_claude_login','use_codex_login','enable_api','start_gateway','status'];

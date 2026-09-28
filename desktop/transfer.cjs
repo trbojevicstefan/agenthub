@@ -75,9 +75,9 @@ const LOOPBACK=/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i;
 function keyKind(agent){
   if(agent.protocol==='openai'&&!['hermes','openclaw'].includes(agent.provider))return 'token';
   const f=require('./maintenance.cjs').frameworkOf(agent);
-  return ['hermes','openclaw','claude','codex','opencode'].includes(f)?f:'';
+  return ['hermes','openclaw','claude','codex','opencode','dsh'].includes(f)?f:'';
 }
-const KIND_LABEL={hermes:'.env',openclaw:'.env',claude:'settings.json env',codex:'Codex login or .env',opencode:'auth.json',token:'Opaya vault'};
+const KIND_LABEL={hermes:'.env',openclaw:'.env',dsh:'.env',claude:'settings.json env',codex:'Codex login or .env',opencode:'auth.json',token:'Opaya vault'};
 // .env values: quotes removed, a trailing comment after an unquoted value dropped.
 function envValueOf(raw){const v=String(raw).trim();const m=/^(['"])(.*)\1$/.exec(v);return m?m[2]:v.replace(/\s+#.*$/,'');}
 const keyName=n=>ENV_KEY.test(n)&&secrets.secretName(n);
@@ -90,6 +90,7 @@ async function keyFile(kind,agent,host){
   if(kind==='openclaw')return {where,file:await at('${OPENCLAW_STATE_DIR:-$HOME/.openclaw}',env.OPENCLAW_STATE_DIR||path.join(home,'.openclaw'),'.env')};
   if(kind==='claude')return {where,file:await at('${CLAUDE_CONFIG_DIR:-$HOME/.claude}',env.CLAUDE_CONFIG_DIR||path.join(home,'.claude'),'settings.json')};
   if(kind==='codex')return {where,file:await at('${CODEX_HOME:-$HOME/.codex}',env.CODEX_HOME||path.join(home,'.codex'),'auth.json')};
+  if(kind==='dsh')return {where,file:await at('${DSH_HOME:-$HOME/.dsh}',env.DSH_HOME||path.join(home,'.dsh'),'.env')};
   if(kind==='codex-env')return {where,file:await at('${CODEX_HOME:-$HOME/.codex}',env.CODEX_HOME||path.join(home,'.codex'),'.env')};
   if(kind==='opencode')return {where,file:await at('${XDG_DATA_HOME:-$HOME/.local/share}',env.XDG_DATA_HOME||path.join(home,'.local','share'),'opencode','auth.json')};
   throw new Error(`Opaya does not know where ${agent.name} keeps API keys.`);
@@ -101,7 +102,7 @@ async function readKeys(agent,host,{vault}={}){
   if(kind==='token'){const v=vault?.get(agent.id);if(v)out.set(endpointKey(agent.endpoint)||'API_KEY',v);return {kind,values:out};}
   if(!kind)return {kind,values:out};
   const {where,file}=await keyFile(kind,agent,host),text=await secrets.readAt(where,file);
-  if(kind==='hermes'||kind==='openclaw'){for(const [k,raw] of parseEnv(text)){const v=envValueOf(raw);if(keyName(k)&&v)out.set(k,v);}}
+  if(kind==='hermes'||kind==='openclaw'||kind==='dsh'){for(const [k,raw] of parseEnv(text)){const v=envValueOf(raw);if(keyName(k)&&v)out.set(k,v);}}
   else if(kind==='claude'){const env=json(text,file).env;if(env&&typeof env==='object')for(const [k,v] of Object.entries(env))if(keyName(k)&&typeof v==='string'&&v)out.set(k,v);}
   else if(kind==='codex'){
     const v=json(text,file).OPENAI_API_KEY;if(typeof v==='string'&&v)out.set('OPENAI_API_KEY',v);
@@ -118,7 +119,7 @@ function planKeys(kind,names,{endpoint=''}={}){
   const want=endpointKey(endpoint);
   return names.map(name=>{
     const c=canon(name);
-    if(kind==='hermes'||kind==='openclaw')return {name,to:`.env as ${name}`};
+    if(kind==='hermes'||kind==='openclaw'||kind==='dsh')return /^DSH_/.test(name)&&kind==='dsh'?{name,why:'DeepSeek Harness never reads DSH_* names from a .env'}:{name,to:`.env as ${name}`};
     if(kind==='claude')return {name,to:`settings.json env ${name}`};
     if(kind==='codex')return c==='OPENAI_API_KEY'?{name,to:'codex login --with-api-key'}:/^CODEX_/.test(name)?{name,why:'Codex never reads CODEX_* names from its .env'}:{name,to:`Codex's .env as ${name}`};
     if(kind==='opencode'){const id=Object.keys(PROVIDER_KEYS).find(p=>PROVIDER_KEYS[p]===c);return id?{name,to:`auth.json provider ${id}`,provider:id}:{name,why:'OpenCode has no provider for this key'};}

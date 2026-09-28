@@ -10,10 +10,10 @@ async function freePort() {
   });
 }
 class Tunnel extends EventEmitter {
-  constructor(host, endpoint) { super(); this.host = host; this.original = new URL(endpoint); this.child = null; this.closed = false; }
+  constructor(host, endpoint, {localPort = 0} = {}) { super(); this.host = host; this.original = new URL(endpoint); this.localPort = localPort; this.child = null; this.closed = false; }
   async start() {
     const ssh = findExecutable('ssh'); if (!ssh) throw new Error('OpenSSH client is not installed.');
-    const localPort = await freePort();
+    const localPort = this.localPort || await freePort();
     if(this.closed)throw new Error('SSH connection was cancelled.');
     const remoteHost = this.original.hostname === '[::1]' ? '[::1]' : '127.0.0.1';
     const remotePort = Number(this.original.port || 80);

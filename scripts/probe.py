@@ -70,6 +70,9 @@ for provider, label in [("codex", "Codex CLI"), ("claude", "Claude Code")]:
 opencode = binary("opencode")
 if opencode:
     agents.append({"name": "OpenCode", "provider": "custom", "protocol": "acp", "command": opencode, "args": ["acp"], "cwd": str(home), "avatar": "lib:opencode", "detail": "Chats over ACP (opencode acp). Sign in once with opencode auth login on this machine."})
+dsh = binary("dsh")
+if dsh:
+    agents.append({"name": "DeepSeek Harness", "provider": "custom", "protocol": "acp", "command": dsh, "args": ["--profile", "acp"], "cwd": str(home), "avatar": "lib:deepseek", "detail": "Chats over ACP (dsh --profile acp). Give it DEEPSEEK_API_KEY from its chat (key button) or the Opaya Vault."})
 root = home / ".openclaw"
 if not binary("openclaw") and root.is_dir():
     warnings.append("OpenClaw is not installed; its old data is still in ~/.openclaw.")

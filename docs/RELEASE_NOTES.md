@@ -1,3 +1,14 @@
+# Opaya 0.22.0 - DeepSeek Harness
+
+- **DeepSeek Harness (dsh)**: DeepSeek's open-source agent harness (developer preview) is now an Opaya agent, everywhere the others are.
+  - Install agents installs it with npm (@deepseek-ai/dsh, Node.js 22.19+) on this computer or a machine, or in a Docker container.
+  - Discover finds it on this computer and on machines.
+  - Chat with it in Opaya over ACP (dsh --profile acp): its tools, approvals, MCP servers and the Opaya Vault work like with Hermes. Its models appear in the model picker by name.
+  - **Web UI** button above its chat: Opaya starts dsh web where it runs and opens it in the Opaya browser. For a machine it goes through an SSH tunnel; for a container, through the port Opaya published for it. Chats started in Opaya show up there too.
+  - Keys: the key button in its chat or the Opaya Vault writes DEEPSEEK_API_KEY (or any provider's key) into ~/.dsh/.env and restarts it so it has the key. Other providers and models are set in its Web UI.
+  - Update, back up, uninstall, clone (also into a container) and transfer of keys and skills work for it, and the Opaya Agent knows it.
+- DeepSeek Harness is a developer preview, and DeepSeek says its API will change; Opaya installs its current release (0.1.7).
+
 # Opaya 0.21.7 - the Opaya Agent can do everything Opaya can, and failures go to it
 
 - **New tools for the Opaya Agent**: it no longer only tells you where to click.

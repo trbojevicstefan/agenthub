@@ -15,7 +15,7 @@ const files = require('./files.cjs');
 const {OpayaAgent} = require('./opaya-agent.cjs');
 const skills = require('./skills.cjs');
 const projects = require('./projects.cjs');
-const {dockerExecContainerIndex} = require('./process.cjs');
+const {dockerExecContainerIndex,collect} = require('./process.cjs');
 const vps = require('./vps.cjs');
 const moves = require('./transfer.cjs');
 const {condense} = require('./condense.cjs');
@@ -98,6 +98,8 @@ async function start({app, safeStorage}, root) {
   await terminals.init();
   // Installs and diagnostics run in visible one-off terminals; the UI is told to show them.
   // Background jobs (clone, redeploy): no IPC timeout, live steps and log sent to every window, kept until dismissed.
+  const webs=new Map(),dshWeb=require('./dsh-web.cjs'),{Tunnel,freePort}=require('./tunnel.cjs');
+  const reachable=url=>fetch(url,{signal:AbortSignal.timeout(2000)}).then(()=>true,()=>false);
   const jobs=new Map(),library=new moves.SkillLibrary(root),origin=new (require('node:async_hooks').AsyncLocalStorage)();
   function publishJob(job){listener?.broadcast('job',job);}
   function startJob({kind,title,detail,steps,route},work){
@@ -639,7 +641,7 @@ async function start({app, safeStorage}, root) {
   // "Connect agents when Opaya starts": after a reboot the service starts fresh, so connect them once, quietly.
   if(broker.data.settings?.autoConnect)setTimeout(()=>{for(const a of broker.data.agents)if(a.protocol!=='terminal')broker.connect(a.id).catch(()=>{});},1500).unref?.();
   async function shutdown() {
-    if (stopping) return true; stopping = true;
+    if (stopping) return true; stopping = true; for (const w of webs.values()) w.tunnel?.close();
     for (const a of approvals.values()) a.finish(false);
     await terminals.shutdown(); await opaya?.close?.(); await broker.close();
     await fs.rm(descriptor,{force:true});
@@ -730,6 +732,35 @@ async function start({app, safeStorage}, root) {
       await runInTerminal({label:`Clone ${name}`,key:`clone_${p.id}`.slice(0,60),host,command});return p;
     },
     // Docker manager for one machine: containers and images, start/stop/restart/remove, and logs or a shell in a terminal.
+    // DeepSeek Harness's own Web UI: started in a visible terminal where the agent runs, reached on this computer
+    // directly, through an SSH tunnel, or on the port published from its container; opened in the Opaya browser.
+    agentWeb:async x=>{
+      const a=broker.agent(x.id);if(maintenance.frameworkOf(a)!=='dsh')throw new Error('Only DeepSeek Harness has a Web UI Opaya can open.');
+      const host=hostOf(a),exec=dshWeb.execPrefix(a),old=webs.get(a.id);
+      if(old&&await reachable(old.url))return {url:old.url,terminal:old.terminal};
+      old?.tunnel?.close();webs.delete(a.id);
+      // Where the browser connects: a free port here; for a container, the port published for it on its machine.
+      let port=await freePort(),hostPort=0;
+      if(exec){
+        const out=await collect(require('./process.cjs').launch({transport:host?'ssh':'local',hostId:host?.id||'',command:'docker',args:[],cwd:''},['port',exec.container,String(dshWeb.WEB_PORT)],host),{timeout:20000}).catch(()=>'');
+        hostPort=Number(/:(\d+)\s*$/m.exec(String(out))?.[1]||0);
+        if(!hostPort)throw new Error(`Container ${exec.container} does not publish port ${dshWeb.WEB_PORT}, so its Web UI cannot be reached. Containers Opaya creates for DeepSeek Harness publish it; recreate this one from Install agents > Docker.`);
+        if(!host)port=hostPort;
+      }
+      const trusted=host?[`127.0.0.1:${port}`,`localhost:${port}`]:exec?[`127.0.0.1:${port}`]:[];
+      const view=await runInTerminal({label:`${a.name} Web UI`.slice(0,60),key:`dshweb_${a.id}`.slice(0,60),host,command:dshWeb.command(a,{port:host&&!exec?0:port,trusted,windows:!host&&process.platform==='win32'})});
+      let printed='';const end=Date.now()+120000;
+      while(!printed&&Date.now()<end){await new Promise(r=>setTimeout(r,500));let v;try{v=terminals.attach(view.id);}catch{break;}printed=dshWeb.printedUrl(v.buffer);if(!printed&&v.exited)break;}
+      if(!printed)throw new Error(`The DeepSeek Harness Web UI did not start. Its terminal "${a.name} Web UI" shows why.`);
+      let url=printed,tunnel=null;
+      if(host){
+        const remotePort=exec?hostPort:Number(new URL(printed).port||80);
+        tunnel=new Tunnel(host,`http://127.0.0.1:${remotePort}`,{localPort:port});await tunnel.start();
+        url=dshWeb.atAddress(printed,port);
+      }else if(exec)url=dshWeb.atAddress(printed,hostPort);
+      webs.set(a.id,{url,tunnel,terminal:view.id});
+      return {url,terminal:view.id};
+    },
     dockerList:x=>dockerManager.list(x.hostId?broker.host(x.hostId):null),
     dockerAction:async x=>{const host=x.hostId?broker.host(x.hostId):null;const r=await dockerManager.act(host,{container:x.container,action:x.action});emit();return r;},
     dockerTerminal:async x=>{const host=x.hostId?broker.host(x.hostId):null,command=dockerManager.terminalCommand(x);const view=await runInTerminal({label:`${x.kind==='logs'?'Logs':'Shell'}: ${x.container}`.slice(0,60),key:`docker_${x.kind==='logs'?'logs':'sh'}_${String(x.container).replace(/[^a-zA-Z0-9_-]/g,'_')}`.slice(0,60),host,command});return {id:view.id};},

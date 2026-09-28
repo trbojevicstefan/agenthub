@@ -23,6 +23,10 @@ const CLI={
     skills:['.config/opencode/agent','.config/opencode/agents','.config/opencode/command','.config/opencode/commands','.config/opencode/skills'],memory:['.config/opencode/AGENTS.md'],personality:[],settings:['.config/opencode/opencode.json','.config/opencode/opencode.jsonc'],
     history:['.local/share/opencode/log','.local/share/opencode/snapshot','.local/share/opencode/storage'],secrets:['.local/share/opencode/auth.json'],
     connection:()=>({provider:'custom',protocol:'acp',command:'opencode',args:['acp'],avatar:'lib:opencode'})},
+  dsh:{name:'DeepSeek Harness',bin:'dsh',top:['.dsh'],
+    skills:['.dsh/skills','.agents/skills'],memory:['.dsh/AGENTS.md'],personality:['.dsh/.agent-presets'],settings:['.dsh/cordis.patch.yml','.dsh/profiles'],
+    history:['.dsh/sessions','.dsh/logs','.dsh/cache','.dsh/attachments'],secrets:['.dsh/.credentials.yaml','.dsh/.env'],
+    connection:()=>({provider:'custom',protocol:'acp',command:'dsh',args:['--profile','acp'],avatar:'lib:deepseek'})},
   openclaw:{name:'OpenClaw',bin:'openclaw',top:['.openclaw'],
     skills:['.openclaw/skills','.openclaw/workspace/skills'],memory:['.openclaw/workspace/MEMORY.md','.openclaw/workspace/memory'],personality:['.openclaw/workspace/SOUL.md','.openclaw/workspace/AGENTS.md','.openclaw/workspace/USER.md','.openclaw/workspace/IDENTITY.md'],settings:['.openclaw/openclaw.json'],
     history:['.openclaw/sessions','.openclaw/logs','.openclaw/agents/*/sessions','.openclaw/media'],secrets:['.openclaw/credentials','.openclaw/.env'],
@@ -69,7 +73,7 @@ async function startContainer(id,where,container,dir){
   const p=containers.PLANS[id];if(!p?.npm)throw new Error(`${CLI[id].name} cannot run in a Docker container from Opaya. Clone it as a regular install.`);
   const script=[`${REMOTE_PATH}`,"command -v docker >/dev/null 2>&1 || { echo 'Docker is not installed on this machine.' >&2; exit 3; }",
     `mkdir -p ${quote(dir)}`,
-    `if docker inspect ${quote(container)} >/dev/null 2>&1; then docker start ${quote(container)} >/dev/null; else docker run -d --name ${quote(container)} --restart unless-stopped -v ${quote(dir+':/root')} -w /root node:22-bookworm sleep infinity >/dev/null || exit 1; fi`,
+    `if docker inspect ${quote(container)} >/dev/null 2>&1; then docker start ${quote(container)} >/dev/null; else docker run -d --name ${quote(container)} --restart unless-stopped -v ${quote(dir+':/root')} -w /root${p.web?` -p 127.0.0.1:${containers.webPort(container)}:${p.web}`:''} node:22-bookworm sleep infinity >/dev/null || exit 1; fi`,
     `docker exec ${quote(container)} sh -c ${quote(`command -v ${CLI[id].bin} >/dev/null 2>&1 || npm install -g ${p.npm}@latest`)} >/dev/null || exit 1`].join('\n');
   await run(where,script,15*60*1000);
 }

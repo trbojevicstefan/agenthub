@@ -13,6 +13,7 @@ const TOOLS=[
   {id:'codex',name:'Codex CLI',bin:'codex',latest:{npm:'@openai/codex'}},
   {id:'openclaw',name:'OpenClaw',bin:'openclaw',latest:{npm:'openclaw'}},
   {id:'opencode',name:'OpenCode',bin:'opencode',latest:{npm:'opencode-ai'}},
+  {id:'dsh',name:'DeepSeek Harness',bin:'dsh',latest:{npm:'@deepseek-ai/dsh'}},
   {id:'goose',name:'Goose',bin:'goose',latest:{github:'block/goose'}},
   {id:'aider',name:'Aider',bin:'aider',latest:{pypi:'aider-chat'}},
   {id:'ollama',name:'Ollama',bin:'ollama',latest:{github:'ollama/ollama'}},

@@ -9,7 +9,7 @@ async function fakeDocker(dir,{info=true,exists=false}={}){
 }
 const runPlan=(plan,home,bin,withDocker=true)=>spawnSync('sh',['-c',plan.command],{env:{HOME:home,PATH:withDocker?`${bin}:/usr/bin:/bin`:'/usr/bin:/bin'},encoding:'utf8',input:''});
 test('agents that can be installed as a container, and their connections',()=>{
-  assert.deepEqual(catalog.list().filter(f=>f.docker).map(f=>f.id).sort(),['claude','codex','hermes','openclaw','opencode']);
+  assert.deepEqual(catalog.list().filter(f=>f.docker).map(f=>f.id).sort(),['claude','codex','dsh','hermes','openclaw','opencode']);
   const codex=containers.plan('codex',{name:'Work Bot'});
   assert.equal(codex.container,'opaya-work-bot');
   assert.deepEqual(codex.connection,{name:'Codex CLI (Docker)',transport:'ssh',tags:['docker'],provider:'codex',protocol:'codex',command:'docker',args:['exec','-i','-w','/root','opaya-work-bot','codex'],cwd:'/root'});

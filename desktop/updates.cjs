@@ -71,6 +71,7 @@ const SPECS={
   // OpenClaw's gateway keeps running the old code until it restarts.
   openclaw:{name:'OpenClaw',bin:'openclaw',npm:'openclaw',self:'openclaw update --yes',own:['installer','other'],then:'openclaw gateway restart >/dev/null 2>&1 || true',winSelf:'openclaw update --yes'},
   opencode:{name:'OpenCode',bin:'opencode',npm:'opencode-ai',brew:['opencode'],self:'opencode upgrade',own:['installer'],scoop:'opencode',choco:'opencode',winSelf:'opencode upgrade'},
+  dsh:{name:'DeepSeek Harness',bin:'dsh',npm:'@deepseek-ai/dsh'},
   goose:{name:'Goose',bin:'goose',brew:['block-goose-cli'],self:'goose update',own:['installer','other'],windows:false},
   aider:{name:'Aider',bin:'aider',uv:'aider-chat',uvUp:'uv tool install --force --python python3.12 --with pip aider-chat@latest',pipx:'aider-chat',pip:'aider-chat',brew:['aider']},
   ollama:{name:'Ollama',bin:'ollama',brew:['ollama'],cask:['ollama-app','ollama'],winget:'Ollama.Ollama',own:['installer'],installer:{posix:'curl -fsSL https://ollama.com/install.sh | sh'},app:true},
@@ -265,9 +266,9 @@ function handoffPrompt(failed){
 }
 // The Opaya Agent's "versions" check: every tool with its version, how it is installed and where, with the same PATH
 // and detection as the update scripts, so what it reads matches what an update will do.
-const DIAG=['hermes','claude','codex','openclaw','opencode','goose','aider','ollama','node','npm','python3','uv','git','gh','brew','docker','tmux','ssh'];
+const DIAG=['hermes','claude','codex','openclaw','opencode','dsh','goose','aider','ollama','node','npm','python3','uv','git','gh','brew','docker','tmux','ssh'];
 function versionsCheck({windows=false}={}){
-  if(windows)return `${PS_HOW}; foreach ($c in 'hermes','claude','codex','openclaw','opencode','goose','aider','ollama','node','npm','python','uv','git','gh','docker','ssh') { $p=(Get-Command $c -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source; if ($p) { $m=OpayaHow $p; $v=$(if ($m -eq 'npm') { OpayaVia $p } else { '' }); $a=$(if ($c -eq 'ssh') { '-V' } else { '--version' }); $n=((& $c $a 2>&1) | Select-Object -First 1); "$($c): $n ($m$(if ($v) { ' via ' + $v }), $p)" } else { "$($c): not installed" } }`;
+  if(windows)return `${PS_HOW}; foreach ($c in 'hermes','claude','codex','openclaw','opencode','dsh','goose','aider','ollama','node','npm','python','uv','git','gh','docker','ssh') { $p=(Get-Command $c -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source; if ($p) { $m=OpayaHow $p; $v=$(if ($m -eq 'npm') { OpayaVia $p } else { '' }); $a=$(if ($c -eq 'ssh') { '-V' } else { '--version' }); $n=((& $c $a 2>&1) | Select-Object -First 1); "$($c): $n ($m$(if ($v) { ' via ' + $v }), $p)" } else { "$($c): not installed" } }`;
   return `sh -c ${quote([TOOL_PATH,REAL,HOW,
     `for c in ${DIAG.join(' ')}; do p=$(command -v "$c" 2>/dev/null); if [ -z "$p" ]; then echo "$c: not installed"; continue; fi; r=$(real "$p"); how "$r"; [ "$m" = other ] && how "$p"; case $c in ssh|tmux) a=-V;; *) a=--version;; esac; n=$("$c" $a 2>&1 </dev/null | head -1); printf '%s: %s (%s%s, %s%s)\\n' "$c" "$n" "$m" "\${v:+ via $v}" "$p" "$([ "$r" = "$p" ] || printf ' -> %s' "$r")"; done`].join('\n'))}`;
 }

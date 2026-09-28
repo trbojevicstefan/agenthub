@@ -119,6 +119,7 @@ const APP_GUIDE=`Opaya app guide (tell the user where things are; you cannot cli
 - Secrets: keys pasted into your chat and those typed in Opaya's secure prompt stay in Opaya's encrypted vault; you only see references such as [secret S1 · NAME · mask]. A key given to Opaya with "Give it to every agent" is written into every agent that reads keys; API connections keep their own token.
 - Opaya Vault (Vault in the sidebar, Settings, Machines, the key button next to your message box, or the key button in any agent's chat): every key the user keeps in Opaya, encrypted. Add a key (name and key; tick "This API needs an endpoint" to add a base URL, saved as NAME_BASE_URL), give it to one agent, to all agents, or forget it. The key button next to your message box opens the Vault with Insert, which puts a key's reference into the message to you. Keys pasted as text into your chat are temporary. Your vault tool does the same: list, give, give_all, forget.
 - Keys in an agent's chat: the key button lists the keys that agent has (names only, read from the file it reads keys from), Insert puts $NAME into the message, Give hands it a vault key, New key gives it one only it gets. Codex and ACP agents restart when idle so a new key is in their environment; Claude Code has it from its next message. Local Claude Code, Codex and ACP agents also have vault_list and vault_use to ask for a key themselves.
+- DeepSeek Harness (dsh, developer preview): installed with npm (@deepseek-ai/dsh, Node.js 22.19+) on this computer, a machine or in a Docker container; Opaya chats with it over ACP (dsh --profile acp) and its Web UI button (above its chat) starts dsh web where it runs and opens it in the Opaya browser (through an SSH tunnel for a machine). Its keys are in ~/.dsh/.env (DEEPSEEK_API_KEY for DeepSeek; a key saved in its own Web UI goes to ~/.dsh/.credentials.yaml and wins); other providers and models are set in its Web UI. Its data is ~/.dsh.
 - Docker manager (Docker on a machine card in Machines): containers with state, image and ports, start, stop, restart, remove, logs and a shell, and images. Your docker tool does the same on any machine. Discover also finds OpenClaw gateways running in Docker (the published port of 18789) on this computer and machines.
 - Doing it yourself: for backup, uninstall, update, clone, transfer, MCP servers, Docker and keys you have tools (backup_agent, uninstall_agent, update_agent, clone_agent, transfer, mcp_server, docker, vault) and jobs to follow a running job. Use them instead of telling the user where to click, unless the user wants to do it. When something the user started fails (a job, a Docker action, giving a key, an install), Opaya hands it to you: find the cause and finish it.`;
 const fn=(name,description,properties={},required=[])=>({type:'function',function:{name,description,parameters:{type:'object',properties,required,additionalProperties:false}}});
@@ -177,6 +178,8 @@ function keyNote(r,name){
   if(/login/i.test(r.where||''))return `[Opaya] I signed you in with a new ${name}: it is saved in ${r.where}. The value is not in this chat. ${r.loaded==='now'?'Opaya restarted you, so it is in use now.':'It is used from your next start.'}`;
   return `[Opaya] A new ${name} is saved as the token Opaya sends to your API from the next connection. The value is not in this chat.`;
 }
+// Where an agent reads keys from: its .env (Hermes, OpenClaw, DeepSeek Harness), Claude Code's settings.json env, or Codex.
+const keyKindOf=a=>a.provider==='hermes'?'hermes':a.provider==='openclaw'?'openclaw':a.provider==='claude'||a.protocol==='claude'?'claude':a.provider==='codex'||a.protocol==='codex'?'codex':require('./maintenance.cjs').frameworkOf(a)==='dsh'?'dsh':'';
 const loadedText=(loaded,reconnect)=>({now:'Opaya restarted it, so the key is in its environment now.',after:'Opaya restarts it when its current answer finishes, so the key is in its environment from its next message.',turn:'It has the key from its next message.'})[loaded]||reconnect;
 const jobOf=j=>j&&typeof j==='object'&&j.steps?{job_id:j.id,kind:j.kind,title:j.title,status:j.status,error:j.error||undefined,steps:j.steps.map(x=>`${x.label}: ${x.state}`),log:(j.log||[]).slice(-8).map(l=>l.text),result:j.result||undefined}:j;
 const stripAnsi=text=>String(text||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)/g,'').replace(/\r/g,'');
@@ -354,7 +357,7 @@ class OpayaAgent{
       'Opaya connects Hermes, Claude Code, Codex, OpenClaw and other agents on this computer and on SSH machines, keeps their chats and terminals, and lets the user switch between them.',
       'Your job: help install new agents, connect and maintain existing ones, manage SSH machines and keys, and troubleshoot agents that do not work.',
       `Work only through your tools. Check the workspace before changing anything. Prefer the smallest change. Explain briefly what you will do before a change. ${this.trusted?.()?'iTrust is on: your changes and commands run without asking the user (removals still ask), so be careful and say what you did.':'iTrust is off: every change and command is approved by the user in a native dialog, and a declined approval is final.'}`,
-      'Secrets (API keys, tokens, passwords): the user can hand them to you freely. Opaya keeps every value in its encrypted vault and you only ever see a reference such as [secret S1 · OPENAI_API_KEY · sk-p…9f3a]; a key pasted into the chat becomes one before it reaches you. You never see, guess or repeat a value, so never put one in a command, a text answer or notes, and never ask the user to paste a key into a terminal. To get one, call request_secret (Opaya asks in a secure prompt). To give one to an agent, call store_secret with its id (S1): it goes where that agent reads keys (Hermes .env, OpenClaw ~/.openclaw/.env, Claude Code settings.json env, Codex login, the token of an API connection, or your own model key with agent_id opaya), then follow its next hint (reconnect, restart a gateway). When a terminal asks for a key, token or password, answer_prompt answer=secret secret=S1 types it. Keys the user already keeps in the Opaya Vault: vault op=list shows them, vault op=give gives one to an agent, op=give_all to every agent; request_secret only for a key that is not there. Hermes and OpenClaw gateway tokens are imported with save_connection import_gateway_token. [hidden NAME · mask] in tool output is a key Opaya hid from you: you cannot use it; ask the user for it with request_secret when you need it.',
+      'Secrets (API keys, tokens, passwords): the user can hand them to you freely. Opaya keeps every value in its encrypted vault and you only ever see a reference such as [secret S1 · OPENAI_API_KEY · sk-p…9f3a]; a key pasted into the chat becomes one before it reaches you. You never see, guess or repeat a value, so never put one in a command, a text answer or notes, and never ask the user to paste a key into a terminal. To get one, call request_secret (Opaya asks in a secure prompt). To give one to an agent, call store_secret with its id (S1): it goes where that agent reads keys (Hermes .env, OpenClaw ~/.openclaw/.env, DeepSeek Harness ~/.dsh/.env, Claude Code settings.json env, Codex login, the token of an API connection, or your own model key with agent_id opaya), then follow its next hint (reconnect, restart a gateway). When a terminal asks for a key, token or password, answer_prompt answer=secret secret=S1 types it. Keys the user already keeps in the Opaya Vault: vault op=list shows them, vault op=give gives one to an agent, op=give_all to every agent; request_secret only for a key that is not there. Hermes and OpenClaw gateway tokens are imported with save_connection import_gateway_token. [hidden NAME · mask] in tool output is a key Opaya hid from you: you cannot use it; ask the user for it with request_secret when you need it.',
       held.length?`Secrets the user gave in this chat: ${held.map(x=>secrets.reference(x)+(x.stored.length?` (saved for ${x.stored.map(y=>`${y.agentName} as ${y.name}`).join(', ')})`:'')).join('; ')}.`:'',
       'Use run_command and open_app to finish onboarding and fixes end to end when no specific tool fits, with as few extra programs as possible.',
       'Projects: list_projects shows saved project folders and their agents; chats started from a project open the agent in that folder. Git and GitHub CLI actions are in the Projects panel (right-click a project). '+
@@ -440,7 +443,7 @@ class OpayaAgent{
     agent.extraEnv=codexEnv(this.userHome?path.join(this.userHome,'.codex'):undefined);
     const rpc=new Rpc(this.spawnAgent(agent,[...SHELL_ENV,'app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.21.7'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.22.0'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
@@ -666,7 +669,7 @@ class OpayaAgent{
       await this.vault.set(agent.id,value,this.vault.available());await this.stored(s,{agentId:agent.id,agentName:agent.name,name:'connection token',where:'Opaya vault'});
       return {stored:true,secret:s.id,agent:agent.name,where:'its connection token (Opaya vault)',next:`Opaya sends it from the next connection. ${reconnect}`};
     }
-    const kind=agent.provider==='hermes'?'hermes':agent.provider==='openclaw'?'openclaw':agent.provider==='claude'||agent.protocol==='claude'?'claude':agent.provider==='codex'||agent.protocol==='codex'?'codex':'';
+    const kind=keyKindOf(agent);
     if(!kind)throw new Error(`Opaya does not know where ${agent.name} reads keys. Run its own sign-in (setup_agent sign_in) and type the key into its prompt with answer_prompt answer=secret${api?', or save it as its connection token with into=connection_token':''}.`);
     // A gateway Opaya reaches only over the network: its files are on another machine Opaya cannot write to.
     if(agent.transport==='http'&&!/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(agent.endpoint||''))throw new Error(`Opaya reaches ${agent.name} only over HTTP (${agent.endpoint}), so it cannot write its config. Add its machine and a connection over SSH, or use into=connection_token for the key Opaya sends it.`);
@@ -695,7 +698,8 @@ class OpayaAgent{
       hermes:`Hermes loads this .env when a Hermes process starts, and a running gateway picks up new provider keys on its next request. ${then} When the key is for a channel (Telegram, Discord, Slack) or an API_SERVER_* setting, restart its gateway: ${restart}.`,
       openclaw:`OpenClaw loads this .env when its gateway starts (a variable already set in the gateway's own environment wins); its CLI commands see it at once. Restart the gateway: ${restart}, then disconnect_agent and connect_agent.`,
       claude:`Claude Code loads env from settings.json when it starts. ${then} An interactive Claude Code may ask once whether to use a new ANTHROPIC_API_KEY.`,
-      codex:`Codex loads this .env when it starts. ${then}`
+      codex:`Codex loads this .env when it starts. ${then}`,
+      dsh:`DeepSeek Harness loads ~/.dsh/.env when it starts (a key saved in its Web UI wins over it). ${then}`
     }[kind];
     return {stored:true,secret:s.id,agent:agent.name,name,file,where:on,loaded,next,...(urlName?{endpointName:urlName,endpoint:s.endpoint}:{})};
   }
@@ -734,7 +738,7 @@ class OpayaAgent{
   // with the ones Opaya gave it marked, plus the vault keys it does not have yet.
   async agentKeys({agentId}={}){
     const b=this.broker,agent=b.agent(schema.id(agentId)),host=agent.transport==='ssh'?b.host(agent.hostId):null;
-    const kind=agent.provider==='hermes'?'hermes':agent.provider==='openclaw'?'openclaw':agent.provider==='claude'||agent.protocol==='claude'?'claude':agent.provider==='codex'||agent.protocol==='codex'?'codex':'';
+    const kind=keyKindOf(agent);
     const given=new Map();
     for(const s of this.secrets)for(const x of s.stored||[])if(x.agentId===agent.id)given.set(x.name==='Codex login'?s.name:x.name,{secret:s,where:x.where});
     let file='',names=[],error='';
@@ -791,7 +795,7 @@ class OpayaAgent{
     const s=this.secretEntry(id),b=this.broker,done=[],skipped=[];
     s.global=true;await this.saveSecrets();
     for(const agent of b.data.agents){
-      const kind=agent.provider==='hermes'?'hermes':agent.provider==='openclaw'?'openclaw':agent.provider==='claude'||agent.protocol==='claude'?'claude':agent.provider==='codex'||agent.protocol==='codex'?'codex':'';
+      const kind=keyKindOf(agent);
       if(!kind){skipped.push({agent:agent.name,reason:agent.protocol==='openai'?'an API connection: it keeps its own token':'Opaya does not know where this agent reads keys'});continue;}
       try{const r=await this.storeSecret({secret:s.id,agent_id:agent.id,name:s.name,into:'agent_config'},{approved:true});done.push({agent:agent.name,agentId:agent.id,file:r.file||'',where:r.where,note:keyNote(r,s.name)});}
       catch(error){skipped.push({agent:agent.name,reason:String(error?.message||error).slice(0,200)});}
@@ -813,6 +817,7 @@ class OpayaAgent{
     }
     if(kind==='openclaw')return local?path.join(env.OPENCLAW_STATE_DIR||path.join(home,'.openclaw'),'.env'):path.posix.join(await secrets.dirAt(where,'${OPENCLAW_STATE_DIR:-$HOME/.openclaw}'),'.env');
     if(kind==='codex')return local?path.join(env.CODEX_HOME||path.join(home,'.codex'),'.env'):path.posix.join(await secrets.dirAt(where,'${CODEX_HOME:-$HOME/.codex}'),'.env');
+    if(kind==='dsh')return local&&!where.container?path.join(env.DSH_HOME||path.join(home,'.dsh'),'.env'):path.posix.join(await secrets.dirAt(where,'${DSH_HOME:-$HOME/.dsh}'),'.env');
     return local?path.join(env.CLAUDE_CONFIG_DIR||path.join(home,'.claude'),'settings.json'):path.posix.join(await secrets.dirAt(where,'${CLAUDE_CONFIG_DIR:-$HOME/.claude}'),'settings.json');
   }
   // Pick a menu option by its text: read the screen, press the arrow key exactly as often as needed, check the
