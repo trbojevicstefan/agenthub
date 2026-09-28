@@ -255,6 +255,9 @@ body[data-theme="light"] .window-controls.win button.wc-close:hover{background:#
 .surface-switch button:hover,.surface-switch button:focus-visible{background:var(--hover);color:var(--text)}
 .surface-switch button.active{background:var(--hover);color:var(--accent);box-shadow:inset 0 0 0 1px var(--border)}
 body.sidebar-hidden .sidebar{display:none}
+/* Windows and Linux: the title bar controls take room on the right, so a narrow window shows the top bar buttons that
+   have an icon as the icon alone (their tooltip keeps the name) instead of wrapping them onto three rows. */
+@media(max-width:1180px){body.frameless:not([data-platform="darwin"]) .topbar-actions button.subtle:has(>span[aria-hidden="true"]){font-size:0;gap:0;padding-left:9px;padding-right:9px}body.frameless:not([data-platform="darwin"]) .topbar-actions button.subtle>span[aria-hidden="true"]{font-size:14px}}
 body.sidebar-hidden[data-platform="darwin"] .topbar{padding-left:212px}
 body[data-theme="light"] .surface-switch button.active{color:#1f7a45}
 body[data-theme="light"].window-blurred .window-controls.mac button{background:#d7ddd8;border-color:#c5ccc7}
