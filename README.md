@@ -4,7 +4,7 @@
 
 Opaya is a local-first desktop app for your own AI agents: **Hermes, Claude Code, Codex, OpenClaw**, and any other CLI or OpenAI-compatible API. It works with agents on this computer, on your VPS machines over SSH, and in Docker containers. Chat with them, watch their terminals, give them a browser, and share skills and tools between them, all from one window. Opaya needs no hosted account, collects no telemetry and sends nothing through a third-party relay.
 
-**Current version: 0.21.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
+**Current version: 0.21.1.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
 
 ## Download
 
@@ -53,7 +53,7 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 
 ### Terminals
 - Integrated xterm.js terminals come with tabs, search, rename and **pop-out windows**.
-- You can open a shell or the agent's native CLI. The switch next to the window buttons opens the selected agent as a chat or in its terminal.
+- You can open a shell or the agent's native CLI. The switch at the top left, above the Opaya Agent, opens the selected agent as a chat or in its terminal.
 - **Paste** text, screenshots (as the path of a saved PNG) and files copied in Finder or Explorer (as quoted paths). On an SSH machine or in a container the files are copied there first.
 - Terminals keep running when you close the window.
 - Remote terminals use **tmux**, so they survive a dropped SSH connection.
@@ -127,7 +127,7 @@ It acts only through Opaya's own tools and terminals you can watch, and every ch
 - Dark and light themes.
 - System notifications while Opaya is not in front: an agent or the Opaya Agent replied, an approval is waiting or a long job finished. Click one to open that chat. Each kind can be turned off in Settings.
 - **Workspace** filters agents by status and place, and each card has Connect, Chat, Terminal, Manage and Fix. **Manage** in the sidebar opens every option for the selected agent, with a row of all agents to switch between.
-- Hide or show the sidebar with the button next to the window buttons or **Cmd/Ctrl+B**.
+- Hide or show the sidebar with the button at the top left or **Cmd/Ctrl+B**.
 - **Files:** mention a file or folder in the chat or in a terminal on the same machine.
 - **Settings:** theme, Enter or Ctrl/Cmd+Enter to send, terminal text size and position, start Opaya when you sign in, connect agents at start, notifications, tips and keyboard shortcuts.
 - A **Connection log** for every agent.

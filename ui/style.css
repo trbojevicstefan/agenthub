@@ -221,7 +221,7 @@ body[data-theme="light"] .orbit-signal{background:#0f8a57;box-shadow:0 0 0 5px #
 /* Frameless window: Opaya draws its own controls on Windows, Linux and macOS. */
 body.frameless .topbar,body.frameless .sidebar{-webkit-app-region:drag}
 body.frameless .topbar :is(button,select,input,a,.status-pill),body.frameless .sidebar :is(button,input,a,.agent-list,.agent-nav-row),dialog,.context-menu,.toast,.window-controls button{-webkit-app-region:no-drag}
-body.frameless:not([data-platform="darwin"]) .topbar{padding-right:268px}
+body.frameless:not([data-platform="darwin"]) .topbar{padding-right:156px}
 .window-controls{position:fixed;z-index:10002;display:flex;-webkit-app-region:no-drag}
 .window-controls:empty{display:none}
 .window-controls.win{top:0;right:0;height:40px}
@@ -245,7 +245,10 @@ body[data-theme="light"] .window-controls.win button.wc-close:hover{background:#
 .title-controls{position:fixed;z-index:10002;display:flex;align-items:center;gap:6px;-webkit-app-region:no-drag}
 .title-controls:empty{display:none}
 .title-controls.mac{top:8px;left:84px}
-.title-controls.win{top:6px;right:146px}
+.title-controls.win{top:8px;left:22px}
+body.frameless:not([data-platform="darwin"]) .sidebar{padding-top:48px}
+body.sidebar-hidden.frameless:not([data-platform="darwin"]) .topbar{padding-left:150px}
+@media(max-width:1100px){body.frameless:not([data-platform="darwin"]) .topbar-actions button.subtle:has(>span[aria-hidden="true"]){font-size:0;gap:0;padding-left:9px;padding-right:9px}body.frameless:not([data-platform="darwin"]) .topbar-actions button.subtle>span[aria-hidden="true"]{font-size:14px}}
 .title-controls button{-webkit-app-region:no-drag}
 .title-controls svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}
 .title-btn{width:28px;height:28px;min-width:0;padding:0;border:0;border-radius:7px;color:var(--muted)}
@@ -257,7 +260,6 @@ body[data-theme="light"] .window-controls.win button.wc-close:hover{background:#
 body.sidebar-hidden .sidebar{display:none}
 /* Windows and Linux: the title bar controls take room on the right, so a narrow window shows the top bar buttons that
    have an icon as the icon alone (their tooltip keeps the name) instead of wrapping them onto three rows. */
-@media(max-width:1180px){body.frameless:not([data-platform="darwin"]) .topbar-actions button.subtle:has(>span[aria-hidden="true"]){font-size:0;gap:0;padding-left:9px;padding-right:9px}body.frameless:not([data-platform="darwin"]) .topbar-actions button.subtle>span[aria-hidden="true"]{font-size:14px}}
 body.sidebar-hidden[data-platform="darwin"] .topbar{padding-left:212px}
 body[data-theme="light"] .surface-switch button.active{color:#1f7a45}
 body[data-theme="light"].window-blurred .window-controls.mac button{background:#d7ddd8;border-color:#c5ccc7}

@@ -1,3 +1,7 @@
+# Opaya 0.21.1 - The chat and terminal switch sits top left on Windows too
+
+- **Top left on every system**: on Windows and Linux the sidebar button and the chat and terminal switch now sit at the top left, above the Opaya Agent, as they do on a Mac after the traffic lights. The top bar gets its space back on the right, next to minimize, maximize and close.
+
 # Opaya 0.21.0 - Chat or terminal next to the window buttons, paste that works, updates that finish, keys and MCP for every agent
 
 - **Chat or terminal, next to the window buttons**: after the traffic lights on a Mac (left of minimize, maximize and close on Windows) there is a sidebar button and a two-icon switch. The first icon opens the selected agent as a chat, the second in its own terminal. They replace the Terminal, Chat and Open chat buttons in the middle of the top bar. Right-click the terminal icon for the CLI below the chat, a shell, or a terminal on this computer. From a project chat the CLI starts in the project's folder. Cmd+B / Ctrl+B hides or shows the sidebar, and Opaya remembers it.
