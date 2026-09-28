@@ -12,6 +12,7 @@ const {spawn}=require('node:child_process');
 const {REMOTE_PATH,findExecutable,environment,quote,collect,dockerExecContainerIndex}=require('./process.cjs');
 const {place,shell,run,sourceHome,isLocal,measure,slug}=require('./clone.cjs');
 const catalog=require('./catalog.cjs');
+const updates=require('./updates.cjs');
 const {hermesHomes}=require('./diagnostics.cjs');
 
 const PATH_PREFIX=REMOTE_PATH;
@@ -71,20 +72,29 @@ function frameworkOf(agent){
   const bin=path.basename(String(i>=0?agent.args[i+1]||'':agent.command||'')).replace(/\.(exe|cmd|bat|ps1)$/i,'').toLowerCase();
   return {opencode:'opencode',goose:'goose',aider:'aider',ollama:'ollama'}[bin]||'';
 }
+// Agents started with npx (`npx -y @openai/codex app-server`) have no installation: npx keeps them in its cache.
+const NPX_PACKAGES={'@openai/codex':'codex','@anthropic-ai/claude-code':'claude','opencode-ai':'opencode','openclaw':'openclaw'};
+function npxOf(agent){
+  if(!/^npx(\.cmd)?$/i.test(path.basename(String(agent.command||''))))return '';
+  for(const a of agent.args||[]){if(String(a).startsWith('-'))continue;const name=String(a).replace(/(.)@[^/@]*$/,'$1');return NPX_PACKAGES[name]||'';}
+  return '';
+}
 // The installation kind decides which update, uninstall and backup apply.
 function kindOf(agent){
-  const container=containerOf(agent),framework=frameworkOf(agent),profile=profileOf(agent);
+  const container=containerOf(agent),framework=frameworkOf(agent),profile=profileOf(agent),npx=npxOf(agent);
   if(container)return {kind:'docker',label:'Docker container',framework,container,managed:!!agent.clone?.container&&agent.clone.container===container,dir:agent.clone?.dir||''};
+  if(npx)return {kind:'npx',label:'Runs through npx',framework:npx};
   if(!framework)return {kind:'remote-api',label:agent.protocol==='openai'?'API connection':'Custom command',framework:''};
   if(profile)return {kind:'hermes-profile',label:`Hermes profile "${profile.name}"`,framework,profile:profile.name,dir:profile.dir};
   return {kind:'cli',label:TOOLS[framework]?.name||framework,framework};
 }
 const posixScript=lines=>`sh -c ${quote([PATH_PREFIX,...lines].join('\n'))}`;
 const q=quote;
-// The readable script inside `sh -c '...'`, for the approval dialog.
+// The readable script inside `sh -c '...'`, for the approval dialog: without the PATH line and the helper functions of
+// update scripts (they run visibly in the terminal).
 function previewOf(command){
   if(!command.startsWith("sh -c '")||!command.endsWith("'"))return command;
-  return command.slice(7,-1).replace(/'\\''/g,"'").split('\n').filter(line=>line!==PATH_PREFIX).join('\n');
+  return command.slice(7,-1).replace(/'\\''/g,"'").split('\n').filter(line=>line!==PATH_PREFIX&&line!==updates.TOOL_PATH&&!/^\w+\(\)\{ /.test(line)).join('\n');
 }
 const withPreview=fn=>(...args)=>{const r=fn(...args);return {...r,preview:previewOf(r.command)};};
 // ---- Update --------------------------------------------------------------------------------------------------
@@ -121,12 +131,12 @@ function updateCommand(agent,{remote,windows=process.platform==='win32'}){
     return {title:`Update container ${c}`,summary:'Pulls the newest version of the container image and, for Docker Compose, recreates the container.',after:'Reconnect the agent afterwards.',
       command:posix?posixScript(lines):`$img=(docker inspect -f '{{.Config.Image}}' ${q(c)}); docker pull $img; 'Image updated. Recreate the container to use it.'`};
   }
-  if(k.framework==='hermes'){
-    const cmd='hermes update';
-    return {title:'Update Hermes',summary:k.kind==='hermes-profile'?'Updates the Hermes installation. Every profile on this machine uses it.':'Updates Hermes with its own updater.',after:'Reconnect Hermes agents on this machine afterwards.',command:posix?posixScript([cmd]):cmd};
-  }
-  const {framework,command}=catalog.command(k.framework,{remote,update:true});
-  return {title:`Update ${framework.name}`,summary:`Brings ${framework.name} to its latest version.`,after:'Reconnect the agent afterwards.',command};
+  // The update script finds how the agent is installed on the machine and updates that copy (updates.cjs).
+  const script=updates.script(k.framework,{windows:!posix,how:k.kind==='npx'?'npx':'auto'});
+  if(!script)throw new Error(`Opaya has no ${posix?'':'Windows '}update for ${TOOLS[k.framework]?.name||k.framework}.`);
+  if(k.framework==='hermes')return {title:'Update Hermes',tool:'hermes',summary:k.kind==='hermes-profile'?'Updates the Hermes installation. Every profile on this machine uses it.':'Updates Hermes with its own updater (hermes update), or with uv or pipx when it was installed that way.',after:'Reconnect Hermes agents on this machine afterwards.',command:script};
+  const name=updates.SPECS[k.framework]?.name||k.framework;
+  return {title:`Update ${name}`,tool:k.framework,summary:k.kind==='npx'?`${name} runs through npx: Opaya removes its old copy from the npx cache and fetches the newest.`:`Finds how ${name} is installed there (Homebrew, npm, the vendor's installer...) and brings that copy to its latest version.`,after:'Reconnect the agent afterwards.',command:script};
 }
 // ---- Uninstall -----------------------------------------------------------------------------------------------
 // Gateways that keep running as a background service (launchd, systemd user unit) or a plain process after the program
@@ -176,6 +186,7 @@ function windowsUninstall(t,id,{data}){
 function uninstallCommand(agent,{remote,data=false,windows=process.platform==='win32'}){
   const k=kindOf(agent),posix=remote||!windows;
   if(k.kind==='remote-api')throw new Error('This is an API connection. There is nothing installed to remove; remove the connection instead.');
+  if(k.kind==='npx')throw new Error('This agent runs through npx, so nothing is installed. Remove the connection instead.');
   if(k.kind==='docker'){
     const c=k.container,dir=data&&k.managed&&k.dir?deletable(k.dir):'';
     // OpenClaw containers from Install agents keep their data in the volume <container>-data.
@@ -338,11 +349,11 @@ async function removeBackup(file,settings){
 function capabilities(agent){
   const k=kindOf(agent),posix=agent.transport==='ssh'||process.platform!=='win32';
   const update=k.kind==='docker'||k.framework==='hermes'||!!catalog.UPDATES[k.framework]?.[posix?'posix':'windows'];
-  return {kind:k.kind,label:k.label,framework:k.framework,update:k.kind!=='remote-api'&&update,uninstall:k.kind!=='remote-api'&&(k.kind!=='docker'||!!k.container),backup:agent.provider==='hermes'||!!BACKUP[k.framework]};
+  return {kind:k.kind,label:k.label,framework:k.framework,update:k.kind!=='remote-api'&&update,uninstall:!['remote-api','npx'].includes(k.kind)&&(k.kind!=='docker'||!!k.container),backup:agent.provider==='hermes'||!!BACKUP[k.framework]};
 }
 // Agents that share one installation: updating or uninstalling it affects all of them.
 function sharing(agent,agents){
-  const k=kindOf(agent);if(k.kind==='docker'||k.kind==='remote-api')return [];
+  const k=kindOf(agent);if(['docker','remote-api','npx'].includes(k.kind))return [];
   return agents.filter(a=>a.id!==agent.id&&a.transport===agent.transport&&(a.hostId||'')===(agent.hostId||'')&&!containerOf(a)&&frameworkOf(a)===k.framework).map(a=>a.id);
 }
-module.exports={TOOLS,kindOf,capabilities,frameworkOf,containerOf,profileOf,previewOf,updateCommand:withPreview(updateCommand),uninstallCommand:withPreview(uninstallCommand),detect,backup,backupDir,listBackups,removeBackup,insideBackups,sharing};
+module.exports={TOOLS,kindOf,npxOf,capabilities,frameworkOf,containerOf,profileOf,previewOf,updateCommand:withPreview(updateCommand),uninstallCommand:withPreview(uninstallCommand),detect,backup,backupDir,listBackups,removeBackup,insideBackups,sharing};

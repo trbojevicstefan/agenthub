@@ -3,8 +3,9 @@
 // Installed versions come from `<tool> --version` on the machine (this computer, or over SSH); latest versions from the
 // public registries each tool ships through. Read-only: updating goes through catalog update commands.
 const {spawn}=require('node:child_process');
-const {REMOTE_PATH,findExecutable,environment,collect,primeShellPath}=require('./process.cjs');
+const {findExecutable,environment,collect,primeShellPath}=require('./process.cjs');
 const {run}=require('./clone.cjs');
+const updates=require('./updates.cjs');
 // `bin` is what the machine runs; `latest` says where the newest version is published.
 const TOOLS=[
   {id:'hermes',name:'Hermes Agent',bin:'hermes',latest:{git:true}},
@@ -29,17 +30,19 @@ const TOOLS=[
 const parse=text=>{const m=/(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(text||''));return m?[Number(m[1]),Number(m[2]),Number(m[3]||0)]:null;};
 const show=v=>v?v.join('.'):'';
 function compare(a,b){for(let i=0;i<3;i++){if((a[i]||0)!==(b[i]||0))return (a[i]||0)<(b[i]||0)?-1:1;}return 0;}
-// One script per machine: `id=<first line of --version>` for each installed tool, and how far Hermes is behind.
+// One script per machine: `id=<first line of --version>` for each installed tool, `id.how=<method>:<via>:<path>` for
+// how it is installed (the same detection and PATH as the update scripts, updates.cjs), and how far Hermes is behind.
 function script({windows}){
-  if(windows)return TOOLS.filter(t=>!t.posixOnly).map(t=>{const bin=t.win||t.bin;return `if (Get-Command ${bin} -ErrorAction SilentlyContinue) { '${t.id}=' + ((& ${bin} ${t.args||'--version'} 2>&1) -join ' ') }`;}).join('; ');
-  return [REMOTE_PATH,
-    ...TOOLS.map(t=>`if command -v ${t.bin} >/dev/null 2>&1; then printf '%s=%s\\n' ${t.id} "$(${t.bin} ${t.args||'--version'} 2>&1 | grep -m1 -E '[0-9]+\\.[0-9]+')"; fi`),
+  if(windows)return [updates.PS_HOW,...TOOLS.filter(t=>!t.posixOnly).map(t=>{const bin=t.win||t.bin;return `if (Get-Command ${bin} -ErrorAction SilentlyContinue) { '${t.id}=' + ((& ${bin} ${t.args||'--version'} 2>&1) -join ' '); $p=(Get-Command ${bin} -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Source; $r=$p; if ($p) { try { $x=(Get-Item -LiteralPath $p -ErrorAction Stop).Target; if ($x) { $r=[string]@($x)[0] } } catch {} }; $m=OpayaHow $r; if ($m -eq 'other' -and $p) { $m=OpayaHow $p }; '${t.id}.how=' + $m + ':' + $(if ($m -eq 'npm') { OpayaVia $r } else { '' }) + ':' + $p }`;})].join('; ');
+  return [updates.TOOL_PATH,updates.REAL,updates.HOW,
+    'wh(){ p=$(command -v "$2" 2>/dev/null); r=$p; case $p in */.asdf/shims/*) r=$(asdf which "$2" 2>/dev/null || echo "$p");; */mise/shims/*) r=$(mise which "$2" 2>/dev/null || echo "$p");; esac; r=$(real "$r"); how "$r"; [ "$m" = other ] && how "$p"; printf \'%s.how=%s:%s:%s\\n\' "$1" "$m" "$v" "$p"; }',
+    ...TOOLS.map(t=>`if command -v ${t.bin} >/dev/null 2>&1; then printf '%s=%s\\n' ${t.id} "$(${t.bin} ${t.args||'--version'} 2>&1 | grep -m1 -E '[0-9]+\\.[0-9]+')"; wh ${t.id} ${t.bin}; fi`),
     // Hermes installs from git: count the commits the checkout is behind its upstream.
     'h="${HERMES_HOME:-$HOME/.hermes}/hermes-agent"; if [ -d "$h/.git" ] && command -v git >/dev/null 2>&1; then git -C "$h" fetch -q 2>/dev/null; b=$(git -C "$h" rev-list --count HEAD..@{u} 2>/dev/null) && echo "hermes_behind=$b"; fi',
     'true'].join('\n');
 }
-async function installed(host,{timeout=90000}={}){
-  const windows=!host&&process.platform==='win32';let out;
+async function installed(host,{timeout=90000,withHow=false}={}){
+  const windows=!host&&process.platform==='win32',hows={};let out;
   if(windows){
     const ps=findExecutable('powershell.exe',environment())||findExecutable('pwsh',environment());if(!ps)return {};
     out=await collect(spawn(ps,['-NoProfile','-Command',script({windows})],{env:environment(),windowsHide:true,stdio:['pipe','pipe','pipe']}),{timeout});
@@ -47,8 +50,11 @@ async function installed(host,{timeout=90000}={}){
   const found={};
   // A value without a version number is a stub, not an install: the Windows Store "python" alias, or macOS' git and
   // python3 that only offer to install Apple's developer tools.
-  for(const line of out.split(/\r?\n/)){const m=/^([\w-]+)=(.*)$/.exec(line.trim());if(m&&(m[1].endsWith('_behind')||/\d+\.\d+/.test(m[2])))found[m[1]]=m[2].trim().slice(0,200);}
-  return found;
+  for(const line of out.split(/\r?\n/)){
+    const how=/^([\w-]+)\.how=([^:]*):([^:]*):(.*)$/.exec(line.trim());if(how){hows[how[1]]={method:how[2],via:how[3],path:how[4].slice(0,300)};continue;}
+    const m=/^([\w-]+)=(.*)$/.exec(line.trim());if(m&&(m[1].endsWith('_behind')||/\d+\.\d+/.test(m[2])))found[m[1]]=m[2].trim().slice(0,200);
+  }
+  return withHow?{found,hows}:found;
 }
 // Newest published versions, cached for an hour. Failures leave that tool without a "latest" (never "outdated").
 const cache=new Map();
@@ -81,13 +87,15 @@ async function latestOf(tool,{fetchImpl=globalThis.fetch,installedVersion=null}=
 }
 // The report for one machine: installed tools, their versions and which ones have an update.
 async function check(host,{fetchImpl}={}){
-  const found=await installed(host),items=[];
+  const {found,hows}=await installed(host,{withHow:true}),items=[];
   for(const tool of TOOLS){
     const raw=found[tool.id];if(raw===undefined)continue;
     const version=parse(raw);let latest=null,outdated=false,note='';
     if(tool.latest?.git){const behind=Number(found.hermes_behind);if(Number.isFinite(behind)&&behind>0){outdated=true;note=`${behind} update${behind===1?'':'s'} behind`;}}
     else if(version){latest=await latestOf(tool,{fetchImpl,installedVersion:version});outdated=!!latest&&compare(version,latest)<0;}
-    items.push({id:tool.id,name:tool.name,dependency:!!tool.dependency,installed:show(version)||raw.slice(0,60),latest:show(latest),outdated,note});
+    // How it is installed and where, so the list shows what an update will use ("Homebrew", "npm (nvm)").
+    const h=hows[tool.id];
+    items.push({id:tool.id,name:tool.name,dependency:!!tool.dependency,installed:show(version)||raw.slice(0,60),latest:show(latest),outdated,note,...(h?{method:h.method,via:h.via,how:updates.label(h.method,h.via),path:h.path}:{})});
   }
   return {checkedAt:new Date().toISOString(),items};
 }

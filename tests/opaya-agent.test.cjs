@@ -109,7 +109,8 @@ test('Opaya Agent updates, follows the terminal to the end and answers installer
   const terminals={describe:()=>[],attach:id=>({id,buffer,exited:false}),write:(id,data)=>{writes.push([id,data]);if(data==='\r')buffer+=`\nDone.\n[opaya] finished with exit code 0 (run ${tag()})\n`;}};
   const agent=new OpayaAgent({root,vault:broker.vault,broker,terminals,approve:async()=>true,emit:()=>{},runInTerminal:async x=>{commands.push(x);buffer+='Updating...\nContinue? [Y/n] ';return {id:'t1'};},platform:'linux'});await agent.init();
   const r=await agent.tool('update_framework',{framework_id:'codex'});
-  assert.match(commands[0].command,/^npm(\.cmd)? install -g @openai\/codex@latest/);assert.match(commands[0].command,/\[opaya\] finished with exit code \$\? \(run \w{8}\)"$/);
+  // The update script finds how Codex is installed (npm of nvm, Homebrew, npx...) and updates that copy.
+  assert.match(commands[0].command,process.platform==='win32'?/npm\.cmd install -g (--prefix "\$pre" )?@openai\/codex@latest/:/^sh -c '[\s\S]*npm\) npm_up @openai\/codex;;/);assert.match(commands[0].command,/\[opaya\] finished with exit code \$\? \(run \w{8}\)"$/);
   const waited=await agent.tool('wait_for_terminal',{terminal_id:r.terminal_id,seconds:10});assert.equal(waited.question,true);
   await assert.rejects(()=>agent.tool('answer_prompt',{terminal_id:r.terminal_id,answer:'rm -rf /'}),/Unsupported/);
   await assert.rejects(()=>agent.tool('answer_prompt',{terminal_id:'other',answer:'y'}),/terminals you started/);
@@ -122,7 +123,7 @@ test('Opaya Agent updates, follows the terminal to the end and answers installer
 });
 test('every framework and dependency has an update command, and the essentials update covers them',()=>{
   for(const f of catalog.FRAMEWORKS)assert(catalog.UPDATES[f.id],`${f.id} has an update entry`);
-  assert.match(catalog.command('hermes',{remote:true,update:true}).command,/^hermes update$/);
+  assert.match(catalog.command('hermes',{remote:true,update:true}).command,/hermes\|installer\) hermes update;;/);
   const all=catalog.command('essentials',{remote:true,update:true}).command;for(const bin of ['node','python3','git','uv self update','tmux'])assert(all.includes(bin),bin);
   assert.match(catalog.command('node',{remote:true}).command,/sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs/);
 });

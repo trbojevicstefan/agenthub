@@ -1159,9 +1159,11 @@ body[data-theme="light"] .backup-dest code{background:#f2f6f3;border-color:#d3dd
 .tool-machine h3{display:flex;align-items:center;gap:10px;margin:0 0 8px;font-size:13px}
 .tool-machine h3 small{font-weight:400;color:var(--faint);font-size:10px}
 .tool-machine h3 button{margin-left:auto}
+.tool-machine h3 button+button{margin-left:0}
 .tool-row{display:flex;align-items:center;gap:12px;padding:7px 10px;border:1px solid #2a352f;border-radius:8px;margin-bottom:5px;font-size:12px}
 .tool-row.outdated{border-color:#6b5a2a;background:#231f14}
 .tool-name{flex:1;min-width:0}
+.tool-pick{flex:none;width:14px;height:14px;margin:0}
 .tool-name small{color:var(--faint);font-size:10px;margin-left:4px}
 .tool-version{font-family:"Cascadia Code","SFMono-Regular",Consolas,monospace;font-size:11px;color:#a9b7ae}
 .tool-version b{color:#f2d98c}

@@ -22,6 +22,8 @@ const {condense} = require('./condense.cjs');
 const free = require('./free-model.cjs');
 const maintenance = require('./maintenance.cjs');
 const versions = require('./versions.cjs');
+const updates = require('./updates.cjs');
+const secrets = require('./secrets.cjs');
 const diagnostics = require('./diagnostics.cjs');
 const containers = require('./containers.cjs');
 const remoteWork = require('./remote-work.cjs');
@@ -127,16 +129,22 @@ async function start({app, safeStorage}, root) {
   const MARK=/\[opaya\] finished with exit code (\d+)/g;
   const marks=view=>[...String(view.buffer||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g,'').matchAll(MARK)];
   const markCount=id=>{try{return marks(terminals.attach(id)).length;}catch{return 0;}};
-  async function waitForMark(id,before,timeout=45*60*1000){
+  async function waitForMark(id,before,timeout=45*60*1000,what='uninstall'){
     const end=Date.now()+timeout;
     for(;;){
-      let view;try{view=terminals.attach(id);}catch{throw new Error('The uninstall terminal was closed before it finished.');}
+      let view;try{view=terminals.attach(id);}catch{throw new Error(`The ${what} terminal was closed before it finished.`);}
       const found=marks(view);
       if(found.length>before)return Number(found.at(-1)[1]);
-      if(view.exited)throw new Error('The uninstall terminal ended before the uninstaller finished.');
-      if(Date.now()>end)throw new Error('The uninstaller did not finish within 45 minutes. Check its terminal.');
+      if(view.exited)throw new Error(`The ${what} terminal ended before the ${what} finished.`);
+      if(Date.now()>end)throw new Error(`The ${what} did not finish within ${Math.round(timeout/60000)} minutes. Check its terminal.`);
       await new Promise(r=>setTimeout(r,1500));
     }
+  }
+  // What one marked run printed: the text between the end line before it and its own end line.
+  function markedOutput(id,before){
+    let text='';try{text=String(terminals.attach(id).buffer||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)/g,'').replace(/\r/g,'');}catch{return '';}
+    const found=[...text.matchAll(MARK)],from=before>0&&found[before-1]?found[before-1].index+found[before-1][0].length:0;
+    return text.slice(from,found[before]?.index??text.length);
   }
   function backupJob(a,{keys,history},work){
     return startJob({kind:work?'uninstall':'backup',route:{from:a.name,fromWhere:whereName(a),to:work?'Backed up, then uninstalled':'Local backup',toWhere:machineName(),provider:a.provider},title:work?`Backing up and uninstalling ${a.name}`:`Backing up ${a.name}`,detail:`${history?'With':'Without'} chat history / ${keys?'with':'without'} API keys`,steps:[['source','Find the data'],['select','Choose files'],['copy','Write the archive'],...(work?.steps||[])]},async progress=>{
@@ -148,19 +156,21 @@ async function start({app, safeStorage}, root) {
   const maintenanceActions={
     agentInstallInfo:async x=>{const a=broker.agent(x.id);const info=await maintenance.detect(a,hostOf(a));return {...info,shared:maintenance.sharing(a,broker.data.agents)};},
     agentMaintenanceCommand:async x=>{const a=broker.agent(x.id),remote=a.transport==='ssh';return x.action==='uninstall'?maintenance.uninstallCommand(a,{remote,data:!!x.data}):maintenance.updateCommand(a,{remote});},
+    // One approval, then the update runs in the machine's "Updates" terminal; if it fails or does not take effect, the
+    // Opaya Agent finishes it (runBatch).
     agentUpdate:async x=>{
-      const a=broker.agent(x.id),host=hostOf(a),c=maintenance.updateCommand(a,{remote:!!host});
-      if(!await approve(a,`${c.title} ${host?`on ${host.name}`:`on ${machineName()}`}?`,`${c.summary}\n\nRuns in a visible terminal:\n\n${c.preview}\n\nAfterwards: ${c.after}`))throw new Error('Update cancelled.');
-      return runInTerminal({label:c.title,key:`update_${a.id}`.slice(0,60),host,command:c.command});
+      const a=broker.agent(x.id),host=hostOf(a),c=maintenance.updateCommand(a,{remote:!!host}),j=agentJob(a,c);
+      if(!await approve(a,`${c.title} ${host?`on ${host.name}`:`on ${machineName()}`}?`,`${c.summary}${j.how?`\n\nInstalled with: ${j.how}.`:''}\n\nRuns in a visible terminal:\n\n${c.preview}\n\nAfterwards: ${c.after} If it fails, the Opaya Agent finishes it.`))throw new Error('Update cancelled.');
+      runBatch([j]).catch(()=>{});return true;
     },
     // Updates every installation once per machine (and every container), after one approval for the whole list.
     agentUpdateAll:async()=>{
       const seen=new Map();
       for(const a of broker.data.agents){let c;try{c=maintenance.updateCommand(a,{remote:a.transport==='ssh'});}catch{continue;}const key=`${a.transport==='ssh'?a.hostId:'local'}|${c.command}`;if(!seen.has(key))seen.set(key,{a,c});}
       if(!seen.size)throw new Error('None of your agents has an update Opaya can run.');
-      const list=[...seen.values()];
-      if(!await approve({name:'Opaya'},`Update ${list.length} installation${list.length===1?'':'s'}?`,list.map(({a,c})=>`${c.title} on ${whereName(a)} (${a.name})`).join('\n')+'\n\nEach runs in its own visible terminal.'))throw new Error('Update cancelled.');
-      for(const {a,c} of list)await runInTerminal({label:c.title,key:`update_${a.id}`.slice(0,60),host:hostOf(a),command:c.command});
+      const list=[...seen.values()],jobs=list.map(({a,c})=>agentJob(a,c));
+      if(!await approve({name:'Opaya'},`Update ${list.length} installation${list.length===1?'':'s'}?`,list.map(({a,c},i)=>`${c.title} on ${whereName(a)} (${a.name}${jobs[i].how?`, ${jobs[i].how}`:''})`).join('\n')+'\n\nThey run one after another in each machine\'s "Updates" terminal. Whatever fails or does not take effect goes to the Opaya Agent to finish.'))throw new Error('Update cancelled.');
+      runBatch(jobs).catch(()=>{});
       return list.length;
     },
     agentBackup:async x=>{const a=broker.agent(x.id);return backupJob(a,{keys:x.keys!==false,history:x.history!==false});},
@@ -214,10 +224,12 @@ async function start({app, safeStorage}, root) {
   const hourly=()=>{if(broker.data.settings?.updateChecks!==false)checkAll().catch(()=>{});};
   setTimeout(hourly,2*60*1000);setInterval(hourly,60*60*1000);
   function notice(n){listener?.broadcast('notice',{id:randomUUID(),at:Date.now(),...n});}
+  // Runs a marked update in a visible terminal and waits for its end line: {code, output (what it printed), terminal}.
   async function runUpdate({host,label,key,command,timeout=20*60*1000}){
     const end=!host&&process.platform==='win32'?'; Write-Host "[opaya] finished with exit code $(if ($?) { 0 } else { 1 })"':'; echo "[opaya] finished with exit code $?"';
-    const view=await runInTerminal({label,key,host,command:command+end});
-    return waitForMark(view.id,markCount(view.id),timeout);
+    const view=await runInTerminal({label,key,host,command:command+end}),before=markCount(view.id);
+    const code=await waitForMark(view.id,before,timeout,'update');
+    return {code,output:markedOutput(view.id,before),terminal:view.id};
   }
   // Agent errors go to the Opaya Agent. A connection that fails because something is too old is updated first and
   // reconnected; every other error (gateway not installed or down, onboarding or sign-in unfinished, a dropped
@@ -270,9 +282,9 @@ async function start({app, safeStorage}, root) {
     notice({level:'info',kind:'fixing',title:`Updating ${dep?(dep==='node'?'Node.js':'Python'):a.name} automatically`,text:`${a.name} did not connect: ${error}. ${c.title||'The update'} runs in the terminal; Opaya reconnects when it finishes.`,agentId:a.id});
     // Agents that share an installation (Hermes profiles) fail together; they share one update run.
     const runKey=`${host?.id||'local'}|${c.command}`;
-    if(!inFlight.has(runKey))inFlight.set(runKey,runUpdate({host,label:`${c.title||'Update'} (auto-fix)`,key:`autofix_${a.id}`.slice(0,60),command:c.command}).finally(()=>setTimeout(()=>inFlight.delete(runKey),60000)));
+    if(!inFlight.has(runKey))inFlight.set(runKey,onMachine(host,()=>runUpdate({host,label:`${c.title||'Update'} (auto-fix)`,key:`autofix_${a.id}`.slice(0,60),command:c.command})).finally(()=>setTimeout(()=>inFlight.delete(runKey),60000)));
     let code;
-    try{code=await inFlight.get(runKey);}
+    try{code=(await inFlight.get(runKey)).code;}
     catch(e){return escalate(a,error,`The automatic update did not finish: ${safeError(e)}`);}
     if(code!==0)return escalate(a,error,`The automatic update (${c.title||'update'}) ended with exit code ${code}; see its terminal.`);
     versions.cache.clear();checkMachine(host).then(emit).catch(()=>{});
@@ -282,6 +294,65 @@ async function start({app, safeStorage}, root) {
   broker.onConnectError=(a,error)=>{autoFix(a,error).catch(()=>{});};
   broker.onAgentError=(a,error,phase)=>{report(a,error,phase);};
   broker.onClientRefused=(a,text)=>{notice({level:'info',kind:'surface',agentId:a.id,title:`${a.name} opens in its terminal now`,text:`It does not accept chats from other apps anymore ("${text.slice(0,160)}"). Its own CLI still works: Opaya shows it in the terminal. Right-click > Open as chat switches back, for example after you add an API key.`});emit();};
+  // ---- Updates the user starts (one tool, Update selected, Update all here, an agent's Update, Update all agents) ------
+  // One at a time per machine, so two Homebrew or npm runs never collide, in that machine's "Updates" terminal. Then the
+  // versions are checked again: exit code 0 with the old version still first on PATH counts as failed. Everything that
+  // failed in one run goes to the Opaya Agent in a single hand-off, or to the user when it cannot take it.
+  const machineRuns=new Map();
+  function onMachine(host,work){const k=machineKey(host),run=(machineRuns.get(k)||Promise.resolve()).catch(()=>{}).then(work);machineRuns.set(k,run.catch(()=>{}));return run;}
+  const toolItem=(host,id)=>(toolState.machines[machineKey(host)]?.items||[]).find(i=>i.id===id)||null;
+  // A job: {host, tool (versions id, '' for containers), name, command, plan, before (the checked item), builtin}.
+  function toolJob(host,id,c){
+    const before=toolItem(host,id),windows=!host&&process.platform==='win32';
+    return {host,tool:id,name:c.framework.name,command:c.command,before,how:before?.how||'',path:before?.path||'',plan:updates.plan(id,before?.method,{windows})||(id==='homebrew'?'brew update && brew upgrade':''),builtin:!host&&before?.method==='opaya'&&builtinHere(id)};
+  }
+  async function runJob(j){
+    if(j.builtin){const {done}=builtinJob([j.tool],{update:true}),r=await done;return {code:r.error?1:0,output:r.error||`Installed ${Object.values(r.installed||{}).join(' ')} with Opaya's installer.`};}
+    // Agent names come from the user: only plain characters reach the echo.
+    const windows=!j.host&&process.platform==='win32',name=String(j.name).replace(/[^\w .()+-]/g,'').slice(0,80),head=windows?`Write-Host '[opaya] Updating ${name}'; `:`echo '[opaya] Updating ${name}'; `;
+    return runUpdate({host:j.host,label:'Updates',key:'updates',command:head+j.command});
+  }
+  async function runMachine(list){
+    const host=list[0].host,out=[];
+    for(const j of list){let r;try{r=await runJob(j);}catch(e){r={error:safeError(e)};}out.push({...j,...r});}
+    versions.cache.clear();let report=null;try{report=await checkMachine(host);emit();}catch{}
+    const fresh=report&&!report.error?report.items||[]:null;
+    return out.map(x=>{
+      const ran=updates.report(x.output),after=x.tool&&fresh?fresh.find(i=>i.id===x.tool)||(x.before?{missing:true}:null):null;
+      const v=updates.verdict({name:x.name,code:x.code,error:x.error,item:after,ran});
+      return {...x,...v,how:ran.label||x.how,path:after?.path||ran.path||x.path,installed:x.before?.installed||ran.before||'',after:after?.installed||ran.after||'',latest:after?.latest||x.before?.latest||'',machine:host?host.name:machineName(),machineId:host?.id||''};
+    });
+  }
+  async function runBatch(jobs){
+    const groups=new Map();for(const j of jobs){const k=machineKey(j.host);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(j);}
+    const results=(await Promise.all([...groups.values()].map(list=>onMachine(list[0].host,()=>runMachine(list))))).flat();
+    const failed=results.filter(r=>!r.ok),done=results.filter(r=>r.ok);
+    if(done.length&&!failed.length)notice({level:'done',kind:'updated',title:`${done.length===1?`${done[0].name} is`:`${done.length} updates are`} done`,text:done.map(r=>`${r.name}${r.after?` ${r.after}`:''} on ${r.machine}`).join(', ')});
+    if(failed.length){const run=handoffs.then(()=>finishUpdates(failed,done));handoffs=run.catch(()=>{});}
+    return results;
+  }
+  // The Opaya Agent finishes what failed; the terminal output it gets has every secret hidden.
+  async function finishUpdates(failed,done){
+    if(stopping)return;
+    const o=opaya,n=failed.length,title=`${n} update${n===1?'':'s'} did not finish`;
+    const held=o?.heldValues?.()||[],items=failed.map(f=>({...f,output:secrets.shieldOutput(updates.tail(f.output),held)}));
+    const list=failed.map(f=>`${f.name} on ${f.machine}: ${f.reason}`).join('\n')+(done.length?`\n\nDone: ${done.map(r=>r.name).join(', ')}.`:'');
+    const prompt=updates.handoffPrompt(items);
+    if(broker.data.settings?.autoFix===false){notice({level:'error',kind:'update-failed',title,text:`${list}\n\nAutomatic fixing is off in Settings, so the Opaya Agent did not take over.`,...(o?.configured()?{prompt}:{})});return;}
+    if(!o?.configured()){notice({level:'error',kind:'update-failed',title,text:`${list}\n\nConnect a model for the Opaya Agent and it finishes updates that fail.`});return;}
+    let detail;
+    try{
+      if(!await idle(o,5*60*1000))throw new Error('it stayed busy with another request');
+      o.begin(prompt);
+      notice({level:'info',kind:'opaya',title:`The Opaya Agent is finishing ${n} update${n===1?'':'s'}`,text:failed.map(f=>`${f.name} on ${f.machine}`).join(', ')});
+      await idle(o,30*60*1000);
+      if(!o.error)return;
+      detail=`The Opaya Agent could not finish them: ${o.error}`;
+    }catch(e){detail=`The Opaya Agent could not take them: ${safeError(e)}`;}
+    notice({level:'error',kind:'update-failed',title,text:`${list}\n\n${detail}`,prompt});
+  }
+  // An agent's installation as an update job; containers are checked by their exit code only.
+  function agentJob(a,c){const host=hostOf(a),k=maintenance.kindOf(a),tool=k.kind==='docker'||k.kind==='npx'?'':c.tool||'';return {host,tool,name:tool?updates.SPECS[tool]?.name||a.name:`${a.name} (${k.label})`,command:c.command,before:tool?toolItem(host,tool):null,how:tool?toolItem(host,tool)?.how||'':k.label,plan:c.summary};}
   // An agent installed as a Docker container on a machine: the script runs in a visible terminal (pull, start, install,
   // then an interactive sign-in), and when it ends Opaya adds the container as an agent and connects it.
   async function installContainer(host,x){
@@ -404,10 +475,11 @@ async function start({app, safeStorage}, root) {
     versions.cache.clear();emit();progress({step,state:'done',message:`${toolchain.NAMES[id]} ${r.version}`});return r;
   }
   // Starts a job and returns it at once; done resolves when it finishes (for the Opaya Agent, which waits for it).
-  function builtinJob(ids){
+  // update: download the latest even when it is installed (Opaya's own copy of it is out of date).
+  function builtinJob(ids,{update=false}={}){
     let finish;const done=new Promise(r=>{finish=r;});
     const job=startJob({kind:'toolchain',route:{from:'Official downloads',fromWhere:'nodejs.org / GitHub',to:ids.map(id=>toolchain.NAMES[id]).join(', '),toWhere:machineName(),provider:'opaya'},title:`Installing ${ids.map(id=>toolchain.NAMES[id].replace(/ \(.*\)$/,'')).join(', ')}`,detail:'Checked against the official checksums; no administrator password',steps:ids.map(id=>[id,toolchain.NAMES[id]])},async progress=>{
-      const missing=await missingOf(ids),out={};
+      const missing=update?ids:await missingOf(ids),out={};
       try{for(const id of ids){if(!missing.includes(id)){progress({step:id,state:'done',message:'Already installed'});continue;}out[id]=(await builtinStep(id,progress)).version;}finish({installed:out});return {installed:out};}
       catch(e){finish({error:safeError(e),installed:out});throw e;}
     });
@@ -474,7 +546,8 @@ async function start({app, safeStorage}, root) {
     progress({step:step.id,state:'done',message:added.length?`Added ${added.join(', ')}`:'Your agents are already in Opaya'});return added;
   }
   // Keep the Opaya Agent from asking again for each install while it finishes the setup, when the person chose that.
-  function handOff(text,trust){
+  // Its own name: a second `function handOff` in this scope replaced the error hand-off above for every caller.
+  function guideHandOff(text,trust){
     if(trust)setupTrust=true;opaya.begin(text);
     const watch=setInterval(()=>{if(!opaya.busy){setupTrust=false;clearInterval(watch);}},2000);watch.unref?.();
   }
@@ -500,7 +573,7 @@ async function start({app, safeStorage}, root) {
         // With a model, the Opaya Agent finishes: it installs the rest, checks and fixes what went wrong.
         if(brainReady()&&!x.scriptOnly){
           progress({message:'The Opaya Agent takes it from here: watch it in the Opaya Agent chat.'});
-          handOff(guide.handoff({steps,facts,goals}),x.trust!==false);
+          guideHandOff(guide.handoff({steps,facts,goals}),x.trust!==false);
           return {handoff:true,way,steps:rest.map(s=>s.id)};
         }
         for(const step of rest){
@@ -516,21 +589,23 @@ async function start({app, safeStorage}, root) {
   const toolActions={
     toolVersions:async x=>{const host=x.hostId?broker.host(x.hostId):null,m=toolState.machines[machineKey(host)];if(!x.force&&m?.checkedAt&&Date.now()-Date.parse(m.checkedAt)<10*60*1000)return m;const r=await checkMachine(host);emit();return r;},
     toolCheckAll:async()=>{versions.cache.clear();await checkAll({notify:false});return toolState;},
-    // Update one tool (agent or dependency) on a machine, or every outdated one after a single approval.
+    // Update one tool (agent or dependency) on a machine, the ones the user ticked (ids), or every outdated one: one
+    // approval, one batch, one hand-off to the Opaya Agent for whatever failed or did not take effect.
     toolUpdate:async x=>{
-      const host=x.hostId?broker.host(x.hostId):null,ids=x.id==='outdated'?(toolState.machines[machineKey(host)]?.items||[]).filter(i=>i.outdated).map(i=>i.id):[String(x.id||'')];
-      const list=ids.map(id=>{try{return catalog.command(id,{remote:!!host,update:true});}catch{return null;}}).filter(Boolean);
-      if(!list.length)throw new Error('Nothing to update here.');
-      if(!await approve({name:'Opaya'},list.length===1?`Update ${list[0].framework.name} on ${host?host.name:machineName()}?`:`Install ${list.length} updates on ${host?host.name:machineName()}?`,list.map(c=>`${c.framework.name}:\n${c.command}`).join('\n\n')+'\n\nRuns in a visible terminal.'))throw new Error('Update cancelled.');
-      Promise.all(list.map(c=>runUpdate({host,label:`Update ${c.framework.name}`,key:`update_${c.framework.id}`,command:c.command}).catch(()=>1)))
-        .then(()=>{versions.cache.clear();return checkMachine(host);}).then(emit).catch(()=>{});
-      return list.length;
+      const host=x.hostId?broker.host(x.hostId):null,where=host?host.name:machineName();
+      const ids=Array.isArray(x.ids)?x.ids.map(String):x.id==='outdated'?(toolState.machines[machineKey(host)]?.items||[]).filter(i=>i.outdated).map(i=>i.id):[String(x.id||'')];
+      const jobs=[...new Set(ids)].slice(0,40).map(id=>{try{return toolJob(host,id,catalog.command(id,{remote:!!host,update:true}));}catch{return null;}}).filter(Boolean);
+      if(!jobs.length)throw new Error('Nothing to update here.');
+      const lines=jobs.map(j=>`${j.name} (${j.how||'detected when it runs'}): ${j.builtin?"Opaya's built-in installer":j.plan}`).join('\n');
+      if(!await approve({name:'Opaya'},jobs.length===1?`Update ${jobs[0].name} on ${where}?`:`Install ${jobs.length} updates on ${where}?`,`${lines}\n\nEach update finds how the tool is installed and updates that copy, one after another in the "Updates" terminal. Opaya checks the versions afterwards; whatever fails or does not take effect goes to the Opaya Agent to finish.`))throw new Error('Update cancelled.');
+      runBatch(jobs).catch(()=>{});
+      return jobs.length;
     }
   };
   opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal,trusted:()=>!!broker.data.settings?.itrustOpaya||setupTrust});
   opaya.askSecret = askSecret;
   // Claude Code as the Opaya Agent's model reaches the Opaya tools through this bridge; its token can only list and call them.
-  opaya.builtinInstall = async id=>{const ids=builtinIds(id);if(!ids.length)return null;const {job,done}=builtinJob(ids);const r=await done;return {job_id:job.id,...r};};
+  opaya.builtinInstall = async (id,{update=false}={})=>{const ids=builtinIds(id);if(!ids.length)return null;const {job,done}=builtinJob(ids,{update});const r=await done;return {job_id:job.id,...r};};
   opaya.toolBridge = {command:process.execPath, args:[path.join(__dirname,'opaya-tools-mcp.cjs')], env:{ELECTRON_RUN_AS_NODE:'1',OPAYA_TOOLS_ENDPOINT:endpoint(root),OPAYA_TOOLS_TOKEN:toolsToken}};
   await stage('opaya agent');
   await opaya.init();
