@@ -1,7 +1,7 @@
 'use strict';
 // Docker on one machine (this computer or an SSH server): its containers and images, and start, stop, restart and
 // remove for each. Everything runs as `docker` with fixed arguments; names and ids are validated first.
-const {launch,collect}=require('./process.cjs');
+const {launch,collect,terminate}=require('./process.cjs');
 const NAME=/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 const IMAGE=/^[a-zA-Z0-9][a-zA-Z0-9_.\/:@-]{0,255}$/;
 const ACTIONS={start:['start'],stop:['stop'],restart:['restart'],remove:['rm','-f'],'remove-image':['rmi']};
@@ -35,9 +35,24 @@ async function act(host,{container,action}){
   catch(error){const e=explain(error);throw new Error(e.error);}
   return {ok:true};
 }
+// The last lines a container printed (docker logs writes both streams), for the Opaya Agent to read.
+function logs(host,container,tail=150){
+  if(!NAME.test(String(container||'')))return Promise.reject(new Error('Invalid container name.'));
+  const lines=Math.max(10,Math.min(1000,Number(tail)||150));
+  const child=launch({transport:host?'ssh':'local',hostId:host?.id||'',command:'docker',args:[],cwd:''},['logs','--tail',String(lines),container],host);
+  return new Promise((resolve,reject)=>{
+    let text='',done=false;const add=d=>{text=(text+d).slice(-200000);};
+    const finish=(error)=>{if(done)return;done=true;clearTimeout(timer);error?reject(error):resolve(text);};
+    const timer=setTimeout(()=>{terminate(child);finish(null);},20000);
+    child.stdout.setEncoding('utf8');child.stderr.setEncoding('utf8');child.stdout.on('data',add);child.stderr.on('data',add);
+    child.on('error',e=>finish(new Error(explain(e).error)));
+    child.on('close',code=>code===0?finish(null):finish(new Error(explain(new Error(text.slice(-2000)||`docker logs exited with code ${code}`)).error)));
+    child.stdin.end();
+  });
+}
 // What a terminal types to follow a container's log or open a shell in it (works in sh, PowerShell and cmd).
 function terminalCommand({container,kind}){
   if(!NAME.test(String(container||'')))throw new Error('Invalid container name.');
   return kind==='logs'?`docker logs --tail 200 -f ${container}`:`docker exec -it ${container} sh`;
 }
-module.exports={list,act,terminalCommand,explain,NAME};
+module.exports={list,act,logs,terminalCommand,explain,NAME};

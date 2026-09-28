@@ -98,9 +98,10 @@ async function start({app, safeStorage}, root) {
   await terminals.init();
   // Installs and diagnostics run in visible one-off terminals; the UI is told to show them.
   // Background jobs (clone, redeploy): no IPC timeout, live steps and log sent to every window, kept until dismissed.
-  const jobs=new Map(),library=new moves.SkillLibrary(root);
+  const jobs=new Map(),library=new moves.SkillLibrary(root),origin=new (require('node:async_hooks').AsyncLocalStorage)();
   function publishJob(job){listener?.broadcast('job',job);}
   function startJob({kind,title,detail,steps,route},work){
+    const byOpaya=origin.getStore()==='opaya';
     const job={id:randomUUID(),kind,title,detail,route,status:'running',startedAt:Date.now(),steps:steps.map(([key,label])=>({key,label,state:'pending'})),log:[],bytes:0,total:0,result:null,error:''};
     jobs.set(job.id,job);if(jobs.size>20)jobs.delete(jobs.keys().next().value);
     let timer=null;const flush=()=>{timer=null;publishJob(job);};
@@ -112,7 +113,9 @@ async function start({app, safeStorage}, root) {
     };
     publishJob(job);
     Promise.resolve().then(()=>work(progress)).then(result=>{job.status='done';job.result=result;job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='pending')s.state='skipped';job.log.push({at:Date.now(),text:'Done.',state:'done'});},
-      error=>{job.status='error';job.error=safeError(error);job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='active')s.state='error';job.log.push({at:Date.now(),text:job.error,state:'error'});})
+      error=>{job.status='error';job.error=safeError(error);job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='active')s.state='error';job.log.push({at:Date.now(),text:job.error,state:'error'});
+        // A job the user started that failed goes to the Opaya Agent (one it started itself, it follows with its jobs tool).
+        if(!byOpaya)actionFailed(job.title,job.error,`It ran as an Opaya job (job_id ${job.id}, ${kind}); its steps: ${job.steps.map(x=>`${x.label} ${x.state}`).join(', ')}. Read it with your jobs tool.`);})
       .finally(()=>{clearTimeout(timer);publishJob(job);emit();});
     return job;
   }
@@ -275,6 +278,19 @@ async function start({app, safeStorage}, root) {
     if(reported.has(key)&&Date.now()-reported.get(key)<30*60*1000)return;
     reported.set(key,Date.now());
     escalate(a,String(error||'Unknown error'),`Opaya's first guess: ${kind.hint}`,phase).catch(()=>{});
+  }
+  // Something the user started in Opaya failed (a job, a Docker action, giving a key, an install in a terminal): the
+  // Opaya Agent gets it with what Opaya knows, the same way agent errors reach it. Cancellations are not failures.
+  const actionReported=new Map();
+  function actionFailed(title,error,context=''){
+    const text=String(error||'');
+    if(stopping||broker.data.settings?.autoFix===false||/cancel|declined|not approved|stopped by the user/i.test(text))return;
+    const key=`${title}|${text.slice(0,120)}`;if(actionReported.has(key)&&Date.now()-actionReported.get(key)<30*60*1000)return;actionReported.set(key,Date.now());
+    const run=handoffs.then(async()=>{
+      const o=opaya;if(!o?.configured())return;
+      if(!await idle(o,5*60*1000))return;
+      o.begin(`Something I did in Opaya failed: ${title}: "${text.slice(0,1500)}". ${context} Find the real cause with your tools (jobs, read_terminal, read_app_logs, agent_diagnostics, docker, run_diagnostic), fix it and finish what I was doing when you can do it safely. Tell me only what I must do myself.`);
+    });handoffs=run.catch(()=>{});
   }
   async function autoFix(a,error){
     if(broker.data.settings?.autoFix===false)return;
@@ -684,7 +700,12 @@ async function start({app, safeStorage}, root) {
       const host=x.hostId?broker.host(x.hostId):null;
       if(x.runtime==='docker')return installContainer(host,x);
       if(!host&&builtinIds(String(x.id||'')).length)return builtinJob(builtinIds(String(x.id))).job;
-      const {framework,command}=catalog.command(String(x.id||''),{remote:!!host});return runInTerminal({label:`Install ${framework.name}`,key:`install_${framework.id}`,host,command});
+      const {framework,command}=catalog.command(String(x.id||''),{remote:!!host});
+      // The install runs with an exit-code mark; a failed install goes to the Opaya Agent.
+      const end=!host&&process.platform==='win32'?'; Write-Host "[opaya] finished with exit code $(if ($?) { 0 } else { 1 })"':'; echo "[opaya] finished with exit code $?"';
+      const view=await runInTerminal({label:`Install ${framework.name}`,key:`install_${framework.id}`,host,command:command+end}),before=markCount(view.id);
+      waitForMark(view.id,before,60*60*1000,'install').then(code=>{if(code!==0)actionFailed(`Install ${framework.name} on ${host?host.name:machineName()}`,`The install ended with exit code ${code}.`,`It ran in the terminal "Install ${framework.name}" (terminal_id ${view.id}); read it with read_terminal. Last output: ${markedOutput(view.id,before).slice(-1500)}`);}).catch(()=>{});
+      return view;
     },
     files:async x=>{
       let host=null,folder=typeof x.path==='string'?x.path:'',fallback=false;
@@ -789,9 +810,26 @@ async function start({app, safeStorage}, root) {
   actions.opayaGiveAll = async x=>{const r=await opaya.giveToAll({id:x.id});emit();return r;};
   actions.agentGiveSecret = async x=>{const r=await opaya.giveToAgent({agentId:x.agentId,name:x.name,value:x.value,endpoint:x.endpoint});emit();return r;};
   actions.opayaForgetSecret = x=>opaya.forgetSecret(String(x.id||''));
+  // The Opaya Agent's tools for backup, uninstall, update, clone, transfer, MCP servers, Docker shells and jobs run these.
+  opaya.appAction=(name,input)=>{if(!Object.hasOwn(actions,name))throw new Error('Unsupported action.');return origin.run('opaya',()=>actions[name](input));};
+  // Actions the user starts whose failure the Opaya Agent should handle, with how to name them.
+  const nameOf=id=>{try{return broker.agent(id).name;}catch{return 'an agent';}},hostName=id=>{try{return id?broker.host(id).name:machineName();}catch{return 'a machine';}};
+  const REPORTED={
+    dockerAction:x=>`Docker ${x.action} ${x.container} on ${hostName(x.hostId)}`,
+    agentGiveSecret:x=>`Give ${x.name||'a key'} to ${nameOf(x.agentId)}`,
+    vaultGiveAgent:x=>`Give a vault key to ${nameOf(x.agentId)}`,
+    opayaGiveAll:()=>'Give a key to every agent',
+    mcpInstall:x=>`Add the ${x.id} MCP server`,
+    installFramework:x=>`Install ${x.id} on ${hostName(x.hostId)}`,
+    agentBackup:x=>`Back up ${nameOf(x.id)}`,
+    cloneAgent:x=>`Clone ${nameOf(x.id)}`,
+    transferStart:x=>`Transfer from ${nameOf(x.sourceId)} to ${nameOf(x.targetId)}`,
+    agentUpdate:x=>`Update ${nameOf(x.id)}`,
+    toolUpdate:x=>`Update ${x.id||'a tool'}`
+  };
   const token = randomBytes(32).toString('hex');
   listener = server({token,snapshot,scopes:()=>new Map([[browserToken,new Set(['browserTool'])],[toolsToken,new Set(['opayaToolList','opayaToolCall'])],[vaultToken,new Set(['vaultTool'])]]),
-    dispatch:async (method,input)=>{if(!Object.hasOwn(actions,method))throw new Error('Unsupported desktop action.');try{return await actions[method](input||{});}catch(error){throw new Error(safeError(error));}},
+    dispatch:async (method,input)=>{if(!Object.hasOwn(actions,method))throw new Error('Unsupported desktop action.');try{return await actions[method](input||{});}catch(error){const text=safeError(error);if(REPORTED[method])actionFailed(REPORTED[method](input||{}),text);throw new Error(text);}},
     onApproval:(socket,message)=>{const a=approvals.get(message.id);if(a?.socket===socket)a.finish(message.allow===true,message.value);},
     onDetach:socket=>{for(const a of approvals.values())if(a.socket===socket)a.finish(false);}
   });

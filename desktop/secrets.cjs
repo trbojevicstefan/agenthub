@@ -200,11 +200,6 @@ function parseEnv(text){
   }
   return out;
 }
-// The variable names an agent's key file holds: a .env, or env in Claude Code's settings.json.
-function envNames(text,json=false){
-  if(!json)return Object.keys(parseEnv(text));
-  try{const data=JSON.parse(String(text||'').replace(/^\uFEFF/,'').trim()||'{}');return data?.env&&typeof data.env==='object'&&!Array.isArray(data.env)?Object.keys(data.env).filter(k=>/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)):[];}catch{return [];}
-}
 // Claude Code's settings.json with env.NAME set; everything else is kept. Invalid JSON is never overwritten.
 function setJsonEnv(text,name,value){
   let data={};const raw=String(text||'').replace(/^\uFEFF/,'').trim();
@@ -232,4 +227,4 @@ async function writeAt(where,file,content){
   const script=`umask 077; f=${quote(file)}; [ -L "$f" ] && f=$(readlink -f -- "$f" 2>/dev/null || printf %s "$f"); mkdir -p -- "$(dirname -- "$f")" && cat > "$f.opaya-tmp" && chmod 600 "$f.opaya-tmp" && mv -f -- "$f.opaya-tmp" "$f"`;
   await collect(shell(where,script),{timeout:30000,input:content});
 }
-module.exports={PATTERNS,REF,detect,replaceSpans,guessName,patternName,contextName,envName,secretName,plausible,keyLike,mask,reference,secretId,conceal,shieldOutput,deep,envValue,setEnv,setJsonEnv,parseEnv,envNames,dirAt,readAt,writeAt};
+module.exports={PATTERNS,REF,detect,replaceSpans,guessName,patternName,contextName,envName,secretName,plausible,keyLike,mask,reference,secretId,conceal,shieldOutput,deep,envValue,setEnv,setJsonEnv,parseEnv,dirAt,readAt,writeAt};

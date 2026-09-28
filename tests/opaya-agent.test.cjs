@@ -322,6 +322,24 @@ test('a key given to a connected Codex restarts it with the key in its environme
   broker.turns.delete(codex.id);finish();for(let i=0;i<50&&connects===before+1;i++)await new Promise(res=>setTimeout(res,5));
   assert.equal(connects,before+2);
 });
+test('the Opaya Agent manages the Vault, jobs and app actions with its own tools, asking first',async t=>{
+  const home=await temp(t),{agent,broker,approvals}=await fixture(t,[],{userHome:home});
+  const claude=await broker.saveAgent({agent:{name:'Claude',provider:'claude',protocol:'claude',transport:'local',command:'claude'}},{preapproved:true});
+  const held=await agent.holdFromUser({name:'GROQ_API_KEY',value:ROUTER_KEY});
+  const list=await agent.tool('vault',{op:'list'});assert.deepEqual(list.keys.map(k=>[k.name,k.agents]),[['GROQ_API_KEY',[]]]);assert(!JSON.stringify(list).includes(ROUTER_KEY.slice(6)));
+  approvals.length=0;const g=await agent.tool('vault',{op:'give',key:'GROQ_API_KEY',agent_id:claude.id});
+  assert.equal(approvals.length,1);assert.match(approvals[0].title,/Give GROQ_API_KEY to Claude/);assert.equal(g.name,'GROQ_API_KEY');
+  assert.equal(JSON.parse(await fs.readFile(path.join(home,'.claude','settings.json'),'utf8')).env.GROQ_API_KEY,ROUTER_KEY);
+  assert.deepEqual((await agent.tool('vault',{op:'list'})).keys[0].agents,['Claude']);
+  await assert.rejects(()=>agent.tool('vault',{op:'give',key:'NOPE',agent_id:claude.id}),/has no NOPE/);
+  // Backup, clone, transfer and jobs go through the service's own actions (the same ones the UI uses).
+  const calls=[];agent.appAction=async(name,input)=>{calls.push([name,input]);return name==='jobs'?[{id:'j1',kind:'backup',title:'Backing up Claude',status:'error',error:'disk full',steps:[{label:'Copy',state:'error'}],log:[{text:'disk full'}]}]:{id:'j1',kind:name,title:name,status:'running',steps:[{label:'Copy',state:'active'}],log:[]};};
+  const b=await agent.tool('backup_agent',{agent_id:claude.id,history:false});assert.equal(b.job_id,'j1');assert.deepEqual(calls[0],['agentBackup',{id:claude.id,keys:true,history:false}]);
+  await agent.tool('clone_agent',{agent_id:claude.id,runtime:'docker',what:'skills',api_keys:false});assert.deepEqual(calls[1][1],{id:claude.id,name:'',hostId:'',runtime:'docker',container:'',scope:'skills',keys:false});
+  await assert.rejects(()=>agent.tool('transfer',{from_agent_id:claude.id,to_agent_id:claude.id}),/Say what to transfer/);
+  const j=await agent.tool('jobs',{});assert.deepEqual(j.jobs[0],{job_id:'j1',kind:'backup',title:'Backing up Claude',status:'error',error:'disk full',steps:['Copy: error'],log:['disk full'],result:undefined});
+  approvals.length=0;await agent.tool('vault',{op:'forget',key:held.id});assert.equal(approvals.length,1);assert.equal((await agent.tool('vault',{op:'list'})).keys.length,0);
+});
 test('store_secret signs Codex in with an OpenAI key on its input, never on its command line, and puts other keys in its .env',async t=>{
   const {EventEmitter}=require('node:events'),{PassThrough}=require('node:stream'),spawned=[];
   const spawnAgent=(a,args)=>{const child=new EventEmitter(),run={args,input:''};Object.assign(child,{stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough(),exitCode:null,signalCode:null});spawned.push(run);child.stdin.on('data',d=>{run.input+=d;});child.stdin.on('end',()=>setImmediate(()=>{child.exitCode=0;child.emit('close',0);}));return child;};

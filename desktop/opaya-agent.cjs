@@ -29,6 +29,8 @@ const screen=require('./screen.cjs');
 const secrets=require('./secrets.cjs');
 const {place,sourceHome,isLocal}=require('./clone.cjs');
 const {codexEnv,SHELL_ENV}=require('./adapters/codex.cjs');
+const dockerManager=require('./docker-manager.cjs');
+const transfer=require('./transfer.cjs');
 
 const PRESETS={
   codex:{label:'Codex CLI (this computer)',kind:'codex',baseUrl:'',model:'',models:[]},
@@ -114,7 +116,11 @@ const APP_GUIDE=`Opaya app guide (tell the user where things are; you cannot cli
 - Settings: theme (dark or light), iTrust, Updates, Skills library, MCP servers. Updates: Opaya checks GitHub releases, downloads with checksum verification and installs in place (Update in the status bar, then Install and restart).
 - Connection log (right-click an agent): protocol messages, stderr, running tools, pending approvals and Hermes log tail; your agent_diagnostics tool reads the same.
 - Your chats: New chat and earlier chats at the top of your panel; Model settings chooses your model and API key.
-- Secrets: the key button next to your message box keeps an API key, token or password in Opaya's encrypted vault and puts only its reference in the message; keys pasted into your chat and those typed in Opaya's secure prompt (your request_secret) are kept the same way. The key button lists what is held and forgets any of it; deleting a chat forgets its secrets. A key given with the key button is global by default ("Give it to every agent too"): Opaya writes it into the config of every Hermes, OpenClaw, Claude Code and Codex agent on every machine and container, and tells each connected agent in its chat; API connections keep their own token. Every agent's own chat also has a key button: that key goes to that agent only, and the agent is told which variable was added and in which file.`;
+- Secrets: keys pasted into your chat and those typed in Opaya's secure prompt stay in Opaya's encrypted vault; you only see references such as [secret S1 · NAME · mask]. A key given to Opaya with "Give it to every agent" is written into every agent that reads keys; API connections keep their own token.
+- Opaya Vault (Vault in the sidebar, Settings, Machines, the key button next to your message box, or the key button in any agent's chat): every key the user keeps in Opaya, encrypted. Add a key (name and key; tick "This API needs an endpoint" to add a base URL, saved as NAME_BASE_URL), give it to one agent, to all agents, or forget it. The key button next to your message box opens the Vault with Insert, which puts a key's reference into the message to you. Keys pasted as text into your chat are temporary. Your vault tool does the same: list, give, give_all, forget.
+- Keys in an agent's chat: the key button lists the keys that agent has (names only, read from the file it reads keys from), Insert puts $NAME into the message, Give hands it a vault key, New key gives it one only it gets. Codex and ACP agents restart when idle so a new key is in their environment; Claude Code has it from its next message. Local Claude Code, Codex and ACP agents also have vault_list and vault_use to ask for a key themselves.
+- Docker manager (Docker on a machine card in Machines): containers with state, image and ports, start, stop, restart, remove, logs and a shell, and images. Your docker tool does the same on any machine. Discover also finds OpenClaw gateways running in Docker (the published port of 18789) on this computer and machines.
+- Doing it yourself: for backup, uninstall, update, clone, transfer, MCP servers, Docker and keys you have tools (backup_agent, uninstall_agent, update_agent, clone_agent, transfer, mcp_server, docker, vault) and jobs to follow a running job. Use them instead of telling the user where to click, unless the user wants to do it. When something the user started fails (a job, a Docker action, giving a key, an install), Opaya hands it to you: find the cause and finish it.`;
 const fn=(name,description,properties={},required=[])=>({type:'function',function:{name,description,parameters:{type:'object',properties,required,additionalProperties:false}}});
 const TOOLS=[
   fn('get_workspace','Read all saved agent connections (with live status and last error), SSH machines and open terminals. Start here.'),
@@ -149,6 +155,15 @@ const TOOLS=[
   fn('list_projects','Read-only: saved projects (a folder on this computer or a machine, and the agents that work in it). Use project_info with the folder for git state. The user runs git actions from the Projects panel.'),
   fn('list_mcp_servers','Read-only: MCP servers saved in Opaya and which agents use them. Values of environment variables and headers are never shown. The user adds or edits servers in Settings > MCP servers.'),
   fn('read_notes','Read your notes file in your home folder.'),
+  fn('vault','The Opaya Vault: every API key, token and password the user keeps in Opaya. list: names, masked hints, endpoints and which agents have each (never values). give: write one key where an agent reads keys (its .env, Claude Code settings.json env, Codex login or .env) and tell the agent in its chat. give_all: make a key global, written to every agent that reads keys. forget: remove it from the vault (agents keep their copy). The user approves give, give_all and forget unless iTrust is on.',{op:{type:'string',enum:['list','give','give_all','forget']},key:{type:'string',description:'The key name (OPENROUTER_API_KEY) or its id (S3) from list.'},agent_id:{type:'string',description:'For give: the agent that gets it.'}},['op']),
+  fn('docker','Docker on this computer or a saved machine, like the Docker manager in the Machines view. list: containers (state, image, ports) and images. start, stop, restart, remove (a container), remove_image. logs: the last lines a container printed. open_shell: a visible terminal with a shell inside the container. The user approves every change; removals always ask.',{op:{type:'string',enum:['list','start','stop','restart','remove','remove_image','logs','open_shell']},machine_id:{type:'string',description:'Saved machine id; omit for this computer.'},container:{type:'string',description:'Container name (or the image for remove_image).'},lines:{type:'number',description:'logs: how many lines (10 to 1000, default 150).'}},['op']),
+  fn('backup_agent','Back up a saved agent\'s data (Hermes home without the installation; ~/.claude, ~/.codex, ~/.openclaw and so on) as a .tar.gz into Opaya\'s backup folder on this computer. Runs as a job: follow it with jobs.',{agent_id:{type:'string'},api_keys:{type:'boolean',description:'Include API keys (default true).'},history:{type:'boolean',description:'Include chat history (default true).'}},['agent_id']),
+  fn('uninstall_agent','Uninstall a saved agent the way it was installed, in a visible terminal (a Hermes profile deletes only the profile; a container removes the container). The user always approves it. Optionally back up first and remove the connection from Opaya. Runs as a job: follow it with jobs.',{agent_id:{type:'string'},delete_data:{type:'boolean',description:'Also delete its data folder.'},backup:{type:'boolean',description:'Back up first (default true); if the backup fails nothing is uninstalled.'},remove_connection:{type:'boolean',description:'Remove the connection and its chats from Opaya afterwards.'}},['agent_id']),
+  fn('update_agent','Update a saved agent with the updater that fits how it was installed (hermes update, claude update, npm, Homebrew, Docker image pull and recreate), in the machine\'s Updates terminal; failures come back to you. all=true updates every installation once per machine. The user approves it.',{agent_id:{type:'string'},all:{type:'boolean'}}),
+  fn('clone_agent','Clone a saved agent (Hermes and the CLI agents) to this computer or a machine: everything, skills + personality, skills or memory, with or without API keys. runtime regular (an install), profile (a Hermes profile, or a profile inside an existing container with container), or docker (a new container). The clone is added to Opaya and connected. Runs as a job: follow it with jobs. The user approves it.',{agent_id:{type:'string'},name:{type:'string',description:'Name of the clone (default: <name>-clone).'},machine_id:{type:'string',description:'Target machine; omit for this computer.'},runtime:{type:'string',enum:['regular','profile','docker']},container:{type:'string',description:'runtime profile: an existing container to add the profile to.'},what:{type:'string',enum:['everything','personality','skills','memory']},api_keys:{type:'boolean'},cron:{type:'boolean',description:'Copy cron jobs (default: only with everything).'}},['agent_id']),
+  fn('transfer','Copy from one saved agent to another: skills (all or named), API keys by name (all or named; values never shown), Opaya MCP servers by id, or the Opaya API token of a connection. Runs as a job: follow it with jobs. The user approves it.',{from_agent_id:{type:'string'},to_agent_id:{type:'string'},skills:{description:'"all" or a list of skill names.'},api_keys:{description:'"all" or a list of key names.'},mcp_server_ids:{type:'array',items:{type:'string'}},api_token:{type:'boolean'}},['from_agent_id','to_agent_id']),
+  fn('mcp_server','MCP servers Opaya gives agents. catalog: the one-click servers (Files, Fetch, Memory, Playwright, GitHub, Context7, Brave Search, Git, Time) and what each needs. install: add one from the catalog (a key it needs by its secret id, request_secret first; a folder for Files) for all agents or chosen ones. enable / disable: turn a saved server (list_mcp_servers) on or off for one agent. remove: delete a saved server. The user approves changes.',{op:{type:'string',enum:['catalog','install','enable','disable','remove']},server:{type:'string',description:'Catalog id for install; saved server id for enable, disable, remove.'},secret:{type:'string',description:'install: the secret id (S1) of the key the server needs.'},folder:{type:'string',description:'install Files: the folder it may use.'},agents:{description:'install: "all" or a list of agent ids.'},agent_id:{type:'string',description:'enable / disable: the agent.'}},['op']),
+  fn('jobs','Background jobs in Opaya (clone, redeploy, backup, uninstall, transfer, skills library, free model setup): status, steps, error and the last log lines. Use it to follow a job you started or to see why one the user started failed.',{job_id:{type:'string',description:'One job; omit for all.'}}),
   fn('write_notes','Replace your notes file in your home folder (max 20000 characters). Use it to remember setup decisions.',{content:{type:'string'}},['content'])
 ];
 // Chat models that can use tools first; embeddings, audio, image and moderation models last.
@@ -163,6 +178,7 @@ function keyNote(r,name){
   return `[Opaya] A new ${name} is saved as the token Opaya sends to your API from the next connection. The value is not in this chat.`;
 }
 const loadedText=(loaded,reconnect)=>({now:'Opaya restarted it, so the key is in its environment now.',after:'Opaya restarts it when its current answer finishes, so the key is in its environment from its next message.',turn:'It has the key from its next message.'})[loaded]||reconnect;
+const jobOf=j=>j&&typeof j==='object'&&j.steps?{job_id:j.id,kind:j.kind,title:j.title,status:j.status,error:j.error||undefined,steps:j.steps.map(x=>`${x.label}: ${x.state}`),log:(j.log||[]).slice(-8).map(l=>l.text),result:j.result||undefined}:j;
 const stripAnsi=text=>String(text||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)/g,'').replace(/\r/g,'');
 
 class OpayaAgent{
@@ -338,7 +354,7 @@ class OpayaAgent{
       'Opaya connects Hermes, Claude Code, Codex, OpenClaw and other agents on this computer and on SSH machines, keeps their chats and terminals, and lets the user switch between them.',
       'Your job: help install new agents, connect and maintain existing ones, manage SSH machines and keys, and troubleshoot agents that do not work.',
       `Work only through your tools. Check the workspace before changing anything. Prefer the smallest change. Explain briefly what you will do before a change. ${this.trusted?.()?'iTrust is on: your changes and commands run without asking the user (removals still ask), so be careful and say what you did.':'iTrust is off: every change and command is approved by the user in a native dialog, and a declined approval is final.'}`,
-      'Secrets (API keys, tokens, passwords): the user can hand them to you freely. Opaya keeps every value in its encrypted vault and you only ever see a reference such as [secret S1 · OPENAI_API_KEY · sk-p…9f3a]; a key pasted into the chat becomes one before it reaches you. You never see, guess or repeat a value, so never put one in a command, a text answer or notes, and never ask the user to paste a key into a terminal. To get one, call request_secret (Opaya asks in a secure prompt). To give one to an agent, call store_secret with its id (S1): it goes where that agent reads keys (Hermes .env, OpenClaw ~/.openclaw/.env, Claude Code settings.json env, Codex login, the token of an API connection, or your own model key with agent_id opaya), then follow its next hint (reconnect, restart a gateway). When a terminal asks for a key, token or password, answer_prompt answer=secret secret=S1 types it. Hermes and OpenClaw gateway tokens are imported with save_connection import_gateway_token. [hidden NAME · mask] in tool output is a key Opaya hid from you: you cannot use it; ask the user for it with request_secret when you need it.',
+      'Secrets (API keys, tokens, passwords): the user can hand them to you freely. Opaya keeps every value in its encrypted vault and you only ever see a reference such as [secret S1 · OPENAI_API_KEY · sk-p…9f3a]; a key pasted into the chat becomes one before it reaches you. You never see, guess or repeat a value, so never put one in a command, a text answer or notes, and never ask the user to paste a key into a terminal. To get one, call request_secret (Opaya asks in a secure prompt). To give one to an agent, call store_secret with its id (S1): it goes where that agent reads keys (Hermes .env, OpenClaw ~/.openclaw/.env, Claude Code settings.json env, Codex login, the token of an API connection, or your own model key with agent_id opaya), then follow its next hint (reconnect, restart a gateway). When a terminal asks for a key, token or password, answer_prompt answer=secret secret=S1 types it. Keys the user already keeps in the Opaya Vault: vault op=list shows them, vault op=give gives one to an agent, op=give_all to every agent; request_secret only for a key that is not there. Hermes and OpenClaw gateway tokens are imported with save_connection import_gateway_token. [hidden NAME · mask] in tool output is a key Opaya hid from you: you cannot use it; ask the user for it with request_secret when you need it.',
       held.length?`Secrets the user gave in this chat: ${held.map(x=>secrets.reference(x)+(x.stored.length?` (saved for ${x.stored.map(y=>`${y.agentName} as ${y.name}`).join(', ')})`:'')).join('; ')}.`:'',
       'Use run_command and open_app to finish onboarding and fixes end to end when no specific tool fits, with as few extra programs as possible.',
       'Projects: list_projects shows saved project folders and their agents; chats started from a project open the agent in that folder. Git and GitHub CLI actions are in the Projects panel (right-click a project). '+
@@ -424,7 +440,7 @@ class OpayaAgent{
     agent.extraEnv=codexEnv(this.userHome?path.join(this.userHome,'.codex'):undefined);
     const rpc=new Rpc(this.spawnAgent(agent,[...SHELL_ENV,'app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.21.6'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.21.7'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
@@ -724,14 +740,37 @@ class OpayaAgent{
     let file='',names=[],error='';
     const remoteHttp=agent.transport==='http'&&!/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:|\/|$)/i.test(agent.endpoint||'');
     if(kind&&!remoteHttp){
-      try{const where=place({agent,host});file=await this.configFile(kind,agent,where);names=secrets.envNames(await secrets.readAt(where,file),kind==='claude');}
+      // The same reader as Transfer (Codex: its login and its .env); file is where a new key would go.
+      try{file=await this.configFile(kind,agent,place({agent,host}));names=(await transfer.envKeys(agent,host,{vault:b.vault})).map(k=>k.name);}
       catch(e){error=String(e?.message||e).slice(0,200);}
     }
-    const keyish=n=>secrets.secretName(n)||/_BASE_URL$/.test(n);
-    const keys=[...new Set([...names.filter(keyish),...given.keys()])].map(name=>{const g=given.get(name);return {name,fromOpaya:Boolean(g),global:Boolean(g?.secret.global),hint:g?.secret.mask,where:g?(g.where==='codex login'?'Codex login':g.where):file,inFile:names.includes(name)};});
+    const keys=[...new Set([...names,...given.keys()])].map(name=>{const g=given.get(name);return {name,fromOpaya:Boolean(g),global:Boolean(g?.secret.global),hint:g?.secret.mask,where:g?(g.where==='codex login'?'Codex login':g.where):file,inFile:names.includes(name)};});
     const have=new Set(keys.map(k=>k.name));
     const vault=this.secrets.filter(s=>(s.kept||s.global)&&!have.has(s.name)).map(s=>({id:s.id,name:s.name,hint:s.mask,global:Boolean(s.global),endpoint:s.endpoint||undefined}));
     return {agent:agent.name,kind,file,error,keys,vault};
+  }
+  // Service actions the Opaya Agent's tools run (backup, uninstall, clone, transfer, MCP, jobs); set by the service.
+  async app(name,input){if(typeof this.appAction!=='function')throw new Error('This action is not available here.');return this.appAction(name,input||{});}
+  // The note about a new key, sent into the agent's last chat when it is connected and idle.
+  tellAgent(agentId,note){
+    const b=this.broker,rt=b.runtime.get(agentId);if(!note||rt?.status!=='connected'||b.turns.has(agentId))return false;
+    const conversationId=b.data.conversations.find(c=>c.agentId===agentId&&c.id===b.data.lastConversation?.[agentId])?.id||b.data.conversations.filter(c=>c.agentId===agentId).at(-1)?.id||'';
+    b.send({agentId,conversationId,text:note}).catch(()=>{});return true;
+  }
+  // The vault tool: list keys, give one to an agent, make one global, forget one.
+  async vaultOp({op,key,agent_id}={}){
+    const keys=this.secrets;
+    if(op==='list')return {keys:keys.map(s=>({id:s.id,name:s.name,hint:s.mask,endpoint:s.endpoint||undefined,global:!!s.global,agents:[...new Set((s.stored||[]).map(x=>x.agentName))]}))};
+    const want=String(key||'').trim(),s=/^S\d+$/i.test(want)?this.secretEntry(want):keys.slice().reverse().find(x=>x.name===secrets.envName(want));
+    if(!s)throw new Error(`The Opaya Vault has no ${want||'such key'}. Call vault op=list, or request_secret to get it from the user.`);
+    if(op==='give'){
+      const agent=this.broker.agent(schema.id(agent_id));
+      await this.ask(`Give ${s.name} to ${agent.name}?`,`${secrets.reference(s)}\n\nOpaya writes it where ${agent.name} reads keys and tells it the variable name in its chat, never the value.`);
+      const r=await this.giveHeldToAgent({id:s.id,agentId:agent.id});return {name:r.name,agent:r.agent,file:r.file||undefined,where:r.where,next:r.next,told:this.tellAgent(agent.id,r.note)};
+    }
+    if(op==='give_all'){await this.ask(`Give ${s.name} to every agent?`,`${secrets.reference(s)}\n\nOpaya writes it into every agent that reads keys, on every machine and in containers, and tells the connected ones.`);return this.giveToAll({id:s.id});}
+    if(op==='forget'){await this.ask(`Forget ${s.name}?`,'Opaya removes it from its vault. Agents it was saved for keep their copy.',{always:true});await this.forgetSecret(s.id);return {forgotten:s.name};}
+    throw new Error('Unknown vault op.');
   }
   // A key already in the Opaya Vault, given to one agent.
   async giveHeldToAgent({id,agentId}={}){
@@ -759,11 +798,7 @@ class OpayaAgent{
     }
     // Each connected, idle agent is told in its last chat; the others see the note when you send it from their chat.
     let told=0;
-    for(const d of done){
-      const rt=b.runtime.get(d.agentId);if(rt?.status!=='connected'||b.turns.has(d.agentId))continue;
-      const conversationId=b.data.conversations.find(c=>c.agentId===d.agentId&&c.id===b.data.lastConversation[d.agentId])?.id||b.data.conversations.filter(c=>c.agentId===d.agentId).at(-1)?.id||'';
-      b.send({agentId:d.agentId,conversationId,text:d.note}).catch(()=>{});told++;
-    }
+    for(const d of done)if(this.tellAgent(d.agentId,d.note))told++;
     this.emit();
     return {id:s.id,name:s.name,stored:done.map(({agentId,note,...x})=>x),skipped,told};
   }
@@ -999,6 +1034,45 @@ class OpayaAgent{
       }
       case 'list_projects':return {projects:(b.data.projects||[]).map(p=>({id:p.id,name:p.name,path:p.path,machine:p.hostId?b.data.hosts.find(h=>h.id===p.hostId)?.name||p.hostId:'this computer',machine_id:p.hostId||undefined,agents:p.agentIds.map(id=>b.data.agents.find(a=>a.id===id)?.name||id),conversations:b.data.conversations.filter(c=>c.projectId===p.id).length}))};
       case 'list_mcp_servers':return {servers:b.snapshot().mcpServers.map(({name,type,command,args,url,envNames,headerNames,agents,enabled})=>({name,type,command,args,url,envNames,headerNames,enabled,agents:agents==='all'?'all':agents.map(id=>b.data.agents.find(x=>x.id===id)?.name||id)}))};
+      case 'vault':return this.vaultOp(args);
+      case 'docker':{
+        const host=this.host(args.machine_id),op=String(args.op||''),c=String(args.container||'');
+        if(op==='list'){const r=await dockerManager.list(host);return r.running?{version:r.version,containers:r.containers.slice(0,100),images:r.images.slice(0,100)}:r;}
+        if(op==='logs')return {container:c,logs:stripAnsi(await dockerManager.logs(host,c,args.lines)).slice(-20000)};
+        if(op==='open_shell'){const view=await this.app('dockerTerminal',{hostId:host?.id||'',container:c,kind:'shell'});return {terminal_id:view.id,note:'The user sees a shell inside the container.'};}
+        const action=op==='remove_image'?'remove-image':op,where=host?host.name:'this computer';
+        await this.ask(`${{start:'Start',stop:'Stop',restart:'Restart',remove:'Remove container','remove-image':'Remove image'}[action]||op} ${c} on ${where}?`,`docker ${action==='remove'?'rm -f':action==='remove-image'?'rmi':action} ${c}${action==='remove'?'\n\nThe container and everything inside it that is not in a volume are deleted.':''}`,{always:action==='remove'||action==='remove-image'});
+        await dockerManager.act(host,{container:c,action});this.broker.changed?.();return {done:true,action,container:c};
+      }
+      case 'backup_agent':{const a=b.agent(schema.id(args.agent_id));await this.ask(`Back up ${a.name}?`,`Saves its data${args.api_keys===false?' without API keys':' with API keys'}${args.history===false?', without chat history':''} into Opaya's backup folder on this computer.`);return jobOf(await this.app('agentBackup',{id:a.id,keys:args.api_keys!==false,history:args.history!==false}));}
+      case 'uninstall_agent':{const a=b.agent(schema.id(args.agent_id));return jobOf(await this.app('agentUninstall',{id:a.id,data:!!args.delete_data,backup:args.backup!==false,removeConnection:!!args.remove_connection}));}
+      case 'update_agent':{if(args.all)return {installations:await this.app('agentUpdateAll',{}),note:'They run one after another in each machine\'s Updates terminal; failures come back to you.'};const a=b.agent(schema.id(args.agent_id));await this.app('agentUpdate',{id:a.id});return {started:true,note:'It runs in the machine\'s Updates terminal; read_terminal shows it, and a failure comes back to you.'};}
+      case 'clone_agent':{
+        const a=b.agent(schema.id(args.agent_id)),host=this.host(args.machine_id),runtime=['regular','profile','docker'].includes(args.runtime)?args.runtime:'regular',what=['everything','personality','skills','memory'].includes(args.what)?args.what:'everything';
+        await this.ask(`Clone ${a.name}?`,`${what==='personality'?'Skills + personality':what[0].toUpperCase()+what.slice(1)}${args.api_keys===false?' without API keys':' with API keys'} to ${host?host.name:'this computer'} as ${runtime==='docker'?'a new Docker container':runtime==='profile'?(args.container?`a profile in container ${args.container}`:'a Hermes profile'):'a regular install'}${args.name?` named ${args.name}`:''}.`);
+        return jobOf(await this.app('cloneAgent',{id:a.id,name:String(args.name||''),hostId:host?.id||'',runtime,container:String(args.container||''),scope:what,keys:args.api_keys!==false,...(args.cron===undefined?{}:{cron:!!args.cron})}));
+      }
+      case 'transfer':{
+        const from=b.agent(schema.id(args.from_agent_id)),to=b.agent(schema.id(args.to_agent_id)),list=v=>v==='all'?'all':Array.isArray(v)&&v.length?v.map(String):undefined;
+        const x={sourceId:from.id,targetId:to.id,skills:list(args.skills),keys:list(args.api_keys),mcp:Array.isArray(args.mcp_server_ids)?args.mcp_server_ids.map(String):[],token:!!args.api_token};
+        const parts=[x.skills&&`skills (${x.skills==='all'?'all':x.skills.join(', ')})`,x.keys&&`API keys (${x.keys==='all'?'all':x.keys.join(', ')})`,x.mcp.length&&`${x.mcp.length} MCP server(s)`,x.token&&'the Opaya API token'].filter(Boolean);
+        if(!parts.length)throw new Error('Say what to transfer: skills, api_keys, mcp_server_ids or api_token.');
+        await this.ask(`Copy to ${to.name}?`,`From ${from.name} to ${to.name}: ${parts.join(', ')}. Key values never go through the chat.`);
+        return jobOf(await this.app('transferStart',x));
+      }
+      case 'mcp_server':{
+        const op=String(args.op||'');
+        if(op==='catalog')return {servers:(await this.app('mcpCatalog',{})).map(({id,title,description,needs,secret,folder})=>({id,name:title,description,needs,secret,folder}))};
+        if(op==='install'){
+          const secret=args.secret?this.secretValue(this.secretEntry(args.secret)):'',agents=args.agents==='all'||args.agents===undefined?'all':[].concat(args.agents).map(x=>b.agent(schema.id(x)).id);
+          await this.ask(`Add the ${args.server} MCP server?`,`For ${agents==='all'?'all agents':agents.map(id=>b.agent(id).name).join(', ')}${args.folder?`, folder ${args.folder}`:''}${args.secret?', with the key the user gave (stored in the vault)':''}.`);
+          const r=await this.app('mcpInstall',{id:String(args.server||''),secret,folder:String(args.folder||''),agents});return {installed:true,server:r?.name||args.server};
+        }
+        if(op==='enable'||op==='disable'){const a=b.agent(schema.id(args.agent_id));await this.ask(`${op==='enable'?'Turn on':'Turn off'} ${args.server} for ${a.name}?`,'New conversations pick up the change.');await this.app('agentMcp',{agentId:a.id,serverId:String(args.server||''),enabled:op==='enable'});return {done:true};}
+        if(op==='remove'){await this.ask(`Remove the MCP server ${args.server}?`,'Every agent stops using it from its next conversation.',{always:true});await this.app('mcpRemove',{id:String(args.server||'')});return {removed:true};}
+        throw new Error('Unknown op.');
+      }
+      case 'jobs':{const all=await this.app('jobs',{}),list=args.job_id?all.filter(j=>j.id===args.job_id):all;return {jobs:list.slice(-10).map(jobOf)};}
       case 'read_notes':return {notes:await fs.readFile(path.join(this.home,'notes.md'),'utf8').catch(()=>'')};
       case 'write_notes':{const content=String(args.content??'');if(content.length>20000||content.includes('\0'))throw new Error('Notes must be under 20000 characters.');await fs.writeFile(path.join(this.home,'notes.md'),content,{mode:0o600});return {saved:true};}
       default:throw new Error('Unknown tool.');

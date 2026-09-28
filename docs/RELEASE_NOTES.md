@@ -1,3 +1,18 @@
+# Opaya 0.21.7 - the Opaya Agent can do everything Opaya can, and failures go to it
+
+- **New tools for the Opaya Agent**: it no longer only tells you where to click.
+  - vault: list keys, give one to an agent or to every agent, forget one.
+  - docker: containers and images on any machine, start, stop, restart, remove, logs and a shell.
+  - backup_agent, uninstall_agent (always asks you), update_agent, clone_agent, transfer (skills, keys, MCP servers, token) and mcp_server (catalog, install, turn on or off per agent, remove).
+  - jobs: follow a backup, clone or transfer and see why one failed.
+  - Its guide now knows the Vault, the Docker manager, the keys list in agent chats and OpenClaw in Docker.
+- **Failures go to the Opaya Agent**: a job you started (clone, backup, uninstall, transfer), a Docker action, giving a key, adding an MCP server or an install in a terminal that ends with an error is handed to the Opaya Agent to find the cause and finish it, like agent errors already were. Cancelling is not a failure. Settings > Auto-fix turns this off.
+- **Keys are simpler**:
+  - The key button next to the Opaya Agent's message box opens the Opaya Vault, with Insert to put a key's reference into your message.
+  - Every key you give stays in the Vault until you forget it. Keys pasted as text into the Opaya chat are temporary and not listed.
+  - "global" is now "all agents"; the "chat" label is gone.
+- **Transfer to Codex**: API keys other than an OpenAI key now go into Codex's .env instead of being refused, and Codex's .env keys are offered when Codex is the source. The key list in an agent's chat uses the same reader.
+
 # Opaya 0.21.6 - Codex really gets its keys, and each chat shows the agent's keys
 
 - **Codex gets the keys you give it**: Opaya now puts the keys from Codex's .env straight into the Codex it starts, and lets the commands Codex runs see them (Codex hides variables named like *_KEY or *_TOKEN from its commands unless told otherwise). The model no longer has to find the file from inside its sandbox.

@@ -58,7 +58,7 @@ async function transferSkills({source,sourceHost,target,targetHost,names='all',p
 // Each agent reads keys somewhere else: Hermes and OpenClaw a .env, Claude Code env in settings.json, Codex its login
 // (codex login --with-api-key, kept in auth.json), OpenCode auth.json per provider, an API connection the token Opaya
 // keeps in its vault. Keys are read where the source keeps them and written where the target reads them, by provider
-// (OPENAI_API_KEY is OpenCode's "openai" and the only key Codex takes). Values stay in the session service: the UI
+// (OPENAI_API_KEY is OpenCode's "openai" and signs Codex in; other keys go into Codex's .env). Values stay in the session service: the UI
 // and the Opaya Agent get names and places only, and values go into files on stdin, never on a command line.
 const secrets=require('./secrets.cjs');
 function parseEnv(text){const out=new Map();for(const line of String(text).split(/\r?\n/)){const m=/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$/.exec(line);if(m)out.set(m[1],m[2]);}return out;}
@@ -77,7 +77,7 @@ function keyKind(agent){
   const f=require('./maintenance.cjs').frameworkOf(agent);
   return ['hermes','openclaw','claude','codex','opencode'].includes(f)?f:'';
 }
-const KIND_LABEL={hermes:'.env',openclaw:'.env',claude:'settings.json env',codex:'Codex login',opencode:'auth.json',token:'Opaya vault'};
+const KIND_LABEL={hermes:'.env',openclaw:'.env',claude:'settings.json env',codex:'Codex login or .env',opencode:'auth.json',token:'Opaya vault'};
 // .env values: quotes removed, a trailing comment after an unquoted value dropped.
 function envValueOf(raw){const v=String(raw).trim();const m=/^(['"])(.*)\1$/.exec(v);return m?m[2]:v.replace(/\s+#.*$/,'');}
 const keyName=n=>ENV_KEY.test(n)&&secrets.secretName(n);
@@ -90,6 +90,7 @@ async function keyFile(kind,agent,host){
   if(kind==='openclaw')return {where,file:await at('${OPENCLAW_STATE_DIR:-$HOME/.openclaw}',env.OPENCLAW_STATE_DIR||path.join(home,'.openclaw'),'.env')};
   if(kind==='claude')return {where,file:await at('${CLAUDE_CONFIG_DIR:-$HOME/.claude}',env.CLAUDE_CONFIG_DIR||path.join(home,'.claude'),'settings.json')};
   if(kind==='codex')return {where,file:await at('${CODEX_HOME:-$HOME/.codex}',env.CODEX_HOME||path.join(home,'.codex'),'auth.json')};
+  if(kind==='codex-env')return {where,file:await at('${CODEX_HOME:-$HOME/.codex}',env.CODEX_HOME||path.join(home,'.codex'),'.env')};
   if(kind==='opencode')return {where,file:await at('${XDG_DATA_HOME:-$HOME/.local/share}',env.XDG_DATA_HOME||path.join(home,'.local','share'),'opencode','auth.json')};
   throw new Error(`Opaya does not know where ${agent.name} keeps API keys.`);
 }
@@ -102,7 +103,11 @@ async function readKeys(agent,host,{vault}={}){
   const {where,file}=await keyFile(kind,agent,host),text=await secrets.readAt(where,file);
   if(kind==='hermes'||kind==='openclaw'){for(const [k,raw] of parseEnv(text)){const v=envValueOf(raw);if(keyName(k)&&v)out.set(k,v);}}
   else if(kind==='claude'){const env=json(text,file).env;if(env&&typeof env==='object')for(const [k,v] of Object.entries(env))if(keyName(k)&&typeof v==='string'&&v)out.set(k,v);}
-  else if(kind==='codex'){const v=json(text,file).OPENAI_API_KEY;if(typeof v==='string'&&v)out.set('OPENAI_API_KEY',v);}
+  else if(kind==='codex'){
+    const v=json(text,file).OPENAI_API_KEY;if(typeof v==='string'&&v)out.set('OPENAI_API_KEY',v);
+    // Other keys Codex has are in CODEX_HOME/.env (Opaya puts them in the environment of the Codex it starts).
+    const env=await keyFile('codex-env',agent,host);for(const [k,raw] of parseEnv(await secrets.readAt(env.where,env.file))){const x=envValueOf(raw);if(keyName(k)&&x&&!/^CODEX_/.test(k)&&!out.has(k))out.set(k,x);}
+  }
   else for(const [id,e] of Object.entries(json(text,file)))if(e?.type==='api'&&typeof e.key==='string'&&e.key&&/^[\w.-]{1,60}$/.test(id))out.set(PROVIDER_KEYS[id]||`${id.toUpperCase().replace(/[^A-Z0-9]+/g,'_')}_API_KEY`,e.key);
   return {kind,file,values:out};
 }
@@ -115,7 +120,7 @@ function planKeys(kind,names,{endpoint=''}={}){
     const c=canon(name);
     if(kind==='hermes'||kind==='openclaw')return {name,to:`.env as ${name}`};
     if(kind==='claude')return {name,to:`settings.json env ${name}`};
-    if(kind==='codex')return c==='OPENAI_API_KEY'?{name,to:'codex login --with-api-key'}:{name,why:'Codex takes an OpenAI API key only'};
+    if(kind==='codex')return c==='OPENAI_API_KEY'?{name,to:'codex login --with-api-key'}:/^CODEX_/.test(name)?{name,why:'Codex never reads CODEX_* names from its .env'}:{name,to:`Codex's .env as ${name}`};
     if(kind==='opencode'){const id=Object.keys(PROVIDER_KEYS).find(p=>PROVIDER_KEYS[p]===c);return id?{name,to:`auth.json provider ${id}`,provider:id}:{name,why:'OpenCode has no provider for this key'};}
     if(kind==='token'){if(want?c===want:names.length===1)return {name,to:'its connection token (Opaya vault)'};return {name,why:want?`This connection takes ${want}`:'An API connection has one token: choose one key'};}
     return {name,why:'Opaya does not know where this agent reads API keys'};
@@ -133,9 +138,10 @@ async function transferKeys({source,sourceHost,target,targetHost,keys='all',vaul
   let into=KIND_LABEL[kind];
   if(kind==='token'){if(!vault)throw new Error('Opaya\'s vault is not available.');await vault.set(target.id,from.get(go[0].name),true);}
   else if(kind==='codex'){
-    // The key goes on Codex's input, as with the Opaya Agent's store_secret.
-    const agent={...target,args:(target.args||[]).filter(x=>x!=='app-server')};
-    await collect(launch(agent,[...agent.args,'login','--with-api-key'],targetHost),{timeout:60000,input:from.get(go[0].name)+'\n'});
+    // An OpenAI key signs Codex in on its input, as with the Opaya Agent's store_secret; other keys go into its .env.
+    const login=go.find(p=>p.to.startsWith('codex login')),rest=go.filter(p=>p!==login);
+    if(login){const agent={...target,args:(target.args||[]).filter(x=>x!=='app-server')};await collect(launch(agent,[...agent.args,'login','--with-api-key'],targetHost),{timeout:60000,input:from.get(login.name)+'\n'});}
+    if(rest.length){const {where,file}=await keyFile('codex-env',target,targetHost);let text=await secrets.readAt(where,file);for(const p of rest)text=secrets.setEnv(text,p.name,from.get(p.name));await secrets.writeAt(where,file,text);into=login?`Codex login and ${file}`:file;}
   }else{
     const {where,file}=await keyFile(kind,target,targetHost);into=file;
     let text=await secrets.readAt(where,file);

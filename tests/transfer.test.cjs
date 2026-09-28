@@ -61,9 +61,11 @@ test('API keys move from any agent to any agent, each to where the target reads 
   assert.deepEqual([...(await readKeys(api,null,{vault})).values.keys()],['OPENAI_API_KEY']);
   // -> Codex: codex login --with-api-key with the key on its input, never on the command line.
   const calls=[];const launch=(agent,args)=>{const child=new EventEmitter();Object.assign(child,{stdin:new PassThrough(),stdout:new PassThrough(),stderr:new PassThrough()});let input='';child.stdin.on('data',d=>{input+=d;});child.stdin.on('finish',()=>{calls.push({command:agent.command,args,input});setImmediate(()=>child.emit('close',0));});return child;};
-  const x=await transferKeys({source:src,target:codex,keys:'all',launch});assert.deepEqual(x.keys,['OPENAI_API_KEY']);
+  // Other keys go into Codex's .env, which Opaya loads into the Codex it starts.
+  const x=await transferKeys({source:src,target:codex,keys:'all',launch});assert.deepEqual(x.keys,['OPENAI_API_KEY','SLACK_BOT_TOKEN']);
   assert.deepEqual(calls,[{command:'codex',args:['login','--with-api-key'],input:'sk-a\n'}]);assert(!JSON.stringify(x).includes('sk-a'));
-  await assert.rejects(()=>transferKeys({source:src,target:codex,keys:['SLACK_BOT_TOKEN'],launch}),/OpenAI API key only/);
+  assert.match(await fs.readFile(path.join(root,'.codex','.env'),'utf8'),/^SLACK_BOT_TOKEN=/m);
+  assert.deepEqual((await envKeys(codex)).map(k=>k.name).sort(),['SLACK_BOT_TOKEN']);
   await assert.rejects(()=>transferKeys({source:src,target:{id:'z',name:'aider',provider:'custom',protocol:'terminal',transport:'local',command:'aider',args:[]}}),/does not know where aider/);
 });
 test('key plans map provider keys to each kind of agent',()=>{
