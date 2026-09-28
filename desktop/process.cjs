@@ -36,7 +36,7 @@ function windowsToolDirs() {
   }
   return dirs;
 }
-// Where version managers and installers put CLIs such as codex, gemini and opencode. A GUI app does not get the
+// Where version managers and installers put CLIs such as codex and opencode. A GUI app does not get the
 // terminal's PATH (on macOS it starts with /usr/bin:/bin:/usr/sbin:/sbin), so npm tools under nvm, Volta, fnm, bun,
 // pnpm or asdf, and node itself, would be invisible without these.
 const versionSort = (a, b) => b.localeCompare(a, undefined, {numeric: true});
@@ -108,7 +108,7 @@ function windowsLaunch(executable, args) {
   if (process.platform !== 'win32' || !/\.(cmd|bat)$/i.test(executable)) return {command: executable, args};
   const dir = path.dirname(executable);
   const name = path.basename(executable, path.extname(executable)).toLowerCase();
-  // npm, pnpm and yarn shims end with the real program: "%dp0%\node_modules\@google\gemini-cli\bundle\gemini.js" %*
+  // npm, pnpm and yarn shims end with the real program: "%dp0%\node_modules\@openai\codex\bin\codex.js" %*
   const shim = cmdShimTarget(executable);
   if (shim && /\.exe$/i.test(shim)) return {command: shim, args};
   const entry = shim || (name === 'codex' ? path.join(dir, 'node_modules/@openai/codex/bin/codex.js') : name === 'claude' ? path.join(dir, 'node_modules/@anthropic-ai/claude-code/cli.js') : name==='openclaw'?path.join(dir,'node_modules/openclaw/openclaw.mjs'):null);

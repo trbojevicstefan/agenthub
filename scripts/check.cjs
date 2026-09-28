@@ -7,6 +7,8 @@ for(const directory of ['desktop','ui','scripts','tests']){
 for(const file of files){const r=spawnSync(process.execPath,['--check',file],{stdio:'inherit'});if(r.status!==0)process.exit(r.status||1);}
 const renderer=fs.readFileSync(path.join(root,'ui/app.js'),'utf8');
 for(const prohibited of ['localStorage.setItem','eval(','new Function(','ipcRenderer','require('])if(renderer.includes(prohibited))throw new Error('Unsafe renderer primitive: '+prohibited);
+// Native alert/confirm/prompt can leave text fields unable to take keyboard input in Electron on Windows: use ask().
+{const native=renderer.match(/(^|[^.\w])(alert|confirm|prompt)\(/m);if(native)throw new Error(`Native ${native[2]}() in the renderer: use ask() instead.`);}
 const main=fs.readFileSync(path.join(root,'desktop/main.cjs'),'utf8');for(const required of ['contextIsolation:true','sandbox:true','nodeIntegration:false',"setWindowOpenHandler(()=>({action:'deny'}))"])if(!main.includes(required))throw new Error('Missing Electron boundary: '+required);
 for(const file of files.filter(p=>p.includes(path.sep+'desktop'+path.sep)||p.includes(path.sep+'ui'+path.sep)))if(/a2agent\.io|a2desktop:|A2AGENT_/.test(fs.readFileSync(file,'utf8')))throw new Error('Legacy application coupling found: '+file);
 {const r=spawnSync(process.execPath,[path.join(root,'scripts/generate-light-theme.cjs'),'--check'],{stdio:'inherit'});if(r.status!==0)process.exit(r.status||1);}

@@ -9,7 +9,7 @@
   const description = a => a?.description || a?.note || labels[a?.provider] || 'Agent';
   // Icon library: the four website logos plus curated LobeHub icons (ui/assets/icons, MIT). Agents default to their provider's logo.
   const ICONS={hermes:['Hermes','assets/agents/hermes.png'],codex:['Codex','assets/agents/codex.svg'],claude:['Claude','assets/agents/claude.png'],openclaw:['OpenClaw','assets/agents/openclaw.svg'],
-    ...Object.fromEntries([['hermes-agent','Hermes Agent'],['nous-research','Nous Research'],['claude-code','Claude Code'],['anthropic','Anthropic'],['gemini-cli','Gemini CLI'],['gemini','Gemini'],['opencode','OpenCode'],['goose','Goose'],['openhands','OpenHands'],['cline','Cline'],['kilo-code','Kilo Code'],['roo-code','Roo Code'],['amp','Amp'],['cursor','Cursor'],['windsurf','Windsurf'],['junie','Junie'],['github-copilot','GitHub Copilot'],['copilot','Copilot'],['openai','OpenAI'],['qwen','Qwen'],['deepseek','DeepSeek'],['kimi','Kimi'],['mistral','Mistral'],['ollama','Ollama'],['lm-studio','LM Studio'],['openrouter','OpenRouter'],['grok','Grok'],['meta-ai','Meta AI'],['manus','Manus'],['zhipu','Zhipu']].map(([id,label])=>[id,[label,`assets/icons/${id}.svg`]]))};
+    ...Object.fromEntries([['hermes-agent','Hermes Agent'],['nous-research','Nous Research'],['claude-code','Claude Code'],['anthropic','Anthropic'],['gemini','Gemini'],['opencode','OpenCode'],['goose','Goose'],['openhands','OpenHands'],['cline','Cline'],['kilo-code','Kilo Code'],['roo-code','Roo Code'],['amp','Amp'],['cursor','Cursor'],['windsurf','Windsurf'],['junie','Junie'],['github-copilot','GitHub Copilot'],['copilot','Copilot'],['openai','OpenAI'],['qwen','Qwen'],['deepseek','DeepSeek'],['kimi','Kimi'],['mistral','Mistral'],['ollama','Ollama'],['lm-studio','LM Studio'],['openrouter','OpenRouter'],['grok','Grok'],['meta-ai','Meta AI'],['manus','Manus'],['zhipu','Zhipu']].map(([id,label])=>[id,[label,`assets/icons/${id}.svg`]]))};
   const agentLogos={hermes:ICONS.hermes[1],codex:ICONS.codex[1],claude:ICONS.claude[1],openclaw:ICONS.openclaw[1],deepseek:ICONS.deepseek[1],openai:ICONS.openai[1],google:ICONS.gemini[1],openrouter:ICONS.openrouter[1],xai:ICONS.grok[1],groq:ICONS['gpt-oss']?.[1],mistral:ICONS.mistral[1],ollama:ICONS.ollama[1],lmstudio:ICONS['lm-studio'][1]};
   const iconImg=(src,cls='')=>`<img class="agent-logo ${cls}" src="${esc(src)}" alt="" draggable="false">`;
   const avatarSrc=a=>{const v=a?.avatar||'';if(v.startsWith('lib:'))return ICONS[v.slice(4)]?.[1]||'';if(v.startsWith('data:image/'))return v;return '';};
@@ -63,6 +63,21 @@
     clearTimeout(toastTimer);toastTimer=setTimeout(()=>box.hidden=true,error?8500:4500);
   }
   async function action(fn) { try { return await fn(); } catch(error) {toast(error.message,true); return undefined;} }
+  // In-app confirm and prompt. Opaya never uses the browser's native confirm and prompt dialogs: in Electron on Windows they can leave
+  // every text field (the message box too) unable to take keyboard input until the window loses and regains focus.
+  // Resolves true/false, or with input: the entered text ('' when cancelled).
+  function ask(message,{ok='OK',cancel='Cancel',danger=false,input=null}={}){
+    return new Promise(resolve=>{
+      const [head,...rest]=String(message).split('\n\n'),d=document.createElement('dialog');d.className='approval-dialog ask-dialog';
+      d.innerHTML=`<h2>${esc(head)}</h2>${rest.length?`<p class="ask-text">${esc(rest.join('\n\n'))}</p>`:''}${input!==null?`<input class="ask-input" value="${esc(input)}" autocomplete="off" spellcheck="false" aria-label="${esc(head)}">`:''}<footer><button type="button" class="secondary" data-ask="cancel">${esc(cancel)}</button><button type="button" class="primary ${danger?'danger-button':''}" data-ask="ok">${esc(ok)}</button></footer>`;
+      const field=d.querySelector('.ask-input'),no=field?'':false;
+      const done=value=>{if(!d.isConnected)return;d.close();d.remove();resolve(value);};
+      d.addEventListener('click',e=>{const b=e.target.closest('[data-ask]');if(b)done(b.dataset.ask==='ok'?(field?field.value.trim():true):no);});
+      d.addEventListener('cancel',e=>{e.preventDefault();done(no);});
+      field?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.isComposing){e.preventDefault();done(field.value.trim());}});
+      document.body.append(d);d.showModal();(field||d.querySelector('[data-ask="ok"]')).focus();field?.select();
+    });
+  }
   function format(text) { return window.OpayaMarkdown?window.OpayaMarkdown.render(text):esc(text); }
   // agentId adds a live line (running time, time since the last update) that updateTurnWatch() refreshes every second.
   function activityMarkup(message,limit=20,agentId=''){
@@ -118,7 +133,7 @@
     $('#terminal-panel').hidden=false;
     if(stageAgent===a.id)return;stageAgent=a.id;
     const mine=[...terminalViews.values()].filter(v=>v.agentId===a.id&&!v.exited),cli=mine.find(v=>v.mode==='agent');
-    if(cli||mine[0]){activateTerminal((cli||mine[0]).id);return;}
+    if(cli||mine[0]){activateTerminal((cli||mine[0]).id,true);return;}
     if(stageOpening.has(a.id))return;stageOpening.add(a.id);
     openTerminal({agentId:a.id,mode:'agent'}).catch(error=>toast(error.message,true)).finally(()=>stageOpening.delete(a.id));
   }
@@ -165,7 +180,7 @@
   function openAdd(){
     modal('Bring your agents together.','Choose where to look. Nothing connects until you approve it.',`<div class="connect-options"><button data-action="discover"><span class="option-symbol"><span class="radar-icon"></span></span><strong>Discover this computer</strong><p>Find Hermes profiles, Codex, Claude Code and local gateways.</p><small>Recommended to get started &#8594;</small></button><button data-action="hosts"><span class="option-symbol"><span class="machine-icon"></span></span><strong>Connect a remote machine</strong><p>Use your saved SSH config, key files or ssh-agent. No public API ports.</p><small>VPS, server or remote computer &#8594;</small></button><button data-action="install-catalog"><span class="option-symbol install-glyph">&#8595;</span><strong>Install a new agent</strong><p>One click installs Hermes, Claude Code, Codex, OpenClaw and more, here or on a VPS.</p><small>Local or remote &#8594;</small></button><button data-action="manual"><span class="option-symbol">+</span><strong>Add a connection manually</strong><p>Choose an agent preset, API endpoint, ACP command or native terminal.</p><small>For custom installations &#8594;</small></button></div><div class="modal-note"><span class="status-dot connected"></span> No Opaya account. No third-party routing. Your provider login stays where the agent runs.</div>`,true);
   }
-  const LIB_ICONS=new Set(['gemini-cli','opencode','goose','ollama','openclaw','codex','claude','hermes-agent']);
+  const LIB_ICONS=new Set(['opencode','goose','ollama','openclaw','codex','claude','hermes-agent']);
   async function discover(hostId,extraHome){
     const host=state.hosts.find(h=>h.id===hostId);
     const tabs=`<div class="segmented discover-tabs" role="tablist"><button type="button" role="tab" class="${!host?'selected':''}" data-action="discover-tab" data-id="">This computer</button>${state.hosts.map(h=>`<button type="button" role="tab" class="${host?.id===h.id?'selected':''}" data-action="discover-tab" data-id="${esc(h.id)}">${esc(h.name)}</button>`).join('')}<button type="button" class="discover-add-vps" data-action="new-vps">+ New VPS</button></div>`;
@@ -305,14 +320,17 @@
     markPanes();
     for(const id of panes){const view=terminalViews.get(id);if(view&&!view.poppedOut)requestAnimationFrame(()=>{if(!view.exited)view.core.fitAndReport(view.report);else{try{view.fit.fit();}catch{}}});}
   }
-  function activateTerminal(id){
+  // Focus moves to the terminal only when the person asked for it (a tab, a new terminal, a split), never when a
+  // background terminal opens, is renamed or ends, and never away from a text field they are typing in.
+  const typingElsewhere=()=>{const el=document.activeElement;return !!el&&el.matches('input,textarea,select,[contenteditable="true"]')&&!el.closest('.terminal-views');};
+  function activateTerminal(id,focus=false){
     if(id&&terminalViews.has(id)){const at=panes.indexOf(id);if(at>=0)paneFocus=at;else panes[paneFocus]=id;}
     else if(!id)panes[paneFocus]='';
     renderPanes();currentTerminal=panes[paneFocus]||'';
     $('#terminal-tabs').innerHTML=[...terminalViews.values()].map(v=>`<div class="terminal-tab ${v.exited?'archived':''}"><button type="button" data-action="terminal-tab" data-id="${esc(v.id)}" title="${esc(v.title)}${v.exited?' (saved output)':''}"><span class="terminal-tab-dot" aria-hidden="true"></span><span class="terminal-tab-title">${esc(v.title)}</span></button><button type="button" class="terminal-tab-close" data-action="terminal-tab-close" data-id="${esc(v.id)}" aria-label="Close ${esc(v.title)}" title="Close">&#10005;</button></div>`).join('')||'<span class="terminal-tabs-empty"><span class="terminal-glyph">&gt;_</span> Terminal</span>';
     markPanes();
     const active=terminalViews.get(currentTerminal);if(!active)closeTerminalSearch();
-    if(active&&!active.poppedOut)requestAnimationFrame(()=>active.term.focus());
+    if(focus&&active&&!active.poppedOut)requestAnimationFrame(()=>{if(!typingElsewhere())active.term.focus();});
   }
   // Put `id` in a new pane left or right of pane `index`. Returns false when there is no room.
   function insertPane(id,dir,index=paneFocus){
@@ -336,12 +354,12 @@
     if(!target&&maxPanes()<=panes.filter(Boolean).length){toast('No room for another terminal side by side. Close a pane or widen the window.');return;}
     await openTerminal({...(target||terminalTarget(terminalViews.get(panes[index]))),split:{dir,index}});
   }
-  function showInSplit(id,dir,index=paneFocus){if(insertPane(id,dir,index))activateTerminal(id);saveView();}
+  function showInSplit(id,dir,index=paneFocus){if(insertPane(id,dir,index))activateTerminal(id,true);saveView();}
   function closePane(i){
     normalizePanes();if(panes.length<2)return;
     const [size]=paneSizes.splice(i,1);panes.splice(i,1);paneSizes[Math.max(0,i-1)]+=size;
     paneFocus=Math.max(0,Math.min(paneFocus>=i?paneFocus-1:paneFocus,panes.length-1));
-    activateTerminal(panes[paneFocus]);saveView();
+    activateTerminal(panes[paneFocus],true);saveView();
   }
   // Drag the grip between two panes to share their width.
   document.addEventListener('pointerdown',event=>{
@@ -389,7 +407,7 @@
     const pane=event.target.closest('.terminal-pane');if(!pane)return;event.preventDefault();event.stopPropagation();
     terminalContextMenu(event,terminalViews.get(panes[Number(pane.dataset.index)]));
   });
-  async function openTerminal({agentId=selected()?.id,hostId,mode='shell',local=false,terminalId,restoring=false,split=null}={}){
+  async function openTerminal({agentId=selected()?.id,hostId,mode='shell',local=false,terminalId,restoring=false,split=null,background=false}={}){
     if(!agentId&&!hostId&&!local&&!terminalId){toast('Select an agent, or open a machine from Machines.');return;}
     if(typeof window.Terminal!=='function'||!window.FitAddon||!window.OpayaTerminal){toast('The terminal UI did not load. Reinstall the complete Opaya build rather than moving the executable out of its installation folder.',true);return;}
     if(!restoring){closeModal();$('#terminal-panel').hidden=false;}
@@ -410,11 +428,11 @@
       for(const event of terminalPending.get(result.id)||[])terminalEvent(event);terminalPending.delete(result.id);
     }
     if(split)insertPane(result.id,split.dir,split.index);
-    activateTerminal(result.id);if(!restoring)saveView();
+    activateTerminal(result.id,!restoring&&!background);if(!restoring)saveView();
     return result.id;
   }
   function terminalEvent(event){
-    if(event.type==='opened'){if(terminalViews.has(event.id)){$('#terminal-panel').hidden=false;activateTerminal(event.id);}else action(()=>openTerminal({terminalId:event.id}));return;}
+    if(event.type==='opened'){if(terminalViews.has(event.id)){$('#terminal-panel').hidden=false;activateTerminal(event.id);}else action(()=>openTerminal({terminalId:event.id,background:true}));return;}
     if(event.type==='renamed'){const view=terminalViews.get(event.id);if(view){view.title=event.title;activateTerminal(currentTerminal);}return;}
     if(event.type==='warning'){toast(event.error,true);return;}
     const view=terminalViews.get(event.id);
@@ -441,12 +459,12 @@
     if(name==='new-vps'){openNewVps();return;}
     if(name==='job-restore'){const running=[...jobs.values()].filter(j=>j.status==='running');if(!jobs.has(jobShown))jobShown=(running[0]||[...jobs.values()].at(-1))?.id||'';jobMinimized=false;renderJobs();return;}
     if(name==='opaya-new'){action(async()=>{await api.opayaNewSession();opayaCount=-1;$('#message-input')?.focus();});return;}
-    if(name==='opaya-delete-session'){const o=opaya();if(!confirm('Delete this chat with the Opaya Agent?'))return;action(async()=>{await api.opayaDeleteSession({id:o.sessionId});opayaCount=-1;});return;}
+    if(name==='opaya-delete-session'){const o=opaya();action(async()=>{if(!await ask('Delete this chat with the Opaya Agent?',{ok:'Delete',danger:true}))return;await api.opayaDeleteSession({id:o.sessionId});opayaCount=-1;});return;}
     if(name==='discover-tab'){discover(id||undefined);return;}
     if(name==='discover-install'){if(button.dataset.host){confirmInstall(button.dataset.fw,button.dataset.host);return;}action(async()=>{const r=await api.installFramework({id:button.dataset.fw,hostId:button.dataset.host||undefined});closeModal();if(r?.kind==='toolchain'){onJob(r);toast('Opaya is installing it from the official download.');return;}toast('Installing in Terminal. Discover again when it finishes.');});return;}
     if(name==='clone-install'){action(async()=>{await api.installFramework({id:'hermes',hostId:button.dataset.host||undefined});toast('Installing Hermes in Terminal. Clone again when it finishes.');});return;}
     if(name==='itrust-agent'){const a=state.agents.find(x=>x.id===id);if(a)toggleAgentTrust(a);return;}
-    if(name==='opaya-itrust'){action(async()=>{const on=!state.settings?.itrustOpaya;if(on&&!confirm('Turn on iTrust for the Opaya Agent?\n\nIt will install, connect and change things without asking each time. Removing connections or machines still asks.'))return;await api.saveSettings({itrustOpaya:on});await refresh();toast(on?'iTrust is on for the Opaya Agent.':'iTrust is off for the Opaya Agent.');});return;}
+    if(name==='opaya-itrust'){action(async()=>{const on=!state.settings?.itrustOpaya;if(on&&!await ask('Turn on iTrust for the Opaya Agent?\n\nIt will install, connect and change things without asking each time. Removing connections or machines still asks.',{ok:'Turn on'}))return;await api.saveSettings({itrustOpaya:on});await refresh();toast(on?'iTrust is on for the Opaya Agent.':'iTrust is off for the Opaya Agent.');});return;}
     if(name==='browser-open'||name==='browser-toggle'){const p=$('#browser-panel');if(name==='browser-toggle'&&!p.hidden){p.hidden=true;$('#browser-toggle')?.classList.remove('selected');return;}showBrowser();$('#browser-toggle')?.classList.add('selected');$('#browser-url').focus();return;}
     if(name==='projects-toggle'){toggleProjects();return;}
     if(name==='project-focus'){projectsExpanded.add(id);toggleProjects(true);return;}
@@ -485,7 +503,7 @@
     if(name==='backup-reveal'){action(()=>api.revealBackup({file:button.dataset.file}));return;}
     if(name==='backup-folder-open'){action(()=>api.revealBackup({folder:true}));return;}
     if(name==='backup-folder-change'){action(async()=>{const dir=await api.pick({kind:'directory'});if(!dir)return;await api.saveSettings({backupDir:dir});await refresh();backupLists.clear();const code=$('.backup-dest code');if(code)code.textContent=dir;toast('Backups now go to '+dir+'.');});return;}
-    if(name==='backup-delete'){if(!confirm('Delete this backup archive? This cannot be undone.'))return;action(async()=>{await api.backupRemove({file:button.dataset.file});const a=state.agents.find(x=>x.id===id);if(a)await loadBackups(a);toast('Backup deleted.');});return;}
+    if(name==='backup-delete'){action(async()=>{if(!await ask('Delete this backup archive?\n\nThis cannot be undone.',{ok:'Delete',danger:true}))return;await api.backupRemove({file:button.dataset.file});const a=state.agents.find(x=>x.id===id);if(a)await loadBackups(a);toast('Backup deleted.');});return;}
     if(name==='edit-host'){openHosts(state.hosts.find(h=>h.id===id));return;}
     if(name==='settings'){openSettings();return;}
     if(name==='models'){action(openModels);return;}
@@ -496,7 +514,7 @@
     if(name==='discovered-add'){const candidate=window.__discovered?.[Number(index)];openAgentForm(candidate?.existingId?state.agents.find(a=>a.id===candidate.existingId):candidate);return;}
     if(name==='starter'){const input=$('#message-input');if(input){input.value=button.dataset.text;drafts.set(draftKey(),input.value);if(api.saveDraft)save(api.saveDraft({agentId:selected().id,conversationId:currentConversation()?.id||'',text:input.value}));input.focus();}return;}
     if(name==='terminal-hide'){$('#terminal-panel').hidden=true;saveView();return;}
-    if(name==='terminal-tab'){activateTerminal(id);saveView();return;}
+    if(name==='terminal-tab'){activateTerminal(id,true);saveView();return;}
     if(name==='terminal-tab-close'){action(()=>closeTerminalTab(id));return;}
     if(name==='terminal-search'){openTerminalSearch();return;}
     if(name==='terminal-split'){action(()=>panes.filter(Boolean).length?splitTerminal('right'):openTerminal({...(selected()&&!overview?{agentId:selected().id}:{local:true})}));return;}
@@ -760,7 +778,7 @@
       {icon:'&#9707;',label:'Show on the right',disabled:panes.includes(id)&&panes.length===1,run:()=>showInSplit(id,'right')},
       {icon:'&#9706;',label:'Show on the left',disabled:panes.includes(id)&&panes.length===1,run:()=>showInSplit(id,'left')},
       panes.length>1&&panes.includes(id)&&{icon:'&#9645;',label:'Close pane (keeps running)',run:()=>closePane(panes.indexOf(id))},
-      {icon:'&#10697;',label:'Open in separate window',disabled:view.exited,run:()=>{activateTerminal(id);return popoutTerminal(id);}},
+      {icon:'&#10697;',label:'Open in separate window',disabled:view.exited,run:()=>{activateTerminal(id,true);return popoutTerminal(id);}},
       '-',
       {icon:'&#10005;',label:view.exited?'Close saved output':'End session',danger:!view.exited,run:()=>closeTerminalTab(id)}
     ];
@@ -879,7 +897,7 @@
     ['api','I have an API key','From OpenAI, Anthropic, Google, DeepSeek, Groq, OpenRouter, Mistral or any compatible service.',''],
     ['none','I have nothing yet','No problem: start with a free model, or set up the tools now and add AI later.','']];
   const GUIDE_GOALS=[['web','Websites and web apps','Git, Node.js, GitHub CLI'],['python','Python, data and automation','Git, Python, uv'],['agents','Just work with AI agents','Git'],['all','A bit of everything','All of the above']];
-  const GUIDE_AGENTS=[['codex','Codex CLI','ChatGPT'],['claude','Claude Code','Claude'],['gemini-cli','Gemini CLI','Google account'],['opencode','OpenCode','Many models']];
+  const GUIDE_AGENTS=[['codex','Codex CLI','ChatGPT'],['claude','Claude Code','Claude'],['opencode','OpenCode','Many models']];
   const GUIDE_KEYS=['google','groq','openrouter','openai','anthropic','deepseek','mistral','xai','cerebras','ollama-cloud','custom'];
   let guide=null;const guideDismissed=()=>tipsSeen.has('guide-closed');
   const guideOn=()=>!!guide;
@@ -1367,12 +1385,11 @@
   async function toggleAgentTrust(a){
     if(state.settings?.itrustAll&&a.itrust===false){toast('iTrust is on for all agents in Settings.');return;}
     const on=!a.itrust;
-    if(on&&!confirm(`Turn on iTrust for ${title(a)}?\n\nIts tool requests (commands, file edits and other actions) will be approved automatically, without asking you.`))return;
+    if(on&&!await ask(`Turn on iTrust for ${title(a)}?\n\nIts tool requests (commands, file edits and other actions) will be approved automatically, without asking you.`,{ok:'Turn on'}))return;
     await action(async()=>{await api.updateAgentDisplay({id:a.id,itrust:on});await refresh();toast(on?`iTrust is on for ${title(a)}.`:`iTrust is off for ${title(a)}.`);});
   }
-  document.addEventListener('change',event=>{const key=event.target.dataset?.setting;if(!key)return;const on=event.target.checked;
-    if(on&&key==='itrustAll'&&!confirm('Turn on iTrust for all agents?\n\nEvery agent\'s tool requests will be approved automatically.')){event.target.checked=false;return;}
-    action(async()=>{await api.saveSettings({[key]:on});await refresh();});});
+  document.addEventListener('change',event=>{const key=event.target.dataset?.setting;if(!key)return;const box=event.target,on=box.checked;
+    action(async()=>{if(on&&key==='itrustAll'){box.checked=false;if(!await ask('Turn on iTrust for all agents?\n\nEvery agent\'s tool requests will be approved automatically.',{ok:'Turn on'}))return;box.checked=true;}await api.saveSettings({[key]:on});await refresh();});});
   async function openSkills(id){
     const a=state.agents.find(x=>x.id===id);if(!a)return;
     modal('Skills, tools & MCP',`${title(a)} / ${labels[a.provider]||a.provider}${a.agentVersion?` ${a.agentVersion}`:''}`,`<div id="skills-body"><p class="field-help">Loading skills...</p></div>`,true);
@@ -1428,7 +1445,7 @@
       <div class="modal-footer"><div></div><div><button class="primary" id="mcp-add">Add MCP server</button></div></div>`}`,true);
     $('#mcp-add')&&($('#mcp-add').onclick=()=>openMcpManager('new'));
     for(const b of document.querySelectorAll('[data-mcp-edit]'))b.onclick=()=>openMcpManager(b.dataset.mcpEdit);
-    for(const b of document.querySelectorAll('[data-mcp-remove]'))b.onclick=()=>action(async()=>{const x=list.find(y=>y.id===b.dataset.mcpRemove);if(!confirm(`Remove MCP server ${x?.name}? Its saved secrets are deleted.`))return;await api.mcpRemove({id:b.dataset.mcpRemove});await refresh();openMcpManager();});
+    for(const b of document.querySelectorAll('[data-mcp-remove]'))b.onclick=()=>action(async()=>{const x=list.find(y=>y.id===b.dataset.mcpRemove);if(!await ask(`Remove MCP server ${x?.name}?\n\nIts saved secrets are deleted.`,{ok:'Remove',danger:true}))return;await api.mcpRemove({id:b.dataset.mcpRemove});await refresh();openMcpManager();});
     const f=$('#mcp-form');if(!f)return;const el=n=>f.elements[n];
     const sync=()=>{const stdio=el('type').value==='stdio';f.querySelector('[data-mcp="stdio"]').hidden=!stdio;f.querySelector('[data-mcp="remote"]').hidden=stdio;f.querySelector('.mcp-agent-list').hidden=el('scope').value!=='some';};
     el('type').onchange=sync;for(const r of f.querySelectorAll('[name="scope"]'))r.onchange=sync;sync();
@@ -1590,7 +1607,7 @@
   }
   async function deleteChat(c){
     const a=state.agents.find(x=>x.id===c.agentId);
-    if(!confirm(`Delete "${c.title}"?\n\nOpaya deletes this ${chatKind(c)==='project'?'project chat':chatKind(c)==='playground'?'playground chat':'chat'} and its transcript${a?` with ${title(a)}`:''}. This cannot be undone.`))return;
+    if(!await ask(`Delete "${c.title}"?\n\nOpaya deletes this ${chatKind(c)==='project'?'project chat':chatKind(c)==='playground'?'playground chat':'chat'} and its transcript${a?` with ${title(a)}`:''}. This cannot be undone.`,{ok:'Delete',danger:true}))return;
     await action(async()=>{await api.deleteConversation({id:c.id});await refresh();toast('Chat deleted.');});
   }
   // Condense: reads the whole chat and keeps only its essence. Uses the Opaya Agent's model API when it has a key,
@@ -1685,7 +1702,7 @@
       {icon:'&#9656;',label:'Browse files',run:()=>openFiles({hostId:p.hostId||undefined,path:p.path,label:`${p.name} / ${hostName(p.hostId)}`})},
       {icon:'&gt;_',label:'Terminal here',run:()=>projectTerminal(p)},
       {icon:'&#9998;',label:'Edit project...',run:()=>openProjectForm(p)},
-      {icon:'&#10005;',label:'Remove project',danger:true,run:async()=>{if(!confirm(`Remove project ${p.name}? Its chats stay with their agents; the folder is not touched.`))return;await api.projectRemove({id:p.id});await refresh();toast('Project removed.');}}];
+      {icon:'&#10005;',label:'Remove project',danger:true,run:async()=>{if(!await ask(`Remove project ${p.name}?\n\nIts chats stay with their agents; the folder is not touched.`,{ok:'Remove',danger:true}))return;await api.projectRemove({id:p.id});await refresh();toast('Project removed.');}}];
   }
   // ---- Remote agents on local projects: one project; each agent on a machine or in a container gets its own copy -----
   const remoteOf=(a,p)=>(p.remotes||[]).find(r=>r.agentId===a.id)||null;
@@ -1699,8 +1716,8 @@
     {icon:'&#10005;',label:'Stop sharing...',danger:true,run:()=>stopSharing(p,a)}];};
   async function sendToRemote(p,a){
     const r=remoteOf(a,p);if(!r)return;let includeChanges=false;
-    if(r.mode==='git'){const info=await api.projectRemoteInfo({id:p.id}).catch(()=>null);if(info?.dirty)includeChanges=confirm(`You have ${info.dirty} uncommitted change${info.dirty===1?'':'s'}. Send them too?\n\nOK sends them along (your folder stays as it is); Cancel sends only your commits.`);}
-    else if(r.mode==='copy'&&!confirm(`Copy your folder to ${title(a)} again? Its files are replaced by yours; bring its changes back first if you have not.`))return;
+    if(r.mode==='git'){const info=await api.projectRemoteInfo({id:p.id}).catch(()=>null);if(info?.dirty)includeChanges=await ask(`You have ${info.dirty} uncommitted change${info.dirty===1?'':'s'}. Send them too?\n\nSend them sends them along (your folder stays as it is); Only commits sends only your commits.`,{ok:'Send them',cancel:'Only commits'});}
+    else if(r.mode==='copy'&&!await ask(`Copy your folder to ${title(a)} again?\n\nIts files are replaced by yours; bring its changes back first if you have not.`,{ok:'Copy'}))return;
     await api.projectRemoteSend({id:p.id,agentId:a.id,includeChanges});
   }
   async function bringFromRemote(p,a){await api.projectRemoteBring({id:p.id,agentId:a.id});}
@@ -1748,8 +1765,8 @@
       <p class="field-help"><strong>Apply to my folder</strong> puts these changes into ${esc(local?.name||'your project')} as uncommitted edits, next to your own work, so you can look at them in your editor and commit what you like.${r.canMerge?` <strong>Merge</strong> adds the agent's commits to ${esc(r.branch||'your branch')} as they are.`:''}</p>
       <div class="modal-footer"><div><button type="button" class="subtle" data-bring="diff">Full diff</button><button type="button" class="subtle" data-bring="branch">New branch...</button></div><div>${r.canMerge?'<button type="button" class="secondary" data-bring="merge">Merge commits</button>':''}<button type="button" class="primary" data-bring="apply">Apply to my folder</button></div></div>`,true);
     $('#app-dialog').addEventListener('click',event=>{const b=event.target.closest('[data-bring]');if(!b)return;const act=b.dataset.bring;
-      let branch='';if(act==='branch'){branch=prompt('Name for the new branch:',`review/${(r.ref.split('/').pop()||'agent')}`)||'';if(!branch)return;}
-      action(async()=>{await api.projectRemoteApply({id:r.projectId,agentId:r.agentId,action:act,branch});closeModal();toast(act==='apply'?'Applying the changes to your folder in the terminal below.':act==='merge'?'Merging in the terminal below.':act==='branch'?`Creating ${branch} in the terminal below.`:'Showing the diff in the terminal below.');});});
+      action(async()=>{let branch='';if(act==='branch'){branch=await ask('Name for the new branch',{ok:'Create',input:`review/${(r.ref.split('/').pop()||'agent')}`});if(!branch)return;}
+        await api.projectRemoteApply({id:r.projectId,agentId:r.agentId,action:act,branch});closeModal();toast(act==='apply'?'Applying the changes to your folder in the terminal below.':act==='merge'?'Merging in the terminal below.':act==='branch'?`Creating ${branch} in the terminal below.`:'Showing the diff in the terminal below.');});});
   }
   function agentChecks(p,hostId){
     return state.agents.filter(a=>a.protocol!=='terminal').map(a=>{const ok=fitsHere(a,{hostId});return `<label class="check-row inline project-agent-check ${ok?'':'off'}" title="${ok?'':'Runs on another machine than this folder'}"><input type="checkbox" name="agent" value="${esc(a.id)}" ${p?.agentIds?.includes(a.id)&&ok?'checked':''} ${ok?'':'disabled'}> ${badge(a)} ${esc(title(a))}</label>`;}).join('')||'<p class="field-help">Add an agent first.</p>';
@@ -1993,13 +2010,13 @@
       for(const n of preset.names||[]){const c=box.querySelector(`[name="skill"][value="${CSS.escape(n)}"]`);if(c)c.checked=true;}syncMode();
     },error=>{$('#transfer-skills').innerHTML=`<div class="message-error">${esc(error.message)}</div>`;});
     if(a.provider==='hermes')api.agentEnvKeys({id:a.id}).then(list=>{keys=list||[];drawKeys();},()=>{keys=[];drawKeys();});
-    f.onsubmit=event=>{event.preventDefault();const t=target(),picked=n=>[...f.querySelectorAll(`[name="${n}"]:checked`)].map(i=>i.value);
+    f.onsubmit=async event=>{event.preventDefault();const t=target(),picked=n=>[...f.querySelectorAll(`[name="${n}"]:checked`)].map(i=>i.value);
       const sm=mode('skillsMode'),km=f.querySelector('[name="keysMode"]')?mode('keysMode'):'none';
       const x={sourceId:a.id,targetId:t.id,skills:sm==='all'?'all':sm==='some'?picked('skill'):false,keys:km==='all'?'all':km==='some'?picked('key'):false,mcp:picked('mcp'),token:!!f.elements.token?.checked};
       if(Array.isArray(x.skills)&&!x.skills.length){toast('Select skills, or choose All or None.',true);return;}
       if(Array.isArray(x.keys)&&!x.keys.length){toast('Select API keys, or choose All or None.',true);return;}
       if(!x.skills&&!x.keys&&!x.mcp.length&&!x.token){toast('Choose what to transfer.',true);return;}
-      if(x.keys&&!confirm(`Copy ${x.keys==='all'?'all':x.keys.length} API key${x.keys.length===1?'':'s'} from ${title(a)} to ${title(t)}?\n\n${title(t)} will be able to use the same accounts and spend on them.`))return;
+      if(x.keys&&!await ask(`Copy ${x.keys==='all'?'all':x.keys.length} API key${x.keys.length===1?'':'s'} from ${title(a)} to ${title(t)}?\n\n${title(t)} will be able to use the same accounts and spend on them.`,{ok:'Copy keys'}))return;
       action(async()=>{await api.transferStart(x);closeModal();});
     };
   }
@@ -2016,7 +2033,7 @@
       const boxes=()=>[...body.querySelectorAll('[data-lib]')],count=()=>{const n=boxes().filter(b=>b.checked).length;$('#library-count')&&($('#library-count').textContent=n?`${n} selected`:'');$('#library-install')&&($('#library-install').disabled=!n);};
       $('#library-all')?.addEventListener('change',e=>{for(const b of boxes())b.checked=e.target.checked;count();});
       for(const b of boxes())b.addEventListener('change',count);
-      for(const b of body.querySelectorAll('[data-lib-remove]'))b.onclick=event=>{event.preventDefault();const n=b.dataset.libRemove;if(!confirm(`Remove ${n} from the library?\n\nAgents that already have it keep their copy.`))return;action(async()=>{await api.libraryRemove({name:n});await drawLibrary();toast(`${n} removed from the library.`);});};
+      for(const b of body.querySelectorAll('[data-lib-remove]'))b.onclick=event=>{event.preventDefault();const n=b.dataset.libRemove;action(async()=>{if(!await ask(`Remove ${n} from the library?\n\nAgents that already have it keep their copy.`,{ok:'Remove',danger:true}))return;await api.libraryRemove({name:n});await drawLibrary();toast(`${n} removed from the library.`);});};
       $('#library-install')&&($('#library-install').onclick=()=>openLibraryInstall(boxes().filter(b=>b.checked).map(b=>b.dataset.lib)));
       $('#library-from-agent').onclick=()=>{const withSkills=state.agents;if(!withSkills.length){toast('Add an agent first.');return;}openLibraryImport();};
       $('#library-from-folder').onclick=()=>action(async()=>{const dir=await api.pick({kind:'directory'});if(!dir)return;const r=await api.libraryAddFolder({path:dir});await drawLibrary();toast(`Added ${plural(r.skills.length,'skill')} to the library.`);});
@@ -2070,7 +2087,7 @@
   }
   async function redeploy(a){
     const src=state.agents.find(x=>x.id===a.clone?.from);if(!src){toast('The source agent of this clone was removed.',true);return;}
-    if(!confirm(`Redeploy ${title(a)} from ${title(src)}?\n\nCopies ${CLONE_SCOPES.find(s=>s[0]===a.clone.scope)?.[1]||a.clone.scope}${(a.clone.cron??a.clone.scope==='everything')?' (with cron jobs)':' (without cron jobs)'} again over the clone${a.clone.container?' and restarts its container':''}. Chat history on the clone is kept.`))return;
+    if(!await ask(`Redeploy ${title(a)} from ${title(src)}?\n\nCopies ${CLONE_SCOPES.find(s=>s[0]===a.clone.scope)?.[1]||a.clone.scope}${(a.clone.cron??a.clone.scope==='everything')?' (with cron jobs)':' (without cron jobs)'} again over the clone${a.clone.container?' and restarts its container':''}. Chat history on the clone is kept.`))return;
     await action(async()=>{const job=await api.redeployAgent({id:a.id});onJob(job);});
   }
   // ---- New VPS: key, public key for the provider, connection test, save ------------------------------------------
@@ -2138,7 +2155,7 @@
   api.onUpdate?.(value=>{const was=update.status;update=value||{status:'idle',failed:u.error};renderUpdate();if(was!=='available'&&update.status==='available'&&!$('#app-dialog'))toast(`Opaya ${update.latest?.version} is available. Click the notice in the status bar to update.`);});
   api.updateState?.().then(value=>{update=value||update;renderUpdate();
     // Confirm a finished update after the restart.
-    const confirm=()=>{if(!initialized){setTimeout(confirm,500);return;}const before=lastVersion;if(update.current&&before!==update.current){if(before&&compareVersions(update.current,before)>0)toast(`Opaya updated to ${update.current}.`);lastVersion=update.current;saveView();}};confirm();
+    const noteUpdated=()=>{if(!initialized){setTimeout(noteUpdated,500);return;}const before=lastVersion;if(update.current&&before!==update.current){if(before&&compareVersions(update.current,before)>0)toast(`Opaya updated to ${update.current}.`);lastVersion=update.current;saveView();}};noteUpdated();
   }).catch(()=>{});
   function compareVersions(a,b){const x=String(a).split('.').map(Number),y=String(b).split('.').map(Number);for(let i=0;i<3;i++){if((x[i]||0)!==(y[i]||0))return (x[i]||0)>(y[i]||0)?1:-1;}return 0;}
   // ---- Layout: the terminal and the browser dock at the bottom (side by side) or on the right (stacked) -------------

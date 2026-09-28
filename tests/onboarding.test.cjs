@@ -1,6 +1,6 @@
 'use strict';
 const {test}=require('node:test');const assert=require('node:assert/strict');const {PassThrough}=require('node:stream');const {EventEmitter}=require('node:events');
-const {Broker}=require('../desktop/broker.cjs');const {Store,Vault}=require('../desktop/store.cjs');const {OpayaAgent}=require('../desktop/opaya-agent.cjs');const {temp,secure}=require('./helpers.cjs');
+const {Broker}=require('../desktop/broker.cjs');const {Store,Vault}=require('../desktop/store.cjs');const {OpayaAgent}=require('../desktop/opaya-agent.cjs');const catalog=require('../desktop/catalog.cjs');const {temp,secure}=require('./helpers.cjs');
 // A stand-in for `claude -p --output-format stream-json`: reads the prompt, may call Opaya tools (as the MCP bridge
 // would), then prints stream-json lines and exits.
 function fakeClaude(script){
@@ -60,7 +60,9 @@ test('the guide gets a model first, then hands the rest to the Opaya Agent; noth
   const win=guide.plan({way:'claude',goals:[],agents:[],facts:{tools:{},signedIn:{claude:true}},platform:'win32'});
   assert.deepEqual(win.map(s=>s.id),['install-git','install-claude','brain','add']);
   // No account: everything by script, no model steps.
-  assert.deepEqual(guide.plan({way:'none',goals:['agents'],agents:['gemini-cli'],facts:{tools:{}},platform:'linux'}).map(s=>s.id),['install-git','install-node','install-gemini-cli','add']);
+  assert.deepEqual(guide.plan({way:'none',goals:['agents'],agents:['opencode'],facts:{tools:{}},platform:'linux'}).map(s=>s.id),['install-git','install-node','install-opencode','add']);
+  // Gemini CLI is not offered any more.
+  assert.equal(Object.hasOwn(guide.AGENTS,'gemini-cli'),false);assert.equal(catalog.FRAMEWORKS.some(f=>f.id==='gemini-cli'),false);
   assert.throws(()=>guide.plan({way:'hack',facts}),/Choose what you have/);
 });
 test('sign-in is read from the files each CLI writes',async t=>{

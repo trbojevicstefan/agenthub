@@ -7,11 +7,11 @@ async function fixture(t,reply){
   const factory=()=>({connect:async()=>({description:'ok'}),close(){},run:async ctx=>{ctx.onEvent({type:'text',text:reply});return {};}});
   const b=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory:factory});await b.init();t.after(()=>b.close());return {b,root};
 }
-const gemini={name:'Gemini CLI',provider:'custom',protocol:'acp',transport:'local',command:'gemini',args:['--acp']};
+const vendor={name:'Vendor CLI',provider:'custom',protocol:'acp',transport:'local',command:'vendor-cli',args:['--acp']};
 const settle=async b=>{for(let i=0;i<50&&b.turns.size;i++)await new Promise(r=>setTimeout(r,10));};
 test('an agent whose vendor refuses other apps switches to its terminal, once, and says so',async t=>{
   const {b}=await fixture(t,'This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google');
-  const a=await b.saveAgent({agent:gemini});const told=[];b.onClientRefused=(agent,text)=>told.push([agent.id,text]);
+  const a=await b.saveAgent({agent:vendor});const told=[];b.onClientRefused=(agent,text)=>told.push([agent.id,text]);
   await b.connect(a.id);await b.send({agentId:a.id,text:'hi'});await settle(b);
   assert.equal(b.agent(a.id).surface,'terminal');assert.equal(told.length,1);assert.match(told[0][1],/Antigravity/);
   // Reloaded from disk, the choice stays.
@@ -19,7 +19,7 @@ test('an agent whose vendor refuses other apps switches to its terminal, once, a
 });
 test('normal answers do not switch anything',async t=>{
   const {b}=await fixture(t,'Here is the version history of the client library.');
-  const a=await b.saveAgent({agent:gemini});await b.connect(a.id);await b.send({agentId:a.id,text:'hi'});await settle(b);
+  const a=await b.saveAgent({agent:vendor});await b.connect(a.id);await b.send({agentId:a.id,text:'hi'});await settle(b);
   assert.equal(b.agent(a.id).surface,'');
   for(const text of ['client is no longer supported','Please migrate to the Antigravity suite'])assert(CLIENT_REFUSED.test(text));
   assert(!CLIENT_REFUSED.test('The Gemini client supports streaming.'));
@@ -29,10 +29,10 @@ test('chat or terminal per agent and in Settings',async t=>{
   assert.equal(b.data.settings.interface,'','not chosen until the first launch asks');
   await b.saveSettings({interface:'terminal'});assert.equal(b.data.settings.interface,'terminal');
   await assert.rejects(()=>b.saveSettings({interface:'desktop'}),/chat or terminal/);
-  const a=await b.saveAgent({agent:gemini});
+  const a=await b.saveAgent({agent:vendor});
   await b.updateAgentDisplay({id:a.id,surface:'chat'});assert.equal(b.agent(a.id).surface,'chat');
   await b.updateAgentDisplay({id:a.id,surface:'bogus'});assert.equal(b.agent(a.id).surface,'');
-  assert.equal(schema.agent({...gemini,surface:'terminal'}).surface,'terminal');assert.equal(schema.agent({...gemini,surface:'x'}).surface,'');
+  assert.equal(schema.agent({...vendor,surface:'terminal'}).surface,'terminal');assert.equal(schema.agent({...vendor,surface:'x'}).surface,'');
 });
 test('split terminals are remembered with the view',async t=>{
   const {b}=await fixture(t,'');
@@ -41,9 +41,19 @@ test('split terminals are remembered with the view',async t=>{
 });
 test('the native CLI is the agent command without its chat-server arguments',()=>{
   const t=Object.create(Terminals.prototype);
-  assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'gemini',args:['--acp']}),[]);
+  assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'vendor-cli',args:['--acp']}),[]);
   assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'opencode',args:['acp']}),[]);
-  assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'gemini',args:['--experimental-acp','--yolo']}),['--yolo']);
-  assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'docker',args:['exec','-i','-w','/root','opaya-g','gemini','--acp']}),['exec','-it','-w','/root','-e','TERM=xterm-256color','opaya-g','gemini']);
+  assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'vendor-cli',args:['--experimental-acp','--yolo']}),['--yolo']);
+  assert.deepEqual(t.cliArgs({provider:'custom',protocol:'acp',command:'docker',args:['exec','-i','-w','/root','opaya-g','vendor-cli','--acp']}),['exec','-it','-w','/root','-e','TERM=xterm-256color','opaya-g','vendor-cli']);
   assert.deepEqual(t.cliArgs({provider:'custom',protocol:'terminal',command:'aider',args:['--model','x']}),['--model','x'],'terminal agents keep their arguments');
+});
+test('saved Gemini CLI connections are removed with their chats when Opaya starts',async t=>{
+  const {b}=await fixture(t,'');
+  const keep=await b.saveAgent({agent:{name:'OpenCode',provider:'custom',protocol:'acp',transport:'local',command:'opencode',args:['acp']}});
+  const local=await b.saveAgent({agent:{name:'Gemini CLI',provider:'custom',protocol:'acp',transport:'local',command:'/usr/local/bin/gemini',args:['--acp']}});
+  const boxed=await b.saveAgent({agent:{name:'Gemini box',provider:'custom',protocol:'acp',transport:'local',command:'docker',args:['exec','-i','opaya-g','gemini','--acp']}});
+  const c=await b.createConversation(local.id);await b.saveProject({name:'p',path:'/tmp',agentIds:[keep.id,local.id]});
+  const again=new Broker({store:b.store,vault:b.vault,emit:()=>{},approve:async()=>true});await again.init();t.after(()=>again.close());
+  assert.deepEqual(again.data.agents.map(a=>a.id),[keep.id]);assert(!again.data.conversations.some(x=>x.id===c.id));
+  assert.deepEqual(again.data.projects[0].agentIds,[keep.id]);assert(!again.data.agents.some(a=>a.id===boxed.id));
 });

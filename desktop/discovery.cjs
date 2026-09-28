@@ -114,13 +114,7 @@ async function scanLocal({home = os.homedir(), extraHomes = [], probe = true} = 
     const command = binary(name);
     if (command) found.push(candidate({name: name === 'codex' ? 'Codex CLI' : 'Claude Code', provider: name, protocol: name, transport: 'local', command, args: [], cwd: home}, 'Uses the CLI login already on this machine.'));
   }
-  // Gemini CLI and OpenCode chat over ACP, like Hermes. Gemini renamed --experimental-acp to --acp; ask which it knows.
-  const gemini = binary('gemini');
-  if (gemini) {
-    const help = await collect(launch({command: gemini, transport: 'local', cwd: home, args: []}, ['--help']), {timeout: 15000}).catch(error => String(error.message || ''));
-    const flag = /--acp\b/.test(help) || !/--experimental-acp/.test(help) ? '--acp' : '--experimental-acp';
-    found.push(candidate({name: 'Gemini CLI', provider: 'custom', protocol: 'acp', transport: 'local', command: gemini, args: [flag], cwd: home, avatar: 'lib:gemini-cli', surface: 'terminal'}, `Opens in its own terminal: Google no longer lets other apps chat with Gemini Code Assist for individuals. With an API key, switch it to chat (right-click > Open as chat).`));
-  }
+  // OpenCode chats over ACP, like Hermes. (Gemini CLI is not offered: Google no longer lets other apps use it.)
   const opencode = binary('opencode');
   if (opencode) found.push(candidate({name: 'OpenCode', provider: 'custom', protocol: 'acp', transport: 'local', command: opencode, args: ['acp'], cwd: home, avatar: 'lib:opencode'}, 'Chats over ACP (opencode acp). Sign in once with opencode auth login in Terminal.'));
   const openclaw = binary('openclaw');

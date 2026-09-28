@@ -2,7 +2,7 @@
 const {randomUUID}=require('node:crypto');
 const path=require('node:path');
 const schema=require('./schema.cjs');
-const {primeShellPath}=require('./process.cjs');
+const {primeShellPath,dockerExecContainerIndex}=require('./process.cjs');
 const {visionOf}=require('./vision.cjs');
 const {scanLocal,scanRemote,fingerprint}=require('./discovery.cjs');
 const {hermesLogs}=require('./diagnostics.cjs');
@@ -24,6 +24,12 @@ function safeError(error,token=''){
 // Agents whose vendor no longer accepts connections from other apps (Gemini Code Assist for individuals now points to
 // Antigravity). Their own CLI in a terminal is the way to use them, so Opaya switches them to it.
 const CLIENT_REFUSED=/(client is no longer supported|no longer supported for Gemini Code Assist|migrate to the Antigravity|antigravity\.google)/i;
+// Gemini CLI is not supported any more (Google does not let other apps use it), so its saved connections are removed.
+function isGeminiCli(a){
+  const i=a.command==='docker'?dockerExecContainerIndex(a.args||[]):-1;
+  const bin=String(i>=0?a.args[i+1]||'':a.command||'').split(/[\\/]/).pop().replace(/\.(exe|cmd|bat|ps1)$/i,'').toLowerCase();
+  return bin==='gemini'||a.avatar==='lib:gemini-cli';
+}
 class Broker{
   constructor({store,vault,emit,approve,adapterFactory=createAdapter}){
     Object.assign(this,{store,vault,emit,approve,adapterFactory});this.runtime=new Map();this.histories=new Map();this.turns=new Map();this.connecting=new Map();this.scanBusy=false;this.closing=false;
@@ -36,6 +42,7 @@ class Broker{
     this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
     this.migrateLinkedCopies();
     this.data.mcpServers=(Array.isArray(this.data.mcpServers)?this.data.mcpServers:[]).flatMap(s=>{try{return [mcp.server(s)];}catch{return [];}});this.data.hosts=this.data.hosts.map(h=>schema.host(h));
+    await this.dropGeminiCli();
     this.data.activeAgentId=this.data.agents.some(a=>a.id===this.data.activeAgentId)?this.data.activeAgentId:this.data.agents[0]?.id||'';
     for(const a of this.data.agents)this.runtime.set(a.id,{status:'disconnected',error:'',models:[]});
     for(const c of this.data.conversations){schema.id(c.id);schema.id(c.agentId);}
@@ -45,6 +52,16 @@ class Broker{
     // No snapshot here: it asks the OS keychain whether encryption is available, and on macOS that can wait on a
     // keychain prompt. The service must finish starting first; the UI's first snapshot asks instead.
     return true;
+  }
+  async dropGeminiCli(){
+    const gone=new Set(this.data.agents.filter(isGeminiCli).map(a=>a.id));if(!gone.size)return;
+    this.data.agents=this.data.agents.filter(a=>!gone.has(a.id));
+    for(const c of this.data.conversations.filter(c=>gone.has(c.agentId))){delete this.data.drafts[c.id];await this.store.deleteTranscript(c.id).catch(()=>{});}
+    this.data.conversations=this.data.conversations.filter(c=>!gone.has(c.agentId));
+    for(const id of gone){delete this.data.drafts[id];delete this.data.lastConversation[id];await this.vault.remove(id).catch(()=>{});}
+    for(const p of this.data.projects){p.agentIds=p.agentIds.filter(id=>!gone.has(id));p.remotes=(p.remotes||[]).filter(r=>!gone.has(r.agentId));}
+    if(gone.has(this.data.activeAgentId))this.data.activeConversationId='';
+    await this.store.write(this.data);
   }
   agent(id){const a=this.data.agents.find(a=>a.id===schema.id(id));if(!a)throw new Error('Agent not found.');return a;}
   host(id){const h=this.data.hosts.find(h=>h.id===schema.id(id));if(!h)throw new Error('Host not found.');return h;}
