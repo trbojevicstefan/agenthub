@@ -5,6 +5,7 @@ const path=require('node:path');
 const {spawn}=require('node:child_process');
 const {randomUUID,createHash}=require('node:crypto');
 const {atomicJson,readJson}=require('./store.cjs');
+const schema=require('./schema.cjs');
 const SERVER_ARGS=new Set(['acp','--acp','app-server']);
 const {environment,findExecutable,windowsLaunch,sshArgs,target,remoteCommand,quote,dockerExecContainerIndex,dockerExecArgs,collect}=require('./process.cjs');
 const WINDOWS_BUILD=process.platform==='win32'?Number(os.release().split('.')[2])||0:0;
@@ -26,6 +27,18 @@ function dockerShellArgs(agent){
   if(agent.command!=='docker'||index<0)return null;
   const options=agent.args.slice(1,index).filter(x=>!['-i','-t','-it','-ti','--interactive','--tty'].includes(x));
   return ['exec','-it',...options,agent.args[index],'sh','-l'];
+}
+// The pseudo agents behind "This computer" and a machine's own shell.
+const localShell=home=>({id:'local-shell',name:'This computer',provider:'custom',transport:'local',command:'',args:[],cwd:home});
+const hostShell=(broker,hostId)=>({id:`host_${schema.id(hostId)}`,name:broker.host(hostId).name,provider:'custom',transport:'ssh',hostId,command:'',args:[],cwd:''});
+// The agent (or pseudo agent) a terminal session was opened for (describe() gives the session), so it can start again,
+// or take pasted files where it runs. `broker` knows the agents and machines.
+function sessionAgent(s,{broker,home}){
+  if(s.agentId==='local-shell')return localShell(home);
+  if(s.agentId.startsWith('host_')){try{return hostShell(broker,s.agentId.slice(5));}catch{throw new Error('The machine of this terminal was removed from Opaya. Close the tab.');}}
+  // An install or diagnostics terminal gets a plain shell on its machine; the finished command does not run again.
+  if(s.agentId.startsWith('svc_')){const host=s.remote?broker.data.hosts.find(h=>h.id===s.hostId||s.agentId.endsWith('_'+h.id)):null;if(s.remote&&!host)throw new Error('The machine of this terminal was removed from Opaya.');return {id:s.agentId,name:s.title,provider:'custom',transport:host?'ssh':'local',hostId:host?.id||'',command:'',args:[],cwd:host?'':home,ephemeral:true};}
+  try{return broker.agent(s.agentId);}catch{throw new Error('The agent of this terminal was removed from Opaya. Close the tab.');}
 }
 class Terminals{
   constructor(emit,{ptyFactory,root}={}){this.emit=emit;this.sessions=new Map();this.ptyFactory=ptyFactory;this.root=root;this.queue=Promise.resolve();this.dirty=false;}
@@ -156,4 +169,4 @@ class Terminals{
     await this.queue;
   }
 }
-module.exports={Terminals,dimensions,tmuxName,tmuxCommand,dockerShellArgs,withWorkdir};
+module.exports={Terminals,dimensions,tmuxName,tmuxCommand,dockerShellArgs,withWorkdir,localShell,hostShell,sessionAgent};

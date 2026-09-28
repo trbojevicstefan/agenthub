@@ -642,7 +642,7 @@
     if(!terminalViews.has(result.id)){
       const element=document.createElement('div');element.className='terminal-view';$('#terminal-views').append(element);
       const archived=!!result.exited;
-      const core=window.OpayaTerminal.create(element,{archived,fontSize:terminalFont,windowsBuild:result.windowsBuild||0,light:theme==='light',onSearch:()=>openTerminalSearch(),onContextMenu:event=>terminalContextMenu(event,terminalViews.get(result.id)),onZoom:applyFont,onRestart:()=>action(()=>restartTerminal(result.id))}),{term,fit}=core;
+      const core=window.OpayaTerminal.create(element,{id:result.id,archived,fontSize:terminalFont,windowsBuild:result.windowsBuild||0,light:theme==='light',onSearch:()=>openTerminalSearch(),onContextMenu:event=>terminalContextMenu(event,terminalViews.get(result.id)),onZoom:applyFont,onRestart:()=>action(()=>restartTerminal(result.id)),onNotice:(text,error)=>toast(text,error)}),{term,fit}=core;
       const report=(cols,rows)=>action(()=>api.terminalResize({id:result.id,cols,rows}));
       const view={id:result.id,agentId:result.agentId||a?.id||'',mode:result.mode||mode,remote:result.remote,title:result.title||`${a?title(a):h?.name||(local?'This computer':'SSH')} / ${mode}`,term,fit,core,report,element,exited:!!result.exited,lastSeq:result.seq||0};terminalViews.set(result.id,view);
       // Typing goes to the live session in pieces the service accepts (a large paste used to be refused whole), in order.

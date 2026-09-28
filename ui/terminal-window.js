@@ -1,23 +1,25 @@
 'use strict';
 (async()=>{
   const api=window.agenthub,id=decodeURIComponent(location.hash.slice(1)),status=document.querySelector('#status');
-  const fail=e=>{status.textContent=e.message;};
+  // The status line: the session's state and errors; paste notes (muted) for a while, then the state again.
+  const show=(text,muted=false)=>{status.textContent=text;status.style.color=muted?'var(--muted)':'';},fail=e=>show(e.message);
   try{
-    const pending=[];let ready=false,seq=0,exited=false,restarting=false;
+    const pending=[];let ready=false,seq=0,exited=false,restarting=false,noteTimer=0;
+    const note=(text,error)=>{show(text,!error);clearTimeout(noteTimer);noteTimer=setTimeout(()=>{if(status.textContent===text)show(exited?'Session ended':'');},error?8500:4500);};
     const item=await api.terminalAttach({id});seq=item.seq;exited=item.exited;
     const fontSize=Number((await api.snapshot().catch(()=>null))?.view?.terminalFont)||13;
     // Enter in an ended session starts it again here; a remote one reattaches to its tmux session.
-    const restart=()=>{if(!exited||restarting)return;restarting=true;status.textContent='';
-      api.terminalRestart({id,cols:term.cols,rows:term.rows}).then(r=>{if(r.id!==id)status.textContent='This session already runs in another Opaya tab.';else if(exited&&r.seq>seq)live();}).catch(fail).finally(()=>{restarting=false;});};
-    const core=window.OpayaTerminal.create(document.querySelector('#terminal'),{archived:exited,windowsBuild:item.windowsBuild||0,fontSize,onZoom:()=>core.fitAndReport(report),onRestart:restart}),{term}=core;
-    const live=()=>{exited=false;core.setLive(true);status.textContent='';};
+    const restart=()=>{if(!exited||restarting)return;restarting=true;show('');
+      api.terminalRestart({id,cols:term.cols,rows:term.rows}).then(r=>{if(r.id!==id)show('This session already runs in another Opaya tab.');else if(exited&&r.seq>seq)live();}).catch(fail).finally(()=>{restarting=false;});};
+    const core=window.OpayaTerminal.create(document.querySelector('#terminal'),{id,archived:exited,windowsBuild:item.windowsBuild||0,fontSize,onZoom:()=>core.fitAndReport(report),onRestart:restart,onNotice:note}),{term}=core;
+    const live=()=>{exited=false;core.setLive(true);show('');};
     const event=e=>{if(e.id!==id)return;if(!ready){pending.push(e);return;}if(e.seq!==undefined){if(e.seq<=seq)return;seq=e.seq;}
       if(e.type==='data')term.write(e.data);
-      if(e.type==='exit'){exited=true;core.setLive(false);term.write(window.OpayaTerminal.endedNote(item,e.exitCode));status.textContent='Session ended';}
+      if(e.type==='exit'){exited=true;core.setLive(false);term.write(window.OpayaTerminal.endedNote(item,e.exitCode));show('Session ended');}
       if(e.type==='restarted')live();};
     api.onTerminal(event);
     api.onTerminal(e=>{if(e.id===id&&e.type==='renamed'){document.querySelector('#title').textContent=e.title;document.title=e.title;}});
-    document.querySelector('#title').textContent=item.title;document.title=item.title;if(exited)status.textContent='Session ended';
+    document.querySelector('#title').textContent=item.title;document.title=item.title;if(exited)show('Session ended');
     // Typing goes to the session in pieces the service accepts (a large paste used to be refused whole), in order.
     term.onData(data=>{if(exited)return;for(const part of window.OpayaTerminal.chunks(data))api.terminalWrite({id,data:part}).catch(fail);});
     const report=(cols,rows)=>{if(!exited)api.terminalResize({id,cols,rows}).catch(fail);};

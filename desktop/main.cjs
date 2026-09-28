@@ -158,6 +158,8 @@ if(hostMode){
       for(const method of ['cloneAgent','redeployAgent'])handlers[method]=input=>client.call(method,input,20*60*1000);
       // These wait for the user's approval, which can take up to ten minutes.
       for(const method of ['agentUpdate','agentUpdateAll','agentUninstall','toolUpdate','installFramework','projectRemoteStop','guideStart','terminalRestart'])handlers[method]=input=>client.call(method,input,11*60*1000);
+      // Files pasted into a terminal on another machine are copied there first: minutes on a slow link.
+      handlers.terminalPaste=input=>client.call('terminalPaste',input,11*60*1000);
       handlers.terminalRename=async input=>{const title=await client.call('terminalRename',input);terminalWindows.get(input.id)?.setTitle(title);return title;};
       // In-app updates. The state goes to every Opaya window; install stops the session service first.
       const updater=new (require('./updater.cjs').Updater)({app,markerFile:path.join(app.getPath('userData'),'pending-update.json'),emit:state=>{for(const w of [win,...terminalWindows.values()])if(w&&!w.isDestroyed())w.webContents.send('hub:update',state);}});
@@ -188,8 +190,9 @@ if(hostMode){
         },
         // Local backups: show an archive (or the backup folder) in Finder / Explorer. The service checks the path.
         revealBackup:async x=>{const p=await client.call('backupPath',x);if(x.folder){await require('node:fs/promises').mkdir(p,{recursive:true});const error=await shell.openPath(p);if(error)throw new Error(error);}else shell.showItemInFolder(p);return true;},
-        // Terminal helpers: text-only clipboard and http(s) links.
-        clipboardRead:async()=>clipboard.readText().slice(0,1024*1024),
+        // Terminal helpers: the clipboard and http(s) links. rich: what a terminal paste types (desktop/clipboard.cjs), the
+        // text, the paths of files copied in Finder / Explorer, or a copied image saved as a PNG in Opaya's data folder.
+        clipboardRead:async x=>x.rich?require('./clipboard.cjs').read(clipboard,app.getPath('userData')):clipboard.readText().slice(0,1024*1024),
         clipboardWrite:async x=>{if(typeof x.text!=='string'||x.text.length>4*1024*1024)throw new Error('Clipboard text is too large.');clipboard.writeText(x.text);return true;},
         openLink:async x=>{let u;try{u=new URL(String(x.url||''));}catch{throw new Error('Invalid link.');}if(!['http:','https:'].includes(u.protocol))throw new Error('Only web links open from the terminal.');await shell.openExternal(u.toString());return true;},
         windowControl:async x=>{
