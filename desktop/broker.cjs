@@ -329,7 +329,7 @@ class Broker{
     const target=direction==='up'?index-1:index+1;if(target<0||target>=this.data.agents.length)return false;
     const [agent]=this.data.agents.splice(index,1);this.data.agents.splice(target,0,agent);await this.persist();return true;
   }
-  async connect(id){
+  async connect(id,{quiet=false}={}){
     const a=this.agent(id),r=this.runtimeFor(id);
     if(r.status==='connected')return;
     if(this.connecting.has(id))return this.connecting.get(id);
@@ -343,9 +343,9 @@ class Broker{
         const info=await adapter.connect();
         if(r.generation!==generation){adapter.close();return;}
         Object.assign(r,info,{status:'connected'});
-        const closed=error=>{if(r.adapter!==adapter||r.generation!==generation)return;r.status='error';r.error=safeError(error,token);this.changed();};
+        const closed=error=>{if(r.adapter!==adapter||r.generation!==generation)return;r.status='error';r.error=safeError(error,token);this.changed();try{this.onConnectionLost?.(a,r.error);}catch{}};
         adapter.rpc?.on('closed',closed);adapter.tunnel?.on('closed',closed);
-      }catch(error){adapter?.close();if(r.generation===generation){r.adapter=null;r.status='error';r.error=safeError(error,token);}try{this.onConnectError?.(a,safeError(error,token));}catch{}throw new Error(safeError(error,token));}
+      }catch(error){adapter?.close();if(r.generation===generation){r.adapter=null;r.status='error';r.error=safeError(error,token);}if(!quiet)try{this.onConnectError?.(a,safeError(error,token));}catch{}throw new Error(safeError(error,token));}
       finally{this.changed();}
     })();
     this.connecting.set(id,job);try{return await job;}finally{this.connecting.delete(id);}
@@ -378,14 +378,20 @@ class Broker{
     const a=this.agent(id);if(this.turns.has(id))throw new Error('Stop this agent\'s current turn first.');
     if(!['status','restart'].includes(operation))throw new Error('Unsupported gateway operation.');
     if(operation==='restart'&&!await this.approve(a,'Restart this gateway?',`Restart only ${a.name} on ${a.transport==='ssh'?this.host(a.hostId).name:'this computer'}. Its gateway connections will briefly disconnect.`))throw new Error('Gateway restart cancelled.');
-    const wasConnected=this.runtimeFor(id).status==='connected';
+    return this.gatewayRun(id,operation);
+  }
+  // A gateway command the caller already approved (or Opaya runs as an automatic fix). After a start, or a restart
+  // of a connected agent, it reconnects; connection errors while the gateway comes up are not reported as new problems.
+  async gatewayRun(id,operation){
+    const a=this.agent(id),wasConnected=this.runtimeFor(id).status==='connected';
     if(operation==='restart')this.disconnect(id);
     const output=await gatewayOperation(a,a.transport==='ssh'?this.host(a.hostId):null,operation);
-    if(operation==='restart'&&wasConnected){
-      let error;for(let attempt=0;attempt<8;attempt++){try{await this.connect(id);error=null;break;}catch(e){error=e;await new Promise(r=>setTimeout(r,1500));}}
-      if(error)throw new Error('Restart command finished, but reconnect failed: '+safeError(error));
+    if(operation==='restart'&&wasConnected||operation==='start'){
+      let error;for(let attempt=0;attempt<8;attempt++){try{await this.connect(id,{quiet:true});error=null;break;}catch(e){error=e;await new Promise(r=>setTimeout(r,1500));}}
+      if(error&&operation==='restart')throw new Error('Restart command finished, but reconnect failed: '+safeError(error));
+      if(error)return {output:safeError(output||'Command completed.'),operation,connected:false,error:safeError(error)};
     }
-    return {output:safeError(output||'Command completed.'),operation};
+    return {output:safeError(output||'Command completed.'),operation,connected:this.runtimeFor(id).status==='connected'};
   }
   async send({agentId,conversationId,text}){
     this.agent(agentId);text=schema.prompt(text);
@@ -435,6 +441,8 @@ class Broker{
         if(result?.externalSessionId)c.externalSessionId=result.externalSessionId;
       }).catch(error=>{assistant.status=abort.signal.aborted?'cancelled':'error';assistant.error=abort.signal.aborted?(turn.reason||'Stopped. The answer so far is kept and the agent stays connected.'):safeError(error,token);}).finally(async()=>{
         clearTimeout(timeout);clearTimeout(emitTimer);clearInterval(checkpoint);refused();
+        // A failed turn, or one the agent stopped answering, is reported (the user's own Stop is not).
+        if(assistant.status==='error'||assistant.status==='cancelled'&&turn.reason)try{this.onTurnError?.(this.agent(agentId),assistant.error,c.id);}catch{}
         try{await this.store.writeTranscript(c.id,messages);await this.store.write(this.data);}catch{assistant.error='Could not save the final transcript to disk. Export it before closing.';}
         if(this.turns.get(agentId)===turn)this.turns.delete(agentId);
         finishDone();this.changed();

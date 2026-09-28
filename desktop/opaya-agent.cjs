@@ -116,9 +116,24 @@ const TOOLS=[
   fn('install_skill','Install a Hermes skill with `hermes skills install` in a visible terminal. The user approves it first. Use hub ids such as official/security/1password or skills-sh/owner/repo/skill, or an https link to a SKILL.md.',{agent_id:{type:'string'},skill:{type:'string'}},['agent_id','skill']),
   fn('list_projects','Read-only: saved projects (a folder on this computer or a machine, and the agents that work in it). Use project_info with the folder for git state. The user runs git actions from the Projects panel.'),
   fn('list_mcp_servers','Read-only: MCP servers saved in Opaya and which agents use them. Values of environment variables and headers are never shown. The user adds or edits servers in Settings > MCP servers.'),
+  fn('agent_gateway','Status, start or restart of the gateway (API server) of a Hermes or OpenClaw agent. When such an agent does not connect because its gateway is not running or not answering: status first, then start (not running) or restart (running but stuck). Opaya reconnects the agent afterwards. Start and restart ask the user first.',{agent_id:{type:'string'},action:{type:'string',enum:['status','start','restart']}},['agent_id','action']),
   fn('read_notes','Read your notes file in your home folder.'),
   fn('write_notes','Replace your notes file in your home folder (max 20000 characters). Use it to remember setup decisions.',{content:{type:'string'}},['content'])
 ];
+// Threads: the main chat stays a conversation (its tools only read); work that changes something runs in a thread the
+// user watches beside the chat, with a checklist of steps. Several threads can work at once.
+const THREAD_LIMIT=3,THREAD_KEEP=100;
+const READ_ONLY=new Set(['get_workspace','list_frameworks','discover_agents','read_terminal','read_app_logs','agent_diagnostics','list_directory','read_file','project_info','list_skills','list_projects','list_mcp_servers','read_notes']);
+const START_THREAD=fn('start_thread','Start a thread for work that needs actions: installing, updating, connecting, repairing or removing agents, running checks, changing connections, machines or SSH keys, installing skills. The thread works on its own with all your tools while the user watches it beside this chat. Give a short title (3 to 6 words), the complete task with every detail from the chat (names, machines, versions, errors) and your planned steps. Then answer the user in one short sentence.',{title:{type:'string'},task:{type:'string'},steps:{type:'array',items:{type:'string'}}},['title','task']);
+const SET_STEPS=fn('set_steps','Show this thread\'s plan as a checklist the user watches. Call it first with every step (the first one active, the rest pending), then again whenever a step starts, finishes or fails. Short steps, in the user\'s language.',{steps:{type:'array',items:{type:'object',properties:{text:{type:'string'},state:{type:'string',enum:['pending','active','done','failed']}},required:['text','state'],additionalProperties:false}}},['steps']);
+const CHAT_TOOLS=[...TOOLS.filter(t=>READ_ONLY.has(t.function.name)),START_THREAD];
+const THREAD_TOOLS=[...TOOLS,SET_STEPS];
+const toolsFor=kind=>kind==='chat'?CHAT_TOOLS:THREAD_TOOLS;
+const QUIET=new Set(['set_steps','start_thread']); // not shown as activity
+const now=()=>new Date().toISOString();
+const firstLine=text=>String(text||'').replace(/[#*_`>|]/g,'').split('\n').map(x=>x.trim()).find(Boolean)?.slice(0,160)||'';
+// The recent part of a history that starts with a user message, as model messages.
+function recent(history,n){let r=history.filter(m=>!m.summary).slice(-n);const start=r.findIndex(m=>m.role==='user');r=start<0?[]:r.slice(start);return r.map(({role,content,tool_calls,tool_call_id})=>({role,content:content??'',...(tool_calls?{tool_calls}:{}),...(tool_call_id?{tool_call_id}:{})}));}
 // Chat models that can use tools first; embeddings, audio, image and moderation models last.
 const rankModels=list=>[...list].sort((a,b)=>score(b)-score(a));
 function score(id){const s=String(id).toLowerCase();if(/embed|whisper|tts|audio|realtime|transcri|image|dall-e|moderation|search|babbage|davinci|guard|rerank|vision-preview/.test(s))return -10;return (/gpt-5|gpt-4\.1|claude|gemini-2|deepseek-(chat|v)|qwen3|llama-3\.3|kimi|grok|mistral-(large|medium)/.test(s)?5:0)+(/mini|flash|small|lite|nano|8b|haiku/.test(s)?1:0);}
@@ -127,7 +142,8 @@ const stripAnsi=text=>String(text||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\
 class OpayaAgent{
   constructor({root,vault,broker,terminals,approve,emit,runInTerminal,builtinInstall=null,platform=process.platform,fetchImpl=globalThis.fetch,spawnAgent=launch,trusted=()=>false}){
     Object.assign(this,{builtinInstall,home:path.join(root,'opaya-agent'),root,vault,broker,terminals,approve,emit,runInTerminal,platform,fetch:fetchImpl,spawnAgent,trusted});this.ownTerminals=new Set();
-    this.config={preset:'',baseUrl:'',model:''};this.messages=[];this.busy=false;this.status='';this.error='';this.controller=null;this.liveReply=null;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;this.claudeSessionId='';this.claudeChild=null;this.claudeActive=null;this.toolBridge=null;
+    this.config={preset:'',baseUrl:'',model:''};this.messages=[];this.threads=[];this.runs=new Map();this.chat=null;this.busy=false;this.status='';this.error='';this.liveReply=null;
+    this.codexRpc=null;this.codexThreadId='';this.codexTurns=new Map();this.claudeSessionId='';this.toolBridge=null;this.writes=Promise.resolve();
   }
   async init(){
     await fs.mkdir(this.home,{recursive:true,mode:0o700});
@@ -142,6 +158,13 @@ class OpayaAgent{
       await atomicJson(path.join(this.home,'sessions',`${id}.json`),Array.isArray(history)?history.slice(-200):[]);await this.saveIndex();
     }
     const messages=await readJson(path.join(this.home,'sessions',`${this.sessionId}.json`),[]);this.messages=Array.isArray(messages)?messages.slice(-200):[];
+    // A thread that was working when Opaya closed is marked, never silently retried.
+    const threads=await readJson(path.join(this.home,'threads.json'),[]);
+    this.threads=(Array.isArray(threads)?threads:[]).filter(t=>t&&typeof t.id==='string').slice(-THREAD_KEEP).map(t=>({...t,inbox:[],waiting:'',...(['working','queued'].includes(t.status)?{status:'stopped',error:'Opaya was closed while this thread was working. Write in the thread to continue.'}:{})}));
+  }
+  saveThreads(){
+    const copy=structuredClone(this.threads.slice(-THREAD_KEEP).map(({inbox,runId,hold,...t})=>t));
+    this.writes=this.writes.catch(()=>{}).then(()=>atomicJson(path.join(this.home,'threads.json'),copy));return this.writes.catch(()=>{});
   }
   saveIndex(){return atomicJson(path.join(this.home,'sessions.json'),{current:this.sessionId,sessions:this.sessions});}
   async newSession(){
@@ -157,6 +180,8 @@ class OpayaAgent{
   }
   async deleteSession(id){
     if(this.busy)throw new Error('Stop the current answer first.');if(!this.sessions.some(x=>x.id===id))throw new Error('Chat not found.');
+    if(this.threads.some(t=>t.sessionId===id&&(t.runId||t.status==='queued')))throw new Error('Stop the threads of this chat first.');
+    this.threads=this.threads.filter(t=>t.sessionId!==id);await this.saveThreads();
     this.sessions=this.sessions.filter(x=>x.id!==id);await fs.rm(path.join(this.home,'sessions',`${id}.json`),{force:true});
     if(!this.sessions.length)this.sessions.push({id:randomUUID(),title:'New chat',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
     if(id===this.sessionId){this.sessionId=this.sessions.at(-1).id;const m=await readJson(path.join(this.home,'sessions',`${this.sessionId}.json`),[]);this.messages=Array.isArray(m)?m:[];this.codexThreadId='';}
@@ -165,8 +190,16 @@ class OpayaAgent{
   cli(preset=this.config.preset){return preset==='codex'||preset==='claude';}
   configured(){return this.cli()||!!(this.config.baseUrl&&this.config.model);}
   describe(){
-    const shown=this.messages.filter(m=>m.role==='user'||m.summary).slice(-80).map(({id,role,content,activity,createdAt,error})=>({id,role,content:content||'',activity:activity||[],createdAt,error}));
-    return {configured:this.configured(),config:this.config,hasKey:!this.cli()&&this.vault.has(KEY),presets:PRESETS,busy:this.busy,status:this.status,error:this.error,messages:shown,live:this.liveReply?{...this.liveReply}:null,home:this.home,sessionId:this.sessionId,sessions:(this.sessions||[]).slice().reverse().map(({id,title,updatedAt})=>({id,title,updatedAt}))};
+    const shown=this.messages.filter(m=>m.role==='user'||m.summary).slice(-80).map(({id,role,content,activity,createdAt,error,threadId,level,title})=>({id,role,content:content||'',activity:activity||[],createdAt,error,threadId,level,title}));
+    return {configured:this.configured(),config:this.config,hasKey:!this.cli()&&this.vault.has(KEY),presets:PRESETS,busy:this.busy,status:this.status,error:this.error,messages:shown,live:this.liveReply?{...this.liveReply}:null,
+      threads:this.threads.slice(-30).map(t=>this.threadView(t)),working:this.threads.filter(t=>t.runId).length,
+      home:this.home,sessionId:this.sessionId,sessions:(this.sessions||[]).slice().reverse().map(({id,title,updatedAt})=>({id,title,updatedAt}))};
+  }
+  threadView(t){
+    const run=t.runId?this.runs.get(t.runId):null,active=t.steps.find(x=>x.state==='active');
+    return {id:t.id,sessionId:t.sessionId,title:t.title,origin:t.origin,status:t.status,waiting:t.waiting||'',error:t.error||'',summary:t.runId&&active?active.text:t.summary||'',agentId:t.agentId||'',
+      createdAt:t.createdAt,startedAt:t.startedAt,turnStartedAt:t.turnStartedAt,finishedAt:t.finishedAt,steps:t.steps,messages:t.messages.slice(-40),activity:t.activity.slice(-60),
+      live:run?{content:run.reply.content,status:run.status}:null};
   }
   async saveConfig({preset='custom',baseUrl,model,apiKey,remember=true}){
     if(!Object.hasOwn(PRESETS,preset))throw new Error('Unknown model provider.');
@@ -174,8 +207,10 @@ class OpayaAgent{
     const config={preset,baseUrl:codex?'':schema.endpoint(baseUrl||PRESETS[preset].baseUrl),model:schema.text(model,'model',256).trim()};
     if(!codex&&!config.model)throw new Error('Choose a model from the provider list.');
     if(!codex&&apiKey!==undefined&&apiKey!=='')await this.vault.set(KEY,schema.text(apiKey,'API key',16000).trim(),Boolean(remember));
-    if(this.config.preset!==config.preset||this.config.model!==config.model||this.config.baseUrl!==config.baseUrl){await this.closeCodex();this.claudeSessionId='';}
-    this.config=config;await atomicJson(path.join(this.home,'config.json'),config);this.error='';this.emit();return this.describe();
+    if(this.config.preset!==config.preset||this.config.model!==config.model||this.config.baseUrl!==config.baseUrl){await this.closeCodex();this.claudeSessionId='';for(const t of this.threads)t.claudeSessionId='';}
+    this.config=config;await atomicJson(path.join(this.home,'config.json'),config);this.error='';this.emit();
+    if(this.configured())try{this.onConfigured?.();}catch{}
+    return this.describe();
   }
   async forgetKey(){await this.vault.set(KEY,'',true);this.emit();return true;}
   headers(candidateKey,preset=this.config.preset){const key=candidateKey||(this.vault.has(KEY)?this.vault.get(KEY):'');return {'Content-Type':'application/json',...(key?{Authorization:`Bearer ${key}`}:{}),...(key&&preset==='anthropic'?{'x-api-key':key,'anthropic-version':'2023-06-01'}:{}),'X-Title':'Opaya'};}
@@ -206,18 +241,31 @@ class OpayaAgent{
     return {ok:true,models,message:models.length?`Connected. ${models.length} models available.`:'Connected.'};
   }
   async clear(){if(this.busy)throw new Error('Stop the current answer first.');this.messages=[];this.error='';this.codexThreadId='';this.claudeSessionId='';await this.persist();this.emit();return true;}
-  stop(){
-    this.controller?.abort();if(this.claudeChild){terminate(this.claudeChild);this.claudeActive?.reject(new Error('Stopped.'));}const active=this.codexActive,rpc=this.codexRpc;
-    if(active){this.codexRpc=null;this.codexThreadId='';this.codexActive=null;if(rpc&&!rpc.closed)rpc.close();active.reject(new Error('Stopped.'));}
-    return true;
+  // Stop cancels the main chat's answer; threads keep working (each has its own Stop).
+  stop(){if(this.chat)this.abort(this.chat);return true;}
+  abort(run){
+    run.controller.abort();
+    if(run.claude){terminate(run.claude.child);run.claude.reject(new Error('Stopped.'));}
+    const turn=[...this.codexTurns.values()].find(x=>x.run===run);
+    if(turn){if(turn.turnId&&this.codexRpc&&!this.codexRpc.closed)this.codexRpc.request('turn/interrupt',{threadId:turn.threadId,turnId:turn.turnId},10000).catch(()=>{});turn.reject(new Error('Stopped.'));}
   }
   async persist(){
     const s=this.sessions?.find(x=>x.id===this.sessionId);
     if(s){const first=this.messages.find(m=>m.role==='user');if(first&&s.title==='New chat')s.title=String(first.content).slice(0,60).replace(/\s+/g,' ');if(this.messages.length)s.updatedAt=new Date().toISOString();}
     await atomicJson(path.join(this.home,'sessions',`${this.sessionId}.json`),this.messages.slice(-200));await this.saveIndex();
   }
-  system(){
-    const s=this.broker.snapshot();
+  system(run={kind:'chat'}){
+    const s=this.broker.snapshot(),t=run.thread,mine=this.threads.filter(x=>x.sessionId===this.sessionId).slice(-12);
+    const where=run.kind==='chat'?[
+      'This is the main chat with the user. Keep it a conversation: answer questions directly (your tools here only read), and never paste tool output, commands or logs into it.',
+      'For anything that needs actions (installing, updating, connecting, repairing or removing agents, running checks, changing connections, machines or SSH keys, installing skills), call start_thread with a short title, the complete task (every detail the user gave) and your planned steps. The work runs in a thread the user watches beside the chat; several threads can run at once. After start_thread, reply with one short sentence.',
+      mine.length?`Threads in this chat (newest last):\n${mine.map(x=>`- ${x.title} [${x.status}]${x.summary?`: ${x.summary}`:''}${x.error?` (error: ${x.error.slice(0,200)})`:''}`).join('\n')}\nWhen the user asks about one, answer from this list; they can open it to follow it or add to it.`:''
+    ]:[
+      `You are working in a thread on one task: "${t.title}". The user watches this thread beside the main chat and may add messages to it: follow them.`,
+      t.origin==='auto'?'Opaya started this thread by itself because something went wrong. Find the cause and fix it without waiting for the user. Only a password, a sign-in or an API key needs them: then say exactly what to do and where.':'',
+      'First call set_steps with your plan (3 to 7 short steps), then call it again whenever a step starts, finishes or fails, so the checklist stays true.',
+      'When you are done, answer with a short summary: what you did, the result, and only what the user must do themselves. No raw logs or command output.'
+    ];
     return [
       'You are the Opaya Agent, the built-in assistant of the Opaya desktop app ("One place. All your agents.").',
       'Opaya connects Hermes, Claude Code, Codex, OpenClaw and other agents on this computer and on SSH machines, keeps their chats and terminals, and lets the user switch between them.',
@@ -227,60 +275,149 @@ class OpayaAgent{
       'Projects: list_projects shows saved project folders and their agents; chats started from a project open the agent in that folder. Git and GitHub CLI actions are in the Projects panel (right-click a project). '+
       'Skills: list_skills shows what an agent has; users run one with /name in its chat. Install Hermes skills with install_skill. MCP servers are added by the user in Settings > MCP servers (list_mcp_servers shows them); Opaya passes them to Hermes over ACP and to Claude Code. ',
       'When an agent hangs or does not answer, call agent_diagnostics first and explain what it shows: a pending approval, a tool that is still running, stderr errors or Hermes log errors. A Hermes log full of repeated "slack_bolt ... Session is closed" tracebacks is a known Hermes gateway bug in its Slack reconnect (NousResearch/hermes-agent#83662); it only affects the gateway and Slack, and restarting the Hermes gateway clears it. For agents that fail: read the connection and error, run diagnostics, check that the endpoint/port or executable exists, reconnect, and only then propose an edited connection. Do not remove connections unless asked.',
-      INSTALL_PROCEDURE,
+      'When a Hermes or OpenClaw agent does not connect because its gateway is not running or not answering, use agent_gateway: status, then start or restart.',
+      ...where,
+      run.kind==='chat'?'':INSTALL_PROCEDURE,
       'To understand a project or config, use list_directory, read_file and project_info (read-only).',
       APP_GUIDE,
       `Platform: ${this.platform}. Saved agents: ${s.agents.length}. Saved machines: ${s.hosts.length}. Your home folder: ${this.home}.`,
       'Answer in the language the user writes in. Be concise.'
-    ].join('\n');
+    ].filter(Boolean).join('\n');
   }
   // Starts a request and returns at once; progress and the answer arrive through state updates.
   begin(text){if(this.busy)throw new Error('The Opaya Agent is already working.');if(!this.configured())throw new Error('Connect the Opaya Agent to a model first.');schema.prompt(text);this.send(text).catch(()=>{});return true;}
+  // A run is one answer of the model, in the main chat or in a thread, with its own Stop, live reply and status.
+  newRun(kind,thread=null){const run={id:randomUUID(),kind,thread,controller:new AbortController(),reply:{id:randomUUID(),role:'assistant',content:'',activity:[],createdAt:now()},status:'Thinking...',cards:[]};this.runs.set(run.id,run);return run;}
+  note(run,text){
+    if(!run){this.status=text;this.emit();return;}
+    const line=String(text).replace(/\.\.\.$/,'');run.status=text;if(run.reply.activity.at(-1)!==line)run.reply.activity.push(line);
+    if(run.kind==='chat')this.status=text;
+    else{const a=run.thread.activity;a.push({at:Date.now(),text:line.slice(0,300)});if(a.length>200)a.splice(0,a.length-200);run.thread.updatedAt=now();}
+    this.emit();
+  }
   async send(text){
     if(this.busy)throw new Error('The Opaya Agent is already working.');
     if(!this.configured())throw new Error('Connect the Opaya Agent to a model first.');
     text=schema.prompt(text);
-    this.messages.push({id:randomUUID(),role:'user',content:text,createdAt:new Date().toISOString()});
-    const reply={id:randomUUID(),role:'assistant',content:'',activity:[],createdAt:new Date().toISOString()};this.current=reply;
-    this.busy=true;this.error='';this.status='Thinking...';this.controller=new AbortController();this.liveReply=reply;this.emit();
-    let recent=this.messages.filter(m=>!m.summary).slice(-40);const start=recent.findIndex(m=>m.role==='user');recent=start<0?[]:recent.slice(start);
-    const context=recent.map(({role,content,tool_calls,tool_call_id})=>({role,content:content??'',...(tool_calls?{tool_calls}:{}),...(tool_call_id?{tool_call_id}:{})}));
-    const conversation=[{role:'system',content:this.system()},...context];
+    this.messages.push({id:randomUUID(),role:'user',content:text,createdAt:now()});
+    const run=this.newRun('chat');this.chat=run;
+    this.busy=true;this.error='';this.status='Thinking...';this.liveReply=run.reply;this.emit();
     try{
-      if(this.config.preset==='codex')await this.runCodex(text,reply);
-      else if(this.config.preset==='claude')await this.runClaude(text,reply);
-      else for(let step=0;step<MAX_STEPS;step++){
-        const message=await this.complete(conversation);
-        const calls=message.tool_calls||[];
-        conversation.push({role:'assistant',content:message.content||'',...(calls.length?{tool_calls:calls}:{})});
-        this.messages.push({role:'assistant',content:message.content||'',internal:true,...(calls.length?{tool_calls:calls}:{})});
-        if(message.content)reply.content=message.content;
-        if(!calls.length)break;
-        for(const call of calls.slice(0,8)){
-          const name=call.function?.name||'';let args={};try{args=JSON.parse(call.function?.arguments||'{}');}catch{}
-          this.status=`Using ${name.replace(/_/g,' ')}...`;reply.activity.push(this.status.replace('...',''));this.emit();
-          let result;try{result=await this.tool(name,args);}catch(error){result={error:String(error.message||error).slice(0,1000)};}
-          const content=JSON.stringify(result).slice(0,24000);
-          conversation.push({role:'tool',tool_call_id:call.id,content});this.messages.push({role:'tool',tool_call_id:call.id,content,internal:true});
-        }
-        if(step===MAX_STEPS-1)reply.content=(reply.content?reply.content+'\n\n':'')+'I stopped after the maximum number of steps. Ask me to continue if needed.';
-      }
-    }catch(error){reply.error=this.controller.signal.aborted?'Stopped.':String(error.message||error).slice(0,600);this.error=reply.error;}
+      if(this.config.preset==='codex')await this.runCodex(run,text);
+      else if(this.config.preset==='claude')await this.runClaude(run,text);
+      else await this.loop(run,[{role:'system',content:this.system(run)},...recent(this.messages,40)],this.messages);
+    }catch(error){run.reply.error=run.controller.signal.aborted?'Stopped.':String(error.message||error).slice(0,600);this.error=run.reply.error;}
     finally{
-      // Internal tool turns stay in history for context; the chat shows one reply per request.
-      this.messages.push({...reply,summary:true});
+      // Internal tool turns stay in history for context; the chat shows one reply per request, then its new threads.
+      this.messages.push({...run.reply,summary:true},...run.cards);
       // Save before reporting idle, so nothing still writes to the home folder once a request is finished.
-      await this.persist().catch(()=>{});this.busy=false;this.status='';this.controller=null;this.liveReply=null;this.emit();
+      await this.persist().catch(()=>{});
+      this.runs.delete(run.id);this.chat=null;this.busy=false;this.status='';this.liveReply=null;
+      for(const t of this.threads)if(t.hold===run.id)delete t.hold;
+      this.emit();this.pump();
     }
-    return {ok:!reply.error};
+    return {ok:!run.reply.error};
   }
-  async complete(messages){
-    const signal=AbortSignal.any([this.controller.signal,AbortSignal.timeout(TIMEOUT)]);
-    const response=await this.fetch(`${this.config.baseUrl}/chat/completions`,{method:'POST',headers:this.headers(),signal,body:JSON.stringify({model:this.config.model,messages,tools:TOOLS,tool_choice:'auto'})});
+  // The tool loop for OpenAI-compatible model APIs. `history` keeps the internal turns (tool calls and results) for the
+  // next request; in a thread, messages the user adds while it works are taken in before each step.
+  async loop(run,conversation,history){
+    const tools=toolsFor(run.kind);
+    for(let step=0;step<MAX_STEPS;step++){
+      for(const text of run.thread?.inbox.splice(0)||[]){const m={role:'user',content:text};conversation.push(m);history.push(m);}
+      const message=await this.complete(conversation,tools,run.controller.signal);
+      const calls=message.tool_calls||[],turn={role:'assistant',content:message.content||'',...(calls.length?{tool_calls:calls}:{})};
+      conversation.push(turn);history.push({...turn,internal:true});
+      if(message.content)run.reply.content=message.content;
+      if(!calls.length){if(run.thread?.inbox.length)continue;break;}
+      for(const call of calls.slice(0,8)){
+        const name=call.function?.name||'';let args={};try{args=JSON.parse(call.function?.arguments||'{}');}catch{}
+        if(!QUIET.has(name))this.note(run,`Using ${name.replace(/_/g,' ')}...`);
+        let result;try{result=await this.tool(name,args,run);}catch(error){result={error:String(error.message||error).slice(0,1000)};}
+        const content=JSON.stringify(result).slice(0,24000);
+        conversation.push({role:'tool',tool_call_id:call.id,content});history.push({role:'tool',tool_call_id:call.id,content,internal:true});
+      }
+      if(step===MAX_STEPS-1)run.reply.content=(run.reply.content?run.reply.content+'\n\n':'')+'I stopped after the maximum number of steps. Ask me to continue if needed.';
+    }
+  }
+  async complete(messages,tools=THREAD_TOOLS,signal){
+    const s=AbortSignal.any([signal||new AbortController().signal,AbortSignal.timeout(TIMEOUT)]);
+    const response=await this.fetch(`${this.config.baseUrl}/chat/completions`,{method:'POST',headers:this.headers(),signal:s,body:JSON.stringify({model:this.config.model,messages,tools,tool_choice:'auto'})});
     const data=await response.json().catch(()=>({}));
     if(!response.ok)throw new Error(data?.error?.message?`Model API: ${String(data.error.message).slice(0,300)}`:`The model API answered ${response.status}.`);
     const message=data.choices?.[0]?.message;if(!message)throw new Error('The model API returned no answer.');
     return message;
+  }
+  // ---- Threads ------------------------------------------------------------------------------------------------------
+  thread(id){const t=this.threads.find(x=>x.id===id);if(!t)throw new Error('Thread not found.');return t;}
+  // `hold`: a thread started from a chat answer begins when that answer is finished, so the chat reply comes first.
+  startThread({title,task,steps=[],origin='chat',key='',agentId='',trust=false,hold='',notice=null}){
+    if(!this.configured())throw new Error('Connect the Opaya Agent to a model first.');
+    task=schema.prompt(String(task||title||'').trim()||'Help me.');title=String(title||'').replace(/\s+/g,' ').trim().slice(0,100)||firstLine(task).slice(0,60);
+    const t={id:randomUUID(),sessionId:this.sessionId,title,task,origin,key:String(key).slice(0,200),agentId:String(agentId),trust:!!trust,status:'queued',waiting:'',error:'',summary:'',
+      createdAt:now(),updatedAt:now(),startedAt:'',turnStartedAt:'',finishedAt:'',
+      steps:(Array.isArray(steps)?steps:[]).slice(0,12).map((x,i)=>({text:String(x?.text??x).replace(/\s+/g,' ').trim().slice(0,160),state:i?'pending':'active'})).filter(x=>x.text),
+      messages:[{id:randomUUID(),role:'task',content:task,createdAt:now()}],history:[],activity:[],inbox:[task],codexThreadId:'',claudeSessionId:''};
+    if(hold)t.hold=hold;
+    this.threads.push(t);
+    // Old finished threads go first; working ones are always kept.
+    while(this.threads.length>THREAD_KEEP){const i=this.threads.findIndex(x=>!x.runId&&x.status!=='queued');if(i<0)break;this.threads.splice(i,1);}
+    const card={id:randomUUID(),role:'thread',threadId:t.id,summary:true,createdAt:now()},held=hold&&this.runs.get(hold);
+    if(notice)this.messages.push({id:randomUUID(),role:'notice',level:notice.level||'error',title:String(notice.title||'').slice(0,200),content:String(notice.text||'').slice(0,1200),threadId:t.id,summary:true,createdAt:now()});
+    if(held)held.cards.push(card);else{this.messages.push(card);this.persist().catch(()=>{});}
+    this.saveThreads();this.emit();this.pump();return t;
+  }
+  // Opaya starts a thread by itself when something breaks. One thread per problem (`key`): while one works or waits
+  // its turn, the same problem is not started again, and a problem handled in the last ten minutes is left alone, so a
+  // fix that fails never loops.
+  autoThread({key,title,task,agentId='',notice=null}){
+    if(!this.configured())return null;
+    const same=this.threads.filter(t=>t.key===key),open=same.find(t=>t.runId||t.status==='queued');if(open)return open;
+    const last=same.at(-1);if(last&&Date.now()-Date.parse(last.createdAt)<10*60*1000)return null;
+    if(this.threads.filter(t=>t.origin==='auto'&&Date.now()-Date.parse(t.createdAt)<60*60*1000).length>=12)return null;
+    return this.startThread({title,task,origin:'auto',key,agentId,notice});
+  }
+  pump(){
+    let working=this.threads.filter(t=>t.runId).length;
+    for(const t of this.threads){if(working>=THREAD_LIMIT)break;if(t.status==='queued'&&!t.hold&&!t.runId&&t.inbox.length){working++;this.runThread(t).catch(()=>{});}}
+  }
+  async runThread(t){
+    const run=this.newRun('thread',t);
+    Object.assign(t,{runId:run.id,status:'working',error:'',waiting:'',startedAt:t.startedAt||now(),turnStartedAt:now(),finishedAt:'',updatedAt:now()});this.emit();
+    try{
+      while(t.inbox.length&&!run.controller.signal.aborted){
+        run.reply={id:randomUUID(),role:'assistant',content:'',activity:[],createdAt:now()};run.status='Thinking...';
+        if(this.cli()){const text=t.inbox.splice(0).join('\n\n');await (this.config.preset==='codex'?this.runCodex(run,text):this.runClaude(run,text));}
+        else await this.loop(run,[{role:'system',content:this.system(run)},...recent(t.history,60)],t.history);
+        if(t.history.length>400)t.history.splice(0,t.history.length-400);
+        if(run.reply.content)t.messages.push({id:run.reply.id,role:'assistant',content:run.reply.content,createdAt:now()});
+      }
+      t.status=run.controller.signal.aborted?'stopped':'done';t.summary=firstLine(t.messages.filter(m=>m.role==='assistant').at(-1)?.content)||t.summary;
+    }catch(error){
+      const stopped=run.controller.signal.aborted;t.status=stopped?'stopped':'failed';t.error=stopped?'Stopped.':String(error.message||error).slice(0,600);
+      if(run.reply.content)t.messages.push({id:run.reply.id,role:'assistant',content:run.reply.content,createdAt:now()});
+      t.summary=stopped?'Stopped.':firstLine(t.error);
+    }finally{
+      Object.assign(t,{finishedAt:now(),updatedAt:now(),waiting:'',inbox:[]});delete t.runId;
+      await this.saveThreads();this.runs.delete(run.id);this.emit();this.pump();
+    }
+  }
+  // A message the user writes in a thread: taken in at the next step while it works, or it starts a new turn.
+  threadSend(id,text){
+    const t=this.thread(schema.id(id));if(!this.configured())throw new Error('Connect the Opaya Agent to a model first.');text=schema.prompt(text);
+    t.messages.push({id:randomUUID(),role:'user',content:text,createdAt:now()});t.inbox.push(text);t.updatedAt=now();
+    if(!t.runId){t.status='queued';t.error='';}
+    this.saveThreads();this.emit();this.pump();return true;
+  }
+  stopThread(id){
+    const t=this.thread(schema.id(id));t.inbox=[];
+    if(t.runId){const run=this.runs.get(t.runId);if(run)this.abort(run);}
+    else if(t.status==='queued'){Object.assign(t,{status:'stopped',finishedAt:now(),summary:'Stopped.'});delete t.hold;this.saveThreads();this.emit();}
+    return true;
+  }
+  async removeThread(id){
+    const t=this.thread(schema.id(id));if(t.runId||t.status==='queued')throw new Error('Stop the thread first.');
+    this.threads=this.threads.filter(x=>x!==t);this.messages=this.messages.filter(m=>m.threadId!==t.id);
+    await this.saveThreads();await this.persist();this.emit();return true;
   }
   // A plain, tool-free completion with the Opaya Agent's own model API, for condensing chats. Needs an API key
   // (or a local model server); the Codex CLI preset is not used for this.
@@ -293,7 +430,7 @@ class OpayaAgent{
     const text=data.choices?.[0]?.message?.content;if(!text)throw new Error('The model API returned no answer.');
     return {text:String(text),usage:data.usage||null};
   }
-  dynamicTools(){return TOOLS.map(t=>({type:'function',name:t.function.name,description:t.function.description,inputSchema:t.function.parameters}));}
+  dynamicTools(kind='chat'){return toolsFor(kind).map(t=>({type:'function',name:t.function.name,description:t.function.description,inputSchema:t.function.parameters}));}
   async ensureCodex(){
     if(this.codexRpc&&!this.codexRpc.closed)return this.codexRpc;
     await primeShellPath();
@@ -301,24 +438,25 @@ class OpayaAgent{
     await fs.mkdir(this.home,{recursive:true}).catch(()=>{});
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     const rpc=new Rpc(this.spawnAgent(agent,['app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
-    this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
+    this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{for(const turn of [...this.codexTurns.values()])turn.reject(error);});
     await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.18.1'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
+  // Codex runs the main chat and every thread as its own Codex thread; tool calls and events carry its id.
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
-    const active=this.codexActive;if(!active||params.threadId!==active.threadId||this.controller?.signal.aborted)throw new Error('This Opaya turn is no longer active.');
-    const name=String(params.tool||'');this.status=`Using ${name.replace(/_/g,' ')}...`;active.reply.activity.push(this.status.replace('...',''));this.emit();
-    try{const result=await this.tool(name,params.arguments&&typeof params.arguments==='object'?params.arguments:{});return {contentItems:[{type:'inputText',text:JSON.stringify(result).slice(0,24000)}],success:true};}
+    const turn=this.codexTurns.get(params.threadId);if(!turn||turn.run.controller.signal.aborted)throw new Error('This Opaya turn is no longer active.');
+    const name=String(params.tool||'');if(!QUIET.has(name))this.note(turn.run,`Using ${name.replace(/_/g,' ')}...`);
+    try{const result=await this.tool(name,params.arguments&&typeof params.arguments==='object'?params.arguments:{},turn.run);return {contentItems:[{type:'inputText',text:JSON.stringify(result).slice(0,24000)}],success:true};}
     catch(error){return {contentItems:[{type:'inputText',text:JSON.stringify({error:String(error.message||error).slice(0,1000)})}],success:false};}
   }
   codexNotification(method,p){
-    const a=this.codexActive;if(!a||p.threadId!==a.threadId)return;
+    const a=this.codexTurns.get(p.threadId);if(!a)return;const reply=a.run.reply;
     if(method==='turn/started')a.turnId=p.turn?.id;
-    if(method==='item/agentMessage/delta'){a.deltaItems.add(p.itemId||'unknown');a.reply.content+=p.delta||'';this.emit();}
-    if(method==='item/started'&&p.item?.type!=='agentMessage'){
-      const label=String(p.item?.tool||p.item?.type||'working').replace(/([a-z])([A-Z])/g,'$1 $2');this.status=`Codex: ${label}`;if(a.reply.activity.at(-1)!==this.status)a.reply.activity.push(this.status);this.emit();
+    if(method==='item/agentMessage/delta'){a.deltaItems.add(p.itemId||'unknown');reply.content+=p.delta||'';this.emit();}
+    if(method==='item/started'&&p.item?.type!=='agentMessage'&&p.item?.type!=='dynamicToolCall'){
+      const label=String(p.item?.tool||p.item?.type||'working').replace(/([a-z])([A-Z])/g,'$1 $2');this.note(a.run,`Codex: ${label}`);
     }
-    if(method==='item/completed'&&p.item?.type==='agentMessage'&&!a.deltaItems.has(p.item.id||'unknown')&&p.item.text){a.reply.content+=p.item.text;this.emit();}
+    if(method==='item/completed'&&p.item?.type==='agentMessage'&&!a.deltaItems.has(p.item.id||'unknown')&&p.item.text){reply.content+=p.item.text;this.emit();}
     if(method==='turn/completed'){
       if(p.turn?.status==='failed')a.reject(new Error(p.turn?.error?.message||'Codex turn failed.'));
       else if(p.turn?.status==='interrupted')a.reject(new Error('Stopped.'));
@@ -326,18 +464,19 @@ class OpayaAgent{
     }
     if(method==='error'&&!p.willRetry)a.reject(new Error(p.error?.message||'Codex reported an error.'));
   }
-  async runCodex(text,reply){
-    const rpc=await this.ensureCodex();
-    if(!this.codexThreadId){
-      const started=await rpc.request('thread/start',{cwd:this.home,model:this.config.model||null,sandbox:'read-only',approvalPolicy:'never',developerInstructions:this.system(),dynamicTools:this.dynamicTools(),ephemeral:false});
-      this.codexThreadId=started.thread?.id||'';if(!this.codexThreadId)throw new Error('Codex did not return a thread ID.');
+  async runCodex(run,text){
+    const rpc=await this.ensureCodex(),t=run.thread;let threadId=t?t.codexThreadId:this.codexThreadId;
+    if(!threadId){
+      const started=await rpc.request('thread/start',{cwd:this.home,model:this.config.model||null,sandbox:'read-only',approvalPolicy:'never',developerInstructions:this.system(run),dynamicTools:this.dynamicTools(run.kind),ephemeral:false});
+      threadId=started.thread?.id||'';if(!threadId)throw new Error('Codex did not return a thread ID.');
+      if(t)t.codexThreadId=threadId;else this.codexThreadId=threadId;
     }
     await new Promise((resolve,reject)=>{
-      let done=false;const finish=error=>{if(done)return;done=true;clearTimeout(timer);this.codexActive=null;error?reject(error):resolve();};
-      const timer=setTimeout(()=>{this.stop();finish(new Error('Codex turn timed out.'));},10*60*1000);timer.unref?.();
-      this.codexActive={threadId:this.codexThreadId,turnId:'',reply,deltaItems:new Set(),resolve:()=>finish(),reject:finish};
-      if(this.controller.signal.aborted){finish(new Error('Stopped.'));return;}
-      rpc.request('turn/start',{threadId:this.codexThreadId,input:[{type:'text',text}],...(this.config.model?{model:this.config.model}:{})},60000).then(result=>{if(this.codexActive)this.codexActive.turnId=result.turn?.id||this.codexActive.turnId;},finish);
+      let done=false;const finish=error=>{if(done)return;done=true;clearTimeout(timer);if(this.codexTurns.get(threadId)?.run===run)this.codexTurns.delete(threadId);error?reject(error):resolve();};
+      const timer=setTimeout(()=>{finish(new Error('Codex turn timed out.'));this.abort(run);},10*60*1000);timer.unref?.();
+      this.codexTurns.set(threadId,{run,threadId,turnId:'',deltaItems:new Set(),resolve:()=>finish(),reject:finish});
+      if(run.controller.signal.aborted){finish(new Error('Stopped.'));return;}
+      rpc.request('turn/start',{threadId,input:[{type:'text',text}],...(this.config.model?{model:this.config.model}:{})},60000).then(result=>{const a=this.codexTurns.get(threadId);if(a)a.turnId=result.turn?.id||a.turnId;},finish);
     });
   }
   // Claude Code as the Opaya Agent's model: `claude -p` in the agent's home folder, with the Opaya tools as an MCP
@@ -363,26 +502,29 @@ class OpayaAgent{
       child.stdin.on('error',()=>{});child.stdin.end(prompt);
     });
   }
-  async runClaude(text,reply){
+  // Each run (the chat or a thread) is its own `claude -p` process; its MCP config names the run, so its tool calls
+  // reach the right thread with that thread's tools.
+  async runClaude(run,text){
     await this.claudeReady();
     if(!this.toolBridge)throw new Error('The Opaya tools are not available. Restart Opaya.');
-    const config=path.join(this.home,'mcp.json');
-    await atomicJson(config,{mcpServers:{opaya:{type:'stdio',command:this.toolBridge.command,args:this.toolBridge.args,env:this.toolBridge.env}}});
+    const t=run.thread,reply=run.reply,session=t?t.claudeSessionId:this.claudeSessionId,config=path.join(this.home,'mcp',`${run.id}.json`);
+    await atomicJson(config,{mcpServers:{opaya:{type:'stdio',command:this.toolBridge.command,args:this.toolBridge.args,env:{...this.toolBridge.env,OPAYA_TOOLS_RUN:run.id}}}});
     const args=['-p','--output-format','stream-json','--verbose','--mcp-config',config,'--strict-mcp-config','--allowedTools','mcp__opaya',
-      '--disallowedTools','Bash','Edit','Write','MultiEdit','NotebookEdit','WebFetch','WebSearch','Task','--append-system-prompt',this.system(),
-      ...(this.claudeSessionId?['--resume',this.claudeSessionId]:[]),...(this.config.model?['--model',this.config.model]:[])];
-    const child=this.claudeSpawn(args);this.claudeChild=child;
-    await new Promise((resolve,reject)=>{
+      '--disallowedTools','Bash','Edit','Write','MultiEdit','NotebookEdit','WebFetch','WebSearch','Task','--append-system-prompt',this.system(run),
+      ...(session?['--resume',session]:[]),...(this.config.model?['--model',this.config.model]:[])];
+    const child=this.claudeSpawn(args);
+    try{await new Promise((resolve,reject)=>{
       let buffer='',stderr='',done=false,resultError='',seen=false;
-      const finish=error=>{if(done)return;done=true;clearTimeout(timer);this.claudeActive=null;this.claudeChild=null;error?reject(error):resolve();};
-      this.claudeActive={reply,reject:finish};
+      const finish=error=>{if(done)return;done=true;clearTimeout(timer);run.claude=null;error?reject(error):resolve();};
+      run.claude={child,reject:finish};
       const timer=setTimeout(()=>{terminate(child);finish(new Error('Claude turn timed out.'));},30*60*1000);timer.unref?.();
+      if(run.controller.signal.aborted){terminate(child);finish(new Error('Stopped.'));return;}
       const parse=line=>{
         if(!line.trim())return;let e;try{e=JSON.parse(line);}catch{return;}
-        if(e.session_id)this.claudeSessionId=e.session_id;
+        if(e.session_id){if(t)t.claudeSessionId=e.session_id;else this.claudeSessionId=e.session_id;}
         if(e.type==='assistant')for(const c of e.message?.content||[]){
           if(c.type==='text'&&c.text){reply.content=(reply.content?reply.content+'\n\n':'')+c.text;this.emit();}
-          if(c.type==='tool_use'&&!String(c.name||'').startsWith('mcp__opaya__')){const label=`Claude: ${c.name}`;if(reply.activity.at(-1)!==label){reply.activity.push(label);this.emit();}}
+          if(c.type==='tool_use'&&!String(c.name||'').startsWith('mcp__opaya__'))this.note(run,`Claude: ${c.name}`);
         }
         if(e.type==='result'){seen=true;if(e.is_error)resultError=String(e.result||'Claude could not complete this request.');else if(!reply.content&&typeof e.result==='string')reply.content=e.result;}
       };
@@ -392,20 +534,29 @@ class OpayaAgent{
       child.on('error',finish);
       child.on('close',code=>{if(buffer.trim())parse(buffer);finish(resultError?new Error(resultError):code!==0?new Error(String(stderr||`Claude Code exited (${code}).`).slice(0,600)):!seen?new Error('Claude Code stopped before it finished.'):null);});
       child.stdin.on('error',()=>{});child.stdin.end(text);
-    });
+    });}finally{fs.rm(config,{force:true}).catch(()=>{});}
   }
-  // A tool call from Claude Code, through the MCP bridge. Only during an active Opaya Agent turn.
-  async bridgeCall(name,args){
-    const active=this.claudeActive;if(!active||!this.busy)throw new Error('The Opaya Agent is not working on a request right now.');
-    if(!TOOLS.some(t=>t.function.name===name))throw new Error('Unknown tool.');
-    this.status=`Using ${name.replace(/_/g,' ')}...`;active.reply.activity.push(this.status.replace('...',''));this.emit();
-    return this.tool(name,args&&typeof args==='object'?args:{});
+  // A tool call from Claude Code, through the MCP bridge, for the run it names. Only while that run works.
+  runFor(runId){return runId?this.runs.get(String(runId)):[...this.runs.values()].filter(r=>r.claude).at(-1);}
+  bridgeTools(runId){return toolsFor(this.runFor(runId)?.kind||'chat').map(t=>t.function);}
+  async bridgeCall(name,args,runId=''){
+    const run=this.runFor(runId);if(!run?.claude)throw new Error('The Opaya Agent is not working on a request right now.');
+    if(!toolsFor(run.kind).some(t=>t.function.name===name))throw new Error('Unknown tool.');
+    if(!QUIET.has(name))this.note(run,`Using ${name.replace(/_/g,' ')}...`);
+    return this.tool(name,args&&typeof args==='object'?args:{},run);
   }
-  async closeCodex(){const rpc=this.codexRpc,active=this.codexActive;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;if(rpc&&!rpc.closed)rpc.close();active?.reject(new Error('Codex stopped.'));}
-  async close(){await this.closeCodex();if(this.claudeChild)terminate(this.claudeChild);}
+  async closeCodex(){const rpc=this.codexRpc;this.codexRpc=null;this.codexThreadId='';for(const t of this.threads)t.codexThreadId='';for(const turn of [...this.codexTurns.values()])turn.reject(new Error('Codex stopped.'));if(rpc&&!rpc.closed)rpc.close();}
+  async close(){for(const run of this.runs.values())this.abort(run);await this.closeCodex();await this.writes.catch(()=>{});}
   host(id){return id?this.broker.host(id):null;}
   // iTrust for the Opaya Agent skips the dialog, except for removals, which always ask.
-  async ask(title,detail,{always=false}={}){if(!always&&this.trusted?.()){this.status=`iTrust approved: ${title}`;this.current?.activity?.push(this.status);this.emit();return;}if(!await this.approve({name:'Opaya Agent'},title,detail))throw new Error('The user declined this action.');}
+  // A thread the setup guide handed over can carry its own trust (the person chose that in the guide).
+  async ask(title,detail,{always=false}={},run=null){
+    const t=run?.thread;
+    if(!always&&(this.trusted?.()||t?.trust)){this.note(run,`iTrust approved: ${title}`);return;}
+    if(t){t.waiting=`Waiting for your approval: ${title}`;this.emit();}
+    try{if(!await this.approve({name:t?`Opaya Agent / ${t.title}`:'Opaya Agent'},title,detail))throw new Error('The user declined this action.');}
+    finally{if(t){t.waiting='';this.emit();}}
+  }
   // Terminals the Opaya Agent started; answer_prompt works only in these. Marked commands print an end line with the
   // exit code, so wait_for_terminal knows when an install is done.
   async runOwn({label,key,host,command,marked=false}){
@@ -417,8 +568,11 @@ class OpayaAgent{
     const deadline=Date.now()+wait;
     for(;;){const view=this.terminals.attach(id);if(view.exited||Date.now()>=deadline)return stripAnsi(view.buffer).slice(-6000);await new Promise(r=>setTimeout(r,800));}
   }
-  async tool(name,args){
+  async tool(name,args,run=null){
     const b=this.broker;
+    // A run gets only its own tools: the main chat reads and starts threads, a thread does the work.
+    if(run&&!toolsFor(run.kind).some(t=>t.function.name===name))throw new Error(run.kind==='chat'&&TOOLS.some(t=>t.function.name===name)?'This changes something: start a thread for it with start_thread.':'Unknown tool.');
+    if(run?.thread&&!QUIET.has(name))run.thread.waiting='';
     switch(name){
       case 'get_workspace':{const s=b.snapshot();return {platform:this.platform,agents:s.agents.map(({id,name,displayName,provider,protocol,transport,hostId,endpoint,model,command,args,cwd,hermesHome,status,error,busy,hasToken,note,group,tags,pinned})=>({id,name,displayName,provider,protocol,transport,hostId,endpoint,model,command,args,cwd,hermesHome,status,error,busy,hasToken,note,group,tags,pinned})),machines:s.hosts,terminals:this.terminals.describe()};}
       case 'list_frameworks':return catalog.list().map(({id,kind,name,description,requires,after,local,remote,localCommand,remoteCommand})=>({id,kind,name,description,requires,after,installableHere:local,installableOnMachines:remote,localCommand,remoteCommand}));
@@ -443,27 +597,27 @@ class OpayaAgent{
         const existing=input.id?b.agent(input.id):null;
         const {token,apiKey,importToken,...clean}=input;
         const agent=schema.agent({...(existing||{}),...clean});
-        await this.ask(existing?`Update connection "${existing.name}"?`:`Add connection "${agent.name}"?`,JSON.stringify(Object.fromEntries(Object.entries(agent).filter(([k,v])=>v!==''&&!(Array.isArray(v)&&!v.length)&&!['createdAt','avatar'].includes(k))),null,2));
+        await this.ask(existing?`Update connection "${existing.name}"?`:`Add connection "${agent.name}"?`,JSON.stringify(Object.fromEntries(Object.entries(agent).filter(([k,v])=>v!==''&&!(Array.isArray(v)&&!v.length)&&!['createdAt','avatar'].includes(k))),null,2),{},run);
         const saved=await b.saveAgent({agent});return {saved:{id:saved.id,name:saved.name},note:'Ask the user to add an API token in the connection form if the agent needs one.'};
       }
-      case 'remove_connection':{const a=b.agent(args.agent_id);await this.ask(`Remove connection "${a.name}"?`,'Deletes the saved connection and its local chats in Opaya, not the agent installation.',{always:true});this.terminals.closeAgent(a.id);await b.removeAgent(a.id);return {removed:a.id};}
+      case 'remove_connection':{const a=b.agent(args.agent_id);await this.ask(`Remove connection "${a.name}"?`,'Deletes the saved connection and its local chats in Opaya, not the agent installation.',{always:true},run);this.terminals.closeAgent(a.id);await b.removeAgent(a.id);return {removed:a.id};}
       case 'save_machine':{
         const input=args.machine&&typeof args.machine==='object'?args.machine:{};const existing=input.id?b.host(input.id):null;
         const host=schema.host({...(existing||{}),...input});
-        await this.ask(existing?`Update machine "${existing.name}"?`:`Add machine "${host.name}"?`,JSON.stringify(host,null,2));
+        await this.ask(existing?`Update machine "${existing.name}"?`:`Add machine "${host.name}"?`,JSON.stringify(host,null,2),{},run);
         const saved=await b.saveHost(host);return {saved:{id:saved.id,name:saved.name}};
       }
-      case 'remove_machine':{const h=b.host(args.machine_id);await this.ask(`Remove machine "${h.name}"?`,'Only the saved machine entry is removed. Nothing changes on the machine.',{always:true});await b.removeHost(h.id);return {removed:h.id};}
+      case 'remove_machine':{const h=b.host(args.machine_id);await this.ask(`Remove machine "${h.name}"?`,'Only the saved machine entry is removed. Nothing changes on the machine.',{always:true},run);await b.removeHost(h.id);return {removed:h.id};}
       case 'install_framework':case 'update_framework':{
         const update=name==='update_framework',host=this.host(args.machine_id);const {framework,command}=catalog.command(String(args.framework_id||''),{remote:!!host,update});
         // On this computer, Node.js, Python, uv, GitHub CLI and Git come from Opaya's built-in installer (official
         // downloads, checksums verified, no administrator password), not from a package manager script.
         if(!host&&!update&&this.builtinInstall&&['node','python','uv','gh','git','essentials'].includes(framework.id)){
-          await this.ask(`Install ${framework.name} on this computer?`,'Opaya downloads the official build, checks its checksum and installs it for your user (no administrator password), then adds it to your PATH.');
+          await this.ask(`Install ${framework.name} on this computer?`,'Opaya downloads the official build, checks its checksum and installs it for your user (no administrator password), then adds it to your PATH.',{},run);
           const r=await this.builtinInstall(framework.id);
           if(r)return {...r,finished:true,next:'Open a new terminal (or restart programs) so they see the new PATH. Agents started from Opaya see it right away.'};
         }
-        await this.ask(`${update?'Update':'Install'} ${framework.name} ${host?`on ${host.name}`:'on this computer'}?`,`Runs in a visible terminal:\n\n${command}\n\n${framework.requires&&!update?`Requires ${framework.requires}.\n`:''}Afterwards: ${framework.after}`);
+        await this.ask(`${update?'Update':'Install'} ${framework.name} ${host?`on ${host.name}`:'on this computer'}?`,`Runs in a visible terminal:\n\n${command}\n\n${framework.requires&&!update?`Requires ${framework.requires}.\n`:''}Afterwards: ${framework.after}`,{},run);
         const view=await this.runOwn({label:`${update?'Update':'Install'} ${framework.name}`,key:`${update?'update':'install'}_${framework.id}`,host,command,marked:true});
         return {terminal_id:view.id,started:true,next:framework.after,hint:'Call wait_for_terminal with this terminal_id to follow it to the end; answer installer questions with answer_prompt.',output:await this.terminalOutput(view.id,4000)};
       }
@@ -474,9 +628,10 @@ class OpayaAgent{
           const output=await this.terminalOutput(id),tail=output.slice(-1500);state=promptState(output);
           if(output!==last){last=output;quietSince=Date.now();}
           const quiet=Date.now()-quietSince;
-          if(state.finished||state.exited||((state.question||state.password)&&quiet>=2500)||Date.now()-start>=limit)break;
+          if(state.finished||state.exited||((state.question||state.password)&&quiet>=2500)||Date.now()-start>=limit||run?.controller.signal.aborted)break;
           await new Promise(r=>setTimeout(r,1500));
         }
+        if(run?.thread&&state.password){run.thread.waiting='Waiting for your password in the terminal';this.emit();}
         return {...state,waited_seconds:Math.round((Date.now()-start)/1000),output:last.slice(-4000),
           next:state.password?'It asks for a password. Only the user can type it: tell them which terminal and what it is for, then wait_for_terminal again.':state.question?'Answer with answer_prompt.':state.finished?(state.exit_code===0?'Done. Continue with the next step.':'It failed. Read the output, fix the cause (often a missing dependency) and try again.'):'Still running. Call wait_for_terminal again.'};
       }
@@ -485,7 +640,7 @@ class OpayaAgent{
         const keys={enter:'\r',y:'y\r',n:'n\r',yes:'yes\r',no:'no\r',up:'\u001b[A',down:'\u001b[B',space:' ',tab:'\t',q:'q',ctrl_c:'\u0003'};
         const answer=String(args.answer||''),data=keys[answer]??(/^[1-9]$/.test(answer)?answer+'\r':null);if(data===null)throw new Error('Unsupported answer.');
         const before=await this.terminalOutput(id);if(promptState(before).password&&answer!=='ctrl_c')throw new Error('The terminal is asking for a password. Only the user can type it.');
-        this.terminals.write(id,data);this.status=`Answered ${answer} in the terminal`;this.emit();
+        this.terminals.write(id,data);this.note(run,`Answered ${answer} in the terminal`);
         return {sent:answer,output:(await this.terminalOutput(id,2500)).slice(-2500)};
       }
       case 'ssh_key':{
@@ -498,7 +653,7 @@ class OpayaAgent{
           title=`Install public key ${name}.pub on ${host.name}?`;
           command=win?`type "${file}.pub" | ssh${port} ${dest} "umask 077; mkdir -p ~/.ssh; cat >> ~/.ssh/authorized_keys"`:`ssh-copy-id -i ${file}.pub${port} ${quote(dest)}`;
         }else throw new Error('Unknown SSH key action.');
-        await this.ask(title,`Runs in a visible terminal on this computer. You type any passphrase or password there.\n\n${command}`);
+        await this.ask(title,`Runs in a visible terminal on this computer. You type any passphrase or password there.\n\n${command}`,{},run);
         const view=await this.runInTerminal({label:`SSH key ${name}`,key:`sshkey_${name}`,host:null,command});
         return {terminal_id:view.id,output:await this.terminalOutput(view.id,3000),identity_file:win?path.join(require('node:os').homedir(),'.ssh',name):`~/.ssh/${name}`};
       }
@@ -509,7 +664,7 @@ class OpayaAgent{
       case 'install_skill':{
         const a=b.agent(args.agent_id),host=a.transport==='ssh'?b.host(a.hostId):null;
         const command=skills.hermesSkillCommand(a,{action:'install',skill:String(args.skill||''),remote:!!host,windows:this.platform==='win32'});
-        await this.ask(`Install skill ${args.skill} for ${a.name}?`,`Runs in a visible terminal ${host?'on '+host.name:'on this computer'}:\n\n${command}`);
+        await this.ask(`Install skill ${args.skill} for ${a.name}?`,`Runs in a visible terminal ${host?'on '+host.name:'on this computer'}:\n\n${command}`,{},run);
         const view=await this.runOwn({label:`Skill ${args.skill}`,key:`skills_${a.id}`.slice(0,60),host,command,marked:true});
         return {terminal_id:view.id,output:await this.terminalOutput(view.id,6000),next:'Start a new conversation with the agent to use the skill.'};
       }
@@ -517,8 +672,24 @@ class OpayaAgent{
       case 'list_mcp_servers':return {servers:b.snapshot().mcpServers.map(({name,type,command,args,url,envNames,headerNames,agents,enabled})=>({name,type,command,args,url,envNames,headerNames,enabled,agents:agents==='all'?'all':agents.map(id=>b.data.agents.find(x=>x.id===id)?.name||id)}))};
       case 'read_notes':return {notes:await fs.readFile(path.join(this.home,'notes.md'),'utf8').catch(()=>'')};
       case 'write_notes':{const content=String(args.content??'');if(content.length>20000||content.includes('\0'))throw new Error('Notes must be under 20000 characters.');await fs.writeFile(path.join(this.home,'notes.md'),content,{mode:0o600});return {saved:true};}
+      case 'agent_gateway':{
+        const a=b.agent(args.agent_id),op=String(args.action||'status');if(!['status','start','restart'].includes(op))throw new Error('Unknown gateway action.');
+        if(!['hermes','openclaw'].includes(a.provider))throw new Error(`${a.name} has no gateway that Opaya manages.`);
+        if(op!=='status')await this.ask(`${op==='start'?'Start':'Restart'} the gateway of ${a.name}?`,`Runs "${a.provider} gateway ${op}" ${a.transport==='ssh'?'on '+b.host(a.hostId).name:'on this computer'}, then reconnects ${a.name}.`,{},run);
+        const r=await b.gatewayRun(a.id,op);return {...r,output:stripAnsi(r.output).slice(-3000),status:b.runtimeFor(a.id).status};
+      }
+      case 'start_thread':{
+        if(run?.kind!=='chat')throw new Error('Threads start from the main chat. Do the work here.');
+        const t=this.startThread({title:args.title,task:args.task,steps:args.steps,hold:run.id});
+        return {thread_id:t.id,started:true,next:'The work runs in the thread beside the chat. Tell the user in one short sentence.'};
+      }
+      case 'set_steps':{
+        const t=run?.thread;if(!t)throw new Error('Steps belong to a thread.');
+        t.steps=(Array.isArray(args.steps)?args.steps:[]).slice(0,12).map(x=>({text:String(x?.text||'').replace(/\s+/g,' ').trim().slice(0,160),state:['pending','active','done','failed'].includes(x?.state)?x.state:'pending'})).filter(x=>x.text);
+        t.updatedAt=now();this.saveThreads();this.emit();return {ok:true,steps:t.steps.length};
+      }
       default:throw new Error('Unknown tool.');
     }
   }
 }
-module.exports={OpayaAgent,PRESETS,TOOLS,DIAGNOSTICS,stripAnsi,promptState,INSTALL_PROCEDURE,APP_GUIDE};
+module.exports={OpayaAgent,PRESETS,TOOLS,CHAT_TOOLS,THREAD_TOOLS,DIAGNOSTICS,stripAnsi,promptState,INSTALL_PROCEDURE,APP_GUIDE};

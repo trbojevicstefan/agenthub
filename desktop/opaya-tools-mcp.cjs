@@ -14,9 +14,11 @@ async function service(){
 }
 const reply=(id,result)=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',id,result})+'\n');
 const fail=(id,message)=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',id,error:{code:-32603,message}})+'\n');
-async function tools(){return (await (await service()).call('opayaToolList',{},15000)).map(t=>({name:t.name,description:t.description,inputSchema:t.parameters}));}
+// OPAYA_TOOLS_RUN names the Opaya Agent run (the main chat or a thread) this Claude Code process works for.
+const run=process.env.OPAYA_TOOLS_RUN||'';
+async function tools(){return (await (await service()).call('opayaToolList',{run},15000)).map(t=>({name:t.name,description:t.description,inputSchema:t.parameters}));}
 async function call(name,args){
-  const value=await (await service()).call('opayaToolCall',{name,args:args||{}},15*60*1000);
+  const value=await (await service()).call('opayaToolCall',{name,args:args||{},run},15*60*1000);
   return {content:[{type:'text',text:JSON.stringify(value).slice(0,24000)}],isError:false};
 }
 let buffer='';

@@ -26,9 +26,10 @@ const containers = require('./containers.cjs');
 const remoteWork = require('./remote-work.cjs');
 const guide = require('./guide.cjs');
 const toolchain = require('./toolchain.cjs');
+const autofix = require('./autofix.cjs');
 const {visionOf, SUPPORTED:VISION_MODELS} = require('./vision.cjs');
 async function start({app, safeStorage}, root) {
-  let broker, terminals, listener, opaya, stopping = false, setupTrust = false;
+  let broker, terminals, listener, opaya, stopping = false;
   const startedAt = new Date().toISOString(), approvals = new Map();
   const descriptor = path.join(root, 'session-service.json');
   await fs.mkdir(root,{recursive:true,mode:0o700});
@@ -91,7 +92,7 @@ async function start({app, safeStorage}, root) {
     };
     publishJob(job);
     Promise.resolve().then(()=>work(progress)).then(result=>{job.status='done';job.result=result;job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='pending')s.state='skipped';job.log.push({at:Date.now(),text:'Done.',state:'done'});},
-      error=>{job.status='error';job.error=safeError(error);job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='active')s.state='error';job.log.push({at:Date.now(),text:job.error,state:'error'});})
+      error=>{job.status='error';job.error=safeError(error);job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='active')s.state='error';job.log.push({at:Date.now(),text:job.error,state:'error'});jobProblem(job);})
       .finally(()=>{clearTimeout(timer);publishJob(job);emit();});
     return job;
   }
@@ -203,46 +204,103 @@ async function start({app, safeStorage}, root) {
     const view=await runInTerminal({label,key,host,command:command+end});
     return waitForMark(view.id,markCount(view.id),timeout);
   }
-  // A connection that fails because something is too old: update it, reconnect, and if that does not work hand the
-  // problem to the Opaya Agent; if the Opaya Agent cannot take it, show the user the error. At most once per 30 minutes
-  // per agent, so a failing update never loops.
+  // ---- Every problem reaches the Opaya Agent ------------------------------------------------------------------------
+  // A connection that fails or drops, a turn that ends in an error, a job or install that fails: Opaya first runs the
+  // fix it knows (update what is too old, start a gateway that is down, open the setup or sign-in an agent still
+  // needs), then hands whatever is left to the Opaya Agent in a thread of its own, which the user can watch. Without a
+  // model the user gets the error and what to do. One automatic fix per agent and problem every 30 minutes, so a fix
+  // that fails never loops. Settings > Agents and tools > automatic fixes turns all of it off.
   const fixing=new Map(),inFlight=new Map();
-  async function escalate(a,error,detail){
-    const o=opaya;
-    if(o?.configured()&&!o.busy){
-      try{
-        o.begin(`${a.name} (${a.provider}, ${whereName(a)}) does not connect: "${error}". ${detail} Find out why and fix it, then reconnect it. Use your tools; tell me only what I must do myself.`);
-        notice({level:'info',kind:'opaya',title:`The Opaya Agent is looking into ${a.name}`,text:detail,agentId:a.id});
-        const end=Date.now()+15*60*1000;while(o.busy&&Date.now()<end)await new Promise(r=>setTimeout(r,2000));
-        if(!o.error)return;
-        detail+=` The Opaya Agent could not fix it: ${o.error}`;
-      }catch(e){detail+=` The Opaya Agent could not take it: ${safeError(e)}`;}
-    }else if(!o?.configured())detail+=' The Opaya Agent has no model connected, so it could not take over.';
-    notice({level:'error',kind:'fix-failed',title:`${a.name} needs your attention`,text:`${error}\n\n${detail}`,agentId:a.id});
+  const autoFixOn=()=>broker.data.settings?.autoFix!==false;
+  function once(key){if(fixing.has(key)&&Date.now()-fixing.get(key)<30*60*1000)return false;fixing.set(key,Date.now());return true;}
+  function escalate({key,title,task,error,detail='',agentId=''}){
+    if(opaya?.configured()){
+      const t=opaya.autoThread({key,title,task,agentId,notice:{level:'error',title,text:error}});
+      if(t)notice({level:'info',kind:'opaya',title:`The Opaya Agent is on it: ${title}`,text:detail||String(error).slice(0,300),agentId,threadId:t.id});
+      return t;
+    }
+    notice({level:'error',kind:'fix-failed',title,text:`${error}${detail?`\n\n${detail}`:''}\n\nConnect a model for the Opaya Agent (Opaya Agent > Model settings, or Start free) and it fixes problems like this by itself.`,agentId});
+    return null;
   }
-  async function autoFix(a,error){
-    const target=versions.fixTarget(error);
-    if(broker.data.settings?.autoFix===false||!target)return;
-    if(fixing.has(a.id)&&Date.now()-fixing.get(a.id)<30*60*1000)return;
-    fixing.set(a.id,Date.now());
-    const host=hostOf(a),remote=!!host;
-    const dep=target==='agent'?'':target; // "requires Node 20": the runtime is too old, not the agent
-    let c;
-    try{c=dep?{...catalog.command(dep,{remote,update:true}),title:`Update ${dep==='node'?'Node.js':'Python'}`}:maintenance.updateCommand(a,{remote});}
-    catch(e){return escalate(a,error,`Opaya could not update it automatically: ${safeError(e)}`);}
+  const agentLabel=a=>`${a.name} (${a.provider}, ${a.protocol}, ${whereName(a)})`;
+  function agentTask(a,error,source,detail=''){
+    const what=source==='turn'?'answered with an error':source==='lost'?'lost its connection':'does not connect';
+    return `${agentLabel(a)} ${what}: "${String(error).slice(0,1500)}". ${detail} Find out why and fix it, then reconnect it and check that it answers. Use your tools; tell me only what I must do myself (a password, a sign-in or an API key).`;
+  }
+  async function agentProblem(a,error,source){
+    if(!autoFixOn()||!a)return;
+    const c=autofix.classify(a,error),key=`${a.id}|${c.kind}`;if(!once(key))return;
+    const hand=detail=>escalate({key,title:source==='turn'?`${a.name} answered with an error`:`${a.name} does not connect`,task:agentTask(a,error,source,detail),error,detail,agentId:a.id});
+    try{
+      if(c.kind==='outdated')return await fixOutdated(a,error,c.target,hand);
+      if(c.kind==='gateway')return await fixGateway(a,error,hand);
+      if(c.kind==='onboarding')return await fixOnboarding(a,error,hand);
+      if(c.kind==='missing')return hand(`Its program was not found where it runs: it may not be installed there (${a.command}). Install it with install_framework, then connect.`);
+      // A dropped connection often comes back by itself: one quiet reconnect first.
+      if(source==='lost'){await new Promise(r=>setTimeout(r,3000));try{await broker.connect(a.id,{quiet:true});return;}catch(e){error=safeError(e);}}
+      return hand('');
+    }catch(e){return hand(`Opaya's automatic fix did not work: ${safeError(e)}.`);}
+  }
+  // Too old: update the agent (or Node.js / Python) in a visible terminal and reconnect. Agents that share an
+  // installation (Hermes profiles) share one update run.
+  async function fixOutdated(a,error,target,hand){
+    const host=hostOf(a),remote=!!host,dep=target==='agent'?'':target;
+    let c;try{c=dep?{...catalog.command(dep,{remote,update:true}),title:`Update ${dep==='node'?'Node.js':'Python'}`}:maintenance.updateCommand(a,{remote});}
+    catch(e){return hand(`Opaya could not update it automatically: ${safeError(e)}.`);}
     notice({level:'info',kind:'fixing',title:`Updating ${dep?(dep==='node'?'Node.js':'Python'):a.name} automatically`,text:`${a.name} did not connect: ${error}. ${c.title||'The update'} runs in the terminal; Opaya reconnects when it finishes.`,agentId:a.id});
-    // Agents that share an installation (Hermes profiles) fail together; they share one update run.
     const runKey=`${host?.id||'local'}|${c.command}`;
     if(!inFlight.has(runKey))inFlight.set(runKey,runUpdate({host,label:`${c.title||'Update'} (auto-fix)`,key:`autofix_${a.id}`.slice(0,60),command:c.command}).finally(()=>setTimeout(()=>inFlight.delete(runKey),60000)));
-    let code;
-    try{code=await inFlight.get(runKey);}
-    catch(e){return escalate(a,error,`The automatic update did not finish: ${safeError(e)}`);}
-    if(code!==0)return escalate(a,error,`The automatic update (${c.title||'update'}) ended with exit code ${code}; see its terminal.`);
+    let code;try{code=await inFlight.get(runKey);}catch(e){return hand(`The automatic update did not finish: ${safeError(e)}.`);}
+    if(code!==0)return hand(`The automatic update (${c.title||'update'}) ended with exit code ${code}; its terminal shows why.`);
     versions.cache.clear();checkMachine(host).then(emit).catch(()=>{});
-    try{await broker.connect(a.id);notice({level:'done',kind:'fixed',title:`${a.name} is updated and connected`,text:c.title||'',agentId:a.id});}
-    catch(e){escalate(a,safeError(e),`Opaya updated it (${c.title||'update'}), but it still does not connect.`);}
+    try{await broker.connect(a.id,{quiet:true});notice({level:'done',kind:'fixed',title:`${a.name} is updated and connected`,text:c.title||'',agentId:a.id});}
+    catch(e){hand(`Opaya updated it (${c.title||'update'}), but it still does not connect: ${safeError(e)}.`);}
   }
-  broker.onConnectError=(a,error)=>{autoFix(a,error).catch(()=>{});};
+  // A Hermes or OpenClaw gateway that does not answer: check it, start it and reconnect.
+  async function fixGateway(a,error,hand){
+    notice({level:'info',kind:'fixing',title:`Starting the gateway of ${a.name}`,text:`${a.name} did not answer (${String(error).slice(0,160)}). Opaya starts its gateway and reconnects.`,agentId:a.id});
+    let status='';try{status=(await broker.gatewayRun(a.id,'status')).output;}catch(e){status=safeError(e);}
+    if(autofix.MISSING.test(status))return hand(`${a.provider} itself was not found ${a.transport==='ssh'?`on ${whereName(a)}`:'on this computer'} ("${status.slice(-300)}"): install it (install_framework), set it up, start its gateway (agent_gateway) and connect.`);
+    let r;try{r=await broker.gatewayRun(a.id,'start');}catch(e){r={connected:false,error:safeError(e),output:''};}
+    if(r.connected){notice({level:'done',kind:'fixed',title:`${a.name} is connected again`,text:'Opaya started its gateway.',agentId:a.id});return;}
+    hand(`Opaya checked its gateway ("${status.slice(-500)}") and tried to start it ("${String(r.output||r.error||'').slice(-500)}"), but it still does not connect. The gateway may not be installed or enabled, or its port or token may be wrong.`);
+  }
+  // An agent whose first-time setup or sign-in is not finished: open it in a visible terminal where the agent runs,
+  // then reconnect when the person is done.
+  async function fixOnboarding(a,error,hand){
+    const s=autofix.signIn(a,{windows:windowsLocal(a)});if(!s)return hand('It needs its first-time setup or sign-in.');
+    notice({level:'info',kind:'fixing',title:`${a.name} needs its first-time setup`,text:`${s.note} It is open in the terminal below; Opaya reconnects when you finish.`,agentId:a.id});
+    const code=await runUpdate({host:hostOf(a),label:`Set up ${a.name}`,key:`setup_${a.id}`.slice(0,60),command:s.command,timeout:45*60*1000});
+    try{await broker.connect(a.id,{quiet:true});notice({level:'done',kind:'fixed',title:`${a.name} is set up and connected`,text:'',agentId:a.id});}
+    catch(e){hand(`Opaya opened its setup ("${s.command}", exit code ${code}), but it still does not connect: ${safeError(e)}.`);}
+  }
+  // A job (clone, install, backup, setup...) that failed for a reason other than the user saying no.
+  const CANCELLED=/cancel|declined|not approved|stopped by you/i;
+  function jobProblem(job){
+    if(!autoFixOn()||CANCELLED.test(job.error)||job.kind==='guide')return;
+    const log=job.log.slice(-12).map(l=>l.text).join('\n');
+    escalate({key:`job|${job.kind}|${job.title}`,title:`${job.title.replace(/^(\w+)ing /,'$1 ')} failed`.replace(/^./,c=>c.toUpperCase()),task:`The Opaya job "${job.title}" (${job.detail||job.kind}) failed: "${job.error}". Its last steps:\n${log}\nFind out why and fix it, then finish what the job was doing if you can. Tell me only what I must do myself.`,error:job.error});
+  }
+  // An install from Install agents or Discover that ended with an error in its terminal.
+  function watchInstall(id,before,framework,host){
+    waitForMark(id,before,60*60*1000).then(code=>{
+      if(code===0||!autoFixOn())return;
+      let output='';try{output=String(terminals.attach(id).buffer||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g,'').slice(-2500);}catch{}
+      escalate({key:`install|${framework.id}|${host?.id||'local'}`,title:`Installing ${framework.name} failed`,task:`Installing ${framework.name} ${host?`on ${host.name}`:'on this computer'} ended with exit code ${code}. The end of its terminal:\n${output}\nFind out why (often a missing dependency or PATH), fix it, install it again and add it to Opaya.`,error:`Exit code ${code}`});
+    }).catch(()=>{});
+  }
+  // Opaya's own first-time setup that is not finished: when the Opaya Agent has a model, it finishes it.
+  const setupFile=path.join(root,'setup-pending.json');
+  const rememberSetup=task=>atomicJson(setupFile,{task,at:new Date().toISOString()}).catch(()=>{});
+  async function resumeSetup(){
+    const pending=await fs.readFile(setupFile,'utf8').then(JSON.parse).catch(()=>null);
+    if(!pending?.task||!opaya?.configured()||!autoFixOn())return;
+    const t=opaya.autoThread({key:'setup',title:'Finish setting up this computer',task:pending.task});
+    if(t){await fs.rm(setupFile,{force:true}).catch(()=>{});notice({level:'info',kind:'opaya',title:'The Opaya Agent is finishing the setup',text:'It installs what is still missing and fixes what went wrong.',threadId:t.id});}
+  }
+  broker.onConnectError=(a,error)=>{agentProblem(a,error,'connect').catch(()=>{});};
+  broker.onConnectionLost=(a,error)=>{agentProblem(a,error,'lost').catch(()=>{});};
+  broker.onTurnError=(a,error)=>{agentProblem(a,error,'turn').catch(()=>{});};
   broker.onClientRefused=(a,text)=>{notice({level:'info',kind:'surface',agentId:a.id,title:`${a.name} opens in its terminal now`,text:`It does not accept chats from other apps anymore ("${text.slice(0,160)}"). Its own CLI still works: Opaya shows it in the terminal. Right-click > Open as chat switches back, for example after you add an API key.`});emit();};
   // An agent installed as a Docker container on a machine: the script runs in a visible terminal (pull, start, install,
   // then an interactive sign-in), and when it ends Opaya adds the container as an agent and connects it.
@@ -434,10 +492,11 @@ async function start({app, safeStorage}, root) {
     }
     progress({step:step.id,state:'done',message:added.length?`Added ${added.join(', ')}`:'Your agents are already in Opaya'});return added;
   }
-  // Keep the Opaya Agent from asking again for each install while it finishes the setup, when the person chose that.
+  // The Opaya Agent finishes the setup in a thread; when the person chose so, that thread does not ask again for each
+  // install (removals still ask).
   function handOff(text,trust){
-    if(trust)setupTrust=true;opaya.begin(text);
-    const watch=setInterval(()=>{if(!opaya.busy){setupTrust=false;clearInterval(watch);}},2000);watch.unref?.();
+    fs.rm(setupFile,{force:true}).catch(()=>{});
+    return opaya.startThread({title:'Finish setting up this computer',task:text,origin:'guide',key:'setup',trust:!!trust});
   }
   const guideActions={
     guideScan:async()=>guideFacts(),
@@ -452,22 +511,24 @@ async function start({app, safeStorage}, root) {
       if(process.platform==='win32')await toolchain.persistPath().catch(()=>{});
       return startJob({kind:'guide',route:{from:'Setup guide',fromWhere:facts.system,to:'Ready to build',toWhere:machineName(),provider:'opaya'},title:'Setting up this computer',detail:[WAYS_LABEL(way),...goals.map(g=>guide.GOALS[g]?.label)].filter(Boolean).join(' / '),steps:steps.map(s=>[s.id,s.title])},async progress=>{
         const failed=[];
+        const unfinished=detail=>{const text=`${guide.handoff({steps,facts,goals})} ${detail}`;if(brainReady()&&!x.scriptOnly)handOff(text,x.trust!==false);else rememberSetup(text);};
         for(const step of steps.filter(s=>s.phase==='model')){
-          if(step.kind==='install'&&!await guideInstall(step,progress))throw new Error(`${step.title} did not work, so the AI part cannot start yet. Look at the "Opaya setup" terminal, then press Try again.`);
+          if(step.kind==='install'&&!await guideInstall(step,progress)){unfinished(`${step.title} did not work in the "Opaya setup" terminal: find out why and fix it first.`);throw new Error(`${step.title} did not work, so the AI part cannot start yet. Look at the "Opaya setup" terminal, then press Try again.`);}
           if(step.kind==='signin')await guideSignIn(step,progress);
           if(step.kind==='brain'&&!await guideBrain(step,progress))throw new Error('The Opaya Agent could not use it yet. Make sure you finished signing in, then press Try again.');
         }
         const rest=steps.filter(s=>s.phase==='rest');
         // With a model, the Opaya Agent finishes: it installs the rest, checks and fixes what went wrong.
         if(brainReady()&&!x.scriptOnly){
-          progress({message:'The Opaya Agent takes it from here: watch it in the Opaya Agent chat.'});
-          handOff(guide.handoff({steps,facts,goals}),x.trust!==false);
-          return {handoff:true,way,steps:rest.map(s=>s.id)};
+          progress({message:'The Opaya Agent takes it from here: watch it in its thread.'});
+          const t=handOff(guide.handoff({steps,facts,goals}),x.trust!==false);
+          return {handoff:true,way,steps:rest.map(s=>s.id),threadId:t.id};
         }
         for(const step of rest){
           if(step.kind==='install'&&!await guideInstall(step,progress))failed.push(step.title.replace(/^Install /,''));
           if(step.kind==='add')await guideAdd(step,progress);
         }
+        if(failed.length){unfinished(`These did not install in the "Opaya setup" terminal: ${failed.join(', ')}. Find out why, fix it and install them.`);}
         if(failed.length)throw new Error(`Almost done: ${failed.join(', ')} did not install. The "Opaya setup" terminal shows why. Connect a model for the Opaya Agent and it can fix this for you.`);
         return {handoff:false,way,ready:true};
       });
@@ -488,12 +549,14 @@ async function start({app, safeStorage}, root) {
       return list.length;
     }
   };
-  opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal,trusted:()=>!!broker.data.settings?.itrustOpaya||setupTrust});
+  opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal,trusted:()=>!!broker.data.settings?.itrustOpaya});
+  opaya.onConfigured=()=>{resumeSetup().catch(()=>{});};
   // Claude Code as the Opaya Agent's model reaches the Opaya tools through this bridge; its token can only list and call them.
   opaya.builtinInstall = async id=>{const ids=builtinIds(id);if(!ids.length)return null;const {job,done}=builtinJob(ids);const r=await done;return {job_id:job.id,...r};};
   opaya.toolBridge = {command:process.execPath, args:[path.join(__dirname,'opaya-tools-mcp.cjs')], env:{ELECTRON_RUN_AS_NODE:'1',OPAYA_TOOLS_ENDPOINT:endpoint(root),OPAYA_TOOLS_TOKEN:toolsToken}};
   await stage('opaya agent');
   await opaya.init();
+  resumeSetup().catch(()=>{});
   // A fresh install: connect the Opaya Agent to a local Ollama model with tools if one already runs (no input needed).
   free.autoConnect({opaya}).then(model=>{if(model)emit();}).catch(()=>{});
   async function shutdown() {
@@ -532,7 +595,9 @@ async function start({app, safeStorage}, root) {
       const host=x.hostId?broker.host(x.hostId):null;
       if(x.runtime==='docker')return installContainer(host,x);
       if(!host&&builtinIds(String(x.id||'')).length)return builtinJob(builtinIds(String(x.id))).job;
-      const {framework,command}=catalog.command(String(x.id||''),{remote:!!host});return runInTerminal({label:`Install ${framework.name}`,key:`install_${framework.id}`,host,command});
+      const {framework,command}=catalog.command(String(x.id||''),{remote:!!host});
+      const end=!host&&process.platform==='win32'?'; Write-Host "[opaya] finished with exit code $(if ($?) { 0 } else { 1 })"':'; echo "[opaya] finished with exit code $?"';
+      const view=await runInTerminal({label:`Install ${framework.name}`,key:`install_${framework.id}`,host,command:command+end});watchInstall(view.id,markCount(view.id),framework,host);return view;
     },
     files:async x=>{
       let host=null,folder=typeof x.path==='string'?x.path:'',fallback=false;
@@ -598,8 +663,8 @@ async function start({app, safeStorage}, root) {
     },
     libraryRemove:x=>library.remove(String(x.name||'')), libraryAddFolder:x=>library.addFolder(String(x.path||'')),
     jobs:async()=>[...jobs.values()], jobDismiss:async x=>jobs.delete(String(x.id||'')),
-    opayaToolList:async()=>require('./opaya-agent.cjs').TOOLS.map(t=>({name:t.function.name,description:t.function.description,parameters:t.function.parameters})),
-    opayaToolCall:async x=>opaya.bridgeCall(String(x?.name||''),x?.args),
+    opayaToolList:async x=>opaya.bridgeTools(x?.run).map(t=>({name:t.name,description:t.description,parameters:t.parameters})),
+    opayaToolCall:async x=>opaya.bridgeCall(String(x?.name||''),x?.args,String(x?.run||'')),
     browserTool, browserResult:async x=>{const c=browserCalls.get(x.id);if(!c)return false;clearTimeout(c.timer);browserCalls.delete(x.id);x.ok?c.resolve(x.value):c.reject(new Error(String(x.error||'Browser action failed.')));return true;},
     mcpSave:x=>broker.saveMcpServer(x), mcpRemove:x=>broker.removeMcpServer(x.id), agentMcp:x=>broker.setAgentMcp(x), agentSkills:x=>broker.skills(x.id),
     // Hermes skills: browse the hub or install one with the Hermes CLI in a visible terminal.
@@ -616,6 +681,7 @@ async function start({app, safeStorage}, root) {
       return startJob({kind:'free-model',route:{from:m.label,fromWhere:`Free / ${m.size}`,to:'Opaya Agent',toWhere:'This computer',provider:'ollama'},title:`Setting up ${m.label}`,detail:'Free local model through Ollama. No account and no key.',steps:[['ollama','Install and start Ollama'],['download',`Download ${m.label} (${m.size})`],['connect','Connect the Opaya Agent']]},progress=>free.setupFree({opaya,model,progress}).then(r=>{emit();return r;}));},
     opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}), opayaForgetKey:()=>opaya.forgetKey(),
     opayaSend:x=>opaya.begin(x.text), opayaNewSession:()=>opaya.newSession(), opayaSelectSession:x=>opaya.selectSession(String(x.id||'')), opayaDeleteSession:x=>opaya.deleteSession(String(x.id||'')), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),
+    opayaThreadSend:x=>opaya.threadSend(String(x?.id||''),x?.text), opayaThreadStop:x=>opaya.stopThread(String(x?.id||'')), opayaThreadRemove:x=>opaya.removeThread(String(x?.id||'')),
     ...maintenanceActions, ...toolActions, ...projectRemoteActions, ...guideActions,
     shutdown
   };
