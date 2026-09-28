@@ -241,4 +241,4 @@ function collect(child, {timeout = 15000, maxBytes = 1024 * 1024, input = '', si
     if (signal?.aborted) abort();
   });
 }
-module.exports = {quote, inFolder, opayaToolsRoot, opayaToolDirs, resetRegistryEnv, REMOTE_PATH, environment, primeShellPath, userToolDirs, cmdShimTarget, findExecutable, windowsLaunch, dockerExecArgs, dockerExecContainerIndex, sshArgs, target, remoteCommand, launch, terminate, collect};
+module.exports = {quote, dshStoreNames, inFolder, opayaToolsRoot, opayaToolDirs, resetRegistryEnv, REMOTE_PATH, environment, primeShellPath, userToolDirs, cmdShimTarget, findExecutable, windowsLaunch, dockerExecArgs, dockerExecContainerIndex, sshArgs, target, remoteCommand, launch, terminate, collect};

@@ -208,6 +208,10 @@ function setJsonEnv(text,name,value){
   if(data.env!==undefined&&(!data.env||typeof data.env!=='object'||Array.isArray(data.env)))throw new Error('settings.json has an env that is not an object, so Opaya does not change it.');
   data.env={...(data.env||{}),[name]:value};return JSON.stringify(data,null,2)+'\n';
 }
+// Names DeepSeek Harness refuses in a .env file (it then does not start at all): only the environment it is started with
+// may set them. Its home .env may set the proxy names. From dsh 0.1.7 (dsh-app-boot isBootstrapOnly).
+const DSH_BOOTSTRAP=new Set('PATH HOME USERPROFILE SHELL NODE_OPTIONS NODE_PATH NODE_EXTRA_CA_CERTS LD_PRELOAD LD_LIBRARY_PATH LD_AUDIT BASH_ENV ENV SHELLOPTS BASHOPTS PERL5OPT PERL5LIB PYTHONSTARTUP PYTHONPATH RUBYOPT RUBYLIB JAVA_TOOL_OPTIONS _JAVA_OPTIONS JDK_JAVA_OPTIONS PYTHONHOME GIT_SSH GIT_SSH_COMMAND GIT_EXTERNAL_DIFF GIT_PAGER GIT_EDITOR GIT_ASKPASS SSH_ASKPASS GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_COUNT EDITOR VISUAL PAGER BROWSER DEEPSEEK_BASE_URL DEEPSEEK_SEARCH_BASE_URL SSL_CERT_FILE SSL_CERT_DIR REQUESTS_CA_BUNDLE CURL_CA_BUNDLE NODE_TLS_REJECT_UNAUTHORIZED'.split(' '));
+const dshEnvRefused=name=>{const u=String(name).toUpperCase();return DSH_BOOTSTRAP.has(u)||/^(DSH_|XDG_|DYLD_|BASH_FUNC_)/.test(u);};
 // DeepSeek Harness's credential store (~/.dsh/.credentials.yaml): refs.NAME set, the rest of the file as it is. A key
 // stored there wins over both .env files, and dsh picks a changed one up on its next request. The value is written as a
 // double-quoted YAML scalar; an entry written over more than one line is replaced whole.
@@ -250,4 +254,4 @@ async function writeAt(where,file,content){
   const script=`umask 077; f=${quote(file)}; [ -L "$f" ] && f=$(readlink -f -- "$f" 2>/dev/null || printf %s "$f"); mkdir -p -- "$(dirname -- "$f")" && cat > "$f.opaya-tmp" && chmod 600 "$f.opaya-tmp" && mv -f -- "$f.opaya-tmp" "$f"`;
   await collect(shell(where,script),{timeout:30000,input:content});
 }
-module.exports={PATTERNS,REF,detect,replaceSpans,guessName,patternName,contextName,envName,secretName,plausible,keyLike,mask,reference,secretId,conceal,shieldOutput,deep,envValue,setEnv,setJsonEnv,setYamlRef,yamlRefs,parseEnv,dirAt,readAt,writeAt};
+module.exports={PATTERNS,REF,detect,replaceSpans,guessName,patternName,contextName,envName,secretName,plausible,keyLike,mask,reference,secretId,conceal,shieldOutput,deep,envValue,setEnv,setJsonEnv,setYamlRef,yamlRefs,dshEnvRefused,parseEnv,dirAt,readAt,writeAt};

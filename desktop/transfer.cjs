@@ -119,7 +119,7 @@ function planKeys(kind,names,{endpoint=''}={}){
   const want=endpointKey(endpoint);
   return names.map(name=>{
     const c=canon(name);
-    if(kind==='hermes'||kind==='openclaw'||kind==='dsh')return /^DSH_/.test(name)&&kind==='dsh'?{name,why:'DeepSeek Harness never reads DSH_* names from a .env'}:{name,to:`.env as ${name}`};
+    if(kind==='hermes'||kind==='openclaw'||kind==='dsh')return kind==='dsh'&&require('./secrets.cjs').dshEnvRefused(name)?{name,why:'DeepSeek Harness takes this name only from the environment it is started with, never from a .env'}:{name,to:`.env as ${name}`};
     if(kind==='claude')return {name,to:`settings.json env ${name}`};
     if(kind==='codex')return c==='OPENAI_API_KEY'?{name,to:'codex login --with-api-key'}:/^CODEX_/.test(name)?{name,why:'Codex never reads CODEX_* names from its .env'}:{name,to:`Codex's .env as ${name}`};
     if(kind==='opencode'){const id=Object.keys(PROVIDER_KEYS).find(p=>PROVIDER_KEYS[p]===c);return id?{name,to:`auth.json provider ${id}`,provider:id}:{name,why:'OpenCode has no provider for this key'};}

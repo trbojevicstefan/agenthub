@@ -443,7 +443,7 @@ class OpayaAgent{
     agent.extraEnv=codexEnv(this.userHome?path.join(this.userHome,'.codex'):undefined);
     const rpc=new Rpc(this.spawnAgent(agent,[...SHELL_ENV,'app-server'],null),{jsonrpc:false,onRequest:(method,params)=>this.codexRequest(method,params)});
     this.codexRpc=rpc;rpc.on('notification',(method,params)=>this.codexNotification(method,params));rpc.on('closed',error=>{if(this.codexActive)this.codexActive.reject(error);});
-    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.22.2'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
+    await rpc.request('initialize',{clientInfo:{name:'opaya',title:'Opaya Agent',version:'0.22.3'},capabilities:{experimentalApi:true}});rpc.notify('initialized',{});return rpc;
   }
   async codexRequest(method,params){
     if(method!=='item/tool/call')throw new Error('Unsupported Codex request.');
@@ -683,7 +683,10 @@ class OpayaAgent{
       return {stored:true,secret:s.id,agent:agent.name,where:`the Codex login ${on}`,loaded,next:`Codex keeps it in its login (auth.json). ${loadedText(loaded,reconnect)}`};
     }
     // A key saved with its endpoint also gets <NAME>_BASE_URL (OPENROUTER_API_KEY -> OPENROUTER_BASE_URL).
-    const urlName=s.endpoint?endpointName(name):'',set=(text,k,v)=>kind==='claude'?secrets.setJsonEnv(text,k,v):secrets.setEnv(text,k,v);
+    // DeepSeek Harness does not start at all when its .env sets a name only its launching environment may set.
+    if(kind==='dsh'&&secrets.dshEnvRefused(name))throw new Error(`DeepSeek Harness takes ${name} only from the environment it is started with, not from a file, so Opaya does not write it.`);
+    if(kind==='dsh'&&name==='DEEPSEEK_API_KEY')await this.checkDeepseekKey(value);
+    const urlName=s.endpoint&&!(kind==='dsh'&&secrets.dshEnvRefused(endpointName(name)))?endpointName(name):'',set=(text,k,v)=>kind==='claude'?secrets.setJsonEnv(text,k,v):secrets.setEnv(text,k,v);
     const file=await this.configFile(kind,agent,where),write=text=>urlName?set(set(text,name,value),urlName,s.endpoint):set(text,name,value);
     write(await secrets.readAt(where,file)); // fails before asking: a value a .env cannot hold, a settings.json that is not JSON
     // DeepSeek Harness: also in its credential store, which wins over its .env files (a key saved in its Web UI goes
@@ -707,6 +710,12 @@ class OpayaAgent{
       dsh:`DeepSeek Harness takes it from its credential store (~/.dsh/.credentials.yaml, where its Web UI saves keys too) on its next request; the same name set in the environment Opaya or a shell starts it from would win, and Opaya does not pass such a stale one to the dsh it starts. ${then}`
     }[kind];
     return {stored:true,secret:s.id,agent:agent.name,name,file,where:on,loaded,next,...(urlName?{endpointName:urlName,endpoint:s.endpoint}:{})};
+  }
+  // A DeepSeek key DeepSeek refuses is caught before it is written (the agent would only fail with "Authentication
+  // Fails" later). No answer from DeepSeek (offline, a proxy) does not stop it.
+  async checkDeepseekKey(value){
+    let r;try{r=await this.fetch('https://api.deepseek.com/models',{headers:{authorization:`Bearer ${value}`},signal:AbortSignal.timeout(10000)});}catch{return;}
+    if(r?.status===401||r?.status===403)throw new Error(`DeepSeek did not accept this key (${r.status}), so Opaya did not save it. Copy the whole key from platform.deepseek.com/api_keys again (it starts with sk-).`);
   }
   // An agent process that keeps running (Codex's app server, an ACP agent such as Hermes) reads its keys when it
   // starts. Opaya restarts it when it is idle ('now'), or right after its current answer ('after'); a disconnected one

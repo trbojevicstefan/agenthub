@@ -1,3 +1,9 @@
+# Opaya 0.22.3 - DeepSeek Harness keys checked
+
+- Giving DeepSeek Harness a DEEPSEEK_API_KEY now checks it with DeepSeek first: a key DeepSeek refuses is not saved, and Opaya says so at once instead of the chat failing later with "Authentication Fails".
+- Its Web UI opened from Opaya on this computer also no longer gets an old same-named key from your environment, so it shows and uses the key in its credential store (the same store its ACP chat uses; all its profiles share ~/.dsh/.credentials.yaml).
+- Names DeepSeek Harness accepts only from the environment it starts in (DEEPSEEK_BASE_URL, proxies, PATH and others) are never written into its .env, where they stop it from starting.
+
 # Opaya 0.22.2 - DeepSeek Harness keys and CLI
 
 - **Key that works**: a key given to DeepSeek Harness (key button in its chat, the Opaya Vault or the Opaya Agent) now also goes into its credential store, ~/.dsh/.credentials.yaml, as well as ~/.dsh/.env. dsh prefers that store over its .env files, so an old key saved in its Web UI no longer wins over the new one.

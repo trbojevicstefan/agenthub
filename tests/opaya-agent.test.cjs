@@ -363,6 +363,12 @@ test('DeepSeek Harness: installed, found, run in Docker, given keys in ~/.dsh/.e
   await agent.giveToAgent({agentId:saved.id,name:'DEEPSEEK_API_KEY',value:ROUTER_KEY});
   assert.equal(await fs.readFile(path.join(home,'.dsh','.credentials.yaml'),'utf8'),`version: 1\n# saved in its Web UI\nrefs:\n  OPENAI_API_KEY: sk-o\n  DEEPSEEK_API_KEY: "${ROUTER_KEY}"\nrecords: {}\n`);
   assert.deepEqual((await agent.agentKeys({agentId:saved.id})).keys.map(k=>k.name).sort(),['DEEPSEEK_API_KEY','OPENAI_API_KEY']);
+  // A name dsh takes only from its launching environment never goes into its .env (dsh would not start).
+  await assert.rejects(agent.giveToAgent({agentId:saved.id,name:'DEEPSEEK_BASE_URL',value:'https://example.com'}),/only from the environment/);
+  // A key DeepSeek refuses is not saved.
+  const refusing=await fixture(t,[],{userHome:await temp(t),trusted:true,fetchImpl:async url=>({ok:false,status:url.includes('deepseek.com')?401:200,json:async()=>({})})});
+  const d2=await refusing.broker.saveAgent({agent:{...local,command:'dsh'}},{preapproved:true});
+  await assert.rejects(refusing.agent.giveToAgent({agentId:d2.id,name:'DEEPSEEK_API_KEY',value:ROUTER_KEY}),/DeepSeek did not accept this key/);
   // An auth failure is an onboarding problem whose first guess is a new DeepSeek key.
   assert.match(require('../desktop/diagnostics.cjs').classify('turn failed: Authentication Fails, Your api key: ****ece is invalid',local).hint,/DEEPSEEK_API_KEY/);
 });

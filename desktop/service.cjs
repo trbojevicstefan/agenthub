@@ -748,7 +748,7 @@ async function start({app, safeStorage}, root) {
         if(!host)port=hostPort;
       }
       const trusted=host?[`127.0.0.1:${port}`,`localhost:${port}`]:exec?[`127.0.0.1:${port}`]:[];
-      const view=await runInTerminal({label:`${a.name} Web UI`.slice(0,60),key:`dshweb_${a.id}`.slice(0,60),host,command:dshWeb.command(a,{port:host&&!exec?0:port,trusted,windows:!host&&process.platform==='win32'})});
+      const view=await runInTerminal({label:`${a.name} Web UI`.slice(0,60),key:`dshweb_${a.id}`.slice(0,60),host,command:dshWeb.command(a,{port:host&&!exec?0:port,trusted,windows:!host&&process.platform==='win32',unset:host||exec?[]:require('./process.cjs').dshStoreNames(require('./process.cjs').environment()).filter(n=>process.env[n]!==undefined)})});
       let printed='';const end=Date.now()+120000;
       while(!printed&&Date.now()<end){await new Promise(r=>setTimeout(r,500));let v;try{v=terminals.attach(view.id);}catch{break;}printed=dshWeb.printedUrl(v.buffer);if(!printed&&v.exited)break;}
       if(!printed)throw new Error(`The DeepSeek Harness Web UI did not start. Its terminal "${a.name} Web UI" shows why.`);
