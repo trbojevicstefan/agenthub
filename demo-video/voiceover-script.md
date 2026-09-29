@@ -45,6 +45,6 @@ Each line is timed to the scene it covers, at about 2.2 words per second. Start 
 > Let the Opaya Agent fix broken agents for you. Get Opaya at opaya.dev.
 
 ## Notes for the mix
-- The music peaks around -5 dBFS (about -15.5 LUFS). Under a voiceover, lower it by 8–10 dB or duck it while the voice speaks; the sound effects (whooshes on the title cards, soft mouse clicks, an alert at 1:14.4, a success chime at 1:23.9) can stay a little louder.
+- The music peaks around -5 dBFS (about -15.5 LUFS). Under a voiceover, lower it by 8–10 dB or duck it while the voice speaks; the sound effects (a soft swell and bell on each title card, soft mouse clicks, an alert at 1:14.4, a success chime at 1:23.9) can stay a little louder.
 - Everything on screen is the real Opaya app (white theme), driven live, with sample agents and servers.
 - "20x faster" and "Opaya Vault" are marketing wording: the app itself does not use the name "Vault" (keys are stored with OS encryption and shared by name through Transfer), and the 20x figure is not something Opaya measures. Check you're comfortable with both before publishing.
