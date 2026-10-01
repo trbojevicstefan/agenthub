@@ -148,7 +148,9 @@ It acts only through Opaya's own tools and terminals you can watch, and every ch
 - Official agent logos, an icon library or your own icon.
 - Dark and light themes.
 - System notifications while Opaya is not in front: an agent or the Opaya Agent replied, an approval is waiting or a long job finished. Click one to open that chat. Each kind can be turned off in Settings.
-- **Workspace** filters agents by status and place, and each card has Manage, Connect, Terminal and Fix.
+- **Home** filters agents by status and place, and each card has Manage, Connect, Terminal and Fix.
+- **The top bar is the same on every screen:** the page title and that page's own controls on the left; on the right the selected agent with **Manage ▾ / Chat / Console**, then the browser and projects. Click the agent to switch agent or machine.
+- **Sidebar:** Discover next to the Opaya Agent, Home, your agents, and at the bottom Playground, Machines (the fleet board), Vault, Settings and Help. **Settings > Sidebar** hides the items you do not use.
 - Hide or show the sidebar with the button at the top left or **Cmd/Ctrl+B**.
 - **Files:** mention a file or folder in the chat or in a terminal on the same machine.
 - **Settings:** theme, Enter or Ctrl/Cmd+Enter to send, terminal text size and position, start Opaya when you sign in, connect agents at start, notifications, tips and keyboard shortcuts.

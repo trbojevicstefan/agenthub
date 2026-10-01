@@ -1872,3 +1872,28 @@ body[data-theme="light"] .fleet-agent{background:#fff;border-color:#dde5e0}
 body:has(#manage-pop) .manage-anchor{color:#dffbe9;background:#22302a}
 body:has(#manage-pop) .manage-anchor .nav-caret{transform:rotate(180deg);color:var(--accent)}
 body[data-theme="light"] .manage-solo{background:#f3f6f4;border-color:#d6e0da;color:#40524a}
+/* One top bar for every screen: title and the page's own controls left; the agent and the tools right */
+.topbar>.breadcrumb{margin-right:0;flex:0 1 auto}
+.topbar-page{display:flex;align-items:center;gap:6px;margin-left:14px;padding-left:14px;border-left:1px solid var(--border);min-width:0;flex-shrink:1}
+.topbar-page .subtle{padding:6px 9px}
+.topbar-spacer{flex:1 1 0;min-width:8px}
+.topbar>.topbar-actions{margin-left:0}
+.agent-chip{display:inline-flex;align-items:center;gap:7px;padding:3px 10px 3px 4px;margin-right:2px;border-radius:9px;max-width:190px;color:#dce4e7;font-size:12px}
+.agent-chip:hover{background:#1f2629}
+.agent-chip .agent-avatar{width:24px;height:24px;margin:0;border-radius:6px}
+.agent-chip-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.agent-switch .agent-chip+.mode-tab{position:relative;margin-left:4px}
+.agent-switch .agent-chip+.mode-tab:before{content:"";position:absolute;left:-4px;top:6px;bottom:6px;border-left:1px solid #ffffff14}
+@media (max-width:1180px){.agent-chip-name{display:none}.agent-chip{padding-right:6px}}
+/* Manage menu: a machine's agents in a flyout */
+.mp-col [data-mp="machine"].flying{background:#1d2a33;box-shadow:inset 0 0 0 1px #2f5379}
+.mp-flyout{position:absolute;top:0;width:290px;padding:10px;border-radius:15px;background:linear-gradient(160deg,#1b2125f9,#14181bf9);border:1px solid #2f5379;box-shadow:0 24px 60px -20px #000,0 0 40px #4aa8ff14;display:flex;flex-direction:column;gap:3px;animation:mp-fly .18s cubic-bezier(.2,.9,.25,1.1) both}
+@keyframes mp-fly{from{opacity:0;transform:translateX(-6px)}}
+.mp-flyout header{display:flex;justify-content:space-between;align-items:baseline;padding:2px 6px 8px}
+.mp-flyout header strong{font-size:12.5px}.mp-flyout header small{color:#7f8b91;font-size:10.5px}
+.mp-fly-actions{display:flex;flex-direction:column;gap:4px;margin-top:6px;padding-top:8px;border-top:1px solid #ffffff0d}
+.mp-flyout .mp-add{border-style:solid;border-color:transparent;color:#a9c9e8}
+.mp-flyout .mp-add:hover{background:#1d2a33}
+.sidebar-bottom>button.selected{background:var(--hover);color:var(--text)}
+body[data-theme="light"] .mp-flyout{background:#fffffff9;border-color:#bcd3e8}
+body[data-theme="light"] .agent-chip{color:#22302a}

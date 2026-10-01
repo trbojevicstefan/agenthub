@@ -721,3 +721,12 @@
 :where(body[data-theme="light"]) .manage-solo:hover{border-color:#acc8b9;color:#06140b}
 :where(body[data-theme="light"]) .manage-solo.selected{background:#cfddd7;color:#06140b;border-color:#acc8b9}
 :where(body[data-theme="light"]):has(#manage-pop) .manage-anchor{color:#06140b;background:#cfddd7}
+:where(body[data-theme="light"]) .agent-chip{color:#111719}
+:where(body[data-theme="light"]) .agent-chip:hover{background:#d6dde0}
+:where(body[data-theme="light"]) .agent-switch .agent-chip+.mode-tab:before{border-left:1px solid #ffffff14}
+:where(body[data-theme="light"]) .mp-col [data-mp="machine"].flying{background:#ccd9e2}
+:where(body[data-theme="light"]) .mp-flyout{background:linear-gradient(160deg,#dae0e4f9,#e4e8ebf9);border:1px solid #99b3ce}
+:where(body[data-theme="light"]) .mp-flyout header small{color:#4f585c}
+:where(body[data-theme="light"]) .mp-fly-actions{border-top:1px solid #ffffff0d}
+:where(body[data-theme="light"]) .mp-flyout .mp-add{color:#12283d}
+:where(body[data-theme="light"]) .mp-flyout .mp-add:hover{background:#ccd9e2}
