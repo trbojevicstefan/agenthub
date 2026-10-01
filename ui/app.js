@@ -19,12 +19,14 @@
   let state = {agents:[],hosts:[],conversations:[],histories:{},secureStorage:false}, overview = true, opayaView = false, playgroundView = false, renderKey = '', initialized = false, theme = 'dark';
   let toastTimer, returnFocus, currentTerminal = '', lastSelected = '', modalBusy = false;
   let manageId = '', manageHtml = '', manageKeyed = {};
+  // How each agent's screen shows: manage (the default a left click opens), chat (the full chat view) or console.
+  const agentModes = new Map(), modeOf = a => agentModes.get(a.id) || 'manage';
   let stageAgent = ''; // the agent whose CLI the terminal stage last opened
   const pendingWrites = new Set();
   const draftKey = () => currentConversation()?.id || selected()?.id || '';
   const save = promise => { pendingWrites.add(promise); promise.catch(error=>toast(error.message,true)).finally(()=>pendingWrites.delete(promise)); return promise; };
   window.agenthubFlush = () => Promise.allSettled([...pendingWrites]);
-  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,panes:panes.filter(Boolean),paneSizes:panes.map((id,i)=>id?paneSizes[i]:0).filter(Boolean),theme,projects:projectsOpen,projectsOpen:[...projectsExpanded],layout,sidebarHidden,tips:[...tipsSeen].slice(-300),greeted,lastVersion,terminalFont})); };
+  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,panes:panes.filter(Boolean),paneSizes:panes.map((id,i)=>id?paneSizes[i]:0).filter(Boolean),theme,projects:projectsOpen,projectsOpen:[...projectsExpanded],layout,chatDock:chatDock.map(d=>({id:d.id,min:!!d.min})),sidebarHidden,tips:[...tipsSeen].slice(-300),greeted,lastVersion,terminalFont})); };
   const drafts = new Map(), pendingSends = new Set(), terminalViews = new Map(), terminalPending = new Map();
   const selected = () => state.agents.find(a => a.id === state.activeAgentId);
   const currentConversation = () => state.conversations.find(c => c.id === state.activeConversationId && c.agentId === state.activeAgentId);
@@ -48,7 +50,6 @@
   // Chat or terminal: how an agent opens. API connections have no CLI, so they always chat; terminal-only agents always
   // use their CLI; otherwise the agent's own choice, then Settings (asked on first launch).
   const hasCli=a=>!!a?.command&&!(a.protocol==='openai'&&!['hermes','openclaw'].includes(a.provider));
-  const surfaceOf=a=>!a?'chat':a.protocol==='terminal'?'terminal':!hasCli(a)?'chat':a.surface||state.settings?.interface||'chat';
   // Motion bookkeeping: state updates re-render often, so entrance animations are keyed to first appearance, not to every render.
   let terminalFont=13,lastVersion='',tipsSeen=new Set(),greeted='',collapsedGroups=new Set(),projectsOpen=false,projectsExpanded=new Set(),layout={terminal:'bottom',browser:'right',bottomHeight:280,rightWidth:520};
   const navSeen=new Map(),messageSeen=new Map();let navHtml='',navSelected='',navSelectedAt=0,messageConversation=null,overviewHtml='';
@@ -78,11 +79,11 @@
   }
   function applyState(next) {
     state=next;document.body.dataset.platform=state.platform;
-    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya||!state.agents.length&&!state.opayaAgent?.configured;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);sidebarHidden=!!state.view?.sidebarHidden;projectsOpen=!!state.view?.projects;tipsSeen=new Set(state.view?.tips||[]);greeted=state.view?.greeted||'';lastVersion=state.view?.lastVersion||'';setTimeout(checkNudges,4000);setTimeout(askInterface,700);if(state.view?.layout)layout={...layout,...state.view.layout};terminalFont=Number(state.view?.terminalFont)||13;queueMicrotask(()=>placePanes());projectsExpanded=new Set(state.view?.projectsOpen||[]);if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});}
+    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya||!state.agents.length&&!state.opayaAgent?.configured;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);sidebarHidden=!!state.view?.sidebarHidden;projectsOpen=!!state.view?.projects;tipsSeen=new Set(state.view?.tips||[]);greeted=state.view?.greeted||'';lastVersion=state.view?.lastVersion||'';setTimeout(checkNudges,4000);if(state.view?.layout)layout={...layout,...state.view.layout};terminalFont=Number(state.view?.terminalFont)||13;queueMicrotask(()=>placePanes());projectsExpanded=new Set(state.view?.projectsOpen||[]);chatDock=(state.view?.chatDock||[]).map(d=>({id:d.id,min:!!d.min}));if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});}
     render();
   }
   function render() {
-    queueMicrotask(()=>{ensureProjectsToggle();renderProjects();const sel=selected()?.id||'';if(historyOpen&&sel!==historyFollow&&historyAgent&&sel)historyAgent=sel;historyFollow=sel;renderHistory();});
+    queueMicrotask(()=>{ensureProjectsToggle();renderProjects();renderDock();const sel=selected()?.id||'';if(historyOpen&&sel!==historyFollow&&historyAgent&&sel)historyAgent=sel;historyFollow=sel;renderHistory();});
     $('#agent-count').textContent=state.agents.length;
     $('#host-count').textContent=state.hosts.length;const vc=$('#vault-count');if(vc)vc.textContent=(state.opayaAgent?.secrets||[]).filter(k=>k.kept||k.global||k.stored?.length).length||'';
     $('.nav-overview').classList.toggle('selected',overview&&!opayaView&&!playgroundView);$('.nav-playground')?.classList.toggle('selected',playgroundView);$('.nav-opaya').classList.toggle('selected',opayaView);renderOpayaNav();
@@ -95,9 +96,10 @@
     const nav=groups.filter(g=>g[2].length).map(([key,name,all])=>{const closed=collapsedGroups.has(key),agents=closed?[]:all,busy=closed&&all.some(a=>a.busy);return `<button class="sidebar-section-label ${closed?'collapsed':''} ${key.startsWith('group:')?'custom-group':''}" data-action="toggle-group" data-group="${esc(key)}" aria-expanded="${!closed}" title="${closed?'Expand':'Collapse'} ${esc(name)} (right-click for group actions)"><span class="group-chevron" aria-hidden="true">&#9662;</span><span class="group-name">${esc(name)}</span>${busy?'<span class="status-dot working"></span>':''}<span class="group-count">${all.length}</span></button><div class="sidebar-group ${closed?'closed':''}">${closed?`<div class="collapsed-strip" data-section="${esc(key)}">${all.map(a=>`<button type="button" class="mini-agent ${a.id===current?'selected':''}" data-action="select" data-id="${esc(a.id)}" data-agent-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}" aria-label="${esc(title(a))}">${badge(a)}${dot(a)}</button>`).join('')}</div>`:''}${agents.map(a=>`<div class="agent-nav-row ${fresh(navSeen,a.id,now,650)?'enter':''}" style="--i:${row++}" data-agent-id="${esc(a.id)}" data-section="${esc(key)}" draggable="true"><button class="agent-nav ${!overview&&!opayaView&&!playgroundView&&a.id===state.activeAgentId?'selected':''} ${a.id===navSelected&&now-navSelectedAt<500?'just-selected':''}" data-action="select" data-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}">${badge(a)}<span class="agent-nav-text"><strong>${esc(title(a))}${trusted(a)?'<span class="itrust-mark" title="iTrust: approved automatically">iT</span>':''}</strong><small class="agent-nav-host">${esc(navSub(a))}</small></span>${dot(a)}</button><button type="button" class="agent-nav-manage" data-action="manage" data-id="${esc(a.id)}" title="Manage ${esc(title(a))}" aria-label="Manage ${esc(title(a))}">&#9881;</button></div>`).join('')}</div>`;}).join('')||'<div class="sidebar-empty"><span class="connection-dots"><i></i><i></i><i></i></span>Your agents will<br>feel at home here.</div>';
     if(nav!==navHtml){navHtml=nav;$('#agent-list').innerHTML=nav;}
     const a=selected();
-    if(overview||opayaView||playgroundView||!a||a.id!==manageId)manageId='';
+    // A left click opens an agent's management screen; Chat and Console are the other two ways to work with it.
+    const mode=!overview&&!opayaView&&!playgroundView&&a?modeOf(a):'';manageId=mode==='manage'?a.id:'';
     $('.nav-manage')?.classList.toggle('selected',!!manageId);
-    const stage=!opayaView&&!playgroundView&&!overview&&!!a&&!manageId&&surfaceOf(a)==='terminal';
+    const stage=mode==='console';
     if(stage!==document.body.classList.contains('terminal-stage')){document.body.classList.toggle('terminal-stage',stage);placePanes();}
     if(!stage)stageAgent='';
     // A view can rebuild its chat box while someone is typing (a new chat gets its id, the agent's details change).
@@ -134,7 +136,7 @@
     $('#topbar').innerHTML='<div class="breadcrumb">Workspace <span>/</span> Overview</div><div class="topbar-actions"><button class="subtle" data-action="connect-all" title="Connect every agent at once">Connect all</button><button class="subtle" data-action="install-catalog" title="Install agents here or on a VPS">&#8595; Install agents</button><button class="subtle" data-action="add" title="Add an agent or API connection by hand">+ Add connection</button><button class="subtle" data-action="hosts">Machines</button><button class="secondary" data-action="discover"><span class="radar-icon"></span> Discover agents</button></div>';
     const connected=state.agents.filter(a=>a.status==='connected').length,entering=renderKey!=='overview';
     contentKind('overview');
-    const html=`<div class="workspace-heading"><div><div class="eyebrow"><span class="tiny-square"></span> YOUR AGENT WORKSPACE</div><h1>One place.<br>All your agents.</h1><p>From the machine in front of you to the server across the world.<br>Connect, switch, and keep the conversation going.</p></div><div class="workspace-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="art-center"><span class="opaya-mark large"><img src="assets/opaya-logo.png" alt=""><i></i></span></div><span class="art-node node-one">${providerIcon('hermes')}</span><span class="art-node node-two">${providerIcon('codex')}</span><span class="art-node node-three">${providerIcon('claude')}</span><span class="art-node node-four">${providerIcon('openclaw')}</span><span class="orbit-signal"></span></div></div><div class="workspace-stats"><div><span class="status-dot connected"></span><strong>${connected}</strong> connected</div><div><span class="machine-icon"></span><strong>${state.hosts.length}</strong> remote machines</div><div><span class="terminal-glyph">&gt;_</span> Native terminal built in</div><div class="stats-private"><span class="lock-symbol">&#9906;</span> Private by default</div></div>${workspaceControls()}<div class="section-heading"><div><h2>Your agents <span>${state.agents.length}</span></h2><p>Different runtimes. One familiar workspace.</p></div><div class="section-actions"><button class="text-button" data-action="install-catalog">&#8595; Install agents</button><button class="text-button" data-action="add">+ Add connection</button></div></div><div class="ws-filters"><label class="ws-search"><span class="search-icon" aria-hidden="true"></span><input id="ws-search" value="${esc(wsQuery)}" placeholder="Filter agents" aria-label="Filter agents" autocomplete="off" spellcheck="false"></label>${[['','All'],['connected','Connected'],['attention','Needs attention'],['offline','Not connected']].map(([v,l])=>`<button type="button" class="tag-chip ${wsStatus===v?'active':''}" data-action="ws-status" data-value="${v}">${l} <small>${wsCount('status',v)}</small></button>`).join('')}<span class="ws-filter-gap"></span>${[['','Everywhere'],['local','This computer'],['vps','VPS'],['docker','Docker'],['api','API']].filter(([v])=>!v||state.agents.some(a=>wsPlaceOf(a)===v)).map(([v,l])=>`<button type="button" class="tag-chip ${wsPlace===v?'active':''}" data-action="ws-place" data-value="${v}">${l} <small>${wsCount('place',v)}</small></button>`).join('')}${allTags().length?`<span class="ws-filter-gap"></span>${allTags().map(t=>`<button class="tag-chip ${t===tagFilter?'active':''}" data-action="tag-filter" data-tag="${esc(t)}">#${esc(t)}</button>`).join('')}`:''}</div>${(n=>n&&n<state.agents.length?`<div class="ws-showing">Showing ${n} of ${state.agents.length} agents. <button type="button" class="text-button" data-action="ws-clear">Show all</button></div>`:'')(wsAgents().length)}<div class="agent-grid">${wsAgents().map((a,i)=>`<article class="agent-card" data-agent-id="${esc(a.id)}" style="--i:${i}"><div class="card-top">${badge(a,true)}<span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span></div><h3>${esc(title(a))}</h3><div class="agent-card-meta">${meta(a)}</div><p>${esc(description(a))}</p>${a.tags?.length?`<div class="card-tags">${tagChips(a)}</div>`:''}<div class="card-connection">${envIcon(a)}${esc(connectionLabel(a))}</div>${a.error?`<p class="card-error" title="${esc(a.error)}">${esc(a.error)}</p>`:''}<div class="card-quick"><button type="button" class="${a.status==='connected'?'secondary':'primary'}" data-action="card-connect" data-id="${esc(a.id)}" ${a.status==='connecting'?'disabled':''}>${a.status==='connected'?'Disconnect':a.status==='connecting'?'Connecting...':'Connect'}</button><button type="button" class="secondary" data-action="select" data-id="${esc(a.id)}" title="Open ${esc(title(a))}">${surfaceOf(a)==='terminal'?'&gt;_ Open':'Chat'}</button><button type="button" class="secondary" data-action="card-terminal" data-id="${esc(a.id)}" title="${esc(hasCli(a)?`Open ${title(a)}'s CLI`:'Open a shell')}">&gt;_ Terminal</button><button type="button" class="secondary" data-action="manage" data-id="${esc(a.id)}" title="Update, skills, clone, back up, uninstall and more">&#9881; Manage</button>${a.error?`<button type="button" class="secondary" data-action="card-fix" data-id="${esc(a.id)}" title="The Opaya Agent checks it end to end and fixes it">&#10038; Fix</button>`:''}</div>${a.group?`<span class="card-group">${esc(a.group)}</span>`:''}</article>`).join('')}${wsAgents().length||!state.agents.length?'':'<div class="ws-none">No agent matches these filters. <button type="button" class="text-button" data-action="ws-clear">Show all</button></div>'}<button class="add-card" data-action="add" style="--i:${state.agents.length}"><span class="add-card-plus">+</span><strong>${state.agents.length?'Make room for another.':'Meet your first agent.'}</strong><small>Hermes, Codex, Claude, OpenClaw<br>or any ACP / compatible API agent.</small><span class="add-card-link">Add an agent &#8594;</span></button></div>${!state.agents.length?'<div class="getting-started"><span class="step-number">01</span><div><strong>Already have agents installed?</strong><p>Discover checks known install folders, CLI tools and local API ports. Review what it finds before connecting.</p></div><button class="secondary" data-action="discover">Discover this computer</button></div>':''}<div class="workspace-footnote">No account to create. No credentials to route through someone else\'s server. Just your agents, connected.</div>`;
+    const html=`<div class="workspace-heading"><div><div class="eyebrow"><span class="tiny-square"></span> YOUR AGENT WORKSPACE</div><h1>One place.<br>All your agents.</h1><p>From the machine in front of you to the server across the world.<br>Connect, switch, and keep the conversation going.</p></div><div class="workspace-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="art-center"><span class="opaya-mark large"><img src="assets/opaya-logo.png" alt=""><i></i></span></div><span class="art-node node-one">${providerIcon('hermes')}</span><span class="art-node node-two">${providerIcon('codex')}</span><span class="art-node node-three">${providerIcon('claude')}</span><span class="art-node node-four">${providerIcon('openclaw')}</span><span class="orbit-signal"></span></div></div><div class="workspace-stats"><div><span class="status-dot connected"></span><strong>${connected}</strong> connected</div><div><span class="machine-icon"></span><strong>${state.hosts.length}</strong> remote machines</div><div><span class="terminal-glyph">&gt;_</span> Native terminal built in</div><div class="stats-private"><span class="lock-symbol">&#9906;</span> Private by default</div></div>${workspaceControls()}<div class="section-heading"><div><h2>Your agents <span>${state.agents.length}</span></h2><p>Different runtimes. One familiar workspace.</p></div><div class="section-actions"><button class="text-button" data-action="install-catalog">&#8595; Install agents</button><button class="text-button" data-action="add">+ Add connection</button></div></div><div class="ws-filters"><label class="ws-search"><span class="search-icon" aria-hidden="true"></span><input id="ws-search" value="${esc(wsQuery)}" placeholder="Filter agents" aria-label="Filter agents" autocomplete="off" spellcheck="false"></label>${[['','All'],['connected','Connected'],['attention','Needs attention'],['offline','Not connected']].map(([v,l])=>`<button type="button" class="tag-chip ${wsStatus===v?'active':''}" data-action="ws-status" data-value="${v}">${l} <small>${wsCount('status',v)}</small></button>`).join('')}<span class="ws-filter-gap"></span>${[['','Everywhere'],['local','This computer'],['vps','VPS'],['docker','Docker'],['api','API']].filter(([v])=>!v||state.agents.some(a=>wsPlaceOf(a)===v)).map(([v,l])=>`<button type="button" class="tag-chip ${wsPlace===v?'active':''}" data-action="ws-place" data-value="${v}">${l} <small>${wsCount('place',v)}</small></button>`).join('')}${allTags().length?`<span class="ws-filter-gap"></span>${allTags().map(t=>`<button class="tag-chip ${t===tagFilter?'active':''}" data-action="tag-filter" data-tag="${esc(t)}">#${esc(t)}</button>`).join('')}`:''}</div>${(n=>n&&n<state.agents.length?`<div class="ws-showing">Showing ${n} of ${state.agents.length} agents. <button type="button" class="text-button" data-action="ws-clear">Show all</button></div>`:'')(wsAgents().length)}<div class="agent-grid">${wsAgents().map((a,i)=>`<article class="agent-card" data-agent-id="${esc(a.id)}" style="--i:${i}"><div class="card-top">${badge(a,true)}<span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span></div><h3>${esc(title(a))}</h3><div class="agent-card-meta">${meta(a)}</div><p>${esc(description(a))}</p>${a.tags?.length?`<div class="card-tags">${tagChips(a)}</div>`:''}<div class="card-connection">${envIcon(a)}${esc(connectionLabel(a))}</div>${a.error?`<p class="card-error" title="${esc(a.error)}">${esc(a.error)}</p>`:''}<div class="card-quick"><button type="button" class="${a.status==='connected'?'secondary':'primary'}" data-action="card-connect" data-id="${esc(a.id)}" ${a.status==='connecting'?'disabled':''}>${a.status==='connected'?'Disconnect':a.status==='connecting'?'Connecting...':'Connect'}</button><button type="button" class="secondary" data-action="select" data-id="${esc(a.id)}" title="Open ${esc(title(a))}">Manage</button><button type="button" class="secondary" data-action="card-terminal" data-id="${esc(a.id)}" title="${esc(hasCli(a)?`Open ${title(a)}'s CLI`:'Open a shell')}">&gt;_ Terminal</button><button type="button" class="secondary" data-action="manage" data-id="${esc(a.id)}" title="Update, skills, clone, back up, uninstall and more">&#9881; Manage</button>${a.error?`<button type="button" class="secondary" data-action="card-fix" data-id="${esc(a.id)}" title="The Opaya Agent checks it end to end and fixes it">&#10038; Fix</button>`:''}</div>${a.group?`<span class="card-group">${esc(a.group)}</span>`:''}</article>`).join('')}${wsAgents().length||!state.agents.length?'':'<div class="ws-none">No agent matches these filters. <button type="button" class="text-button" data-action="ws-clear">Show all</button></div>'}<button class="add-card" data-action="add" style="--i:${state.agents.length}"><span class="add-card-plus">+</span><strong>${state.agents.length?'Make room for another.':'Meet your first agent.'}</strong><small>Hermes, Codex, Claude, OpenClaw<br>or any ACP / compatible API agent.</small><span class="add-card-link">Add an agent &#8594;</span></button></div>${!state.agents.length?'<div class="getting-started"><span class="step-number">01</span><div><strong>Already have agents installed?</strong><p>Discover checks known install folders, CLI tools and local API ports. Review what it finds before connecting.</p></div><button class="secondary" data-action="discover">Discover this computer</button></div>':''}<div class="workspace-footnote">No account to create. No credentials to route through someone else\'s server. Just your agents, connected.</div>`;
     if(entering||html!==overviewHtml){const searching=document.activeElement?.id==='ws-search'?document.activeElement:null,caret=searching&&[searching.selectionStart,searching.selectionEnd];overviewHtml=html;$('#content').innerHTML=html;if(searching){const box=$('#ws-search');box?.focus({preventScroll:true});box?.setSelectionRange(...caret);}}
     if(entering)enter($('#content'));
     renderKey='overview';
@@ -143,7 +145,7 @@
   // Entering an agent opens (or brings back) its CLI once; after that the user decides what runs where.
   const stageOpening=new Set();
   function renderAgentTerminal(a){
-    $('#topbar').innerHTML=`<div class="breadcrumb">Agents <span>/</span> <strong>${esc(title(a))}</strong> <span class="stage-mode">Terminal</span></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span><button class="subtle" data-action="files-agent" data-id="${esc(a.id)}" title="Browse this agent's folders"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="skills" data-id="${esc(a.id)}" title="Skills, tools and MCP servers"><span aria-hidden="true">&#10022;</span> Skills</button><button class="subtle" data-action="edit" data-id="${esc(a.id)}" title="How Opaya connects to ${esc(title(a))}"><span aria-hidden="true">&#8644;</span> Connection</button><button class="secondary manage-button" data-action="manage" data-id="${esc(a.id)}" title="Every option for this agent (${mod()}Shift+M)"><span aria-hidden="true">&#9881;</span> Manage</button></div>`;
+    $('#topbar').innerHTML=`<div class="breadcrumb">Agents <span>/</span> <strong>${esc(title(a))}</strong> <span class="stage-mode">Console</span></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span>${gridPicker()}${modeSwitch(a)}</div>`;
     contentKind('stage');if(renderKey!=='stage:'+a.id){$('#content').innerHTML='';renderKey='stage:'+a.id;}
     $('#terminal-panel').hidden=false;
     if(stageAgent===a.id)return;stageAgent=a.id;
@@ -151,10 +153,10 @@
     // Someone typing in a form or dialog keeps the keyboard when the stage follows another agent.
     if(cli||mine[0]){activateTerminal((cli||mine[0]).id,{focus:!typingElsewhere()});return;}
     if(stageOpening.has(a.id))return;stageOpening.add(a.id);
-    openTerminal({agentId:a.id,mode:'agent'}).catch(error=>toast(error.message,true)).finally(()=>stageOpening.delete(a.id));
+    openTerminal(hasCli(a)?{agentId:a.id,mode:'agent'}:{agentId:a.id}).catch(error=>toast(error.message,true)).finally(()=>stageOpening.delete(a.id));
   }
   function renderAgent(a) {
-    const proj=projectOf(currentConversation());$('#topbar').innerHTML=`<div class="breadcrumb">${proj?`<button type="button" class="crumb-project" data-action="project-focus" data-id="${esc(proj.id)}" title="${esc(proj.path)}"><span class="project-folder" aria-hidden="true"></span>${esc(proj.name)}</button>`:'Agents'} <span>/</span> <strong>${esc(title(a))}</strong></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span>${trusted(a)?`<button type="button" class="itrust-pill" data-action="itrust-agent" data-id="${esc(a.id)}" title="iTrust is on: ${esc(title(a))}'s tool requests are approved automatically. Click to change.">iTrust</button>`:''}<button class="subtle" data-action="files-agent" data-id="${esc(a.id)}" title="Browse ${esc(title(a))}'s folders"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="skills" data-id="${esc(a.id)}" title="Skills, tools and MCP servers"><span aria-hidden="true">&#10022;</span> Skills</button>${['hermes','openclaw'].includes(a.provider)?'<button class="subtle" data-action="gateway" title="Gateway status and restart"><span aria-hidden="true">&#9889;</span> Gateway</button>':''}<button class="subtle" data-action="edit" data-id="${esc(a.id)}" title="How Opaya connects to ${esc(title(a))}"><span aria-hidden="true">&#8644;</span> Connection</button><button class="secondary manage-button" data-action="manage" data-id="${esc(a.id)}" title="Every option for this agent: skills, files, update, back up, clone, uninstall and more (${mod()}Shift+M)"><span aria-hidden="true">&#9881;</span> Manage</button></div>`;
+    const proj=projectOf(currentConversation());$('#topbar').innerHTML=`<div class="breadcrumb">${proj?`<button type="button" class="crumb-project" data-action="project-focus" data-id="${esc(proj.id)}" title="${esc(proj.path)}"><span class="project-folder" aria-hidden="true"></span>${esc(proj.name)}</button>`:'Agents'} <span>/</span> <strong>${esc(title(a))}</strong></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span>${trusted(a)?`<button type="button" class="itrust-pill" data-action="itrust-agent" data-id="${esc(a.id)}" title="iTrust is on: ${esc(title(a))}'s tool requests are approved automatically. Click to change.">iTrust</button>`:''}<button class="subtle" data-action="files-agent" data-id="${esc(a.id)}" title="Browse ${esc(title(a))}'s folders"><span class="folder-glyph" aria-hidden="true"></span> Files</button><button class="subtle" data-action="skills" data-id="${esc(a.id)}" title="Skills, tools and MCP servers"><span aria-hidden="true">&#10022;</span> Skills</button>${['hermes','openclaw'].includes(a.provider)?'<button class="subtle" data-action="gateway" title="Gateway status and restart"><span aria-hidden="true">&#9889;</span> Gateway</button>':''}<button class="subtle" data-action="edit" data-id="${esc(a.id)}" title="How Opaya connects to ${esc(title(a))}"><span aria-hidden="true">&#8644;</span> Connection</button>${modeSwitch(a)}</div>`;
     contentKind('conversation');
     if(renderKey!==JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId])) {
       $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity">${badge(a,true)}<div><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p><div class="identity-meta">${meta(a)}${a.tags?.length?`<span class="heading-tags">${tagChips(a,6)}</span>`:''}</div></div></div><div class="conversation-controls"><select id="conversation-picker" aria-label="Conversation history" title="Switch between this agent's conversations"></select><button class="icon-button" data-action="new-conversation" title="New conversation (Ctrl + N)" aria-label="New conversation">+</button><button class="icon-button" data-action="export" title="Export this conversation as Markdown" aria-label="Export conversation">&#8595;</button><button class="icon-button history-button" data-action="history-toggle" title="Chat history (${mod()}Shift+H)" aria-label="Chat history"><span class="history-glyph" aria-hidden="true"></span></button>${a.install?.framework==='dsh'?'<button class="secondary" data-action="dsh-web" title="Open DeepSeek Harness\'s own Web UI in the Opaya browser">Web UI</button>':''}<button id="connect-button" class="secondary" data-action="connect"></button></div></div><div id="connection-banner"></div><div id="message-list" class="message-list"></div><div class="compose-area"><form id="message-form"><div id="compose-files" class="compose-files" hidden></div><textarea id="message-input" placeholder="Message ${esc(title(a))}..." aria-label="Message ${esc(title(a))}" rows="2" maxlength="80000"></textarea><div class="compose-bottom"><div class="compose-tools"><button type="button" class="compose-tool" data-action="compose-attach" title="Attach files (you can also drop files here or paste a screenshot)" aria-label="Attach files"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button><button type="button" class="compose-tool" data-action="compose-secret" title="Keys: see the keys this agent has, insert one into your message, or give it a new one" aria-label="This agent's keys"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3M16 7l3 3M13.5 9.5l2 2"/></svg></button><button type="button" id="compose-model" class="compose-chip" data-action="compose-model" title="Model for this chat"></button><button type="button" id="compose-effort" class="compose-chip" data-action="compose-effort" title="Reasoning effort for this chat" hidden></button><span id="compose-hint"></span></div><button type="button" id="stop-button" class="stop-button" data-action="stop" title="Stop this turn" hidden><span>&#9632;</span> Stop</button><button id="send-button" type="submit" class="send-button" title="Send message (Enter)" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption"><span class="send-caption">${sendCaption()}</span> <span>&#183;</span> Conversations stay on this computer</p></div>`;
@@ -389,10 +391,13 @@
     const image=i=>{const ref=i.repository&&i.repository!=='<none>'?`${i.repository}${i.tag&&i.tag!=='<none>'?':'+i.tag:''}`:i.id;return `<div class="docker-row image"><div class="docker-main"><strong>${esc(ref)}</strong><small>${esc(i.size)} / ${esc(i.created)}</small></div><div class="docker-actions"><button type="button" class="subtle docker-btn danger-text" data-action="docker-do" data-do="remove-image" data-id="${esc(key)}" data-name="${esc(ref)}" title="Remove this image">&#10005;</button></div></div>`;};
     return `${head}<section class="docker-group"><h3>Containers <small>${r.containers.length}</small></h3>${r.containers.length?`<div class="docker-list">${r.containers.map(row).join('')}</div>`:'<p class="field-help">No containers on this machine yet. Install agents can set one up in Docker.</p>'}</section>${r.images.length?`<details class="docker-group"><summary>Images <small>${r.images.length}</small></summary><div class="docker-list">${r.images.map(image).join('')}</div></details>`:''}`;
   }
-  function paintDocker(key){const box=$('#docker-manager');if(box&&box.dataset.key===key)box.innerHTML=dockerBody(key);}
+  function paintDocker(key){const box=$('#docker-manager');if(box&&box.dataset.key===key)box.innerHTML=dockerBody(key);const mg=$('#mg-docker'),a=selected();if(mg&&mg.dataset.key===key&&manageId&&a&&a.install?.kind!=='remote-api')mg.innerHTML=dockerPanel(a);}
+  // The images list on the management screen stays open or closed across refreshes.
+  document.addEventListener('toggle',event=>{const d=event.target;if(d.classList?.contains('mg-images')){const v=dockerViews.get(d.dataset.key);if(v)v.imagesOpen=d.open;}},true);
   async function loadDocker(key){
     dockerViews.set(key,{...dockerViews.get(key),loading:true,error:''});paintDocker(key);
-    try{dockerViews.set(key,{result:await api.dockerList({hostId:key==='local'?undefined:key})});}
+    // The management screen's Live switch and open images list survive a refresh.
+    try{const result=await api.dockerList({hostId:key==='local'?undefined:key}),prev=dockerViews.get(key)||{};dockerViews.set(key,{statsOff:prev.statsOff,imagesOpen:prev.imagesOpen,result});}
     catch(error){dockerViews.set(key,{...dockerViews.get(key),loading:false,error:error.message});}
     paintDocker(key);
   }
@@ -408,8 +413,10 @@
     if(what==='remove'&&!await ask(`Remove container ${name} on ${machine}?\n\nA running container is stopped first. Data in its volumes and mounted folders stays; everything else inside the container is deleted.${warn}`))return;
     if(what==='stop'&&agents.length&&!await ask(`Stop container ${name} on ${machine}?${warn} It stops answering until you start the container again.`))return;
     if(what==='remove-image'&&!await ask(`Remove image ${name} on ${machine}?\n\nDocker refuses if a container still uses it. It can be downloaded again.`))return;
+    if(what==='prune'&&!await ask(`Remove unused images on ${machine}?\n\nOnly images no container uses and that have no name (dangling) are removed. They can be downloaded again.`))return;
+    if(what==='pull')toast(`Downloading the newest ${name} on ${machine}...`);
     dockerViews.set(key,{...dockerViews.get(key),loading:true});paintDocker(key);
-    try{await api.dockerAction({hostId:key==='local'?undefined:key,container:name,action:what});toast({start:'Started',stop:'Stopped',restart:'Restarted',remove:'Removed','remove-image':'Removed'}[what]+` ${name}.`);}
+    try{await api.dockerAction({hostId:key==='local'?undefined:key,container:name,action:what});toast(what==='prune'?`Unused images removed on ${machine}.`:{start:'Started',stop:'Stopped',restart:'Restarted',pause:'Paused',unpause:'Resumed',pull:'Pulled the newest',remove:'Removed','remove-image':'Removed'}[what]+` ${name}.${what==='pull'?' Restart or update its container to use it.':''}`);}
     catch(error){toast(error.message,true);}
     await loadDocker(key);
   }
@@ -441,7 +448,7 @@
     const toggle=(key,label,hint='',dflt=true)=>`<label class="switch-row"><input type="checkbox" data-setting="${key}" ${on(key,dflt)?'checked':''}><span class="switch" aria-hidden="true"></span><span>${label}${hint?` <small>(${hint})</small>`:''}</span></label>`;
     const choice=(act,value,current,label,small,extra='')=>`<button type="button" class="theme-option compact ${current?'selected':''}" data-action="${act}" data-value="${value}" ${extra}><strong>${label}</strong><small>${small}</small></button>`;
     modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid">
-      <section class="settings-wide"><h3>Workspace style</h3><p class="settings-copy">How agents open when you select them. Each agent can differ: right-click it &gt; Open as chat / Open as terminal. API connections always chat.</p><div class="theme-options"><button class="theme-option ${(st.interface||'chat')==='chat'?'selected':''}" data-action="interface" data-value="chat"><span class="interface-preview chat mini" aria-hidden="true"><i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-input"></i></span><strong>Chat</strong><small>Conversations, history and projects</small></button><button class="theme-option ${st.interface==='terminal'?'selected':''}" data-action="interface" data-value="terminal"><span class="interface-preview terminal mini" aria-hidden="true"><i class="ip-line"></i><i class="ip-line w2"></i><i class="ip-cursor"></i></span><strong>Terminal</strong><small>Each agent's own CLI, full size</small></button></div></section>
+      <section class="settings-wide"><h3>Chat opens as</h3><p class="settings-copy">Selecting an agent opens its management screen. Chat and Console sit next to Manage at the top; this chooses what Chat opens. A chat window can always be expanded to the full view.</p><div class="theme-options"><button class="theme-option ${st.chatOpens!=='full'?'selected':''}" data-action="chat-opens" data-value="window"><span class="interface-preview chat mini" aria-hidden="true"><i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-input"></i></span><strong>A chat window</strong><small>Docked at the bottom, several at once</small></button><button class="theme-option ${st.chatOpens==='full'?'selected':''}" data-action="chat-opens" data-value="full"><span class="interface-preview chat mini" aria-hidden="true"><i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-bubble l short"></i><i class="ip-input"></i></span><strong>The full chat view</strong><small>History, projects and files in the main area</small></button></div></section>
       <section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section>
       <section><h3>Notifications</h3><p class="settings-copy">System notifications while Opaya is not in front: hidden, minimized or behind another app. Click one to open that chat.</p>${toggle('notifyReplies','When an agent or the Opaya Agent replies')}${toggle('notifyApprovals','When something waits for your approval')}${toggle('notifyJobs','When installs, clones, updates and fixes finish')}${toggle('notifySound','With sound')}</section>
       <section><h3>Chat</h3><p class="settings-copy">How the message box sends. Models, reasoning effort and attachments are under each chat's message box.</p><div class="theme-options">${choice('send-key','enter',(st.sendKey||'enter')==='enter','Enter sends','Shift+Enter: new line')}${choice('send-key','mod-enter',st.sendKey==='mod-enter',`${mod()}Enter sends`,'Enter: new line')}</div>${toggle('tips','Tips from Opaya','now and then, when something useful applies')}</section>
@@ -473,7 +480,7 @@
   // that already shows it.
   let panes=[''],paneSizes=[1],paneFocus=0;
   const MIN_PANE=240;
-  const maxPanes=()=>Math.max(1,Math.floor(($('#terminal-views')?.clientWidth||960)/MIN_PANE));
+  const maxPanes=()=>gridCells()||Math.max(1,Math.floor(($('#terminal-views')?.clientWidth||960)/MIN_PANE));
   function paneRoot(){
     let root=$('#terminal-panes');
     if(!root){root=document.createElement('div');root.id='terminal-panes';root.className='terminal-panes';$('#terminal-views').prepend(root);
@@ -487,6 +494,8 @@
     panes=panes.map(id=>terminalViews.has(id)&&!terminalViews.get(id).poppedOut?id:'');
     // Several panes never show the same terminal, and empty panes go away while others remain.
     panes=panes.map((id,i)=>id&&panes.indexOf(id)!==i?'':id);
+    // A grid keeps its cells, empty ones too; sessions beyond its cells go back to their tabs.
+    if(gridCells()){const n=gridCells();panes=panes.slice(0,n);while(panes.length<n)panes.push('');paneSizes=panes.map(()=>1);paneFocus=Math.min(Math.max(0,paneFocus),n-1);return;}
     if(panes.length>1){const keep=panes.map((id,i)=>[id,paneSizes[i]||1]).filter(([id])=>id);if(keep.length){paneFocus=Math.max(0,keep.findIndex(([id])=>id===panes[paneFocus]));panes=keep.map(k=>k[0]);paneSizes=keep.map(k=>k[1]);}else{panes=[''];paneSizes=[1];}}
     if(!panes.length){panes=[''];paneSizes=[1];}
     paneSizes=panes.map((_,i)=>paneSizes[i]>0?paneSizes[i]:1);paneFocus=Math.min(Math.max(0,paneFocus),panes.length-1);
@@ -510,7 +519,7 @@
       if(view){if(view.element.parentElement!==body){body.replaceChildren(view.element);}view.element.hidden=false;}
       else if(!body.querySelector('.terminal-placeholder')){const ph=document.createElement('div');ph.className='terminal-placeholder';ph.innerHTML='<div><p>No session here. Every other session keeps running in its tab.</p><div class="placeholder-actions"><button type="button" class="secondary" data-action="terminal-cli"><span class="term-play" aria-hidden="true"></span> Agent CLI</button><button type="button" class="secondary" data-action="terminal-shell">+ Shell</button></div><small>Right-click a terminal to open another beside it.</small></div>';body.replaceChildren(ph);}
     });
-    root.classList.toggle('split',panes.length>1);
+    root.classList.toggle('split',panes.length>1);applyGrid();
     for(const view of terminalViews.values())if(!panes.includes(view.id)&&view.element.parentElement!==pool){view.element.hidden=true;pool.append(view.element);}
     markPanes();
     for(const id of panes){const view=terminalViews.get(id);if(view&&!view.poppedOut)requestAnimationFrame(()=>{if(!view.exited)view.core.fitAndReport(view.report);else{try{view.fit.fit();}catch{}}});}
@@ -547,6 +556,8 @@
   // Put `id` in a new pane left or right of pane `index`. Returns false when there is no room.
   function insertPane(id,dir,index=paneFocus){
     normalizePanes();
+    // In a grid a new session takes the first empty cell, else the focused one.
+    if(gridCells()){const from=panes.indexOf(id);if(from>=0){paneFocus=from;return true;}const empty=panes.indexOf('');paneFocus=empty>=0?empty:index;panes[paneFocus]=id;return true;}
     const from=panes.indexOf(id);if(from>=0&&panes.length===1)return true;
     if(from<0&&panes.length>=maxPanes()){toast('No room for another terminal side by side. Close a pane or widen the window.');return false;}
     if(from>=0){panes.splice(from,1);const [size]=paneSizes.splice(from,1);if(from<index)index--;paneSizes[Math.min(index,paneSizes.length-1)]+=size;}
@@ -568,7 +579,7 @@
   }
   function showInSplit(id,dir,index=paneFocus){if(insertPane(id,dir,index))activateTerminal(id);saveView();}
   function closePane(i){
-    normalizePanes();if(panes.length<2)return;
+    normalizePanes();if(gridCells()){panes[i]='';paneFocus=i;activateTerminal('');saveView();return;}if(panes.length<2)return;
     const [size]=paneSizes.splice(i,1);panes.splice(i,1);paneSizes[Math.max(0,i-1)]+=size;
     paneFocus=Math.max(0,Math.min(paneFocus>=i?paneFocus-1:paneFocus,panes.length-1));
     activateTerminal(panes[paneFocus]);saveView();
@@ -788,6 +799,20 @@
     if(name==='agent-menu'){const a=state.agents.find(a=>a.id===id);if(a){const r=button.getBoundingClientRect();openMenu(r.left,r.bottom+4,agentMenu(a),title(a),button.closest('[data-agent-id]'));}return;}
     if(name==='hosts'){openHosts();return;}
     if(name==='manage'){openManage(id);return;}
+    if(name==='agent-mode'){const a=state.agents.find(x=>x.id===id);if(a)action(()=>setAgentMode(a,button.dataset.mode));return;}
+    if(name==='chat-new'){const a=state.agents.find(x=>x.id===id);if(a)action(()=>newDockChat(a));return;}
+    if(name==='chat-open'){const c=dockConv(id),a=c&&state.agents.find(x=>x.id===c.agentId);if(a)action(()=>openChatWindow(a,c.id));return;}
+    if(name==='deploy'){const a=state.agents.find(x=>x.id===id);if(a)action(()=>deployTo(a,button.dataset.deployHost||'',button.dataset.deployRuntime||'regular',$('.mg-card')||button,button));return;}
+    if(name==='dockerize'){const a=state.agents.find(x=>x.id===id),cta=button.closest('.mg-dockerize');if(a)action(()=>deployTo(a,cta?.dataset.deployHost||'','docker',$('.mg-card')||button,cta||button));return;}
+    if(name==='docker-inspect'){dockerInspect(id,button.dataset.name);return;}
+    if(name==='docker-prune'){dockerDo(id,'','prune');return;}
+    if(name==='docker-live'){const v=dockerViews.get(id);if(v){v.statsOff=!button.checked;if(button.checked)loadDockerStats(id);}return;}
+    if(name==='git-run'){const p=(state.projects||[]).find(x=>x.id===id);if(p)action(()=>pushProject(p,button.dataset.git,button));return;}
+    if(name==='git-more'){const p=(state.projects||[]).find(x=>x.id===id);if(p){const r=button.getBoundingClientRect();openMenu(r.left,r.bottom+4,gitMenu(p),p.name);}return;}
+    if(name==='project-chat'){const p=(state.projects||[]).find(x=>x.id===id);if(p)action(()=>startProjectChat(p,button.dataset.agent));return;}
+    if(name==='key-menu'){keyMenu(button,id);return;}
+    if(name==='terminal-grid'){openToolbarMenu(button,[...Object.keys(GRIDS).map(g=>({icon:gridIcon(g),label:GRIDS[g][0]+((layout.grid||'row')===g?'  \u2713':''),run:()=>setGrid(g)})),'-',{icon:'+',label:'Fill empty cells',disabled:!gridCells()||!panes.includes(''),run:()=>fillGrid()}],'Layout');return;}
+    if(name==='terminal-grid-set'){setGrid(button.dataset.grid);return;}
     if(name==='send-key'){action(async()=>{await api.saveSettings({sendKey:button.dataset.value});await refresh();openSettings();toast(button.dataset.value==='mod-enter'?`${mod()}Enter sends; Enter starts a new line.`:'Enter sends; Shift+Enter starts a new line.');});return;}
     if(name==='font-step'){const size=Math.max(8,Math.min(28,terminalFont+Number(button.dataset.step)));applyFont(size);const out=$('#settings-font');if(out)out.textContent=size+'px';return;}
     if(name==='terminal-place'){if((layout.terminal==='right'?'right':'bottom')!==button.dataset.value)moveDock('terminal');openSettings();return;}
@@ -811,8 +836,7 @@
     if(name==='select'&&manageId&&button.closest('#agent-list')){openManage(id);return;}
     if(name==='project-remote'){const p=(state.projects||[]).find(x=>x.id===id);if(p)openProjectAgents(p);return;}
     if(name==='copy-send'||name==='copy-bring'){const p=(state.projects||[]).find(x=>x.id===id),a=state.agents.find(x=>x.id===button.dataset.agent);if(p&&a)action(()=>name==='copy-send'?sendToRemote(p,a):bringFromRemote(p,a));return;}
-    if(name==='surface'){const a=state.agents.find(x=>x.id===id);if(a)action(()=>setSurface(a,button.dataset.surface));return;}
-    if(name==='interface'){action(()=>chooseInterface(button.dataset.value,button.closest('#interface-chooser')?'first':'settings'));return;}
+    if(name==='chat-opens'){action(async()=>{await api.saveSettings({chatOpens:button.dataset.value});await refresh();openSettings();toast(button.dataset.value==='full'?'Chat opens the full chat view.':'Chat opens a chat window.');});return;}
     if(name==='manage-run'){const item=manageKeyed[button.dataset.key];if(item&&!item.disabled)action(()=>item.run());return;}
     if(name==='local-machine'){openLocalMachine();return;}
     if(name==='docker-manager'){openDocker(id);return;}
@@ -848,12 +872,12 @@
     if(name==='terminal-more'){openToolbarMenu(button,terminalMoreMenu(),'Terminal');return;}
     if(name==='terminal-split'){action(()=>panes.filter(Boolean).length?splitTerminal('right'):openTerminal({...(selected()&&!overview?{agentId:selected().id}:{local:true})}));return;}
     action(async()=>{
-      if(name==='select'||name==='switch-select'){overview=false;opayaView=false;playgroundView=false;manageId='';closeModal();await api.select({id});render();saveView();}
+      if(name==='select'||name==='switch-select'){closeModal();await openManage(id);}
       else if(name==='connect-all')await connectAll();
       else if(name==='stop-agent')await api.stop({id});
       else if(name==='pg-connect')await api.connect({id});
       else if(name==='pg-stop'){for(const agentId of pgAgents)if(state.agents.find(a=>a.id===agentId)?.busy)await api.stop({id:agentId});}
-      else if(name==='pg-open'){await api.selectConversation({id});overview=false;opayaView=false;playgroundView=false;render();saveView();}
+      else if(name==='pg-open'){const c=state.conversations.find(x=>x.id===id);if(c)agentModes.set(c.agentId,'chat');await api.selectConversation({id});overview=false;opayaView=false;playgroundView=false;render();saveView();}
       else if(name==='opaya-clear')await api.opayaClear();
       else if(name==='opaya-stop')await api.opayaStop();
       else if(name==='opaya-forget-key'){await api.opayaForgetKey();openOpayaConfig();toast('Saved key removed.');}
@@ -892,10 +916,10 @@
     if(event.key.toLowerCase()==='b'&&!event.shiftKey&&(state.platform==='darwin'?event.metaKey:event.ctrlKey&&!viewOf(document.activeElement))&&!$('#app-dialog')){event.preventDefault();toggleSidebar();return;}
     if(event.shiftKey&&event.key.toLowerCase()==='m'&&selected()&&!$('#app-dialog')){event.preventDefault();openManage(selected().id);return;}
     if($('#app-dialog'))return;
-    if(event.key.toLowerCase()==='n'&&selected()){event.preventDefault();action(()=>api.newConversation({agentId:selected().id}));}
+    if(event.key.toLowerCase()==='n'&&selected()){event.preventDefault();const a=selected();action(()=>!overview&&!opayaView&&!playgroundView&&modeOf(a)==='chat'?api.newConversation({agentId:a.id}):newDockChat(a));}
     if(event.key==='`'){event.preventDefault();if(!$('#terminal-panel').hidden)$('#terminal-panel').hidden=true;else action(()=>currentTerminal&&terminalViews.has(currentTerminal)?($('#terminal-panel').hidden=false,activateTerminal(currentTerminal)):agentTerminal());}
     // Chosen from inside a terminal, the terminal panel still follows the choice (followSelectedAgent keeps a focused one).
-    if(/^[1-9]$/.test(event.key)&&state.agents[Number(event.key)-1]){event.preventDefault();overview=false;opayaView=false;playgroundView=false;const id=state.agents[Number(event.key)-1].id;if(id!==state.activeAgentId&&viewOf(document.activeElement))document.activeElement.blur();action(()=>api.select({id}));}
+    if(/^[1-9]$/.test(event.key)&&state.agents[Number(event.key)-1]){event.preventDefault();overview=false;opayaView=false;playgroundView=false;const id=state.agents[Number(event.key)-1].id;if(id!==state.activeAgentId&&viewOf(document.activeElement))document.activeElement.blur();action(()=>openManage(id));}
   });
   if(!api){$('#content').innerHTML='<div class="runtime-missing"><h1>Open Opaya as a desktop app.</h1><p>This workspace needs its native bridge to discover agents, use SSH and open terminals.</p><code>npm install &amp;&amp; npm start</code></div>';return;}
   // Scrollback search (Ctrl+F in a terminal, or the search button).
@@ -936,15 +960,16 @@
     form.addEventListener('submit',event=>{event.preventDefault();const value=form.elements.displayName.value.trim();action(async()=>{await api.updateAgentDisplay({id:a.id,displayName:value===a.name?'':value});closeModal();toast('Agent renamed.');});});
   }
   async function refresh(){state=await api.snapshot();render();}
-  async function selectAgent(id){overview=false;opayaView=false;playgroundView=false;manageId='';closeModal();await api.select({id});render();saveView();}
+  async function selectAgent(id,mode='manage'){if(mode==='manage'){await openManage(id);return;}agentModes.set(id,mode);overview=false;opayaView=false;playgroundView=false;closeModal();await api.select({id});render();saveView();}
   // Every action for one agent, shared by the right-click menu and the Manage screen.
   function agentActions(a){
     const id=a.id,index=state.agents.findIndex(x=>x.id===id),connected=a.status==='connected',cap=a.install||{};
     const source=a.clone&&state.agents.find(x=>x.id===a.clone.from);
     return {
-      open:{icon:'&#8599;',label:surfaceOf(a)==='terminal'?'Open terminal':'Open chat',run:()=>selectAgent(id)},
-      surface:a.protocol!=='terminal'&&hasCli(a)&&(surfaceOf(a)==='terminal'?{icon:'&#9993;',label:'Open as chat',run:()=>setSurface(a,'chat')}:{icon:'&gt;_',label:'Open as terminal',run:()=>setSurface(a,'terminal')}),
-      newChat:{icon:'+',label:'New conversation',hint:`${mod()}N`,run:async()=>{await selectAgent(id);await api.newConversation({agentId:id});}},
+      open:a.protocol==='terminal'?{icon:'&gt;_',label:'Open console',run:()=>setAgentMode(a,'console')}:{icon:'&#9993;',label:'Open chat window',run:()=>openChatWindow(a)},
+      surface:a.protocol==='terminal'?null:a.surface==='terminal'?{icon:'&#9993;',label:'Allow chat again',hint:'its vendor refused chats',run:async()=>{await api.updateAgentDisplay({id,surface:''});await refresh();toast(`${title(a)} chats in Opaya again.`);}}:{icon:'&#9634;',label:'Full chat view',run:()=>setAgentMode(a,'full')},
+      console:a.protocol!=='terminal'&&{icon:'&gt;_',label:'Open console',run:()=>setAgentMode(a,'console')},
+      newChat:{icon:'+',label:'New chat window',hint:`${mod()}N`,disabled:a.protocol==='terminal',run:()=>newDockChat(a)},
       connect:a.busy?{icon:'&#9632;',label:'Stop current turn',run:()=>api.stop({id})}:{icon:connected?'&#9675;':'&#9679;',label:connected?'Disconnect':a.status==='connecting'?'Connecting...':'Connect',disabled:a.status==='connecting',run:()=>connected?api.disconnect({id}):api.connect({id})},
       clearError:a.error&&{icon:'!',label:'Clear connection error',run:async()=>{await api.clearError({id});await refresh();}},
       manage:{icon:'&#9881;',label:'Manage...',run:()=>openManage(id)},
@@ -981,7 +1006,7 @@
   function agentMenu(a){
     const x=agentActions(a);
     return [
-      x.open,x.surface,x.newChat,x.connect,x.clearError,
+      x.open,x.newChat,x.surface,x.console,x.connect,x.clearError,
       '-',
       x.manage,x.history,
       '-',
@@ -994,30 +1019,6 @@
     ];
   }
   // ---- Chat or terminal ---------------------------------------------------------------------------------------------
-  async function setSurface(a,surface){
-    await api.updateAgentDisplay({id:a.id,surface:surface===(state.settings?.interface||'chat')?'':surface});await refresh();
-    stageAgent='';if(state.activeAgentId!==a.id)await selectAgent(a.id);else render();
-    toast(surface==='terminal'?`${title(a)} opens in its terminal.`:`${title(a)} opens as a chat.`);
-  }
-  async function chooseInterface(value,from){
-    await api.saveSettings({interface:value});await refresh();stageAgent='';
-    if(from==='first'){closeModal();toast(value==='terminal'?'Terminal first: agents open in their own CLI. Change it any time in Settings.':'Chat first: agents open as chats. Change it any time in Settings.');}
-    else openSettings();
-    render();
-  }
-  // First launch: ask once how the user likes to work. Existing workspaces are asked too, once.
-  let lastTyped=-1e9;document.addEventListener('keydown',()=>{lastTyped=performance.now();},true);
-  function askInterface(){
-    if(state.settings?.interface||$('#app-dialog')||!initialized)return;
-    // Not in the middle of typing: the dialog would take the keyboard away from the chat box mid-sentence.
-    const typing=document.activeElement?.matches?.('textarea,input:not([type=checkbox]):not([type=radio]),[contenteditable="true"]')&&performance.now()-lastTyped<15000;
-    if(!state.agents.length||guideOn()||typing){setTimeout(askInterface,5000);return;}
-    const card=(value,titleText,text,preview)=>`<button type="button" class="interface-option" data-action="interface" data-value="${value}"><span class="interface-preview ${value}" aria-hidden="true">${preview}</span><strong>${titleText}</strong><span>${text}</span></button>`;
-    modal('How do you like to work?','Pick one now; switch any time in Settings, or per agent from its right-click menu.',`<div id="interface-chooser" class="interface-choice">
-      ${card('chat','Chat','Conversations with every agent in one clean window: history, projects, models, files and the Opaya browser. Terminals are one click away.','<i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-bubble l short"></i><i class="ip-input"></i>')}
-      ${card('terminal','Terminal','Each agent opens in its own CLI, full size: Claude Code, Codex, Hermes and the rest exactly as in your terminal, with tabs and splits. Chat stays available per agent.','<i class="ip-line"></i><i class="ip-line w2"></i><i class="ip-line w3"></i><i class="ip-split"></i><i class="ip-cursor"></i>')}
-    </div>`,true);
-  }
   // ---- Maintenance: update, back up, uninstall --------------------------------------------------------------------
   const installInfo=new Map(),backupLists=new Map();
   const fmtSize=n=>!n?'0 B':n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
@@ -1074,20 +1075,135 @@
     overview=false;opayaView=true;playgroundView=false;manageId='';render();saveView();
   }
   // ---- Manage screen: every option for one agent -----------------------------------------------------------------
+  // ---- Manage: the agent's command center, the screen a left click on an agent opens ------------------------------
+  // One screen per agent: a 3D stage with what it is connected to, quick actions, where it can run (drag the agent card
+  // onto a machine or Docker to clone it there), keys (drag a vault key onto an agent to give it), Docker on its machine,
+  // its projects with git, recent chats and every maintenance action. Chat opens in a window of the chat dock; Console
+  // turns the main area into a grid of terminals.
+  const keyLists=new Map(),dockerStatsOf=new Map();let heroCtl=null,statsTimer=0,mgTimer=0;
+  const stage=()=>window.OpayaStage;
+  const dockerKeyOf=a=>a.transport==='ssh'?a.hostId:'local';
+  // The container an agent runs in: Opaya's own record, else the container named in `docker exec ... <name> <program>`.
+  const containerOf=a=>{if(a.install?.container)return a.install.container;if(a.command!=='docker'||(a.args||[])[0]!=='exec')return '';const args=a.args||[];for(let i=1;i<args.length;i++){const x=args[i];if(x.startsWith('-')){if(['-w','-e','-u','--workdir','--env','--user'].includes(x))i++;continue;}return x;}return '';};
+  const canDocker=a=>a.provider==='hermes'||CLONE_DOCKER.includes(a.install?.framework||'');
+  const agentProjects=a=>(state.projects||[]).filter(p=>(p.agentIds||[]).includes(a.id));
+  const agentChats=a=>state.conversations.filter(c=>c.agentId===a.id).slice().sort((x,y)=>String(y.createdAt).localeCompare(String(x.createdAt)));
+  const modeSwitch=a=>`<div class="mode-switch" role="tablist" aria-label="Work with ${esc(title(a))}">${[['manage','<span class="mode-glyph manage-glyph"></span>','Manage',`Everything about ${title(a)} (${mod()}Shift+M)`],['chat','<span class="mode-glyph chat-glyph"></span>','Chat','Opens a chat window; expand it for the full view'],['console','<span class="mode-glyph console-glyph"></span>','Console','Terminals in a grid you arrange']].map(([m,icon,label,hint])=>`<button type="button" role="tab" class="mode-tab ${modeOf(a)===m?'selected':''}" data-action="agent-mode" data-mode="${m}" data-id="${esc(a.id)}" aria-selected="${modeOf(a)===m}" title="${esc(hint)}">${icon}<span>${label}</span></button>`).join('')}</div>`;
   async function openManage(id){
     const a=state.agents.find(x=>x.id===id);if(!a)return;
-    overview=false;opayaView=false;playgroundView=false;closeModal();closeMenu();
-    // The selection must be in state before rendering, or render() would drop back to the chat.
+    overview=false;opayaView=false;playgroundView=false;closeModal();closeMenu();agentModes.set(id,'manage');
+    // The selection must be in state before rendering, or render() would show another agent.
     if(state.activeAgentId!==id){await api.select({id});state=await api.snapshot();}
-    manageId=id;render();saveView();
-    loadInstallInfo(a);loadBackups(a);
+    render();saveView();
+    loadInstallInfo(a);loadBackups(a);loadKeys(a);if(a.install?.kind!=='remote-api')loadDocker(dockerKeyOf(a));for(const p of agentProjects(a))if(!projectGit.get(p.id)?.info)loadProjectGit(p);
   }
+  async function setAgentMode(a,mode){
+    if(mode==='manage'){await openManage(a.id);return;}
+    // An agent whose vendor stopped accepting chats from other apps (the service marks it) works in its console.
+    if(mode==='chat'&&a.surface==='terminal'){toast(`${title(a)} does not accept chats from other apps: its own CLI opens instead.`);mode='console';}
+    if(mode==='chat'&&a.protocol!=='terminal'&&state.settings?.chatOpens!=='full'){await openChatWindow(a);return;}
+    if(mode==='chat')mode=a.protocol==='terminal'?'console':'full';
+    agentModes.set(a.id,mode==='full'?'chat':'console');overview=false;opayaView=false;playgroundView=false;closeModal();
+    if(state.activeAgentId!==a.id){await api.select({id:a.id});state=await api.snapshot();}
+    stageAgent='';render();saveView();
+  }
+  async function loadKeys(a,force=false){
+    if(!force&&keyLists.has(a.id))return keyLists.get(a.id);
+    try{keyLists.set(a.id,await api.agentKeys({agentId:a.id}));}catch(error){keyLists.set(a.id,{keys:[],vault:[],error:error.message});}
+    if(manageId)render();return keyLists.get(a.id);
+  }
+  // The live parts of the screen (Docker stats, clone progress) refresh while it is visible, and stop when it is not.
+  function manageTick(){
+    clearTimeout(mgTimer);const a=selected();
+    if(!manageId||!a||document.hidden){mgTimer=0;return;}
+    const key=dockerKeyOf(a),v=dockerViews.get(key);
+    const box=$('#mg-docker'),near=box&&box.getBoundingClientRect().top<innerHeight+200;
+    if(v?.result?.running&&near&&!v.statsOff&&a.install?.kind!=='remote-api')loadDockerStats(key);
+    // Every 4 seconds on this computer; a machine over SSH every 10.
+    mgTimer=setTimeout(manageTick,key==='local'?4000:10000);
+  }
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&manageId)manageTick();});
+  async function loadDockerStats(key){
+    if(dockerStatsOf.get(key)?.loading)return;const prev=dockerStatsOf.get(key)||{};dockerStatsOf.set(key,{...prev,loading:true});
+    try{const r=await api.dockerStats({hostId:key==='local'?undefined:key});dockerStatsOf.set(key,{at:Date.now(),by:Object.fromEntries((r?.stats||[]).map(s=>[s.name,s]))});}
+    catch(error){dockerStatsOf.set(key,{...prev,loading:false,error:error.message});}
+    paintDocker(key);
+  }
+  const pct=v=>Math.max(0,Math.min(100,parseFloat(v)||0));
+  const gauge=(label,value,text)=>`<div class="mg-gauge"><span>${label}</span><i style="--v:${pct(value)}%"></i><b>${esc(text||value||'--')}</b></div>`;
+  function dockerPanel(a){
+    const key=dockerKeyOf(a),v=dockerViews.get(key)||{},r=v.result,machine=key==='local'?localName():hostName(key),mine=containerOf(a),st=dockerStatsOf.get(key)||{};
+    const btn=(act,label,attrs='',cls='mg-icon-btn',hint='')=>`<button type="button" class="${cls}" data-action="${act}" data-id="${esc(key)}" ${attrs} ${hint?`title="${esc(hint)}"`:''}>${label}</button>`;
+    const engine=v.loading&&!r?'<span class="status-dot working"></span> Reading Docker...':v.error?`<span class="status-dot error"></span> ${esc(v.error)}`:r?.running?`<span class="status-dot connected"></span> Engine ${esc(r.version)} <span class="mg-sep">/</span> ${r.containers.filter(c=>c.state==='running').length} of ${r.containers.length} running <span class="mg-sep">/</span> ${r.images.length} image${r.images.length===1?'':'s'}`:r?`<span class="status-dot error"></span> ${esc(r.error)}`:'<span class="status-dot"></span> Not checked yet';
+    const head=`<header class="mg-section-head"><div><h2><span class="mg-h-icon docker-h" aria-hidden="true"></span>Docker on ${esc(machine)}</h2><p class="mg-engine">${engine}</p></div><div class="mg-head-actions">${r?.running?`<label class="mg-toggle" title="Live CPU and memory, every few seconds while this screen is open"><input type="checkbox" data-action="docker-live" data-id="${esc(key)}" ${v.statsOff?'':'checked'}><span class="switch" aria-hidden="true"></span>Live</label>${btn('docker-prune','Prune images','','secondary small','Remove images no container uses')}`:''}${btn('docker-refresh','&#8635; Refresh',v.loading?'disabled':'','secondary small')}${btn('docker-manager','Open manager','','subtle small','All containers and images in a window')}</div></header>`;
+    if(!r?.running)return head+`<div class="mg-docker-empty">${r&&!r.installed?`<p>Docker is not installed on ${esc(machine)}.</p><button type="button" class="primary" data-action="install-catalog" ${key!=='local'?`data-host="${esc(key)}"`:''}>&#8595; Install Docker</button>`:r?'<p>Start Docker there, then refresh.</p>':'<p>Opaya reads Docker when you open this screen.</p>'}</div>`;
+    const actionsFor=c=>{const on=c.state==='running',paused=c.state==='paused',d=(what,label,hint,cls='')=>`<button type="button" class="mg-icon-btn ${cls}" data-action="docker-do" data-do="${what}" data-id="${esc(key)}" data-name="${esc(c.name)}" title="${esc(hint)}">${label}</button>`,t=(kind,label,hint)=>`<button type="button" class="mg-icon-btn" data-action="docker-terminal" data-kind="${kind}" data-id="${esc(key)}" data-name="${esc(c.name)}" title="${esc(hint)}">${label}</button>`;
+      return [t('logs','Logs','Follow its log in a terminal'),on&&t('shell','Shell','A shell inside the container'),on&&d('restart','Restart','Restart the container'),on&&d('pause','Pause','Freeze its processes; Resume continues them'),paused&&d('unpause','Resume','Continue its processes'),on||paused?d('stop','Stop','Stop the container'):d('start','Start','Start the container','go'),`<button type="button" class="mg-icon-btn" data-action="docker-inspect" data-id="${esc(key)}" data-name="${esc(c.name)}" title="Image, mounts, ports, restart policy and health">Inspect</button>`,d('remove','&#10005;','Remove this container','danger')].filter(Boolean).join('');};
+    const card=c=>{const s=st.by?.[c.name],agents=machineAgents(key==='local'?'':key).filter(x=>containerOf(x)===c.name),on=c.state==='running',me=c.name===mine;
+      return `<article class="mg-container ${me?'mine':''} ${esc(c.state)}" data-container="${esc(c.name)}"><header><span class="mg-light ${on?'on':c.state==='paused'?'paused':c.state==='restarting'?'busy':'off'}" title="${esc(c.state)}"></span><div><strong>${esc(c.name)}</strong><small>${esc(c.image)}</small></div>${me?'<em class="mg-badge">this agent</em>':''}</header>
+        <p class="mg-container-status">${esc(c.status)}${c.ports?` <code>${esc(c.ports.split(',')[0])}</code>`:''}</p>
+        ${on?`<div class="mg-gauges">${gauge('CPU',s?.cpu,s?.cpu)}${gauge('MEM',s?.memPercent,s?s.mem.split(' / ')[0]:'')}</div>`:''}
+        ${agents.length?`<div class="mg-container-agents">${agents.map(x=>`<button type="button" class="docker-agent" data-action="manage" data-id="${esc(x.id)}" title="Manage ${esc(title(x))}">${badge(x)}${esc(title(x))}</button>`).join('')}</div>`:''}
+        <footer class="mg-container-actions">${actionsFor(c)}</footer></article>`;};
+    const list=r.containers.slice().sort((x,y)=>(y.name===mine)-(x.name===mine)||(y.state==='running')-(x.state==='running'));
+    const cta=!mine&&cloneable(a)&&canDocker(a)?`<article class="mg-container mg-dockerize" data-drop="agent" data-deploy-host="${a.transport==='ssh'?esc(a.hostId):''}" data-deploy-runtime="docker"><div class="mg-cube" aria-hidden="true"><i></i><i></i><i></i></div><div><strong>Dockerize ${esc(title(a))}</strong><p>Run a copy in its own container on ${esc(machine)}: isolated, restarts by itself, easy to move.</p></div><button type="button" class="primary" data-action="dockerize" data-id="${esc(a.id)}">Dockerize&#8230;</button></article>`:'';
+    const image=i=>{const ref=i.repository&&i.repository!=='<none>'?`${i.repository}${i.tag&&i.tag!=='<none>'?':'+i.tag:''}`:i.id;return `<div class="mg-image"><span class="mg-image-icon" aria-hidden="true"></span><strong>${esc(ref)}</strong><small>${esc(i.size)} / ${esc(i.created)}</small>${i.repository&&i.repository!=='<none>'?`<button type="button" class="mg-icon-btn" data-action="docker-do" data-do="pull" data-id="${esc(key)}" data-name="${esc(ref)}" title="Download the newest ${esc(ref)}">Pull</button>`:''}<button type="button" class="mg-icon-btn danger" data-action="docker-do" data-do="remove-image" data-id="${esc(key)}" data-name="${esc(ref)}" title="Remove this image">&#10005;</button></div>`;};
+    return `${head}<div class="mg-containers">${cta}${list.map(card).join('')||'<p class="field-help">No containers yet.</p>'}</div>${r.images.length?`<details class="mg-images" ${v.imagesOpen?'open':''} data-key="${esc(key)}"><summary>Images <small>${r.images.length}</small></summary><div>${r.images.map(image).join('')}</div></details>`:''}`;
+  }
+  async function dockerInspect(key,name){
+    modal(`Container ${name}`,`${key==='local'?localName():hostName(key)} / docker inspect, without environment values`,'<div id="docker-inspect"><p class="field-help">Reading...</p></div>');
+    let r;try{r=await api.dockerInspect({hostId:key==='local'?undefined:key,container:name});}catch(error){const box=$('#docker-inspect');if(box)box.innerHTML=`<p class="field-help">${esc(error.message)}</p>`;return;}
+    const box=$('#docker-inspect');if(!box)return;const row=(k,v)=>v?`<div><small>${k}</small><span>${v}</span></div>`:'';
+    box.innerHTML=`<div class="mg-inspect">${row('Image',esc(r.image))}${row('State',esc(r.state+(r.health?` / ${r.health}`:'')+(r.restartCount?` / restarted ${r.restartCount}x`:'')))}${row('Restart policy',esc(r.restart))}${row('Created',esc(whenText(r.created)))}${row('Command',`<code>${esc(r.command)}</code>`)}${row('Working folder',esc(r.workdir))}${row('Ports',r.ports.map(p=>`<code>${esc(p)}</code>`).join(' '))}${row('Networks',esc(r.networks.join(', ')))}${row('Mounts',r.mounts.map(m=>`<code>${esc(m.source)} &#8594; ${esc(m.destination)}${m.rw?'':' (read-only)'}</code>`).join('<br>'))}${row('Environment',r.env.map(e=>`<span class="tag-chip">${esc(e)}</span>`).join(' '))}</div><div class="modal-footer"><span>Values of environment variables stay on the machine.</span><button type="button" class="primary" data-action="modal-close">Close</button></div>`;
+  }
+  // Where the agent can run: this computer and each machine, installed or in Docker. Drop the agent card on one.
+  function deployTargets(a){
+    if(!cloneable(a))return `<p class="field-help">${esc(title(a))} is an API connection: the provider runs it, so there is nothing to copy.</p>`;
+    const here=a.transport==='ssh'?a.hostId:'',docker=canDocker(a),running=[...jobs.values()].filter(j=>j.kind==='clone'&&j.route?.from===a.name);
+    const t=(hostId,runtime,name,sub,icon)=>{const job=running.find(j=>(j.route.toHostId||'')===hostId&&(runtime==='docker')===/ \/ /.test(j.route.toWhere||'')),isHere=hostId===here&&(runtime==='docker')===!!containerOf(a);
+      return `<button type="button" class="mg-target ${isHere?'here':''} ${job?'busy':''}" data-drop="agent" data-deploy-host="${esc(hostId)}" data-deploy-runtime="${runtime}" data-action="deploy" data-id="${esc(a.id)}" title="${esc(isHere?`${title(a)} runs here. Drop it here to make another copy.`:`Clone ${title(a)} to ${name}`)}"><span class="mg-target-icon ${icon}" aria-hidden="true"></span><span class="mg-target-text"><strong>${esc(name)}</strong><small>${job?`${job.status==='running'?'Cloning':job.status==='done'?'Cloned':'Failed'} ${jobPercent(job)}%`:isHere?'Runs here':esc(sub)}</small></span>${job?`<span class="mg-target-bar" style="--p:${jobPercent(job)}%"></span>`:''}</button>`;};
+    return `<div class="mg-targets">${t('','regular',localName(),'Install here','local-t')}${docker?t('','docker',`${localName()} · Docker`,'Docker container','docker-t'):''}${state.hosts.map(h=>t(h.id,'regular',h.name,'VPS install','vps-t')+(docker?t(h.id,'docker',`${h.name} · Docker`,'Docker container','docker-t'):'')).join('')}<button type="button" class="mg-target add" data-action="new-vps"><span class="mg-target-icon add-t" aria-hidden="true"></span><span class="mg-target-text"><strong>New VPS</strong><small>Key and connection</small></span></button></div>`;
+  }
+  function keysPanel(a){
+    const held=(opaya().secrets||[]).filter(k=>k.kept||k.global||k.stored?.length),has=keyLists.get(a.id),others=state.agents.filter(x=>x.id!==a.id&&!x.ephemeral).slice(0,8);
+    const chip=k=>`<button type="button" class="mg-key" data-drag="key" data-drag-id="${esc(k.id)}" data-action="key-menu" data-id="${esc(k.id)}" title="Drag onto an agent to give it ${esc(k.name)} (or click)"><span class="mg-key-glyph" aria-hidden="true"></span><span><strong>${esc(k.name)}</strong><small>${esc(k.mask||'')}</small></span>${k.global?'<em>all</em>':''}</button>`;
+    const target=(x,big=false)=>`<div class="mg-key-target ${big?'big':''}" data-drop="key" data-agent-target="${esc(x.id)}">${badge(x)}<span><strong>${esc(title(x))}</strong><small>${esc(placeText(x))}</small></span><em class="mg-shared" aria-live="polite"></em></div>`;
+    return `<header class="mg-section-head"><div><h2><span class="mg-h-icon key-h" aria-hidden="true"></span>Keys & access</h2><p>Drag a key from the vault onto an agent. Opaya writes it where that agent reads keys; values never go into a chat.</p></div><div class="mg-head-actions"><button type="button" class="secondary small" data-action="manage-run" data-key="keys">${esc(title(a))}'s keys</button><button type="button" class="secondary small" data-action="vault">Open Vault</button></div></header>
+      <div class="mg-keys"><div class="mg-vault"><h3>Opaya Vault <small>${held.length}</small></h3>${held.length?`<div class="mg-key-list">${held.map(chip).join('')}</div>`:'<p class="field-help">No keys yet. Add one in the Vault.</p>'}</div>
+      <div class="mg-flow" aria-hidden="true"><i></i><i></i><i></i></div>
+      <div class="mg-give"><h3>Give to</h3>${target(a,true)}<div class="mg-key-others">${others.map(x=>target(x)).join('')}</div></div>
+      <div class="mg-has"><h3>${esc(title(a))} has <small>${has?.keys?.length??''}</small></h3>${!has?'<p class="field-help">Reading its keys...</p>':has.keys.length?`<div class="mg-has-list">${has.keys.map(k=>`<span class="mg-has-key" title="${esc(k.where||'')}"><span class="mg-key-glyph small" aria-hidden="true"></span>${esc(k.name)}</span>`).join('')}</div>`:`<p class="field-help">${has.error?esc(has.error):has.kind?'No keys yet.':'Opaya does not know where this agent reads keys.'}</p>`}</div></div>`;
+  }
+  function gitPanel(a){
+    const list=agentProjects(a);
+    const card=p=>{const g=projectGit.get(p.id),i=g?.info;
+      return `<article class="mg-project" data-project="${esc(p.id)}"><header><span class="project-folder" aria-hidden="true"></span><div><strong>${esc(p.name)}</strong><small title="${esc(p.path)}">${esc(p.path)}</small></div></header>
+        <div class="mg-git-line">${!g?'<span class="field-help">Reading git...</span>':g.error?`<span class="field-help">${esc(g.error)}</span>`:i?.git?`<span class="mg-branch">&#5833; ${esc(i.branch||'detached')}</span>${i.dirty?`<span class="mg-pill warn">${i.dirty} changed</span>`:'<span class="mg-pill ok">clean</span>'}${i.unpushed?`<span class="mg-pill">${i.unpushed} to push</span>`:''}${i.origin?`<span class="mg-remote" title="${esc(i.origin)}">${esc(String(i.origin).replace(/^https?:\/\/|^git@|\.git$/g,'').replace(':','/'))}</span>`:''}`:'<span class="field-help">Not a git repository</span>'}</div>
+        <footer>${i?.git?`<button type="button" class="mg-icon-btn" data-action="git-run" data-git="pull" data-id="${esc(p.id)}" title="Pull">&#8595; Pull</button><button type="button" class="mg-icon-btn go" data-action="git-run" data-git="commitPush" data-id="${esc(p.id)}" title="Commit everything and push">&#10003; Commit & push</button><button type="button" class="mg-icon-btn" data-action="git-run" data-git="push" data-id="${esc(p.id)}" title="Push">&#8593; Push</button>`:''}<button type="button" class="mg-icon-btn" data-action="project-chat" data-id="${esc(p.id)}" data-agent="${esc(a.id)}" title="New chat with ${esc(title(a))} in ${esc(p.name)}">Chat here</button><button type="button" class="mg-icon-btn" data-action="git-more" data-id="${esc(p.id)}" title="Every git and GitHub action">&#8943;</button></footer><span class="mg-remote-node" aria-hidden="true"></span></article>`;};
+    return `<header class="mg-section-head"><div><h2><span class="mg-h-icon git-h" aria-hidden="true"></span>Projects & git</h2><p>Folders ${esc(title(a))} works in. Push and pull without leaving this screen.</p></div><div class="mg-head-actions"><button type="button" class="secondary small" data-action="manage-run" data-key="projects">+ Add project</button></div></header>${list.length?`<div class="mg-projects">${list.map(card).join('')}</div>`:`<div class="mg-empty-row"><p>No projects yet. Add a folder and ${esc(title(a))} can work in it, here or on its machine.</p></div>`}`;
+  }
+  function chatsPanel(a){
+    const list=agentChats(a).slice(0,5),docked=new Set(chatDock.map(d=>d.id));
+    return `<header class="mg-section-head"><div><h2><span class="mg-h-icon chat-h" aria-hidden="true"></span>Chats</h2><p>Each opens in its own window at the bottom; expand one for the full view.</p></div><div class="mg-head-actions"><button type="button" class="secondary small" data-action="manage-run" data-key="history">History</button><button type="button" class="primary small" data-action="chat-new" data-id="${esc(a.id)}" ${a.protocol==='terminal'?'disabled':''}>+ New chat</button></div></header>
+      ${list.length?`<div class="mg-chats">${list.map(c=>{const n=(state.histories[c.id]||[]).length;return `<button type="button" class="mg-chat ${docked.has(c.id)?'open':''}" data-action="chat-open" data-id="${esc(c.id)}"><span class="mg-chat-title">${esc(chatLabel(c))}</span><small>${esc(ago(c.createdAt))}${n?` / ${n} messages`:''}${docked.has(c.id)?' / open':''}</small></button>`;}).join('')}</div>`:`<div class="mg-empty-row"><p>No chats yet.</p></div>`}`;
+  }
+  // Nodes of the 3D stage: what the agent is connected to.
+  function stageNodes(a){
+    const keys=keyLists.get(a.id)?.keys?.length||0,projects=agentProjects(a).length,chats=agentChats(a).length,box=containerOf(a);
+    return [{kind:'machine',label:location(a),on:true},{kind:'docker',label:box||'No container',on:!!box},{kind:'key',label:keys?`${keys} key${keys===1?'':'s'}`:'No keys',on:!!keys},{kind:'git',label:projects?`${projects} project${projects===1?'':'s'}`:'No projects',on:!!projects},{kind:'skill',label:'Skills',on:a.status==='connected'},{kind:'chat',label:chats?`${chats} chat${chats===1?'':'s'}`:'No chats',on:!!chats}];
+  }
+  function mountStage(a){
+    const S=stage(),slot=$('#mg-stage');if(!S||!slot)return;
+    heroCtl=heroCtl||S.heroStage();if(heroCtl.el.parentElement!==slot)slot.append(heroCtl.el);
+    heroCtl.set({agent:a.id,status:a.error?'error':a.status,busy:!!a.busy,nodes:stageNodes(a)});
+  }
+  window.addEventListener('opaya-stage',()=>{if(manageId)render();});
   function renderManage(a){
-    const x=agentActions(a),cap=a.install||{},info=installInfo.get(a.id),backs=backupLists.get(a.id),shared=sharedWith(a);
-    $('#topbar').innerHTML=`<div class="breadcrumb">Agents <span>/</span> ${esc(title(a))} <span>/</span> <strong>Manage</strong></div><div class="topbar-actions"></div>`;
-    contentKind('overview manage');
+    const x=agentActions(a),cap=a.install||{},info=installInfo.get(a.id),backs=backupLists.get(a.id),shared=sharedWith(a),box=containerOf(a);
+    $('#topbar').innerHTML=`<div class="breadcrumb">Agents <span>/</span> <strong>${esc(title(a))}</strong></div><div class="topbar-actions"><span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span>${modeSwitch(a)}</div>`;
+    contentKind('overview manage command-center');
     // Only what applies: an action that cannot run for this agent is left out, and so is a card with nothing left.
-    const btn=(item,cls='secondary')=>item&&!item.disabled?`<button type="button" class="${item.danger?'danger-button ':''}${cls}" data-action="manage-run" data-key="${esc(item.key)}" ${item.disabled?'disabled':''} ${item.hint?`title="${esc(item.hint)}"`:''}><span class="manage-btn-icon" aria-hidden="true">${item.icon||''}</span>${esc(item.label.replace(/\.\.\.$/,''))}</button>`:'';
+    const btn=(item,cls='mg-control')=>item&&!item.disabled?`<button type="button" class="${item.danger?'danger-button ':''}${cls}" data-action="manage-run" data-key="${esc(item.key)}" ${item.hint?`title="${esc(item.hint)}"`:''}><span class="manage-btn-icon" aria-hidden="true">${item.icon||''}</span><span>${esc(item.label.replace(/\.\.\.$/,''))}</span></button>`:'';
     const keyed=Object.fromEntries(Object.entries(x).filter(([,v])=>v).map(([k,v])=>[k,{...v,key:k}]));
     if(a.protocol!=='terminal')keyed.models={key:'models',icon:'&#9672;',label:'Choose model',run:()=>openModels()};
     if(Array.isArray(a.efforts)&&a.efforts.length)keyed.effort={key:'effort',icon:'&#9889;',label:`Reasoning effort: ${a.effort?EFFORT_LABELS[a.effort]||a.effort:'auto'}`,run:()=>openDefaultEffort(a)};
@@ -1096,37 +1212,266 @@
     keyed.terminal={key:'terminal',icon:'&gt;_',label:hasCli(a)?`Open ${title(a)} CLI`:'Open shell',run:()=>openTerminal(hasCli(a)?{agentId:a.id,mode:'agent'}:{agentId:a.id})};
     const cliKey=hasCli(a)?'terminal':'shell';
     keyed.fix={key:'fix',icon:'&#10038;',label:'Check & fix with Opaya Agent',run:()=>askOpayaToFix(a)};
+    keyed.keys={key:'keys',icon:'&#9919;',label:'Keys',run:()=>openAgentKeys(a)};
+    keyed.chat={key:'chat',icon:'&#9993;',label:'Chat',run:()=>openChatWindow(a)};
+    keyed.fullChat={key:'fullChat',icon:'&#9634;',label:'Full chat view',run:()=>setAgentMode(a,'full')};
+    keyed.console={key:'console',icon:'&gt;_',label:'Console',run:()=>setAgentMode(a,'console')};
+    keyed.restart={key:'restart',icon:'&#8635;',label:'Restart connection',hint:'Disconnect and connect again',disabled:a.busy||a.status==='connecting',run:async()=>{if(a.status==='connected')await api.disconnect({id:a.id});await api.connect({id:a.id});toast(`${title(a)} reconnected.`);}};
+    keyed.copyId={key:'copyId',icon:'#',label:'Copy agent ID',run:async()=>{await api.clipboardWrite({text:a.id});toast('Agent ID copied.');}};
+    if(a.command)keyed.copyCommand={key:'copyCommand',icon:'&#10095;',label:'Copy launch command',run:async()=>{await api.clipboardWrite({text:[a.command,...(a.args||[])].join(' ')});toast('Launch command copied.');}};
+    if(box)keyed.containerRestart={key:'containerRestart',icon:'&#8635;',label:'Restart container',run:()=>dockerDo(dockerKeyOf(a),box,'restart')};
+    if(box)keyed.containerLogs={key:'containerLogs',icon:'&#8801;',label:'Container logs',run:()=>api.dockerTerminal({hostId:a.transport==='ssh'?a.hostId:undefined,container:box,kind:'logs'})};
     manageKeyed=keyed;
-    const card=(title,desc,keys,icon='',wide='')=>{const buttons=[...new Set(keys)].map(k=>btn(keyed[k])).join('');return buttons?`<section class="manage-card ${wide}"><h3><span class="manage-card-icon" aria-hidden="true">${icon}</span>${esc(title)}</h3><p>${esc(desc)}</p><div class="manage-actions">${buttons}</div></section>`:'';};
-    const backupRows=backs?.backups?.length?`<div class="backup-list">${backs.backups.slice(0,6).map(b=>`<div class="backup-row"><span class="backup-file" title="${esc(b.file)}">${esc(whenText(b.createdAt))}</span><small>${esc(fmtSize(b.bytes))}${b.history===false?' / no history':''}${b.keys===false?' / no keys':''}</small><button type="button" class="text-button" data-action="backup-reveal" data-file="${esc(b.file)}">Show</button><button type="button" class="text-button danger-text" data-action="backup-delete" data-file="${esc(b.file)}" data-id="${esc(a.id)}">Delete</button></div>`).join('')}</div>${backs.backups.length>6?`<p class="field-help">${backs.backups.length-6} older backup${backs.backups.length-6===1?'':'s'} in the folder.</p>`:''}`:`<p class="field-help">${backs?backs.error?esc(backs.error):'No backups yet.':'Loading backups...'}</p>`;
-    // Every agent stays one click away here, also with the sidebar hidden or a section of it collapsed.
-    const picker=state.agents.length>1?`<nav class="manage-switch" aria-label="Agent to manage"><span>Agents</span>${state.agents.map(x=>`<button type="button" class="manage-pick ${x.id===a.id?'selected':''}" data-action="manage" data-id="${esc(x.id)}" title="${esc(title(x)+' / '+placeText(x)+' / '+status(x))}" ${x.id===a.id?'aria-current="page"':''}>${badge(x)}<span>${esc(title(x))}</span>${dot(x)}</button>`).join('')}</nav>`:'';
-    const html=`${picker}<div class="manage-head"><div class="conversation-identity">${badge(a,true)}<div><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p><div class="identity-meta">${meta(a)}<span class="status-pill">${dot(a)} ${esc(status(a))}</span></div></div></div><div class="manage-head-actions">${btn(keyed.connect,'primary')}${btn(keyed.open)}${btn(keyed.fix)}</div></div>
-      ${a.error?`<div class="inline-notice error-notice"><span>!</span><div><strong>Connection needs attention</strong><p>${esc(a.error)}</p><button type="button" class="text-button" data-action="manage-run" data-key="fix">Let the Opaya Agent fix it &#8594;</button></div></div>`:''}
-      <div class="manage-facts">
+    const tile=(titleText,desc,keys,icon,cls='')=>{const buttons=[...new Set(keys)].map(k=>btn(keyed[k])).join('');return buttons?`<section class="mg-tile ${cls}"><h3><span class="manage-card-icon" aria-hidden="true">${icon}</span>${esc(titleText)}</h3><p>${esc(desc)}</p><div class="mg-tile-actions">${buttons}</div></section>`:'';};
+    const chips=[['skills','&#10022;','Skills'],['keys','&#9919;',`Keys${keyLists.get(a.id)?.keys?` ${keyLists.get(a.id).keys.length}`:''}`],a.protocol!=='terminal'&&['models','&#9672;',modelText(a.activeModel||a.model)||'Model'],['files','&#9656;','Files'],['projects','&#9635;',`Projects ${agentProjects(a).length||''}`.trim()]].filter(Boolean).map(([k,icon,label])=>`<button type="button" class="mg-chip" data-action="manage-run" data-key="${k}"><span aria-hidden="true">${icon}</span>${esc(label)}</button>`).join('');
+    const connect=keyed.connect;
+    const hero=`<section class="mg-hero" data-drop="key" data-agent-target="${esc(a.id)}">
+      <div class="mg-stage" id="mg-stage" aria-hidden="true"></div>
+      <div class="mg-card glass" data-drag="agent" data-drag-id="${esc(a.id)}" title="Drag onto a machine or Docker to clone ${esc(title(a))} there">
+        <div class="mg-id">${badge(a,true)}<div class="mg-id-text"><h1>${esc(title(a))}</h1><p>${esc(location(a))}${box?` <span class="mg-sep">/</span> ${esc(box)}`:''}</p></div><span class="mg-live ${esc(a.busy?'working':a.error?'error':a.status||'disconnected')}" title="${esc(status(a))}"></span></div>
+        <div class="mg-chips">${chips}</div>
+        <div class="mg-hero-actions">${connect&&!connect.disabled?`<button type="button" class="${a.status==='connected'?'secondary':'primary'}" data-action="manage-run" data-key="connect">${esc(connect.label)}</button>`:connect?`<button type="button" class="secondary" disabled>${esc(connect.label)}</button>`:''}<button type="button" class="secondary" data-action="agent-mode" data-mode="chat" data-id="${esc(a.id)}" ${a.protocol==='terminal'?'disabled':''}><span class="mode-glyph chat-glyph" aria-hidden="true"></span>Chat</button><button type="button" class="secondary" data-action="agent-mode" data-mode="console" data-id="${esc(a.id)}"><span class="mode-glyph console-glyph" aria-hidden="true"></span>Console</button><button type="button" class="secondary mg-more" data-action="agent-menu" data-id="${esc(a.id)}" title="Every action" aria-label="More actions">&#8943;</button></div>
+        <span class="mg-drag-hint" aria-hidden="true">&#10303; drag to deploy</span>
+      </div>
+    </section>`;
+    const facts=`<div class="mg-facts">
         <div><small>Runs on</small><strong>${esc(location(a))}</strong><span>${esc(placeText(a))}${a.transport==='ssh'?' / over SSH':''}</span></div>
         <div><small>Installation</small><strong>${esc(cap.label||'Unknown')}</strong><span>${info==='loading'||!info?'Checking...':esc(info.error&&!info.methods?.length?info.error:[info.methodLabels?.join(' + '),info.version,info.image,info.state].filter(Boolean).join(' / ')||'Not detected')}</span></div>
         <div><small>Connection</small><strong>${esc(labels[a.provider]||a.provider)} / ${esc(a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase())}</strong><span>${esc(modelText(a.activeModel||a.model)||'Agent\'s own model')}${a.agentVersion?` / ${esc(a.agentVersion)}`:''}</span></div>
         <div><small>Data</small><strong>${esc(info&&info!=='loading'&&info.data?info.data:'--')}</strong><span>${backs?.backups?.length?`${backs.backups.length} backup${backs.backups.length===1?'':'s'}, last ${esc(whenText(backs.backups[0].createdAt))}`:'No local backups'}</span></div>
-      </div>
-      ${browserCapable(a)?`<p class="field-help manage-shared">Opaya browser: ${a.vision?.vision===false?'not available. ':a.vision?.vision?'works. ':'maybe. '}${esc(a.vision?.reason||'')}${a.vision?.vision?'':` Works with models that can see images: ${esc(state.visionModels||'')}.`}</p>`:''}
-      ${shared.length?`<p class="field-help manage-shared">Shares its ${esc(cap.label)} installation with ${esc(shared.map(title).join(', '))}: updating or uninstalling it affects them too.</p>`:''}
-      <div class="manage-grid">
-        ${card('Conversations','Chats, history and the projects this agent works in.',['newChat','history','projects'],'&#9993;')}
-        ${card('Model & reasoning','The model and reasoning effort new chats start with. Each chat can change both under its message box.',['models','effort'],'&#9672;')}
-        ${card('Files & terminal','The agent\'s machine, its native CLI and what Opaya exchanged with it.',['files',cliKey,hasCli(a)?'shell':'','log','gateway'].filter(Boolean),'&gt;_')}
-        ${card('Skills & tools','What the agent can do, and what it may do without asking.',['skills','transfer','itrust','browser'],'&#10022;')}
-        ${card('Maintenance',cap.kind==='remote-api'?'An API connection: the provider runs and updates it.':`${cap.label}. Update, copy or move it, or remove it from ${location(a)}.`,['update','backup','clone','redeploy'],'&#8635;')}
-        ${card('Name & look','Only changes how it shows in Opaya.',['rename','icon','groupTags','pin','moveUp','moveDown'],'&#9998;')}
-        ${cap.backup||backs?.backups?.length?`<section class="manage-card"><h3><span class="manage-card-icon" aria-hidden="true">&#9635;</span>Local backups</h3><p>Archives on ${esc(localName())}. <button type="button" class="text-button" data-action="backup-folder-open">Open folder</button></p>${backupRows}</section>`:''}
-        ${card('Connection','How Opaya reaches this agent.',['settings','clearError'],'&#8644;')}
-        <section class="manage-card danger-zone"><h3><span class="manage-card-icon" aria-hidden="true">!</span>Danger zone</h3><p>${keyed.uninstall&&!keyed.uninstall.disabled?`Uninstalling removes the agent and its data from ${esc(location(a))}. `:''}Removing the connection only removes it from Opaya.</p><div class="manage-actions">${btn(keyed.uninstall)}${btn(keyed.remove)}</div></section>
+        <div><small>Activity</small><strong>${agentChats(a).length} chat${agentChats(a).length===1?'':'s'}</strong><span>${a.busy?'Working now':agentChats(a)[0]?`Last ${esc(ago(agentChats(a)[0].createdAt))} ago`:'Not used yet'}</span></div>
       </div>`;
-    const key='manage:'+a.id;
-    if(renderKey!==key||html!==manageHtml){manageHtml=html;$('#content').innerHTML=html;}
-    if(renderKey!==key)enter($('#content'));
-    renderKey=key;
+    const backupRows=backs?.backups?.length?`<div class="backup-list">${backs.backups.slice(0,4).map(b=>`<div class="backup-row"><span class="backup-file" title="${esc(b.file)}">${esc(whenText(b.createdAt))}</span><small>${esc(fmtSize(b.bytes))}${b.history===false?' / no history':''}${b.keys===false?' / no keys':''}</small><button type="button" class="text-button" data-action="backup-reveal" data-file="${esc(b.file)}">Show</button><button type="button" class="text-button danger-text" data-action="backup-delete" data-file="${esc(b.file)}" data-id="${esc(a.id)}">Delete</button></div>`).join('')}</div>`:'';
+    const picker=sidebarHidden&&state.agents.length>1?`<nav class="manage-switch" aria-label="Agent to manage"><span>Agents</span>${state.agents.map(y=>`<button type="button" class="manage-pick ${y.id===a.id?'selected':''}" data-action="manage" data-id="${esc(y.id)}" title="${esc(title(y)+' / '+placeText(y)+' / '+status(y))}" ${y.id===a.id?'aria-current="page"':''}>${badge(y)}<span>${esc(title(y))}</span>${dot(y)}</button>`).join('')}</nav>`:'';
+    // The screen is a list of parts. Entering an agent draws them all (their entrance plays once); later updates
+    // (a status, Docker stats, keys that finished loading) replace only the parts that changed, so nothing replays.
+    const tiles=[tile('Model & reasoning','The model and reasoning effort new chats start with.',['models','effort'],'&#9672;'),
+        tile('Skills & tools','What it can do, and what it may do without asking.',['skills','transfer','itrust','browser'],'&#10022;'),
+        tile('Files & terminal','Its machine, its CLI and what Opaya exchanged with it.',['files',cliKey,hasCli(a)?'shell':'','log','gateway','containerLogs'].filter(Boolean),'&gt;_'),
+        tile('Maintenance',cap.kind==='remote-api'?'An API connection: the provider runs and updates it.':`${cap.label||'Installation'}. Update, back up, copy or move it.`,['update','backup','clone','redeploy','containerRestart'],'&#8635;'),
+        tile('Connection','How Opaya reaches this agent.',['restart','settings','clearError','copyId','copyCommand','fix'],'&#8644;'),
+        tile('Name & look','Only changes how it shows in Opaya.',['rename','icon','groupTags','pin','moveUp','moveDown'],'&#9998;'),
+        cap.backup||backs?.backups?.length?`<section class="mg-tile"><h3><span class="manage-card-icon" aria-hidden="true">&#9635;</span>Local backups</h3><p>Archives on ${esc(localName())}. <button type="button" class="text-button" data-action="backup-folder-open">Open folder</button></p>${backupRows||`<p class="field-help">${backs?backs.error?esc(backs.error):'No backups yet.':'Loading backups...'}</p>`}</section>`:'',
+        `<section class="mg-tile danger-zone"><h3><span class="manage-card-icon" aria-hidden="true">!</span>Danger zone</h3><p>${keyed.uninstall&&!keyed.uninstall.disabled?`Uninstalling removes the agent and its data from ${esc(location(a))}. `:''}Removing the connection only removes it from Opaya.</p><div class="mg-tile-actions">${btn(keyed.uninstall)}${btn(keyed.remove)}</div></section>`].join('');
+    const parts=[
+      ['mg-p-picker','',0,picker],
+      ['mg-p-hero','',0,hero],
+      ['mg-p-error','mg-reveal',1,a.error?`<div class="inline-notice error-notice"><span>!</span><div><strong>Connection needs attention</strong><p>${esc(a.error)}</p><button type="button" class="text-button" data-action="manage-run" data-key="fix">Let the Opaya Agent fix it &#8594;</button></div></div>`:''],
+      ['mg-p-facts','mg-reveal',1,facts],
+      ['mg-p-shared','',1,shared.length?`<p class="field-help manage-shared">Shares its ${esc(cap.label)} installation with ${esc(shared.map(title).join(', '))}: updating or uninstalling it affects them too.</p>`:''],
+      ['mg-p-deploy','mg-section mg-reveal',2,`<header class="mg-section-head"><div><h2><span class="mg-h-icon deploy-h" aria-hidden="true"></span>Deploy & clone</h2><p>Drag the agent card onto a machine or Docker to clone it there, or click a target.</p></div>${a.clone?`<div class="mg-head-actions">${btn(keyed.redeploy,'secondary small')}</div>`:''}</header>${deployTargets(a)}`],
+      ['mg-docker','mg-section mg-docker-section mg-reveal',3,cap.kind==='remote-api'?'':dockerPanel(a)],
+      ['mg-p-keys','mg-section mg-reveal',4,keysPanel(a)],
+      ['mg-p-work','mg-split two mg-reveal',5,`<section class="mg-section">${gitPanel(a)}</section><section class="mg-section">${chatsPanel(a)}</section>`],
+      ['mg-p-tiles','mg-tiles mg-reveal',6,tiles]];
+    const key='manage:'+a.id,entering=renderKey!==key||!$('#mg-p-hero');
+    if(entering){manageHtml={};$('#content').innerHTML=parts.map(([id,cls,i,inner])=>{manageHtml[id]=inner;return `<div id="${id}" class="${cls}" style="--i:${i}"${id==='mg-docker'?` data-key="${esc(dockerKeyOf(a))}"`:''}>${inner}</div>`;}).join('');}
+    else for(const [id,,,inner] of parts)if(manageHtml[id]!==inner){const el=document.getElementById(id);if(el){manageHtml[id]=inner;el.innerHTML=inner;}}
+    // The parts have their own entrance (mg-reveal), staggered after the hero; the generic view entrance would delay it.
+    if(entering){$('#content').classList.remove('view-enter');$('#content').scrollTop=0;$('#content').classList.add('mg-entering');clearTimeout(renderManage.t);renderManage.t=setTimeout(()=>$('#content')?.classList.remove('mg-entering'),1400);if(!keyLists.has(a.id))loadKeys(a);if(cap.kind!=='remote-api'&&!dockerViews.has(dockerKeyOf(a)))loadDocker(dockerKeyOf(a));for(const p of agentProjects(a))if(!projectGit.get(p.id))loadProjectGit(p);}
+    renderKey=key;mountStage(a);if(!mgTimer)mgTimer=setTimeout(manageTick,600);
   }
+  // ---- Moves on the management screen: give a key, clone or dockerize, push ----------------------------------------
+  const flash=(el,text)=>{if(!el)return;const tag=el.querySelector('.mg-shared');if(tag){tag.textContent=text;}el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),2200);};
+  async function giveKey(keyId,agentId,from,targetEl){
+    const k=(opaya().secrets||[]).find(x=>x.id===keyId),a=state.agents.find(x=>x.id===agentId);if(!k||!a)return;
+    const flight=stage()?.fly({from,to:targetEl,kind:'key'});
+    targetEl?.classList.add('receiving');
+    try{const r=await api.vaultGiveAgent({id:k.id,agentId});await flight;toast(`${r?.name||k.name} saved for ${r?.agent||title(a)}${r?.file?` in ${r.file}`:''}.`);heroCtl?.pulse('key');keyLists.delete(agentId);await refresh();if(selected()?.id===agentId)await loadKeys(a,true);
+      // The screen may have been redrawn meanwhile: mark the agent's card as it is now.
+      const now=targetEl?.isConnected?targetEl:document.querySelector(`.mg-key-target[data-agent-target="${CSS.escape(agentId)}"]`)||document.querySelector(`.agent-nav-row[data-agent-id="${CSS.escape(agentId)}"]`);flash(now,'✓ Key shared');stage()?.burst(now,'key');}
+    catch(error){await flight;toast(error.message,true);}
+    finally{targetEl?.classList.remove('receiving');}
+  }
+  // A ghost of the agent card flies to the target with a copy label (the 3D trail runs under it), then the clone
+  // dialog opens with that target chosen. The job's progress then shows on the target.
+  async function deployTo(a,hostId,runtime,from,targetEl){
+    if(!cloneable(a)){toast('This is an API connection: there is nothing installed to clone.');return;}
+    if(runtime==='docker'&&!canDocker(a)){toast(`${title(a)} cannot run in a Docker container Opaya sets up.`,true);return;}
+    const fromRect=from?.getBoundingClientRect?from.getBoundingClientRect():from,to=targetEl?.getBoundingClientRect();
+    if(fromRect&&to&&!matchMedia('(prefers-reduced-motion: reduce)').matches){
+      const ghost=document.createElement('div');ghost.className='mg-ghost';ghost.innerHTML=`${badge(a)}<div><strong>${esc(title(a))} <em>copy</em></strong><small>${runtime==='docker'?'Dockerizing':'Cloning'}&#8230;</small></div>`;document.body.append(ghost);
+      const sx=fromRect.left+fromRect.width/2-130,sy=fromRect.top+fromRect.height/2-32,ex=to.left+to.width/2-130,ey=to.top+to.height/2-32;
+      const anim=ghost.animate([{transform:`translate(${sx}px,${sy}px) perspective(700px) rotateY(0deg) rotateX(0deg) scale(1)`,opacity:.0},{transform:`translate(${sx+40}px,${sy-30}px) perspective(700px) rotateY(-14deg) rotateX(8deg) scale(1.04)`,opacity:1,offset:.25},{transform:`translate(${ex}px,${ey}px) perspective(700px) rotateY(10deg) rotateX(-6deg) scale(.55)`,opacity:.15}],{duration:900,easing:'cubic-bezier(.5,0,.2,1)'});
+      const trail=runtime==='docker'?stage()?.assemble({around:targetEl,into:targetEl}):stage()?.fly({from:fromRect,to:targetEl,kind:'clone'});
+      await new Promise(r=>{anim.onfinish=anim.oncancel=r;});ghost.remove();await trail;stage()?.burst(targetEl,runtime==='docker'?'docker':'clone');
+    }
+    openClone(a,{hostId,runtime});
+  }
+  async function pushProject(p,key,button){
+    const card=button?.closest('.mg-project'),node=card?.querySelector('.mg-remote-node');
+    if(['push','commitPush'].includes(key)&&card&&node)stage()?.fly({from:button,to:node,kind:'git',count:3});
+    if(key==='pull'&&card&&node)stage()?.fly({from:node,to:button,kind:'git',count:2});
+    await runGit(p,key);
+  }
+  // ---- Drag and drop: vault keys onto agents, the agent card onto a machine or Docker -------------------------------
+  // Pointer-based, so the ghost can tilt with the movement. A plain click on a key still opens its menu.
+  let drag=null,dropTarget=null,suppressClick=false;
+  const dropFor=(kind,x,y)=>{const el=document.elementFromPoint(x,y);if(!el)return null;return kind==='key'?el.closest('[data-drop~="key"],.agent-nav-row[data-agent-id],.mini-agent[data-agent-id]'):el.closest(`[data-drop~="${kind}"]`);};
+  document.addEventListener('pointerdown',event=>{
+    if(event.button!==0)return;const src=event.target.closest('[data-drag]');if(!src)return;
+    if(event.target.closest('button,input,select,textarea,a,label')&&event.target.closest('button,input,select,textarea,a,label')!==src)return;
+    drag={src,kind:src.dataset.drag,id:src.dataset.dragId,x:event.clientX,y:event.clientY,lx:event.clientX,ly:event.clientY,started:false,pointer:event.pointerId};
+  });
+  document.addEventListener('pointermove',event=>{
+    if(!drag||event.pointerId!==drag.pointer)return;
+    if(!drag.started){if(Math.hypot(event.clientX-drag.x,event.clientY-drag.y)<6)return;drag.started=true;
+      const r=drag.src.getBoundingClientRect(),g=document.createElement('div');g.className=`drag-ghost ${drag.kind}`;
+      if(drag.kind==='agent'){const a=state.agents.find(x=>x.id===drag.id);g.innerHTML=`${badge(a)}<div><strong>${esc(title(a))}</strong><small>Drop on a machine or Docker</small></div>`;drag.ox=24;drag.oy=26;}
+      else{g.innerHTML=drag.src.innerHTML;g.style.width=r.width+'px';drag.ox=event.clientX-r.left;drag.oy=event.clientY-r.top;}
+      document.body.append(g);drag.ghost=g;document.body.classList.add('dragging',`dragging-${drag.kind}`);drag.src.classList.add('drag-source');}
+    const vx=event.clientX-drag.lx,vy=event.clientY-drag.ly;drag.lx=event.clientX;drag.ly=event.clientY;
+    drag.ghost.style.transform=`translate(${event.clientX-drag.ox}px,${event.clientY-drag.oy}px) perspective(500px) rotateY(${Math.max(-25,Math.min(25,vx*1.6))}deg) rotateX(${Math.max(-25,Math.min(25,-vy*1.6))}deg) scale(1.06)`;
+    const t=dropFor(drag.kind,event.clientX,event.clientY);if(t!==dropTarget){dropTarget?.classList.remove('drop-over');dropTarget=t;t?.classList.add('drop-over');}
+  });
+  function endDrag(drop){
+    if(!drag)return;const d=drag;drag=null;document.body.classList.remove('dragging','dragging-key','dragging-agent');d.src.classList.remove('drag-source');dropTarget?.classList.remove('drop-over');
+    const target=drop?dropTarget:null;dropTarget=null;if(!d.started)return;suppressClick=true;setTimeout(()=>{suppressClick=false;},0);
+    const rect=d.ghost.getBoundingClientRect();
+    if(!target){const back=d.src.getBoundingClientRect();d.ghost.animate([{transform:d.ghost.style.transform,opacity:1},{transform:`translate(${back.left}px,${back.top}px) scale(.9)`,opacity:0}],{duration:280,easing:'ease-in'}).onfinish=()=>d.ghost.remove();return;}
+    d.ghost.remove();
+    if(d.kind==='key'){const agentId=target.dataset.agentTarget||target.dataset.agentId;if(agentId)giveKey(d.id,agentId,rect,target);}
+    else if(d.kind==='agent'){const a=state.agents.find(x=>x.id===d.id);if(a)deployTo(a,target.dataset.deployHost||'',target.dataset.deployRuntime||'regular',rect,target);}
+  }
+  document.addEventListener('pointerup',event=>{if(drag&&event.pointerId===drag.pointer)endDrag(true);});
+  document.addEventListener('pointercancel',()=>endDrag(false));
+  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&drag?.started){event.preventDefault();endDrag(false);}});
+  document.addEventListener('click',event=>{if(suppressClick){event.preventDefault();event.stopPropagation();suppressClick=false;}},true);
+  // The same moves without dragging: a key's menu lists the agents to give it to.
+  function keyMenu(button,keyId){
+    const k=(opaya().secrets||[]).find(x=>x.id===keyId);if(!k)return;
+    const r=button.getBoundingClientRect(),targetEl=id=>document.querySelector(`[data-agent-target="${CSS.escape(id)}"]`)||button;
+    openMenu(r.left,r.bottom+4,[...state.agents.filter(a=>!a.ephemeral).map(a=>({icon:'&#9919;',label:`Give to ${title(a)}`,run:()=>giveKey(k.id,a.id,button,targetEl(a.id))})),'-',{icon:'&#9635;',label:'Open Vault',run:()=>openVault()}],k.name);
+  }
+  // ---- Chat dock: chats in their own windows along the bottom, several at once ---------------------------------------
+  // Like a desktop messenger: each window is one conversation. Click its header to minimize it, expand it to the full
+  // chat view, or close it. Windows that do not fit collapse into round avatars on the right. The open windows are saved
+  // with the view, and the session service sends their messages with every update.
+  let chatDock=[];const dockSigs=new Map(),dockUnread=new Map(),dockSending=new Set();
+  const DOCK_W=340;
+  const dockConv=id=>state.conversations.find(c=>c.id===id);
+  function dockRoot(){
+    let root=$('#chat-dock');if(root)return root;
+    root=document.createElement('div');root.id='chat-dock';root.className='chat-dock';root.setAttribute('aria-label','Chat windows');document.body.append(root);
+    root.addEventListener('click',event=>{
+      const b=event.target.closest('[data-dock]'),win=event.target.closest('.chat-win'),id=win?.dataset.conv||b?.dataset.conv;if(!b||!id)return;
+      const act=b.dataset.dock,d=chatDock.find(x=>x.id===id),c=dockConv(id),a=c&&state.agents.find(x=>x.id===c.agentId);
+      if(act==='toggle'&&!event.target.closest('button:not([data-dock="toggle"])')){if(d){d.min=!d.min;if(!d.min)dockUnread.delete(id);saveView();renderDock();if(!d.min)win.querySelector('textarea')?.focus();}return;}
+      if(act==='min'&&d){d.min=true;saveView();renderDock();return;}
+      if(act==='close'){closeChatWindow(id);return;}
+      if(act==='bubble'){const at=chatDock.findIndex(x=>x.id===id);if(at>=0){const [x]=chatDock.splice(at,1);x.min=false;chatDock.unshift(x);dockUnread.delete(id);saveView();renderDock();}return;}
+      if(act==='expand'&&a){closeChatWindow(id);action(async()=>{agentModes.set(a.id,'chat');overview=false;opayaView=false;playgroundView=false;await api.selectConversation({id});state=await api.snapshot();render();saveView();$('#message-input')?.focus();});return;}
+      if(act==='connect'&&a){action(()=>api.connect({id:a.id}));return;}
+      if(act==='stop'&&a){action(()=>api.stop({id:a.id}));return;}
+      if(act==='manage'&&a){openManage(a.id);return;}
+    });
+    root.addEventListener('submit',event=>{const f=event.target.closest('.chat-win-compose');if(!f)return;event.preventDefault();dockSend(f.closest('.chat-win').dataset.conv);});
+    root.addEventListener('keydown',event=>{if(event.target.tagName!=='TEXTAREA')return;if(sendKeyPressed(event)){event.preventDefault();dockSend(event.target.closest('.chat-win').dataset.conv);}else if(event.key==='Escape'){const id=event.target.closest('.chat-win').dataset.conv,d=chatDock.find(x=>x.id===id);if(d){d.min=true;saveView();renderDock();}}});
+    root.addEventListener('input',event=>{const t=event.target;if(t.tagName!=='TEXTAREA')return;const id=t.closest('.chat-win').dataset.conv,c=dockConv(id);drafts.set(id,t.value);if(c&&api.saveDraft)save(api.saveDraft({agentId:c.agentId,conversationId:id,text:t.value}));t.style.height='auto';t.style.height=Math.min(t.scrollHeight,120)+'px';});
+    window.addEventListener('resize',()=>renderDock());
+    return root;
+  }
+  // The agent's window: an open one, else its latest chat, else a new chat that does not change the selected agent.
+  async function openChatWindow(a,conversationId=''){
+    if(!a)return;if(a.protocol==='terminal'||a.surface==='terminal'&&!conversationId){await setAgentMode(a,'console');return;}
+    let id=conversationId||chatDock.find(d=>dockConv(d.id)?.agentId===a.id)?.id||agentChats(a)[0]?.id;
+    if(!id){const c=await api.newConversation({agentId:a.id,activate:false});id=c.id;state=await api.snapshot();}
+    const at=chatDock.findIndex(d=>d.id===id);if(at>=0)chatDock.splice(at,1);
+    chatDock.unshift({id,min:false});chatDock=chatDock.slice(0,6);dockUnread.delete(id);
+    saveView();renderDock();if(manageId)render();
+    requestAnimationFrame(()=>$(`.chat-win[data-conv="${CSS.escape(id)}"] textarea`)?.focus());
+  }
+  async function newDockChat(a){if(!a)return;if(a.busy){toast('Wait for or stop this agent\'s current turn first.',true);return;}const c=await api.newConversation({agentId:a.id,activate:false});state=await api.snapshot();await openChatWindow(a,c.id);}
+  function closeChatWindow(id){
+    const el=$(`.chat-win[data-conv="${CSS.escape(id)}"]`);chatDock=chatDock.filter(d=>d.id!==id);dockSigs.delete(id);saveView();
+    if(el){el.classList.add('leaving');setTimeout(()=>{el.remove();renderDock();},200);}else renderDock();
+    if(manageId)render();
+  }
+  async function dockSend(id,text){
+    const win=$(`.chat-win[data-conv="${CSS.escape(id)}"]`),box=win?.querySelector('textarea'),c=dockConv(id),a=c&&state.agents.find(x=>x.id===c.agentId);
+    const value=text??box?.value??'';if(!a||!value.trim()||dockSending.has(id))return;
+    if(a.status!=='connected'){toast(`Connect ${title(a)} before sending a message.`,true);return;}
+    dockSending.add(id);renderDock();
+    try{await api.send({agentId:a.id,conversationId:id,text:value});drafts.set(id,'');if(box&&text===undefined){box.value='';box.style.height='auto';}}
+    catch(error){toast(error.message,true);}finally{dockSending.delete(id);renderDock();}
+  }
+  const dockMessage=(m,a)=>`<div class="dock-msg ${m.role==='user'?'mine':'theirs'} ${m.status==='error'?'failed':''}">${m.role==='user'?'':`<span class="dock-msg-avatar">${agentIcon(a)}</span>`}<div class="dock-bubble">${activityMarkup(m,4,m.status==='streaming'?a.id:'')}${m.content?`<div class="message-text">${format(m.content)}</div>`:m.status==='streaming'?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}${m.attachments?.length?`<small class="dock-files">${m.attachments.length} file${m.attachments.length===1?'':'s'}</small>`:''}${m.error?`<small class="dock-error">${esc(m.error)}</small>`:''}</div></div>`;
+  function renderDock(){
+    const root=dockRoot();chatDock=chatDock.filter(d=>dockConv(d.id));
+    const room=Math.max(1,Math.floor((innerWidth-(sidebarHidden?60:320))/(DOCK_W+12))),shown=chatDock.slice(0,room),rest=chatDock.slice(room);
+    root.hidden=!chatDock.length;document.body.classList.toggle('chat-dock-open',shown.some(d=>!d.min));
+    const keep=new Set(shown.map(d=>d.id));
+    for(const el of root.querySelectorAll('.chat-win'))if(!keep.has(el.dataset.conv)&&!el.classList.contains('leaving')){el.remove();dockSigs.delete(el.dataset.conv);}
+    shown.forEach((d,i)=>{
+      const c=dockConv(d.id),a=state.agents.find(x=>x.id===c.agentId);if(!a)return;
+      let el=root.querySelector(`.chat-win[data-conv="${CSS.escape(d.id)}"]`);
+      if(!el){el=document.createElement('section');el.className='chat-win entering';el.dataset.conv=d.id;el.setAttribute('role','dialog');el.setAttribute('aria-label',`Chat with ${title(a)}`);
+        el.innerHTML=`<header class="chat-win-head" data-dock="toggle" data-conv="${esc(d.id)}" title="Minimize or open"><span class="chat-win-avatar"></span><span class="chat-win-who"><strong></strong><small></small></span><em class="chat-win-unread" hidden></em><button type="button" class="chat-win-btn" data-dock="manage" title="Manage this agent" aria-label="Manage"><span class="mode-glyph manage-glyph" aria-hidden="true"></span></button><button type="button" class="chat-win-btn" data-dock="expand" title="Full chat view" aria-label="Expand"><span class="expand-glyph" aria-hidden="true"></span></button><button type="button" class="chat-win-btn" data-dock="min" title="Minimize" aria-label="Minimize">&#8211;</button><button type="button" class="chat-win-btn" data-dock="close" title="Close" aria-label="Close">&#10005;</button></header>
+          <div class="chat-win-body"><div class="chat-win-list" aria-live="polite"></div><div class="chat-win-note" hidden></div><form class="chat-win-compose"><textarea rows="1" maxlength="80000" placeholder="Message ${esc(title(a))}..." aria-label="Message ${esc(title(a))}"></textarea><button type="button" class="chat-win-stop" data-dock="stop" title="Stop" aria-label="Stop" hidden>&#9632;</button><button type="submit" class="chat-win-send" title="Send" aria-label="Send">&#8593;</button></form></div>`;
+        root.append(el);el.querySelector('textarea').value=drafts.get(d.id)??state.drafts?.[d.id]??'';setTimeout(()=>el.classList.remove('entering'),420);}
+      el.style.order=String(i+1);el.classList.toggle('min',!!d.min);
+      const head=`${badge(a)}${dot(a)}`;if(el.dataset.head!==head){el.querySelector('.chat-win-avatar').innerHTML=head;el.dataset.head=head;}
+      el.querySelector('.chat-win-who strong').textContent=title(a);el.querySelector('.chat-win-who small').textContent=a.busy?'Working...':`${chatLabel(c)}`;
+      const messages=state.histories[d.id],last=messages?.at(-1),sig=messages?`${messages.length}:${last?.content?.length||0}:${last?.status||''}:${last?.activity?.length||0}:${a.status}`:'loading';
+      if(dockSigs.get(d.id)!==sig){
+        const prev=dockSigs.get(d.id),list=el.querySelector('.chat-win-list'),atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<60;
+        if(d.min&&prev&&prev!=='loading'&&messages&&last?.role==='assistant'&&last.status!=='streaming'&&!prev.startsWith(`${messages.length}:`))dockUnread.set(d.id,(dockUnread.get(d.id)||0)+1);
+        dockSigs.set(d.id,sig);
+        list.innerHTML=!messages?'<p class="chat-win-empty">Loading the chat...</p>':messages.length?messages.slice(-60).map(m=>dockMessage(m,a)).join(''):`<div class="chat-win-empty">${badge(a,true)}<strong>${esc(title(a))}</strong><span>${a.status==='connected'?'Say hello.':'Not connected.'}</span>${a.status==='connected'?'':`<button type="button" class="secondary small" data-dock="connect" data-conv="${esc(d.id)}">Connect</button>`}</div>`;
+        if(atBottom||!prev||prev==='loading')list.scrollTop=list.scrollHeight;
+      }
+      const unread=dockUnread.get(d.id)||0,badgeEl=el.querySelector('.chat-win-unread');badgeEl.hidden=!unread;badgeEl.textContent=unread;el.classList.toggle('attention',!!unread);
+      const note=el.querySelector('.chat-win-note'),off=a.status!=='connected';note.hidden=!off||!messages?.length;note.innerHTML=off?`${esc(status(a))} <button type="button" class="text-button" data-dock="connect" data-conv="${esc(d.id)}">Connect</button>`:'';
+      el.querySelector('.chat-win-send').disabled=off||!!a.busy||dockSending.has(d.id);el.querySelector('.chat-win-send').hidden=!!a.busy;el.querySelector('.chat-win-stop').hidden=!a.busy;
+    });
+    let more=root.querySelector('.chat-more');
+    if(rest.length){if(!more){more=document.createElement('div');more.className='chat-more';root.append(more);}more.style.order='0';
+      more.innerHTML=rest.map(d=>{const c=dockConv(d.id),a=state.agents.find(x=>x.id===c?.agentId);return a?`<button type="button" class="chat-bubble ${dockUnread.get(d.id)?'attention':''}" data-dock="bubble" data-conv="${esc(d.id)}" title="${esc(title(a)+': '+chatLabel(c))}">${badge(a)}${dot(a)}</button>`:'';}).join('');}
+    else more?.remove();
+  }
+  // The note about a new key, in the agent's window when no full chat is open.
+  async function dockTell(a,note){await openChatWindow(a);const id=chatDock[0]?.id,box=$(`.chat-win[data-conv="${CSS.escape(id)}"] textarea`);if(!box)return;const typed=box.value.trim();if(!typed&&a.status==='connected'){await dockSend(id,note);return;}box.value=note+(typed?'\n\n'+box.value:'');box.dispatchEvent(new Event('input',{bubbles:true}));box.focus();}
+  // ---- Console: terminals in a grid ---------------------------------------------------------------------------------
+  // Besides side by side (drag the grips), the terminal area can be a grid: two columns or rows, 2 x 2, one large with
+  // two stacked, three columns or 3 x 2. Empty cells offer the agent's CLI or a shell; drag the gutters to resize.
+  const GRIDS={row:['Side by side',0],cols2:['Two columns',2],rows2:['Two rows',2],grid4:['2 × 2',4],main3:['One large, two stacked',3],cols3:['Three columns',3],grid6:['3 × 2',6]};
+  const gridCells=()=>GRIDS[layout.grid]?.[1]||0;
+  const gridIcon=g=>`<span class="grid-ico" data-g="${g}" aria-hidden="true">${'<i></i>'.repeat(Math.max(1,GRIDS[g][1]||2))}</span>`;
+  const gridPicker=()=>`<div class="grid-picker" role="radiogroup" aria-label="Terminal layout">${Object.keys(GRIDS).map(g=>`<button type="button" role="radio" class="grid-pick ${(layout.grid||'row')===g?'selected':''}" data-action="terminal-grid-set" data-grid="${g}" aria-checked="${(layout.grid||'row')===g}" title="${esc(GRIDS[g][0])}">${gridIcon(g)}</button>`).join('')}</div>`;
+  function setGrid(g){
+    if(!GRIDS[g])return;layout.grid=g;if(!gridCells()){panes=panes.filter(Boolean);if(!panes.length)panes=[''];paneSizes=panes.map(()=>1);}
+    $('#terminal-panel').hidden=false;renderPanes();saveView();
+    for(const b of document.querySelectorAll('.grid-pick')){const on=b.dataset.grid===g;b.classList.toggle('selected',on);b.setAttribute('aria-checked',String(on));}
+    toast(gridCells()?`${GRIDS[g][0]}: empty cells offer the agent's CLI or a shell.`:'Side by side: drag the grips to share the width.');
+  }
+  // Every empty cell gets a session: the agent's CLI first, then shells for it.
+  async function fillGrid(){
+    const a=inAgentView()?selected():null;if(!gridCells())return;
+    for(let i=0;i<panes.length;i++){if(panes[i])continue;paneFocus=i;const cli=a&&hasCli(a)&&![...terminalViews.values()].some(v=>v.agentId===a.id&&v.mode==='agent'&&!v.exited);await openTerminal(a?{agentId:a.id,...(cli?{mode:'agent'}:{})}:{local:true});}
+  }
+  function gridTemplates(){
+    const g=layout.grid,c=layout.gridCol||.5,r=layout.gridRow||.5;
+    return {cols:{cols2:`${c}fr ${1-c}fr`,rows2:'1fr',grid4:`${c}fr ${1-c}fr`,main3:`${c}fr ${1-c}fr`,cols3:'1fr 1fr 1fr',grid6:'1fr 1fr 1fr'}[g]||'',rows:{cols2:'1fr',rows2:`${r}fr ${1-r}fr`,grid4:`${r}fr ${1-r}fr`,main3:`${r}fr ${1-r}fr`,cols3:'1fr',grid6:`${r}fr ${1-r}fr`}[g]||''};
+  }
+  function applyGrid(){
+    const root=$('#terminal-panes');if(!root)return;const n=gridCells(),g=layout.grid,t=gridTemplates();
+    root.classList.toggle('grid',!!n);root.dataset.grid=n?g:'';root.style.gridTemplateColumns=t.cols;root.style.gridTemplateRows=t.rows;
+    [...root.querySelectorAll(':scope > .terminal-pane')].forEach((p,i)=>{p.style.gridRow=n&&g==='main3'&&i===0?'1 / span 2':'';});
+    const views=$('#terminal-views'),gutter=(id,kind)=>{let el=$('#'+id);if(!el){el=document.createElement('div');el.id=id;el.className=`grid-gutter ${kind}`;el.setAttribute('role','separator');el.setAttribute('aria-orientation',kind==='col'?'vertical':'horizontal');el.setAttribute('aria-label',kind==='col'?'Resize columns':'Resize rows');el.dataset.gutter=kind;views.append(el);}return el;};
+    const col=n&&['cols2','grid4','main3'].includes(g),row=n&&['rows2','grid4','main3','grid6'].includes(g);
+    const x=root.offsetLeft,y=root.offsetTop,w=root.clientWidth,h=root.clientHeight,c=layout.gridCol||.5,r=layout.gridRow||.5;
+    const gc=col?gutter('grid-gutter-col','col'):$('#grid-gutter-col'),gr=row?gutter('grid-gutter-row','row'):$('#grid-gutter-row');
+    if(gc){gc.hidden=!col;if(col)Object.assign(gc.style,{left:`${x+w*c-4}px`,top:`${y}px`,height:`${h}px`});}
+    if(gr){gr.hidden=!row;if(row){const left=g==='main3'?x+w*c:x;Object.assign(gr.style,{left:`${left}px`,top:`${y+h*r-4}px`,width:`${g==='main3'?w*(1-c):w}px`});}}
+  }
+  document.addEventListener('pointerdown',event=>{
+    const g=event.target.closest('.grid-gutter');if(!g)return;event.preventDefault();const root=$('#terminal-panes'),kind=g.dataset.gutter;
+    g.setPointerCapture(event.pointerId);document.body.classList.add('pane-resizing');
+    const move=e=>{const r=root.getBoundingClientRect(),v=kind==='col'?(e.clientX-r.left)/r.width:(e.clientY-r.top)/r.height,clamped=Math.round(Math.max(.15,Math.min(.85,v))*1000)/1000;if(kind==='col')layout.gridCol=clamped;else layout.gridRow=clamped;applyGrid();};
+    g.addEventListener('pointermove',move);
+    g.addEventListener('lostpointercapture',()=>{g.removeEventListener('pointermove',move);document.body.classList.remove('pane-resizing');renderPanes();saveView();},{once:true});
+  });
+  window.addEventListener('resize',()=>{if(gridCells())requestAnimationFrame(applyGrid);});
   function terminalMenu(id){
     const view=terminalViews.get(id);if(!view)return [];
     return [
@@ -1478,8 +1823,9 @@
   }
   // The note about a new key goes into the agent's chat: sent at once when nothing is typed, else put in front.
   async function tellAgent(a,note){
-    if(!note||selected()?.id!==a.id)return;
-    const input=$('#message-input');if(!input)return;const typed=input.value.trim();
+    if(!note)return;
+    // No full chat open for this agent (its management screen, say): the note goes to its chat window.
+    const input=selected()?.id===a.id?$('#message-input'):null;if(!input){await dockTell(a,note);return;}const typed=input.value.trim();
     input.value=note+(typed?'\n\n'+input.value:'');input.dispatchEvent(new Event('input'));
     if(!typed&&selected()?.status==='connected')await sendMessage();
     else{input.focus();toast(selected()?.status==='connected'?'The note is in front of your message: send it so the agent knows.':'Connect the agent and send the note so it knows about the key.');}
@@ -1556,13 +1902,12 @@
     closeModal();
     if(target?.opaya){overview=false;playgroundView=false;opayaView=true;manageId='';render();saveView();return;}
     if(!state.agents.some(a=>a.id===target?.agentId))return;
-    overview=false;opayaView=false;playgroundView=false;manageId='';
-    if(target.conversationId&&state.conversations.some(c=>c.id===target.conversationId))await api.selectConversation({id:target.conversationId});else await api.select({id:target.agentId});
-    render();saveView();
+    // A reply opens in the agent's chat window, over whatever screen is open.
+    const a=state.agents.find(x=>x.id===target.agentId);await openChatWindow(a,state.conversations.some(c=>c.id===target.conversationId&&c.agentId===a.id)?target.conversationId:'');
   }));
   api.onNotice?.(n=>{
     if(n.kind==='updates'){renderToolChip();return;}
-    if(n.kind==='surface'){stageAgent='';refresh().catch(()=>{});}
+    if(n.kind==='surface'){stageAgent='';if(n.agentId&&agentModes.get(n.agentId)==='chat')agentModes.set(n.agentId,'console');refresh().catch(()=>{});}
     if(n.level!=='error'){toast(n.text?`${n.title}. ${n.text}`:n.title);return;}
     document.getElementById('opaya-nudge')?.remove();
     const card=document.createElement('div');card.id='opaya-nudge';card.className='opaya-nudge urgent-notice';card.setAttribute('role','alert');
@@ -1650,7 +1995,7 @@
     terminal:'<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M4.75 6.25 6.75 8l-2 1.75M8.5 10h3"/></svg>'};
   function renderTitleControls(){
     const box=$('#title-controls');if(!box)return;const mac=state.platform==='darwin',a=selected();
-    const here=!!a&&!overview&&!opayaView&&!playgroundView&&!manageId,now=here?surfaceOf(a):'',name=a?title(a):'';
+    const mode=a&&!overview&&!opayaView&&!playgroundView?modeOf(a):'',now=mode==='console'?'terminal':mode==='chat'?'chat':'',name=a?title(a):'';
     const chatTip=!a?'Open the Opaya Agent':a.protocol==='terminal'?`${name} works only in its terminal`:`Chat with ${name}`;
     const termTip=!a?'A terminal on this computer':hasCli(a)?`${name} in its terminal (right-click for more)`:`A shell for ${name} (right-click for more)`;
     const html=`<button type="button" class="title-btn" data-title="sidebar" aria-pressed="${!sidebarHidden}" title="${sidebarHidden?'Show':'Hide'} the sidebar (${mac?'&#8984;':'Ctrl+'}B)" aria-label="${sidebarHidden?'Show':'Hide'} the sidebar">${TITLE_ICONS.sidebar}</button><div class="surface-switch" role="group" aria-label="Chat or terminal"><button type="button" data-title="chat" class="${now==='chat'?'active':''}" aria-pressed="${now==='chat'}" title="${esc(chatTip)}" aria-label="${esc(chatTip)}">${TITLE_ICONS.chat}</button><button type="button" data-title="terminal" class="${now==='terminal'?'active':''}" aria-pressed="${now==='terminal'}" title="${esc(termTip)}" aria-label="${esc(termTip)}">${TITLE_ICONS.terminal}</button></div>`;
@@ -1661,15 +2006,13 @@
   // Chat or terminal for the selected agent, leaving the Workspace, Manage, the Opaya Agent or the Playground. From a
   // project chat the CLI starts in the project's folder, as the Terminal button did (the service reuses a running one).
   async function showSurface(surface){
-    const a=selected(),p=a&&inAgentView()&&!manageId?projectOf(currentConversation()):null;
+    const a=selected(),p=a&&inAgentView()&&modeOf(a)==='chat'?projectOf(currentConversation()):null;
     if(!a){if(surface==='terminal')await openTerminal({local:true});else{overview=false;playgroundView=false;opayaView=true;manageId='';closeModal();render();saveView();}return;}
-    if(surface==='terminal'&&!hasCli(a)){await openTerminal({agentId:a.id,projectId:p&&fitsProject(a,p)?p.id:undefined});return;}
-    if(surface==='chat'&&a.protocol==='terminal')toast(`${title(a)} works only in its terminal.`);
-    const project=surface==='terminal'&&p&&fitsProject(a,p)?p:null;
-    overview=false;opayaView=false;playgroundView=false;manageId='';closeModal();stageAgent=project?a.id:'';
-    if(surfaceOf(a)!==surface&&(surface==='terminal'||a.protocol!=='terminal')){await api.updateAgentDisplay({id:a.id,surface:surface===(state.settings?.interface||'chat')?'':surface});state=await api.snapshot();}
-    render();saveView();
-    if(project)await openTerminal({agentId:a.id,mode:'agent',projectId:project.id});
+    if(surface==='chat'){if(a.protocol==='terminal')toast(`${title(a)} works only in its terminal.`);else await setAgentMode(a,'chat');return;}
+    // Console; from a project chat the CLI starts in the project's folder (the service reuses a running one).
+    const project=p&&hasCli(a)&&fitsProject(a,p)?p:null;
+    await setAgentMode(a,'console');
+    if(project){stageAgent=a.id;await openTerminal({agentId:a.id,mode:'agent',projectId:project.id});}
   }
   function terminalChoices(event){
     const a=selected(),items=[
@@ -1909,7 +2252,7 @@
   async function loadSkills(id,force=false){if(!force&&skillCache.has(id))return skillCache.get(id);const r=await api.agentSkills({id});skillCache.set(id,r);return r;}
   function useCommand(a,name){
     closeModal();
-    const put=()=>{const input=$('#message-input');if(!input)return;input.value=`/${name} `;drafts.set(draftKey(),input.value);input.focus();input.setSelectionRange(input.value.length,input.value.length);};
+    agentModes.set(a.id,'chat');const put=()=>{const input=$('#message-input');if(!input)return;input.value=`/${name} `;drafts.set(draftKey(),input.value);input.focus();input.setSelectionRange(input.value.length,input.value.length);};
     if(state.activeAgentId!==a.id||overview||opayaView||playgroundView){overview=false;opayaView=false;playgroundView=false;action(async()=>{await api.select({id:a.id});await refresh();put();});}else put();
   }
   const browserCapable=a=>a.transport!=='ssh'&&a.command!=='docker'&&['acp','claude'].includes(a.protocol);
@@ -2200,7 +2543,7 @@
   async function startChatWith(agentId,text,projectId=''){
     const a=state.agents.find(x=>x.id===agentId),p=projectId&&(state.projects||[]).find(x=>x.id===projectId);
     const fits=p&&(p.hostId||'')===(a?.transport==='ssh'?a.hostId:'');
-    const c=await api.newConversation({agentId,projectId:fits?projectId:''});
+    const c=await api.newConversation({agentId,projectId:fits?projectId:''});agentModes.set(agentId,'chat');
     closeModal();overview=false;opayaView=false;playgroundView=false;drafts.set(c.id,text);await api.saveDraft({agentId,conversationId:c.id,text});await refresh();
     const input=$('#message-input');if(input&&currentConversation()?.id===c.id){input.value=text;input.focus();input.setSelectionRange(text.length,text.length);input.dispatchEvent(new Event('input'));}
   }
@@ -2226,9 +2569,9 @@
     web.classList.toggle('selected',!$('#browser-panel').hidden);bar.append(web,button);
   }
   async function startProjectChat(p,agentId){
-    await api.newConversation({agentId,projectId:p.id});overview=false;opayaView=false;playgroundView=false;await refresh();$('#message-input')?.focus();
+    await api.newConversation({agentId,projectId:p.id});agentModes.set(agentId,'chat');overview=false;opayaView=false;playgroundView=false;await refresh();$('#message-input')?.focus();
   }
-  async function openProjectChat(id){await api.selectConversation({id});overview=false;opayaView=false;playgroundView=false;await refresh();}
+  async function openProjectChat(id){const c=state.conversations.find(x=>x.id===id);if(c)agentModes.set(c.agentId,'chat');await api.selectConversation({id});overview=false;opayaView=false;playgroundView=false;await refresh();}
   async function projectTerminal(p){
     await openTerminal({...(p.hostId?{hostId:p.hostId}:{local:true}),projectId:p.id});
   }
@@ -2476,6 +2819,8 @@
       else toast(`${j.title} failed: ${j.error}`,true);
     }
     renderJobs();
+    // Clone progress shows on the deploy targets of the management screen.
+    if(manageId&&j.kind==='clone'&&(!prev||prev.status!==j.status||jobPercent(prev)!==jobPercent(j)))render();
   }
   function renderJobs(){
     const running=[...jobs.values()].filter(j=>j.status==='running');

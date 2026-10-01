@@ -76,6 +76,9 @@ if(hostMode){
         ['/vendor/addon-webgl.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-webgl/lib/addon-webgl.js')]],
         ['/vendor/addon-search.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-search/lib/addon-search.js')]],
         ['/vendor/addon-web-links.js',['text/javascript',path.join(__dirname,'../node_modules/@xterm/addon-web-links/lib/addon-web-links.js')]],
+        ['/vendor/three.module.js',['text/javascript',path.join(__dirname,'../node_modules/three/build/three.module.js')]],
+        ['/vendor/three.core.js',['text/javascript',path.join(__dirname,'../node_modules/three/build/three.core.js')]],
+        ['/stage3d.js',['text/javascript',path.join(__dirname,'../ui/stage3d.js')]],
         ['/markdown.js',['text/javascript',path.join(__dirname,'../ui/markdown.js')]],
         ['/terminal-core.js',['text/javascript',path.join(__dirname,'../ui/terminal-core.js')]]
       ]);
@@ -148,7 +151,7 @@ if(hostMode){
       const forwards=['projectRemoteInfo','projectRemoteStart','projectRemoteSend','projectRemoteBring','projectRemoteApply','projectRemoteStop','projectRemoteGithubLogin','guideScan','guidePlan','guideStart','toolVersions','toolCheckAll','agentInstallInfo','agentMaintenanceCommand','agentUpdate','agentUpdateAll','agentBackup','agentBackups','backupRemove','agentUninstall','opayaFreeModels','opayaFreeSetup','agentEnvKeys','transferStart','renameConversation','deleteConversation','condenseConversation','conversationMarkdown','libraryList','libraryImport','libraryInstall','libraryRemove','libraryAddFolder','jobs','jobDismiss','sshKeyCreate','hostTest','saveSettings','projectSave','projectRemove','projectInfo','projectBranches','projectGit','projectClone','mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaNewSession','opayaSelectSession','opayaDeleteSession','opayaStop','opayaClear','snapshot','saveAgent','reorderAgents','updateAgentDisplay','removeAgent','saveHost','removeHost','discover','connect','disconnect','clearError','select','newConversation','selectConversation','send','stop','saveDraft','saveView','terminalOpen','terminalAttach','terminalWrite','terminalResize','terminalDetach','terminalClose'];
       forwards.push('selectEffort','fileInfo');
       forwards.push('mcpCatalog','mcpInstall');
-      forwards.push('dockerList','dockerTerminal');
+      forwards.push('dockerList','dockerTerminal','dockerStats','dockerInspect');
       const handlers=Object.fromEntries(forwards.map(method=>[method,input=>client.call(method,input)]));
       // Attachments: the native picker (several files), and pasted files (base64) written to Opaya's data folder here so
       // only their paths go to the session service, whose messages are limited to 24 MB. Removed again if the send fails.

@@ -25,6 +25,19 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 
 ## What you can do
 
+### Manage every agent (0.23)
+Selecting an agent opens its **management screen**. Chat and Console sit next to Manage at the top.
+- **The stage:** a live 3D view of the agent and what it is connected to (its machine, container, keys, projects, skills and chats). It glows when the agent is connected and pulses while it works.
+- **Deploy & clone:** drag the agent card onto **This computer**, a **VPS** or **Docker** to clone it there, or click a target. Progress shows on the target.
+- **Docker:** the containers on the agent's machine, its own container first, with live CPU and memory, **Logs**, **Shell**, **Restart**, **Pause / Resume**, **Stop / Start**, **Inspect** (image, mounts, ports, restart policy and health; environment variables by name only) and **Remove**. Pull a newer image and prune unused ones. **Dockerize** runs a copy of an agent in its own container.
+- **Keys & access:** drag a key from the Opaya Vault onto any agent, on this screen or in the sidebar, to give it that key. Click a key for the same thing without dragging.
+- **Projects & git:** pull, commit and push, or start a chat in a project, from the screen.
+- Every other action is here too: model and effort, skills and tools, files, update, back up, connection (restart, copy ID or launch command), name and look, and removal.
+
+### Chat windows and the console (0.23)
+- **Chat** opens a chat window docked at the bottom, like a desktop messenger. Keep several open, click a header to minimize it, expand it to the full chat view or close it. Windows that do not fit collapse into avatars on the right. Settings > **Chat opens as** can make Chat open the full view instead.
+- **Console** turns the main area into terminals: side by side, two columns or rows, 2 x 2, one large with two stacked, three columns or 3 x 2. Drag the gutters to resize; **Fill empty cells** opens the agent's CLI and shells.
+
 ### Chat with every agent
 - Every agent gets its own chats, and each chat keeps its exact provider session.
 - **Rich messages:** Markdown, tables, task lists, code blocks with Copy, and HTML/SVG preview.
@@ -126,7 +139,7 @@ It acts only through Opaya's own tools and terminals you can watch, and every ch
 - Official agent logos, an icon library or your own icon.
 - Dark and light themes.
 - System notifications while Opaya is not in front: an agent or the Opaya Agent replied, an approval is waiting or a long job finished. Click one to open that chat. Each kind can be turned off in Settings.
-- **Workspace** filters agents by status and place, and each card has Connect, Chat, Terminal, Manage and Fix. **Manage** in the sidebar opens every option for the selected agent, with a row of all agents to switch between.
+- **Workspace** filters agents by status and place, and each card has Manage, Connect, Terminal and Fix.
 - Hide or show the sidebar with the button at the top left or **Cmd/Ctrl+B**.
 - **Files:** mention a file or folder in the chat or in a terminal on the same machine.
 - **Settings:** theme, Enter or Ctrl/Cmd+Enter to send, terminal text size and position, start Opaya when you sign in, connect agents at start, notifications, tips and keyboard shortcuts.

@@ -1,3 +1,17 @@
+# Opaya 0.23.0 - manage first
+
+- **Selecting an agent opens its management screen.** Chat and Console sit next to Manage at the top of every agent.
+  - A **3D stage** shows the agent at the center of what it is connected to: its machine, container, keys, projects, skills and chats. It glows green when connected, amber while working, red on an error, and follows the pointer. Three.js loads only when the screen first appears and draws only while it is on screen.
+  - **Deploy & clone**: drag the agent card onto This computer, a VPS or Docker (or click one). A copy card flies there, and the clone dialog opens with that target chosen. Clone progress shows on the target.
+  - **Docker** is a full panel: containers on the agent's machine with its own first, live CPU and memory every few seconds, Logs, Shell, Restart, Pause / Resume, Stop / Start, Inspect and Remove. Pull a newer image, prune unused images, and **Dockerize** an agent that is not in a container yet (container walls assemble around the target).
+  - **Keys & access**: drag a key from the Opaya Vault onto an agent here or in the sidebar. A 3D key flies to it and the agent shows "Key shared". Click a key to do the same without dragging.
+  - **Projects & git**: branch, changes and commits to push per project, with Pull, Commit & push and Push (commits fly to the remote) and Chat here.
+  - New controls: Restart connection, Copy agent ID, Copy launch command, Restart container and Container logs, and an Activity summary.
+- **Chat windows**: Chat opens the agent's chat in a window docked at the bottom. Several can be open, from different agents; minimize one to its header (a badge counts replies), expand it to the full chat view, or close it. Windows that do not fit become avatars on the right. Open windows come back after a restart. A notification about a reply opens its window. Settings > **Chat opens as** picks the window or the full view.
+- **Console grid**: Console fills the main area with terminals in a layout you choose in its top bar or the terminal's layout button: side by side, two columns, two rows, 2 x 2, one large with two stacked, three columns or 3 x 2. Drag the gutters between cells; empty cells offer the agent's CLI or a shell, and **Fill empty cells** opens them all. The layout and its sizes are kept.
+- Settings > Workspace style and the first-launch "chat or terminal" question are gone: Manage, Chat and Console replace them. Agents whose vendor stopped accepting chats from other apps open their console; right-click > **Allow chat again** undoes it.
+- The Docker manager behind the screen can pause, resume, pull and prune, and reads `docker stats` and a `docker inspect` summary that lists environment variables by name only, so their values never leave the machine.
+
 # Opaya 0.22.4 - model settings name the right agent
 
 - Choosing a model for DeepSeek Harness or another ACP agent no longer says "Hermes opens a session"; only Hermes says Hermes.

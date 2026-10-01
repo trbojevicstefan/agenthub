@@ -47,3 +47,22 @@ test('the Docker manager lists containers and images and runs only validated act
   assert.throws(()=>docker.terminalCommand({container:'$(x)',kind:'shell'}),/Invalid/);
   assert.equal(docker.explain(new Error('Cannot connect to the Docker daemon at unix:///var/run/docker.sock')).running,false);
 });
+test('the Docker manager pauses, pulls, prunes and reads stats and a safe inspect summary',{skip},async t=>{
+  const dir=await temp(t),bin=path.join(dir,'bin');await fs.mkdir(bin,{recursive:true});
+  const stats=JSON.stringify({Name:'pg',CPUPerc:'1.5%',MemUsage:'20MiB / 2GiB',MemPerc:'1.0%',NetIO:'1kB / 2kB',BlockIO:'0B / 0B',PIDs:'7'});
+  const inspect=JSON.stringify([{Name:'/pg',Created:'2026-09-01T00:00:00Z',RestartCount:2,Config:{Image:'postgres:16',Env:['POSTGRES_PASSWORD=supersecret','PATH=/usr/bin'],Cmd:['postgres']},HostConfig:{RestartPolicy:{Name:'unless-stopped'}},State:{Status:'running',Health:{Status:'healthy'}},Mounts:[{Type:'volume',Name:'pgdata',Destination:'/var/lib/postgresql/data',RW:true}],NetworkSettings:{Ports:{'5432/tcp':[{HostIp:'127.0.0.1',HostPort:'5433'}]},Networks:{bridge:{}}}}]);
+  await fs.writeFile(path.join(bin,'stats.txt'),stats+'\n');await fs.writeFile(path.join(bin,'inspect.txt'),inspect);
+  await fs.writeFile(path.join(bin,'docker'),`#!/bin/sh\necho "$*" >> "${path.join(bin,'calls.log')}"\ncase "$1" in\n stats) cat "${path.join(bin,'stats.txt')}";;\n inspect) cat "${path.join(bin,'inspect.txt')}";;\nesac\nexit 0\n`,{mode:0o755});
+  const old=process.env.PATH;process.env.PATH=`${bin}:${old}`;
+  try{
+    await docker.act(null,{container:'pg',action:'pause'});await docker.act(null,{container:'pg',action:'unpause'});await docker.act(null,{container:'postgres:16',action:'pull'});await docker.act(null,{action:'prune'});
+    const calls=await fs.readFile(path.join(bin,'calls.log'),'utf8');
+    assert.match(calls,/^pause pg$/m);assert.match(calls,/^unpause pg$/m);assert.match(calls,/^pull postgres:16$/m);assert.match(calls,/^image prune -f$/m);
+    await assert.rejects(docker.act(null,{container:'x;y',action:'pull'}),/Invalid/);
+    const s=await docker.stats(null);assert.deepEqual(s.stats[0],{name:'pg',cpu:'1.5%',mem:'20MiB / 2GiB',memPercent:'1.0%',net:'1kB / 2kB',block:'0B / 0B',pids:'7'});
+    const i=await docker.inspect(null,'pg');
+    assert.equal(i.name,'pg');assert.equal(i.restart,'unless-stopped');assert.equal(i.health,'healthy');assert.deepEqual(i.ports,['127.0.0.1:5433 -> 5432/tcp']);assert.deepEqual(i.env,['POSTGRES_PASSWORD','PATH']);
+    assert.ok(!JSON.stringify(i).includes('supersecret'),'environment values never leave the machine');
+    await assert.rejects(docker.inspect(null,'$(x)'),/Invalid/);
+  }finally{process.env.PATH=old;}
+});

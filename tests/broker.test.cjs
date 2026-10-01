@@ -52,3 +52,12 @@ test('dropped connections and failed answers are reported as agent errors, cance
   assert.deepEqual(seen,[[one.id,'The Hermes gateway failed while answering (HTTP 502).','turn']]);
   await b.send({agentId:one.id,text:'again'});b.stop(one.id);await b.turns.get(one.id)?.done;assert.equal(seen.length,1,'a stopped turn is not an error');
   adapters.at(-1).rpc.emit('closed',new Error('socket hang up'));assert.deepEqual(seen.at(-1),[one.id,'socket hang up','dropped']);assert.equal(b.runtimeFor(one.id).status,'error');});
+test('chat windows in the dock get their messages without switching the open agent',async t=>{const {b,runs}=await fixture(t),one=await b.saveAgent({agent:apiAgent('one',8642)}),two=await b.saveAgent({agent:apiAgent('two',8643)});await b.connect(two.id);await b.select(one.id);
+  const quiet=await b.newConversation(two.id,'',{activate:false});assert.equal(b.data.activeAgentId,one.id,'a dock chat does not change the selected agent');
+  await b.saveView({chatDock:[{id:quiet.id,min:1},{id:quiet.id},{id:'missing'},{id:5}]});assert.deepEqual(b.data.view.chatDock,[{id:quiet.id,min:true}]);
+  await b.send({agentId:two.id,conversationId:quiet.id,text:'from the dock'});assert.equal(b.snapshot().histories[quiet.id][0].content,'from the dock');assert.equal(b.data.activeAgentId,one.id);
+  await b.saveView({chatDock:[]});assert.equal(b.snapshot().histories[quiet.id],undefined,'closed windows stop receiving histories');
+  runs[0].resolve({});await Promise.all([...b.turns.values()].map(t=>t.done));});
+test('console grid layouts are validated and kept',async t=>{const {b}=await fixture(t);
+  await b.saveView({layout:{grid:'grid4',gridCol:0.3,gridRow:2}});assert.deepEqual([b.data.view.layout.grid,b.data.view.layout.gridCol,b.data.view.layout.gridRow],['grid4',0.3,0.5]);
+  await b.saveView({layout:{grid:'<script>'}});assert.equal(b.data.view.layout.grid,'row');});

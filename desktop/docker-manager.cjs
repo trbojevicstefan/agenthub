@@ -1,10 +1,13 @@
 'use strict';
-// Docker on one machine (this computer or an SSH server): its containers and images, and start, stop, restart and
-// remove for each. Everything runs as `docker` with fixed arguments; names and ids are validated first.
+// Docker on one machine (this computer or an SSH server): its containers and images, start, stop, restart, pause,
+// resume and remove for each, pulling a newer image, pruning unused images, live resource use and a safe summary of
+// how a container runs. Everything runs as `docker` with fixed arguments; names and ids are validated first.
 const {launch,collect,terminate}=require('./process.cjs');
 const NAME=/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 const IMAGE=/^[a-zA-Z0-9][a-zA-Z0-9_.\/:@-]{0,255}$/;
-const ACTIONS={start:['start'],stop:['stop'],restart:['restart'],remove:['rm','-f'],'remove-image':['rmi']};
+const ACTIONS={start:['start'],stop:['stop'],restart:['restart'],pause:['pause'],unpause:['unpause'],remove:['rm','-f'],'remove-image':['rmi'],pull:['pull'],prune:['image','prune','-f']};
+// Actions on an image (validated as an image reference) and actions on the whole machine (no target).
+const IMAGE_ACTIONS=new Set(['remove-image','pull']),MACHINE_ACTIONS=new Set(['prune']);
 const run=(host,args,timeout=20000)=>collect(launch({transport:host?'ssh':'local',hostId:host?.id||'',command:'docker',args:[],cwd:''},args,host),{timeout,maxBytes:2*1024*1024});
 const lines=raw=>String(raw||'').split(/\r?\n/).map(l=>l.trim()).filter(Boolean).slice(0,500).map(l=>{try{return JSON.parse(l);}catch{return null;}}).filter(Boolean);
 // Plain words for the errors people hit: no Docker, Docker Desktop not started, the SSH user not in the docker group.
@@ -29,11 +32,35 @@ async function list(host){
 }
 async function act(host,{container,action}){
   const args=ACTIONS[action];if(!args)throw new Error('Unknown Docker action.');
-  const target=String(container||'');
-  if(action==='remove-image'?!IMAGE.test(target):!NAME.test(target))throw new Error('Invalid container or image name.');
-  try{await run(host,[...args,target],120000);}
+  const target=String(container||''),machine=MACHINE_ACTIONS.has(action);
+  if(!machine&&(IMAGE_ACTIONS.has(action)?!IMAGE.test(target):!NAME.test(target)))throw new Error('Invalid container or image name.');
+  // A pull downloads layers: it gets longer than the other actions.
+  try{await run(host,machine?args:[...args,target],action==='pull'?600000:120000);}
   catch(error){const e=explain(error);throw new Error(e.error);}
   return {ok:true};
+}
+// CPU, memory, network and disk use of the running containers, one sample (docker stats --no-stream).
+async function stats(host){
+  let rows;
+  try{rows=lines(await run(host,['stats','--no-stream','--format','{{json .}}'],30000));}
+  catch(error){throw new Error(explain(error).error);}
+  return {at:new Date().toISOString(),stats:rows.map(r=>({name:String(r.Name||'').slice(0,128),cpu:String(r.CPUPerc||'').slice(0,12),mem:String(r.MemUsage||'').slice(0,60),memPercent:String(r.MemPerc||'').slice(0,12),net:String(r.NetIO||'').slice(0,60),block:String(r.BlockIO||'').slice(0,60),pids:String(r.PIDs||'').slice(0,10)})).filter(r=>NAME.test(r.name))};
+}
+// How a container runs: image, restart policy, mounts, ports, networks and health. Environment variables are listed
+// by name only, so values such as API keys never leave the machine.
+async function inspect(host,container){
+  if(!NAME.test(String(container||'')))throw new Error('Invalid container name.');
+  let raw;
+  try{raw=JSON.parse(String(await run(host,['inspect','--type','container',container],20000)))[0];}
+  catch(error){throw new Error(error instanceof SyntaxError?'Docker returned something Opaya could not read.':explain(error).error);}
+  if(!raw)throw new Error('Container not found.');
+  const cfg=raw.Config||{},hc=raw.HostConfig||{},st=raw.State||{};
+  const ports=Object.entries(raw.NetworkSettings?.Ports||{}).flatMap(([inside,out])=>(out||[]).map(o=>`${o.HostIp||'0.0.0.0'}:${o.HostPort} -> ${inside}`)).slice(0,40);
+  return {name:String(raw.Name||container).replace(/^\//,'').slice(0,128),image:String(cfg.Image||'').slice(0,256),created:String(raw.Created||'').slice(0,40),
+    state:String(st.Status||'').slice(0,20),startedAt:String(st.StartedAt||'').slice(0,40),restartCount:Number(raw.RestartCount)||0,health:String(st.Health?.Status||'').slice(0,20),
+    restart:String(hc.RestartPolicy?.Name||'no').slice(0,30),command:[...(cfg.Entrypoint||[]),...(cfg.Cmd||[])].join(' ').slice(0,300),workdir:String(cfg.WorkingDir||'').slice(0,200),
+    mounts:(raw.Mounts||[]).slice(0,30).map(m=>({type:String(m.Type||'').slice(0,20),source:String(m.Name||m.Source||'').slice(0,300),destination:String(m.Destination||'').slice(0,300),rw:m.RW!==false})),
+    ports,networks:Object.keys(raw.NetworkSettings?.Networks||{}).slice(0,20),env:(cfg.Env||[]).map(e=>String(e).split('=')[0].slice(0,80)).filter(Boolean).slice(0,80)};
 }
 // The last lines a container printed (docker logs writes both streams), for the Opaya Agent to read.
 function logs(host,container,tail=150){
@@ -55,4 +82,4 @@ function terminalCommand({container,kind}){
   if(!NAME.test(String(container||'')))throw new Error('Invalid container name.');
   return kind==='logs'?`docker logs --tail 200 -f ${container}`:`docker exec -it ${container} sh`;
 }
-module.exports={list,act,logs,terminalCommand,explain,NAME};
+module.exports={list,act,stats,inspect,logs,terminalCommand,explain,NAME,ACTIONS};

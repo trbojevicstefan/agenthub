@@ -23,6 +23,7 @@
 - [x] iTrust mode (global, per agent, Opaya Agent), Opaya browser with an MCP bridge, rich Markdown messages, customizable dock layout.
 - [x] Hermes clone and redeploy (local, VPS, Docker) with a background progress window; New VPS with SSH key generation.
 - [x] Chat history panel: labels, delete, rename, condense, share.
+- [x] Management-first agent screen with a Three.js stage, drag-and-drop keys and deploys, a Docker panel with live stats; docked chat windows; console grid layouts.
 
 ## Acceptance still requiring the owner's machines
 - [ ] Connect the actual four Hermes profiles and verify authentication/model settings.

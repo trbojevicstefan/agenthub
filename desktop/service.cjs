@@ -319,7 +319,7 @@ async function start({app, safeStorage}, root) {
   }
   broker.onConnectError=(a,error)=>{autoFix(a,error).catch(()=>{});};
   broker.onAgentError=(a,error,phase)=>{report(a,error,phase);};
-  broker.onClientRefused=(a,text)=>{notice({level:'info',kind:'surface',agentId:a.id,title:`${a.name} opens in its terminal now`,text:`It does not accept chats from other apps anymore ("${text.slice(0,160)}"). Its own CLI still works: Opaya shows it in the terminal. Right-click > Open as chat switches back, for example after you add an API key.`});emit();};
+  broker.onClientRefused=(a,text)=>{notice({level:'info',kind:'surface',agentId:a.id,title:`${a.name} opens in its terminal now`,text:`It does not accept chats from other apps anymore ("${text.slice(0,160)}"). Its own CLI still works: Opaya shows it in the terminal. Right-click it > Allow chat again switches back, for example after you add an API key.`});emit();};
   // ---- Updates the user starts (one tool, Update selected, Update all here, an agent's Update, Update all agents) ------
   // One at a time per machine, so two Homebrew or npm runs never collide, in that machine's "Updates" terminal. Then the
   // versions are checked again: exit code 0 with the old version still first on PATH counts as failed. Everything that
@@ -654,7 +654,7 @@ async function start({app, safeStorage}, root) {
     snapshot, saveAgent:x=>broker.saveAgent(x), reorderAgents:x=>broker.reorderAgents(x), updateAgentDisplay:x=>broker.updateAgentDisplay(x), saveHost:x=>broker.saveHost(x), removeHost:x=>broker.removeHost(x.id),
     removeAgent:async x=>{const a=broker.agent(x.id); if(!await approve(a,'Remove this agent connection?','Deletes its saved connection and local chat transcripts, not the agent installation.'))return false;terminals.closeAgent(a.id);await broker.removeAgent(a.id);return true;},
     discover:x=>broker.discover(x), connect:x=>broker.connect(x.id), disconnect:x=>broker.disconnect(x.id), clearError:x=>broker.clearError(x.id),
-    select:x=>broker.select(x.id), newConversation:x=>broker.newConversation(x.agentId,x.projectId||''), selectConversation:x=>broker.selectConversation(x.id),
+    select:x=>broker.select(x.id), newConversation:x=>broker.newConversation(x.agentId,x.projectId||'',{activate:x.activate!==false}), selectConversation:x=>broker.selectConversation(x.id),
     send:x=>broker.send(x), stop:x=>broker.stop(x.id), saveDraft:x=>broker.saveDraft(x), saveView:x=>broker.saveView(x),
     transcript:async x=>{const c=broker.data.conversations.find(c=>c.id===schema.id(x.id));if(!c)throw new Error('Conversation not found.');return {conversation:c,agent:broker.agent(c.agentId),messages:broker.histories.get(c.id)||await broker.store.transcript(c.id)};},
     terminalOpen:async x=>{
@@ -763,6 +763,8 @@ async function start({app, safeStorage}, root) {
     },
     dockerList:x=>dockerManager.list(x.hostId?broker.host(x.hostId):null),
     dockerAction:async x=>{const host=x.hostId?broker.host(x.hostId):null;const r=await dockerManager.act(host,{container:x.container,action:x.action});emit();return r;},
+    dockerStats:x=>dockerManager.stats(x.hostId?broker.host(x.hostId):null),
+    dockerInspect:x=>dockerManager.inspect(x.hostId?broker.host(x.hostId):null,x.container),
     dockerTerminal:async x=>{const host=x.hostId?broker.host(x.hostId):null,command=dockerManager.terminalCommand(x);const view=await runInTerminal({label:`${x.kind==='logs'?'Logs':'Shell'}: ${x.container}`.slice(0,60),key:`docker_${x.kind==='logs'?'logs':'sh'}_${String(x.container).replace(/[^a-zA-Z0-9_-]/g,'_')}`.slice(0,60),host,command});return {id:view.id};},
     sshKeyCreate:x=>vps.createKey(x.name), hostTest:x=>vps.test(x.hostId?broker.host(x.hostId):schema.host(x.host||{})),
     saveSettings:x=>broker.saveSettings(x), cloneAgent:async x=>{

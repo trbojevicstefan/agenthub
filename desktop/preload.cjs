@@ -10,7 +10,7 @@ methods.push('projectRemoteInfo','projectRemoteStart','projectRemoteSend','proje
 methods.push('opayaFreeModels','opayaFreeSetup','saveSettings','projectSave','projectRemove','projectInfo','projectBranches','projectGit','projectClone','mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaNewSession','opayaSelectSession','opayaDeleteSession','opayaStop','opayaClear','windowControl','ask');
 methods.push('opayaHoldSecret','opayaForgetSecret','agentGiveSecret','opayaGiveAll','vaultGiveAgent','agentKeys','agentWeb');
 methods.push('mcpCatalog','mcpInstall');
-methods.push('dockerList','dockerAction','dockerTerminal');
+methods.push('dockerList','dockerAction','dockerTerminal','dockerStats','dockerInspect');
 for(const method of methods)api[method]=async input=>{
   const result=await ipcRenderer.invoke(`hub:${method}`,input);
   if(!result?.ok)throw new Error(result?.error||'Desktop request failed.');

@@ -27,6 +27,11 @@ function safeError(error,token=''){
 }
 // Agents whose vendor no longer accepts connections from other apps. Their own CLI in a terminal is the way to use them, so Opaya switches them to it.
 const CLIENT_REFUSED=/client is no longer supported/i;
+// Console grid layouts (ui/app.js) and the share of the first column / row, kept between 0.15 and 0.85.
+const GRIDS=['row','cols2','rows2','grid4','main3','cols3','grid6'];
+const ratio=v=>{const n=Number(v);return Number.isFinite(n)&&n>=0.15&&n<=0.85?Math.round(n*1000)/1000:0.5;};
+// Chat windows open in the chat dock: existing conversations only, each once, at most six.
+const chatDock=(list,conversations)=>Array.isArray(list)?list.filter(d=>d&&typeof d.id==='string'&&conversations.some(c=>c.id===d.id)).filter((d,i,all)=>all.findIndex(x=>x.id===d.id)===i).slice(0,6).map(d=>({id:d.id,min:!!d.min})):[];
 class Broker{
   constructor({store,vault,emit,approve,adapterFactory=createAdapter}){
     Object.assign(this,{store,vault,emit,approve,adapterFactory});this.runtime=new Map();this.histories=new Map();this.turns=new Map();this.connecting=new Map();this.scanBusy=false;this.closing=false;
@@ -36,7 +41,7 @@ class Broker{
     this.data.drafts=this.data.drafts||{};this.data.lastConversation=this.data.lastConversation||{};this.data.view=this.data.view||{};
     this.data.agents=this.data.agents.map(a=>schema.agent(a));
     // 0.19: iTrust for the Opaya Agent is on by default (once for existing settings too); the user can turn it off.
-    {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:s.opayaDefaults===2?!!s.itrustOpaya:true,opayaDefaults:2,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false,interface:['chat','terminal'].includes(s.interface)?s.interface:'',
+    {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:s.opayaDefaults===2?!!s.itrustOpaya:true,opayaDefaults:2,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false,interface:['chat','terminal'].includes(s.interface)?s.interface:'',chatOpens:s.chatOpens==='full'?'full':'window',
       notifyReplies:s.notifyReplies!==false,notifyApprovals:s.notifyApprovals!==false,notifyJobs:s.notifyJobs!==false,notifySound:s.notifySound!==false,tips:s.tips!==false,autoConnect:s.autoConnect===true,sendKey:s.sendKey==='mod-enter'?'mod-enter':'enter'};}
     this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
     this.migrateLinkedCopies();
@@ -45,6 +50,8 @@ class Broker{
     for(const a of this.data.agents)this.runtime.set(a.id,{status:'disconnected',error:'',models:[]});
     for(const c of this.data.conversations){schema.id(c.id);schema.id(c.agentId);}
     for(const c of this.data.conversations.slice(-100))this.histories.set(c.id,await this.store.transcript(c.id));
+    // Chat windows left open in the dock get their messages from the first snapshot, also for older chats.
+    for(const d of this.data.view?.chatDock||[])if(!this.histories.has(d.id)&&this.data.conversations.some(c=>c.id===d.id))this.histories.set(d.id,await this.store.transcript(d.id));
     // An app crash may have left streaming placeholders on disk.
     for(const [id,messages] of this.histories){let recovered=false;for(const m of messages)if(m.status==='streaming'){m.status='error';m.error='The session service stopped during this turn. Saved partial output is preserved. Check the agent before retrying.';recovered=true;}if(recovered)await this.store.writeTranscript(id,messages);}
     attach.prune(this.store.root).catch(()=>{});
@@ -57,7 +64,7 @@ class Broker{
   runtimeFor(id){if(!this.runtime.has(id))this.runtime.set(id,{status:'disconnected',error:'',models:[]});return this.runtime.get(id);}
   snapshot(){
     const {agents,hosts,conversations,activeAgentId,activeConversationId}=this.data;
-    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',activeModel:r.adapter?.currentModel||'',commands:r.adapter?.commands||[],models:r.models||[],efforts:effortLevels(a,r.adapter),hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,settings:this.data.settings,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations:conversations.map(({essence,...c})=>essence?{...c,essence:{by:essence.by,at:essence.at}}:c),activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
+    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',activeModel:r.adapter?.currentModel||'',commands:r.adapter?.commands||[],models:r.models||[],efforts:effortLevels(a,r.adapter),hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,settings:this.data.settings,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations:conversations.map(({essence,...c})=>essence?{...c,essence:{by:essence.by,at:essence.at}}:c),activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||(this.data.view?.chatDock||[]).some(d=>d.id===id)||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
   }
   changed(){if(!this.closing)this.emit(this.snapshot());}
   async persist(){await this.store.write(this.data);this.changed();}
@@ -125,10 +132,11 @@ class Broker{
     await Promise.all(ids.filter(id=>conversations[id]).map(id=>this.send({agentId:id,conversationId:conversations[id],text}).catch(error=>{errors[id]=safeError(error);})));
     await this.persist();return this.data.playground;
   }
-  async newConversation(agentId,projectId=''){
+  // activate:false makes a chat without switching the selected agent (a chat window opened from the chat dock).
+  async newConversation(agentId,projectId='',{activate=true}={}){
     const a=this.agent(agentId);if(this.turns.has(agentId))throw new Error('Wait for or stop this agent\'s current turn first.');
     if(projectId){const p=this.project(projectId);if(!projects.fits(a,p))throw new Error(`${a.name} runs on a different machine than ${p.name}.`);}
-    return this.createConversation(agentId,{projectId});
+    return this.createConversation(agentId,{projectId,activate});
   }
   async createConversation(agentId,{activate=true,title='New conversation',projectId='',kind=''}={}){
     if(this.data.conversations.length>=2000)throw new Error('Conversation limit reached. Delete old chats from History.');
@@ -156,7 +164,12 @@ class Broker{
     const key=conversationId||agentId;this.data.drafts[key]=text;await this.store.write(this.data);return true;
   }
   async saveView(input){
-    this.data.view={overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',panes:Array.isArray(input.panes)?input.panes.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)).slice(0,8):[],paneSizes:Array.isArray(input.paneSizes)?input.paneSizes.map(Number).filter(x=>Number.isFinite(x)&&x>0&&x<100).slice(0,8):[],theme:input.theme==='light'?'light':'dark',projects:!!input.projects,sidebarHidden:!!input.sidebarHidden,tips:Array.isArray(input.tips)?[...new Set(input.tips.filter(x=>typeof x==='string'&&x.length<=200))].slice(-300):[],lastVersion:typeof input.lastVersion==='string'&&/^\d+\.\d+\.\d+$/.test(input.lastVersion)?input.lastVersion:'',greeted:typeof input.greeted==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(input.greeted)?input.greeted:'',layout:(l=>({terminal:l?.terminal==='right'?'right':'bottom',browser:l?.browser==='bottom'?'bottom':'right',bottomHeight:Math.max(120,Math.min(3000,Number(l?.bottomHeight)||280)),rightWidth:Math.max(240,Math.min(4000,Number(l?.rightWidth)||520))}))(input.layout),terminalFont:(n=>Number.isInteger(n)&&n>=8&&n<=28?n:13)(Number(input.terminalFont)),projectsOpen:Array.isArray(input.projectsOpen)?[...new Set(input.projectsOpen.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)))].slice(0,50):[]};await this.store.write(this.data);return true;
+    this.data.view={overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',panes:Array.isArray(input.panes)?input.panes.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)).slice(0,8):[],paneSizes:Array.isArray(input.paneSizes)?input.paneSizes.map(Number).filter(x=>Number.isFinite(x)&&x>0&&x<100).slice(0,8):[],theme:input.theme==='light'?'light':'dark',projects:!!input.projects,sidebarHidden:!!input.sidebarHidden,tips:Array.isArray(input.tips)?[...new Set(input.tips.filter(x=>typeof x==='string'&&x.length<=200))].slice(-300):[],lastVersion:typeof input.lastVersion==='string'&&/^\d+\.\d+\.\d+$/.test(input.lastVersion)?input.lastVersion:'',greeted:typeof input.greeted==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(input.greeted)?input.greeted:'',layout:(l=>({terminal:l?.terminal==='right'?'right':'bottom',browser:l?.browser==='bottom'?'bottom':'right',bottomHeight:Math.max(120,Math.min(3000,Number(l?.bottomHeight)||280)),rightWidth:Math.max(240,Math.min(4000,Number(l?.rightWidth)||520)),grid:GRIDS.includes(l?.grid)?l.grid:'row',gridCol:ratio(l?.gridCol),gridRow:ratio(l?.gridRow)}))(input.layout),chatDock:chatDock(input.chatDock,this.data.conversations),terminalFont:(n=>Number.isInteger(n)&&n>=8&&n<=28?n:13)(Number(input.terminalFont)),projectsOpen:Array.isArray(input.projectsOpen)?[...new Set(input.projectsOpen.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)))].slice(0,50):[]};const docked=this.data.view.chatDock.map(d=>d.id),missing=docked.filter(id=>!this.histories.has(id));
+    for(const id of missing)this.histories.set(id,await this.store.transcript(id));
+    await this.store.write(this.data);
+    // A newly docked chat's messages reach the window with the next snapshot.
+    if(missing.length||docked.join()!==(this.lastDocked||'')){this.lastDocked=docked.join();this.changed();}
+    return true;
   }
   // iTrust: tool requests from this agent (or every agent) are approved without asking. Read at request time.
   isTrusted(id){const a=this.data.agents.find(x=>x.id===id);return !!a&&(this.data.settings?.itrustAll||a.itrust);}
@@ -172,6 +185,8 @@ class Broker{
     if(input.sendKey!==undefined){if(!['enter','mod-enter'].includes(input.sendKey))throw new Error('Choose Enter or Ctrl+Enter to send.');next.sendKey=input.sendKey;}
     // Chat or Terminal first. '' until the user chooses on first launch.
     if(input.interface!==undefined){if(!['chat','terminal'].includes(input.interface))throw new Error('Choose chat or terminal.');next.interface=input.interface;}
+    // What Chat opens: a window in the chat dock, or the full chat view.
+    if(input.chatOpens!==undefined){if(!['window','full'].includes(input.chatOpens))throw new Error('Choose a chat window or the full view.');next.chatOpens=input.chatOpens;}
     // This computer as shown in Opaya (the sidebar, Machines, backups) and where local backups go.
     if(input.machineName!==undefined)next.machineName=schema.text(input.machineName,'machine name',60).trim();
     if(input.machineNote!==undefined)next.machineNote=schema.text(input.machineNote,'machine note',200).trim();
