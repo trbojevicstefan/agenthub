@@ -86,7 +86,7 @@
     queueMicrotask(()=>{ensureProjectsToggle();renderProjects();renderDock();const sel=selected()?.id||'';if(historyOpen&&sel!==historyFollow&&historyAgent&&sel)historyAgent=sel;historyFollow=sel;renderHistory();});
     $('#agent-count').textContent=state.agents.length;
     $('#host-count').textContent=state.hosts.length;const vc=$('#vault-count');if(vc)vc.textContent=(state.opayaAgent?.secrets||[]).filter(k=>k.kept||k.global||k.stored?.length).length||'';
-    $('.nav-overview').classList.toggle('selected',overview&&!opayaView&&!playgroundView);$('.nav-playground')?.classList.toggle('selected',playgroundView);$('.nav-opaya').classList.toggle('selected',opayaView);renderOpayaNav();
+    $('.nav-overview').classList.toggle('selected',overview&&!fleetView&&!opayaView&&!playgroundView);$('.nav-playground')?.classList.toggle('selected',playgroundView);$('.nav-opaya').classList.toggle('selected',opayaView);renderOpayaNav();
     // Sections: pinned, each custom group in first-seen order, then ungrouped local and remote agents. Every section collapses
     // to a row of its agents' icons, so a collapsed section never looks like it holds only the selected agent.
     const customGroups=[...new Set(state.agents.filter(a=>!a.pinned&&a.group).map(a=>a.group))];
@@ -98,14 +98,14 @@
     const a=selected();
     // A left click opens an agent's management screen; Chat and Console are the other two ways to work with it.
     const mode=!overview&&!opayaView&&!playgroundView&&a?modeOf(a):'';manageId=mode==='manage'?a.id:'';
-    $('.nav-manage')?.classList.toggle('selected',!!manageId);
+    $('.nav-manage')?.classList.toggle('selected',!!manageId||fleetView&&overview&&!opayaView&&!playgroundView);
     const stage=mode==='console';
     if(stage!==document.body.classList.contains('terminal-stage')){document.body.classList.toggle('terminal-stage',stage);placePanes();}
     if(!stage)stageAgent='';
     // A view can rebuild its chat box while someone is typing (a new chat gets its id, the agent's details change).
     // The new box would not have focus, so keystrokes went nowhere: keep focus and the caret in the chat box.
     const typing=document.activeElement?.id==='message-input'?document.activeElement:null,caret=typing&&[typing.value,typing.selectionStart,typing.selectionEnd];
-    if(opayaView)renderOpaya();else if(playgroundView)renderPlayground();else if(overview||!a)renderOverview();else if(manageId)renderManage(a);else if(stage)renderAgentTerminal(a);else renderAgent(a);
+    if(opayaView)renderOpaya();else if(playgroundView)renderPlayground();else if(overview&&fleetView)renderFleet();else if(overview||!a)renderOverview();else if(manageId)renderManage(a);else if(stage)renderAgentTerminal(a);else renderAgent(a);
     const box=$('#message-input');
     if(typing&&box&&box!==typing&&!box.disabled&&(!document.activeElement||document.activeElement===document.body)){box.focus({preventScroll:true});if(box.value===caret[0])box.setSelectionRange(caret[1],caret[2]);}
     $('#status-left').textContent=playgroundView?'Playground / ask two agents the same question':opayaView?'Opaya Agent / installs, connects and troubleshoots your agents':a&&!overview?`${labels[a.provider]} / ${a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase()} / ${location(a)}`:'One place. All your agents.';
@@ -361,9 +361,9 @@
   function refreshMachine(key){const el=document.querySelector(`#machines [data-machine="${CSS.escape(key)}"]`);if(el)el.outerHTML=machineCard(key);}
   async function testMachine(id){
     const h=state.hosts.find(x=>x.id===id);if(!h)return;if(hostChecks.get(id)?.state==='checking')return;
-    hostChecks.set(id,{state:'checking'});refreshMachine(id);
+    hostChecks.set(id,{state:'checking'});refreshMachine(id);if(fleetView&&overview)render();
     try{hostChecks.set(id,{state:'ok',result:await api.hostTest({hostId:id})});}catch(error){hostChecks.set(id,{state:'error',error:error.message});}
-    refreshMachine(id);
+    refreshMachine(id);if(fleetView&&overview)render();
   }
   async function testAllMachines(){const ids=state.hosts.map(h=>h.id);for(let i=0;i<ids.length;i+=4)await Promise.all(ids.slice(i,i+4).map(testMachine));}
   function openHosts(edit={},{form=false}={}){
@@ -391,7 +391,7 @@
     const image=i=>{const ref=i.repository&&i.repository!=='<none>'?`${i.repository}${i.tag&&i.tag!=='<none>'?':'+i.tag:''}`:i.id;return `<div class="docker-row image"><div class="docker-main"><strong>${esc(ref)}</strong><small>${esc(i.size)} / ${esc(i.created)}</small></div><div class="docker-actions"><button type="button" class="subtle docker-btn danger-text" data-action="docker-do" data-do="remove-image" data-id="${esc(key)}" data-name="${esc(ref)}" title="Remove this image">&#10005;</button></div></div>`;};
     return `${head}<section class="docker-group"><h3>Containers <small>${r.containers.length}</small></h3>${r.containers.length?`<div class="docker-list">${r.containers.map(row).join('')}</div>`:'<p class="field-help">No containers on this machine yet. Install agents can set one up in Docker.</p>'}</section>${r.images.length?`<details class="docker-group"><summary>Images <small>${r.images.length}</small></summary><div class="docker-list">${r.images.map(image).join('')}</div></details>`:''}`;
   }
-  function paintDocker(key){const box=$('#docker-manager');if(box&&box.dataset.key===key)box.innerHTML=dockerBody(key);const mg=$('#mg-docker'),a=selected();if(mg&&mg.dataset.key===key&&manageId&&a&&a.install?.kind!=='remote-api')mg.innerHTML=dockerPanel(a);}
+  function paintDocker(key){const box=$('#docker-manager');if(box&&box.dataset.key===key)box.innerHTML=dockerBody(key);const mg=$('#mg-docker'),a=selected();if(mg&&mg.dataset.key===key&&manageId&&a&&a.install?.kind!=='remote-api')mg.innerHTML=dockerPanel(a);const fl=$('#fl-docker');if(fl&&fl.dataset.key===key)fl.innerHTML=dockerPanel(null,key);if(fleetView&&overview&&$('#fl-board'))render();}
   // The images list on the management screen stays open or closed across refreshes.
   document.addEventListener('toggle',event=>{const d=event.target;if(d.classList?.contains('mg-images')){const v=dockerViews.get(d.dataset.key);if(v)v.imagesOpen=d.open;}},true);
   async function loadDocker(key){
@@ -792,7 +792,7 @@
     if(name==='install-framework'){confirmInstall(id,button.dataset.host||'');return;}
     if(name==='install-runtime'){confirmInstall(id,button.dataset.host||'',button.dataset.runtime||'');return;}
     if(name==='icon-picker'){const a=state.agents.find(a=>a.id===id);if(a)openIconPicker(a);return;}
-    if(name==='overview'){overview=true;opayaView=false;playgroundView=false;render();saveView();return;}
+    if(name==='overview'){overview=true;fleetView=false;opayaView=false;playgroundView=false;render();saveView();return;}
     if(name==='add'){openAdd();return;}
     if(name==='manual'){openAgentForm();return;}
     if(name==='edit'){openAgentForm(state.agents.find(a=>a.id===id));return;}
@@ -832,7 +832,12 @@
     if(name==='compose-unattach'){const key=draftKey(),files=(composeFiles.get(key)||[]).slice();files.splice(Number(button.dataset.index),1);composeFiles.set(key,files);renderComposeFiles();render();return;}
     if(name==='compose-model'){if(pickerFor===button){closePicker();return;}openModelPicker(button);return;}
     if(name==='compose-effort'){if(pickerFor===button){closePicker();return;}openEffortPicker(button);return;}
-    if(name==='manage-nav'){const target=selected()||state.agents[0];if(target)openManage(target.id);else{toast('Add an agent first: Install agents or Discover.');openInstall('');}return;}
+    if(name==='manage-nav'){openManagePop(button);return;}
+    if(name==='manage-agents'){const target=selected()||state.agents[0];if(target)openManage(target.id);else{toast('Add an agent first: Install agents or Discover.');openInstall('');}return;}
+    if(name==='fleet-focus'){if(event.target.closest('[data-action="fleet-machine-menu"]'))return;fleetFocus=id;if(!dockerViews.has(id))loadDocker(id);render();return;}
+    if(name==='fleet-agent-menu'){const a=state.agents.find(x=>x.id===id);if(a)fleetAgentMenu(a,button);return;}
+    if(name==='fleet-machine-menu'){fleetMachineMenu(id,button);return;}
+    if(name==='sidebar-hide'){toggleSidebar(true);return;}
     if(name==='select'&&manageId&&button.closest('#agent-list')){openManage(id);return;}
     if(name==='project-remote'){const p=(state.projects||[]).find(x=>x.id===id);if(p)openProjectAgents(p);return;}
     if(name==='copy-send'||name==='copy-bring'){const p=(state.projects||[]).find(x=>x.id===id),a=state.agents.find(x=>x.id===button.dataset.agent);if(p&&a)action(()=>name==='copy-send'?sendToRemote(p,a):bringFromRemote(p,a));return;}
@@ -1114,15 +1119,15 @@
   }
   // The live parts of the screen (Docker stats, clone progress) refresh while it is visible, and stop when it is not.
   function manageTick(){
-    clearTimeout(mgTimer);const a=selected();
-    if(!manageId||!a||document.hidden){mgTimer=0;return;}
-    const key=dockerKeyOf(a),v=dockerViews.get(key);
-    const box=$('#mg-docker'),near=box&&box.getBoundingClientRect().top<innerHeight+200;
-    if(v?.result?.running&&near&&!v.statsOff&&a.install?.kind!=='remote-api')loadDockerStats(key);
+    clearTimeout(mgTimer);const a=selected(),fleet=fleetView&&overview&&!opayaView&&!playgroundView;
+    if(!(manageId&&a||fleet)||document.hidden){mgTimer=0;return;}
+    const key=fleet?fleetFocus:dockerKeyOf(a),v=dockerViews.get(key);
+    const box=$(fleet?'#fl-docker':'#mg-docker'),near=box&&box.getBoundingClientRect().top<innerHeight+200;
+    if(v?.result?.running&&near&&!v.statsOff&&(fleet||a.install?.kind!=='remote-api'))loadDockerStats(key);
     // Every 4 seconds on this computer; a machine over SSH every 10.
     mgTimer=setTimeout(manageTick,key==='local'?4000:10000);
   }
-  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&manageId)manageTick();});
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden&&(manageId||fleetView&&overview))manageTick();});
   async function loadDockerStats(key){
     if(dockerStatsOf.get(key)?.loading)return;const prev=dockerStatsOf.get(key)||{};dockerStatsOf.set(key,{...prev,loading:true});
     try{const r=await api.dockerStats({hostId:key==='local'?undefined:key});dockerStatsOf.set(key,{at:Date.now(),by:Object.fromEntries((r?.stats||[]).map(s=>[s.name,s]))});}
@@ -1131,8 +1136,9 @@
   }
   const pct=v=>Math.max(0,Math.min(100,parseFloat(v)||0));
   const gauge=(label,value,text)=>`<div class="mg-gauge"><span>${label}</span><i style="--v:${pct(value)}%"></i><b>${esc(text||value||'--')}</b></div>`;
-  function dockerPanel(a){
-    const key=dockerKeyOf(a),v=dockerViews.get(key)||{},r=v.result,machine=key==='local'?localName():hostName(key),mine=containerOf(a),st=dockerStatsOf.get(key)||{};
+  // For an agent (its machine, its own container first) or, with only a machine key, for the fleet's machine view.
+  function dockerPanel(a,machineKey=''){
+    const key=machineKey||dockerKeyOf(a),v=dockerViews.get(key)||{},r=v.result,machine=key==='local'?localName():hostName(key),mine=a?containerOf(a):'',st=dockerStatsOf.get(key)||{};
     const btn=(act,label,attrs='',cls='mg-icon-btn',hint='')=>`<button type="button" class="${cls}" data-action="${act}" data-id="${esc(key)}" ${attrs} ${hint?`title="${esc(hint)}"`:''}>${label}</button>`;
     const engine=v.loading&&!r?'<span class="status-dot working"></span> Reading Docker...':v.error?`<span class="status-dot error"></span> ${esc(v.error)}`:r?.running?`<span class="status-dot connected"></span> Engine ${esc(r.version)} <span class="mg-sep">/</span> ${r.containers.filter(c=>c.state==='running').length} of ${r.containers.length} running <span class="mg-sep">/</span> ${r.images.length} image${r.images.length===1?'':'s'}`:r?`<span class="status-dot error"></span> ${esc(r.error)}`:'<span class="status-dot"></span> Not checked yet';
     const head=`<header class="mg-section-head"><div><h2><span class="mg-h-icon docker-h" aria-hidden="true"></span>Docker on ${esc(machine)}</h2><p class="mg-engine">${engine}</p></div><div class="mg-head-actions">${r?.running?`<label class="mg-toggle" title="Live CPU and memory, every few seconds while this screen is open"><input type="checkbox" data-action="docker-live" data-id="${esc(key)}" ${v.statsOff?'':'checked'}><span class="switch" aria-hidden="true"></span>Live</label>${btn('docker-prune','Prune images','','secondary small','Remove images no container uses')}`:''}${btn('docker-refresh','&#8635; Refresh',v.loading?'disabled':'','secondary small')}${btn('docker-manager','Open manager','','subtle small','All containers and images in a window')}</div></header>`;
@@ -1146,7 +1152,7 @@
         ${agents.length?`<div class="mg-container-agents">${agents.map(x=>`<button type="button" class="docker-agent" data-action="manage" data-id="${esc(x.id)}" title="Manage ${esc(title(x))}">${badge(x)}${esc(title(x))}</button>`).join('')}</div>`:''}
         <footer class="mg-container-actions">${actionsFor(c)}</footer></article>`;};
     const list=r.containers.slice().sort((x,y)=>(y.name===mine)-(x.name===mine)||(y.state==='running')-(x.state==='running'));
-    const cta=!mine&&cloneable(a)&&canDocker(a)?`<article class="mg-container mg-dockerize" data-drop="agent" data-deploy-host="${a.transport==='ssh'?esc(a.hostId):''}" data-deploy-runtime="docker"><div class="mg-cube" aria-hidden="true"><i></i><i></i><i></i></div><div><strong>Dockerize ${esc(title(a))}</strong><p>Run a copy in its own container on ${esc(machine)}: isolated, restarts by itself, easy to move.</p></div><button type="button" class="primary" data-action="dockerize" data-id="${esc(a.id)}">Dockerize&#8230;</button></article>`:'';
+    const cta=a&&!mine&&cloneable(a)&&canDocker(a)?`<article class="mg-container mg-dockerize" data-drop="agent" data-deploy-host="${a.transport==='ssh'?esc(a.hostId):''}" data-deploy-runtime="docker"><div class="mg-cube" aria-hidden="true"><i></i><i></i><i></i></div><div><strong>Dockerize ${esc(title(a))}</strong><p>Run a copy in its own container on ${esc(machine)}: isolated, restarts by itself, easy to move.</p></div><button type="button" class="primary" data-action="dockerize" data-id="${esc(a.id)}">Dockerize&#8230;</button></article>`:'';
     const image=i=>{const ref=i.repository&&i.repository!=='<none>'?`${i.repository}${i.tag&&i.tag!=='<none>'?':'+i.tag:''}`:i.id;return `<div class="mg-image"><span class="mg-image-icon" aria-hidden="true"></span><strong>${esc(ref)}</strong><small>${esc(i.size)} / ${esc(i.created)}</small>${i.repository&&i.repository!=='<none>'?`<button type="button" class="mg-icon-btn" data-action="docker-do" data-do="pull" data-id="${esc(key)}" data-name="${esc(ref)}" title="Download the newest ${esc(ref)}">Pull</button>`:''}<button type="button" class="mg-icon-btn danger" data-action="docker-do" data-do="remove-image" data-id="${esc(key)}" data-name="${esc(ref)}" title="Remove this image">&#10005;</button></div>`;};
     return `${head}<div class="mg-containers">${cta}${list.map(card).join('')||'<p class="field-help">No containers yet.</p>'}</div>${r.images.length?`<details class="mg-images" ${v.imagesOpen?'open':''} data-key="${esc(key)}"><summary>Images <small>${r.images.length}</small></summary><div>${r.images.map(image).join('')}</div></details>`:''}`;
   }
@@ -1285,18 +1291,19 @@
   }
   // A ghost of the agent card flies to the target with a copy label (the 3D trail runs under it), then the clone
   // dialog opens with that target chosen. The job's progress then shows on the target.
-  async function deployTo(a,hostId,runtime,from,targetEl){
+  async function deployTo(a,hostId,runtime,from,targetEl,{migrate=false}={}){
     if(!cloneable(a)){toast('This is an API connection: there is nothing installed to clone.');return;}
     if(runtime==='docker'&&!canDocker(a)){toast(`${title(a)} cannot run in a Docker container Opaya sets up.`,true);return;}
     const fromRect=from?.getBoundingClientRect?from.getBoundingClientRect():from,to=targetEl?.getBoundingClientRect();
     if(fromRect&&to&&!matchMedia('(prefers-reduced-motion: reduce)').matches){
-      const ghost=document.createElement('div');ghost.className='mg-ghost';ghost.innerHTML=`${badge(a)}<div><strong>${esc(title(a))} <em>copy</em></strong><small>${runtime==='docker'?'Dockerizing':'Cloning'}&#8230;</small></div>`;document.body.append(ghost);
+      const ghost=document.createElement('div');ghost.className='mg-ghost';ghost.innerHTML=`${badge(a)}<div><strong>${esc(title(a))} <em>${migrate?'moving':'copy'}</em></strong><small>${migrate?'Migrating':runtime==='docker'?'Dockerizing':'Cloning'}&#8230;</small></div>`;document.body.append(ghost);
       const sx=fromRect.left+fromRect.width/2-130,sy=fromRect.top+fromRect.height/2-32,ex=to.left+to.width/2-130,ey=to.top+to.height/2-32;
       const anim=ghost.animate([{transform:`translate(${sx}px,${sy}px) perspective(700px) rotateY(0deg) rotateX(0deg) scale(1)`,opacity:.0},{transform:`translate(${sx+40}px,${sy-30}px) perspective(700px) rotateY(-14deg) rotateX(8deg) scale(1.04)`,opacity:1,offset:.25},{transform:`translate(${ex}px,${ey}px) perspective(700px) rotateY(10deg) rotateX(-6deg) scale(.55)`,opacity:.15}],{duration:900,easing:'cubic-bezier(.5,0,.2,1)'});
       const trail=runtime==='docker'?stage()?.assemble({around:targetEl,into:targetEl}):stage()?.fly({from:fromRect,to:targetEl,kind:'clone'});
       await new Promise(r=>{anim.onfinish=anim.oncancel=r;});ghost.remove();await trail;stage()?.burst(targetEl,runtime==='docker'?'docker':'clone');
     }
-    openClone(a,{hostId,runtime});
+    // A migration keeps the agent's name; a clone gets a new one.
+    openClone(a,{hostId,runtime,migrate,...(migrate?{name:a.name.replace(/\s+/g,'-').toLowerCase()}:{})});
   }
   async function pushProject(p,key,button){
     const card=button?.closest('.mg-project'),node=card?.querySelector('.mg-remote-node');
@@ -1317,7 +1324,7 @@
     if(!drag||event.pointerId!==drag.pointer)return;
     if(!drag.started){if(Math.hypot(event.clientX-drag.x,event.clientY-drag.y)<6)return;drag.started=true;
       const r=drag.src.getBoundingClientRect(),g=document.createElement('div');g.className=`drag-ghost ${drag.kind}`;
-      if(drag.kind==='agent'){const a=state.agents.find(x=>x.id===drag.id);g.innerHTML=`${badge(a)}<div><strong>${esc(title(a))}</strong><small>Drop on a machine or Docker</small></div>`;drag.ox=24;drag.oy=26;}
+      if(drag.kind==='agent'){const a=state.agents.find(x=>x.id===drag.id);g.innerHTML=`${badge(a)}<div><strong>${esc(title(a))}</strong><small>${fleetView&&overview?'Drop on a machine to clone or migrate, on an agent to share':'Drop on a machine or Docker'}</small></div>`;drag.ox=24;drag.oy=26;}
       else{g.innerHTML=drag.src.innerHTML;g.style.width=r.width+'px';drag.ox=event.clientX-r.left;drag.oy=event.clientY-r.top;}
       document.body.append(g);drag.ghost=g;document.body.classList.add('dragging',`dragging-${drag.kind}`);drag.src.classList.add('drag-source');}
     const vx=event.clientX-drag.lx,vy=event.clientY-drag.ly;drag.lx=event.clientX;drag.ly=event.clientY;
@@ -1331,7 +1338,10 @@
     if(!target){const back=d.src.getBoundingClientRect();d.ghost.animate([{transform:d.ghost.style.transform,opacity:1},{transform:`translate(${back.left}px,${back.top}px) scale(.9)`,opacity:0}],{duration:280,easing:'ease-in'}).onfinish=()=>d.ghost.remove();return;}
     d.ghost.remove();
     if(d.kind==='key'){const agentId=target.dataset.agentTarget||target.dataset.agentId;if(agentId)giveKey(d.id,agentId,rect,target);}
-    else if(d.kind==='agent'){const a=state.agents.find(x=>x.id===d.id);if(a)deployTo(a,target.dataset.deployHost||'',target.dataset.deployRuntime||'regular',rect,target);}
+    else if(d.kind==='agent'){const a=state.agents.find(x=>x.id===d.id);if(!a)return;
+      if(target.dataset.agentTarget){if(target.dataset.agentTarget!==a.id)shareTo(a,target.dataset.agentTarget,rect,target);}
+      else if(target.dataset.machine!==undefined)machineDrop(a,target.dataset.machine,rect,target);
+      else deployTo(a,target.dataset.deployHost||'',target.dataset.deployRuntime||'regular',rect,target);}
   }
   document.addEventListener('pointerup',event=>{if(drag&&event.pointerId===drag.pointer)endDrag(true);});
   document.addEventListener('pointercancel',()=>endDrag(false));
@@ -1431,6 +1441,136 @@
   }
   // The note about a new key, in the agent's window when no full chat is open.
   async function dockTell(a,note){await openChatWindow(a);const id=chatDock[0]?.id,box=$(`.chat-win[data-conv="${CSS.escape(id)}"] textarea`);if(!box)return;const typed=box.value.trim();if(!typed&&a.status==='connected'){await dockSend(id,note);return;}box.value=note+(typed?'\n\n'+box.value:'');box.dispatchEvent(new Event('input',{bubbles:true}));box.focus();}
+  // ---- Manage menu: agents or machines -------------------------------------------------------------------------------
+  // Manage in the sidebar opens a two-column menu: every agent (its management screen) and every machine (the fleet
+  // board, where agents are cloned, migrated, shared and uninstalled across machines).
+  let fleetView=false,fleetFocus='local',fleetHtml={};const migrations=new Map();
+  const machineKeys=()=>['local',...state.hosts.map(h=>h.id)];
+  const machineName=key=>key==='local'?localName():state.hosts.find(h=>h.id===key)?.name||'Machine';
+  const machineOnline=key=>key==='local'||hostChecks.get(key)?.state==='ok';
+  function openManagePop(button){
+    if($('#manage-pop')){closeManagePop();return;}
+    const pop=document.createElement('div');pop.id='manage-pop';pop.className='manage-pop';pop.setAttribute('role','dialog');pop.setAttribute('aria-label','Manage');
+    const agentRow=a=>`<button type="button" class="mp-item ${manageId===a.id?'current':''}" data-mp="agent" data-id="${esc(a.id)}">${badge(a)}<span><strong>${esc(title(a))}</strong><small>${esc(placeText(a))} / ${esc(location(a))}</small></span>${dot(a)}</button>`;
+    const machineRow=key=>{const n=machineAgents(key==='local'?'':key).length,c=hostChecks.get(key),h=state.hosts.find(x=>x.id===key);return `<button type="button" class="mp-item ${fleetView&&overview&&fleetFocus===key?'current':''}" data-mp="machine" data-id="${esc(key)}"><span class="mg-target-icon ${key==='local'?'local-t':'vps-t'}" aria-hidden="true"></span><span><strong>${esc(machineName(key))}</strong><small>${n} agent${n===1?'':'s'}${h?` / ${esc(h.alias||h.hostname)}`:''}</small></span><span class="status-dot ${machineOnline(key)?'connected':c?.state==='error'?'error':''}"></span></button>`;};
+    pop.innerHTML=`<section class="mp-col"><header><span class="mp-h agents" aria-hidden="true"></span><div><strong>Agents</strong><small>One screen each: keys, Docker, git, maintenance</small></div></header><div class="mp-list">${state.agents.map(agentRow).join('')||'<p class="field-help">No agents yet.</p>'}</div></section>
+      <section class="mp-col"><header><span class="mp-h machines" aria-hidden="true"></span><div><strong>Machines</strong><small>Clone, migrate, share and uninstall agents across machines</small></div></header><button type="button" class="mp-fleet" data-mp="fleet"><span class="grid-ico" data-g="grid4" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span><strong>All machines</strong><small>The fleet board</small></span></button><div class="mp-list">${machineKeys().map(machineRow).join('')}</div><button type="button" class="mp-add" data-mp="new-vps">+ New VPS</button></section>`;
+    document.body.append(pop);
+    const r=button.getBoundingClientRect();pop.style.left=`${Math.max(8,Math.min(r.left,innerWidth-pop.offsetWidth-12))}px`;pop.style.top=`${Math.max(8,Math.min(r.bottom+6,innerHeight-pop.offsetHeight-12))}px`;
+    pop.addEventListener('click',event=>{const b=event.target.closest('[data-mp]');if(!b)return;const k=b.dataset.mp,id=b.dataset.id;closeManagePop();
+      if(k==='agent')action(()=>openManage(id));else if(k==='machine')openFleet(id);else if(k==='fleet')openFleet();else if(k==='new-vps')openNewVps();});
+    setTimeout(()=>document.addEventListener('pointerdown',outsideManagePop,true),0);pop.querySelector('.mp-item.current,.mp-item')?.focus();
+  }
+  function outsideManagePop(event){if(!event.target.closest('#manage-pop,.nav-manage'))closeManagePop();}
+  function closeManagePop(){$('#manage-pop')?.remove();document.removeEventListener('pointerdown',outsideManagePop,true);}
+  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('#manage-pop')){event.preventDefault();closeManagePop();$('.nav-manage')?.focus();}});
+  // ---- Fleet: every machine with its agents ----------------------------------------------------------------------------
+  // Drag an agent onto another machine to clone or migrate it there (in Docker too), onto another agent to share its
+  // skills, keys and MCP servers. Every agent and machine also has a menu with the same moves and the rest.
+  function openFleet(key){
+    overview=true;fleetView=true;opayaView=false;playgroundView=false;closeModal();closeMenu();if(key)fleetFocus=key;
+    render();saveView();
+    for(const h of state.hosts)if(!hostChecks.has(h.id))testMachine(h.id);
+    if(!dockerViews.has(fleetFocus))loadDocker(fleetFocus);
+  }
+  function fleetAgent(a){
+    const box=containerOf(a);
+    return `<div class="fleet-agent" data-drag="agent" data-drag-id="${esc(a.id)}" data-drop="agent" data-agent-target="${esc(a.id)}" title="Drag onto another machine to clone or migrate ${esc(title(a))}, or onto another agent to share with it">${badge(a)}<span class="fleet-agent-text"><strong>${esc(title(a))}</strong><small>${esc(box?`Docker / ${box}`:a.install?.label||labels[a.provider]||'')}</small></span>${dot(a)}<button type="button" class="mg-icon-btn" data-action="fleet-agent-menu" data-id="${esc(a.id)}" aria-label="Actions for ${esc(title(a))}" title="Clone, migrate, share, update, uninstall">&#8943;</button></div>`;
+  }
+  function fleetColumn(key){
+    const h=state.hosts.find(x=>x.id===key),host=key==='local'?'':key,agents=machineAgents(host),c=hostChecks.get(key),r=c?.result,d=dockerViews.get(key)?.result;
+    const st=key==='local'?['connected','This computer']:!c?['','Not checked yet']:c.state==='checking'?['working','Checking...']:c.state==='error'?['error','Unreachable']:['connected',`Online${r?.ms?` / ${(r.ms/1000).toFixed(1)} s`:''}`];
+    const facts=key==='local'?[state.machine?.hostname,{win32:'Windows',darwin:'macOS',linux:'Linux'}[state.platform]||state.platform]:r?[r.os||r.system,r.memory&&`memory ${r.memory}`,r.disk&&`disk ${r.disk}`]:[h?.alias||h?.hostname];
+    const copies=[...jobs.values()].filter(j=>j.kind==='clone'&&j.status==='running'&&(j.route?.toHostId||'')===host);
+    return `<article class="fleet-col ${fleetFocus===key?'focused':''} ${st[0]==='error'?'down':''}" data-drop="agent" data-machine="${esc(key)}">
+      <header class="fleet-col-head" data-action="fleet-focus" data-id="${esc(key)}" title="Details and Docker for ${esc(machineName(key))}"><span class="mg-target-icon ${key==='local'?'local-t':'vps-t'}" aria-hidden="true"></span><div><strong>${esc(machineName(key))}</strong><small><span class="status-dot ${st[0]}"></span> ${esc(st[1])}</small></div><button type="button" class="mg-icon-btn" data-action="fleet-machine-menu" data-id="${esc(key)}" aria-label="Actions for ${esc(machineName(key))}">&#8943;</button></header>
+      ${facts.filter(Boolean).length?`<div class="fleet-facts">${facts.filter(Boolean).map(f=>`<span>${esc(f)}</span>`).join('')}</div>`:''}
+      <div class="fleet-agents">${agents.map(fleetAgent).join('')}${copies.map(j=>`<div class="fleet-agent copying"><span class="fleet-agent-text"><strong>${esc(j.route.to)}</strong><small>${/ \/ /.test(j.route.toWhere||'')?'Into Docker':'Cloning'} from ${esc(j.route.from)} / ${jobPercent(j)}%</small></span><i style="--p:${jobPercent(j)}%"></i></div>`).join('')}${agents.length||copies.length?'':'<p class="fleet-empty">Drop an agent here to clone or migrate it to this machine.</p>'}</div>
+      <footer class="fleet-col-foot"><span class="fleet-docker ${d?.running?'on':''}" title="${esc(d?.running?`Docker ${d.version}`:d?d.error||'No Docker':'Docker not checked yet')}"><span class="mg-image-icon" aria-hidden="true"></span>${d?.running?`${d.containers.filter(x=>x.state==='running').length}/${d.containers.length} containers`:d?'No Docker':'Docker ?'}</span><button type="button" class="mg-icon-btn" data-action="install-catalog" ${host?`data-host="${esc(host)}"`:''} title="Install agents and tools on ${esc(machineName(key))}">+ Install</button></footer></article>`;
+  }
+  function fleetDetail(key){
+    const h=state.hosts.find(x=>x.id===key),host=key==='local'?'':key,tools=(state.toolUpdates?.machines?.[key]?.items||[]).filter(i=>i.installed),agents=machineAgents(host),out=tools.filter(i=>i.outdated).length;
+    const b=(act,label,attrs='',hint='')=>`<button type="button" class="mg-control" data-action="${act}" ${attrs} ${hint?`title="${esc(hint)}"`:''}>${label}</button>`,id=host?`data-id="${esc(host)}"`:'',hostAttr=host?`data-host="${esc(host)}"`:'';
+    return `<section class="mg-section"><header class="mg-section-head"><div><h2><span class="mg-h-icon deploy-h" aria-hidden="true"></span>${esc(machineName(key))}</h2><p>${h?`<code>${esc(sshText(h))}</code>`:esc(state.machine?.hostname||'')} / ${agents.length} agent${agents.length===1?'':'s'}</p></div><div class="mg-head-actions">${host?b('host-test','&#8635; Test connection',id):''}${b(host?'host-terminal':'local-terminal','&gt;_ Terminal',id)}${b(host?'host-files':'files-local','Files',id)}${b(host?'host-discover':'discover','Discover agents',id)}${b('install-catalog','&#8595; Install agents',hostAttr)}${host?b('edit-host','Edit',id):b('local-machine','Rename')}</div></header>
+      <div class="fleet-tools">${tools.length?tools.map(i=>`<span class="mg-pill ${i.outdated?'warn':'ok'}" title="${esc(`${i.label||i.id} ${i.installed}${i.outdated&&i.latest?`, ${i.latest} available`:''}`)}">${esc(i.label||i.id)} ${esc(i.installed)}${i.outdated?' &#8593;':''}</span>`).join(''):'<span class="field-help">Installed tools show after a version check.</span>'}${out?b('tool-updates',`&#8679; Update ${out}`):''}${b('machine-versions','Check versions',hostAttr)}</div></section>
+      <section class="mg-section mg-docker-section" id="fl-docker" data-key="${esc(key)}">${dockerPanel(null,key)}</section>`;
+  }
+  function renderFleet(){
+    if(!machineKeys().includes(fleetFocus))fleetFocus='local';
+    $('#topbar').innerHTML=`<div class="breadcrumb">Manage <span>/</span> <strong>Machines</strong></div><div class="topbar-actions"><div class="mode-switch" role="tablist" aria-label="Manage"><button type="button" role="tab" class="mode-tab" data-action="manage-agents" aria-selected="false"><span class="mode-glyph manage-glyph"></span><span>Agents</span></button><button type="button" role="tab" class="mode-tab selected" aria-selected="true"><span class="mg-image-icon" aria-hidden="true"></span><span>Machines</span></button></div></div>`;
+    contentKind('overview manage command-center fleet');
+    const keys=machineKeys(),docker=state.agents.filter(a=>containerOf(a)).length,down=keys.filter(k=>hostChecks.get(k)?.state==='error').length;
+    const hero=`<section class="mg-hero fleet-hero"><div class="mg-stage" id="mg-stage" aria-hidden="true"></div><div class="mg-card glass fleet-card"><div class="mg-id"><span class="opaya-mark small" aria-hidden="true"><img src="assets/opaya-logo.png" alt=""><i></i></span><div class="mg-id-text"><h1>Your fleet</h1><p>${keys.length} machine${keys.length===1?'':'s'} <span class="mg-sep">/</span> ${state.agents.length} agent${state.agents.length===1?'':'s'} <span class="mg-sep">/</span> ${docker} in Docker${down?` <span class="mg-sep">/</span> <span class="danger-text">${down} unreachable</span>`:''}</p></div></div>
+      <ul class="fleet-moves"><li><b>Clone or migrate</b> drag an agent onto another machine</li><li><b>Share</b> drop it on another agent: skills, keys, MCP</li><li><b>&#8943;</b> on an agent: update, back up, uninstall</li></ul>
+      <div class="mg-hero-actions"><button type="button" class="primary" data-action="new-vps">+ New VPS</button><button type="button" class="secondary" data-action="install-catalog">&#8595; Install agents</button><button type="button" class="secondary" data-action="hosts-test-all" ${state.hosts.length?'':'disabled'}>&#8635; Test all</button><button type="button" class="secondary" data-action="update-all">Update all</button></div></div></section>`;
+    const parts=[['fl-hero','',0,hero],['fl-board','mg-reveal',1,`<div class="fleet-board">${keys.map(fleetColumn).join('')}</div>`],['fl-detail','mg-split two fleet-detail mg-reveal',2,fleetDetail(fleetFocus)]];
+    const entering=renderKey!=='fleet'||!$('#fl-hero');
+    if(entering){fleetHtml={};$('#content').innerHTML=parts.map(([id,cls,i,inner])=>{fleetHtml[id]=inner;return `<div id="${id}" class="${cls}" style="--i:${i}">${inner}</div>`;}).join('');$('#content').classList.remove('view-enter');$('#content').scrollTop=0;$('#content').classList.add('mg-entering');clearTimeout(renderFleet.t);renderFleet.t=setTimeout(()=>$('#content')?.classList.remove('mg-entering'),1400);}
+    else for(const [id,,,inner] of parts)if(fleetHtml[id]!==inner){const el=document.getElementById(id);if(el){fleetHtml[id]=inner;el.innerHTML=inner;}}
+    renderKey='fleet';
+    const S=stage(),slot=$('#mg-stage');
+    if(S&&slot){heroCtl=heroCtl||S.heroStage();if(heroCtl.el.parentElement!==slot)slot.append(heroCtl.el);heroCtl.set({agent:'fleet',status:down?'connecting':'connected',busy:state.agents.some(a=>a.busy),nodes:keys.slice(0,7).map(k=>({kind:hostChecks.get(k)?.state==='error'?'clone':'machine',label:`${machineName(k)} / ${machineAgents(k==='local'?'':k).length}`,on:machineOnline(k)}))});}
+    if(!mgTimer)mgTimer=setTimeout(manageTick,600);
+  }
+  // Dropped on a machine: the moves that fit there.
+  function machineDrop(a,key,from,target){
+    const host=key==='local'?'':key,name=machineName(key),here=(a.transport==='ssh'?a.hostId:'')===host,r=target.getBoundingClientRect(),ok=cloneable(a),docker=ok&&canDocker(a);
+    const go=(runtime,migrate)=>()=>deployTo(a,host,runtime,from,target,{migrate});
+    const others=machineAgents(host).filter(x=>x.id!==a.id);
+    openMenu(Math.min(r.left+24,innerWidth-300),Math.min(r.top+56,innerHeight-300),[
+      !ok&&{icon:'!',label:'An API connection: nothing to copy',disabled:true,run:()=>{}},
+      ok&&{icon:'&#10697;',label:here?`Another copy on ${name}`:`Clone to ${name}`,run:go('regular',false)},
+      docker&&{icon:'&#9635;',label:`Clone into Docker on ${name}`,run:go('docker',false)},
+      ok&&!here&&{icon:'&#8674;',label:`Migrate to ${name}`,run:go('regular',true)},
+      docker&&{icon:'&#8674;',label:`Migrate into Docker on ${name}`,run:go('docker',true)},
+      others.length?'-':'',
+      others.length&&{icon:'&#8644;',label:'Share skills, keys and MCP with',submenu:others.map(x=>({icon:'&#8250;',label:title(x),run:()=>shareTo(a,x.id,from,target)}))}
+    ],`${title(a)} to ${name}: migrating retires the original afterwards`);
+  }
+  async function shareTo(a,targetId,from,targetEl){
+    const el=document.querySelector(`.fleet-agent[data-agent-target="${CSS.escape(targetId)}"]`)||targetEl;
+    await stage()?.fly({from,to:el,kind:'skill',count:3});openTransfer(a,{targetId});
+  }
+  // Clone to, migrate to and share with, as submenus: the same moves without dragging.
+  function moveItems(a,migrate){
+    const ok=cloneable(a),docker=ok&&canDocker(a),from=$(`.fleet-agent[data-agent-target="${CSS.escape(a.id)}"]`)||$('.mg-card');
+    return machineKeys().flatMap(key=>{const host=key==='local'?'':key,here=(a.transport==='ssh'?a.hostId:'')===host,to=()=>$(`.fleet-col[data-machine="${CSS.escape(key)}"]`)||$(`.mg-target[data-deploy-host="${CSS.escape(host)}"]`);
+      return [!(migrate&&here)&&{icon:'&#9635;',label:machineName(key),run:()=>deployTo(a,host,'regular',from,to(),{migrate})},docker&&{icon:'&#9635;',label:`${machineName(key)} · Docker`,run:()=>deployTo(a,host,'docker',from,to(),{migrate})}].filter(Boolean);}).filter(()=>ok);
+  }
+  function fleetAgentMenu(a,button){
+    const x=agentActions(a),r=button.getBoundingClientRect(),others=state.agents.filter(y=>y.id!==a.id);
+    openMenu(r.left,r.bottom+4,[
+      {icon:'&#9881;',label:'Manage',run:()=>openManage(a.id)},x.open,x.console,'-',
+      cloneable(a)?{icon:'&#10697;',label:'Clone to',submenu:moveItems(a,false)}:{icon:'&#10697;',label:'Clone: an API connection has nothing to copy',disabled:true,run:()=>{}},
+      cloneable(a)&&{icon:'&#8674;',label:'Migrate to',submenu:moveItems(a,true)},
+      others.length&&{icon:'&#8644;',label:'Share with',submenu:others.map(y=>({icon:'&#8250;',label:`${title(y)} (${machineName(y.transport==='ssh'?y.hostId:'local')})`,run:()=>openTransfer(a,{targetId:y.id})}))},
+      x.redeploy,'-',x.update,x.backup,x.connect,'-',x.uninstall,x.remove
+    ],title(a));
+  }
+  function fleetMachineMenu(key,button){
+    const host=key==='local'?'':key,h=state.hosts.find(x=>x.id===host),r=button.getBoundingClientRect(),agents=machineAgents(host);
+    openMenu(r.left,r.bottom+4,[
+      host&&{icon:'&#8635;',label:'Test connection',run:()=>testMachine(host)},
+      {icon:'&gt;_',label:'Terminal',run:()=>openTerminal(host?{hostId:host}:{local:true})},
+      {icon:'&#9656;',label:'Files',run:()=>openFiles(host?{hostId:host,label:`${h.name} over SSH`}:{label:'This computer'})},
+      {icon:'&#9678;',label:'Discover agents',run:()=>discover(host||undefined)},
+      {icon:'&#8595;',label:'Install agents',run:()=>openInstall(host)},
+      {icon:'&#9635;',label:'Docker manager',run:()=>openDocker(key)},'-',
+      agents.length&&{icon:'&#9679;',label:`Connect its ${agents.length} agent${agents.length===1?'':'s'}`,run:async()=>{for(const a of agents)if(a.status!=='connected')await api.connect({id:a.id}).catch(()=>{});}},
+      agents.some(a=>a.install?.update)&&{icon:'&#8635;',label:'Update its agents',run:async()=>{for(const a of agents)if(a.install?.update)await updateAgent(a);}},
+      '-',
+      host?{icon:'&#9998;',label:'Edit machine',run:()=>openHosts(h)}:{icon:'&#9998;',label:'Rename this computer',run:()=>openLocalMachine()},
+      host&&{icon:'&#10005;',label:'Remove machine from Opaya',danger:true,disabled:agents.length>0,hint:agents.length?'has agents':'',run:async()=>{if(!await ask(`Remove ${h.name} from Opaya?\n\nOnly Opaya forgets it. The server, its agents and your SSH keys stay as they are.`))return;await api.removeHost({id:host});hostChecks.delete(host);await refresh();}}
+    ],machineName(key));
+  }
+  // A migration is a clone, and then the original is retired once the copy is there.
+  function finishMigration(src,j){
+    modal(`${title(src)} migrated`,`The copy is ready on ${j.route?.toWhere||'its new machine'}. Retire the original on ${location(src)}?`,`<div class="migrate-done"><p class="field-help">Check the copy first if you like: open it, connect and send a message. The original keeps running until you choose.</p><div class="modal-footer"><button type="button" class="secondary" data-migrate="keep">Keep both</button><div><button type="button" class="secondary" data-migrate="remove">Remove its connection only</button><button type="button" class="primary danger-button" data-migrate="uninstall">Uninstall the original&#8230;</button></div></div></div>`);
+    $('.migrate-done').addEventListener('click',event=>{const b=event.target.closest('[data-migrate]');if(!b)return;const how=b.dataset.migrate;
+      if(how==='keep'){closeModal();return;}
+      if(how==='uninstall'){closeModal();openUninstall(src);return;}
+      action(async()=>{if(await api.removeAgent({id:src.id})){closeModal();await refresh();toast(`${title(src)}'s old connection is removed; the copy stays.`);}});});
+  }
   // ---- Console: terminals in a grid ---------------------------------------------------------------------------------
   // Besides side by side (drag the grips), the terminal area can be a grid: two columns or rows, 2 x 2, one large with
   // two stacked, three columns or 3 x 2. Empty cells offer the agent's CLI or a shell; drag the gutters to resize.
@@ -1990,42 +2130,20 @@
   // The switch shows how the selected agent is open and changes it (the agent remembers it). It replaces the Terminal,
   // Chat and Open chat buttons that sat in the middle of the top bars. Right-click the terminal half for the other ways.
   let sidebarHidden=false,titleHtml='';
-  const TITLE_ICONS={sidebar:'<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M6.25 3v10"/></svg>',
-    chat:'<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.2 3h9.6c.7 0 1.2.5 1.2 1.2v5.6c0 .7-.5 1.2-1.2 1.2H7.4L4.5 13.4V11H3.2C2.5 11 2 10.5 2 9.8V4.2C2 3.5 2.5 3 3.2 3z"/></svg>',
-    terminal:'<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M4.75 6.25 6.75 8l-2 1.75M8.5 10h3"/></svg>'};
+  const TITLE_ICONS={sidebar:'<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M6.25 3v10"/></svg>'};
+  // The sidebar toggle lives at the bottom of the sidebar; while the sidebar is hidden, a small button in the title
+  // bar brings it back (so does Ctrl/Cmd+B).
   function renderTitleControls(){
-    const box=$('#title-controls');if(!box)return;const mac=state.platform==='darwin',a=selected();
-    const mode=a&&!overview&&!opayaView&&!playgroundView?modeOf(a):'',now=mode==='console'?'terminal':mode==='chat'?'chat':'',name=a?title(a):'';
-    const chatTip=!a?'Open the Opaya Agent':a.protocol==='terminal'?`${name} works only in its terminal`:`Chat with ${name}`;
-    const termTip=!a?'A terminal on this computer':hasCli(a)?`${name} in its terminal (right-click for more)`:`A shell for ${name} (right-click for more)`;
-    const html=`<button type="button" class="title-btn" data-title="sidebar" aria-pressed="${!sidebarHidden}" title="${sidebarHidden?'Show':'Hide'} the sidebar (${mac?'&#8984;':'Ctrl+'}B)" aria-label="${sidebarHidden?'Show':'Hide'} the sidebar">${TITLE_ICONS.sidebar}</button><div class="surface-switch" role="group" aria-label="Chat or terminal"><button type="button" data-title="chat" class="${now==='chat'?'active':''}" aria-pressed="${now==='chat'}" title="${esc(chatTip)}" aria-label="${esc(chatTip)}">${TITLE_ICONS.chat}</button><button type="button" data-title="terminal" class="${now==='terminal'?'active':''}" aria-pressed="${now==='terminal'}" title="${esc(termTip)}" aria-label="${esc(termTip)}">${TITLE_ICONS.terminal}</button></div>`;
+    const box=$('#title-controls');if(!box)return;const mac=state.platform==='darwin';
+    const html=sidebarHidden?`<button type="button" class="title-btn" data-title="sidebar" aria-pressed="false" title="Show the sidebar (${mac?'&#8984;':'Ctrl+'}B)" aria-label="Show the sidebar">${TITLE_ICONS.sidebar}</button>`:'';
+    const hide=$('.sidebar-hide-btn');if(hide)hide.title=`Hide the sidebar (${mac?'\u2318':'Ctrl+'}B)`;
     box.className=`title-controls ${mac?'mac':'win'}`;if(html!==titleHtml){titleHtml=html;box.innerHTML=html;}
     document.body.classList.toggle('sidebar-hidden',sidebarHidden);
   }
   function toggleSidebar(force){sidebarHidden=force??!sidebarHidden;renderTitleControls();requestAnimationFrame(()=>placePanes());saveView();}
   // Chat or terminal for the selected agent, leaving the Workspace, Manage, the Opaya Agent or the Playground. From a
   // project chat the CLI starts in the project's folder, as the Terminal button did (the service reuses a running one).
-  async function showSurface(surface){
-    const a=selected(),p=a&&inAgentView()&&modeOf(a)==='chat'?projectOf(currentConversation()):null;
-    if(!a){if(surface==='terminal')await openTerminal({local:true});else{overview=false;playgroundView=false;opayaView=true;manageId='';closeModal();render();saveView();}return;}
-    if(surface==='chat'){if(a.protocol==='terminal')toast(`${title(a)} works only in its terminal.`);else await setAgentMode(a,'chat');return;}
-    // Console; from a project chat the CLI starts in the project's folder (the service reuses a running one).
-    const project=p&&hasCli(a)&&fitsProject(a,p)?p:null;
-    await setAgentMode(a,'console');
-    if(project){stageAgent=a.id;await openTerminal({agentId:a.id,mode:'agent',projectId:project.id});}
-  }
-  function terminalChoices(event){
-    const a=selected(),items=[
-      a&&hasCli(a)&&{icon:'&gt;_',label:`${title(a)} in its terminal`,run:()=>action(()=>showSurface('terminal'))},
-      a&&hasCli(a)&&{icon:'&#9636;',label:`${title(a)} CLI below the chat`,run:()=>action(()=>inAgentView()&&!manageId?agentTerminal():openTerminal({agentId:a.id,mode:'agent'}))},
-      a&&{icon:'$',label:`Shell for ${title(a)}`,hint:location(a),run:()=>action(()=>openTerminal({agentId:a.id}))},
-      {icon:'&#9635;',label:'Terminal on this computer',run:()=>action(()=>openTerminal({local:true}))},'-',
-      {icon:'&#8615;',label:$('#terminal-panel').hidden?'Show the terminal panel':'Hide the terminal panel',hint:'Ctrl+`',run:()=>{if(!$('#terminal-panel').hidden)$('#terminal-panel').hidden=true;else action(()=>currentTerminal&&terminalViews.has(currentTerminal)?($('#terminal-panel').hidden=false,activateTerminal(currentTerminal)):openTerminal(a?{agentId:a.id}:{local:true}));}}
-    ].filter(Boolean);
-    openMenu(event.clientX,event.clientY,items,'Terminal',event.target.closest('button'));
-  }
-  $('#title-controls')?.addEventListener('click',event=>{const b=event.target.closest('[data-title]');if(!b)return;if(b.dataset.title==='sidebar')toggleSidebar();else action(()=>showSurface(b.dataset.title));});
-  $('#title-controls')?.addEventListener('contextmenu',event=>{const b=event.target.closest('[data-title="terminal"]');if(!b)return;event.preventDefault();terminalChoices(event);});
+  $('#title-controls')?.addEventListener('click',event=>{const b=event.target.closest('[data-title]');if(!b)return;if(b.dataset.title==='sidebar')toggleSidebar();});
   // ---- Files panel: read-only folders, file previews and project info, on this computer or over SSH ----------------
   let files=null;
   const filesScope=()=>files.agentId?{agentId:files.agentId}:files.hostId?{hostId:files.hostId}:{};
@@ -2819,7 +2937,9 @@
       else toast(`${j.title} failed: ${j.error}`,true);
     }
     renderJobs();
-    // Clone progress shows on the deploy targets of the management screen.
+    if(migrations.has(j.id)&&j.status!=='running'){const src=state.agents.find(x=>x.id===migrations.get(j.id));migrations.delete(j.id);if(j.status==='done'&&src)setTimeout(()=>finishMigration(src,j),600);}
+    // Clone progress shows on the deploy targets of the management screen and on the fleet board.
+    if(fleetView&&overview&&j.kind==='clone'&&(!prev||prev.status!==j.status||jobPercent(prev)!==jobPercent(j)))render();
     if(manageId&&j.kind==='clone'&&(!prev||prev.status!==j.status||jobPercent(prev)!==jobPercent(j)))render();
   }
   function renderJobs(){
@@ -2995,8 +3115,8 @@
     const local=state.hosts.length===0,hermes=a.provider==='hermes',fw=a.install?.framework||'',cliName=CLONE_CLI[fw]||'',docker=hermes||CLONE_DOCKER.includes(fw);
     const here=a.transport==='ssh'?a.hostId:'',from=hermes?'hermes':fw,boxes=cloneContainers();
     const scopes=hermes?CLONE_SCOPES:CLONE_SCOPES.map(([id,label])=>[id,label,{everything:'Settings, skills, memory and instructions. No chat history.',personality:'Skills, instructions and personality files, plus settings.',skills:'Skills, commands and agents, plus settings.',memory:'Memory and instruction files, plus settings.'}[id]]);
-    modal(`Clone ${title(a)}`,hermes?'Copy this agent to this computer or a VPS, as a Hermes profile or a Docker container.':`Copy ${cliName} with its settings, skills and memory to another machine (Opaya installs it there if needed)${docker?' or into a Docker container':''}.`,`<form id="clone-form" class="mcp-form">
-      <label>Name of the clone<input name="name" required maxlength="40" value="${esc(preset.name||`${a.name}-clone`.replace(/\s+/g,'-').toLowerCase())}" autocomplete="off"></label>
+    modal(`${preset.migrate?'Migrate':'Clone'} ${title(a)}`,preset.migrate?`Copy ${title(a)} to its new place. When the copy is there, Opaya offers to retire the original on ${location(a)}.`:hermes?'Copy this agent to this computer or a VPS, as a Hermes profile or a Docker container.':`Copy ${cliName} with its settings, skills and memory to another machine (Opaya installs it there if needed)${docker?' or into a Docker container':''}.`,`<form id="clone-form" class="mcp-form">
+      <label>${preset.migrate?'Name in its new place':'Name of the clone'}<input name="name" required maxlength="40" value="${esc(preset.name||`${a.name}-clone`.replace(/\s+/g,'-').toLowerCase())}" autocomplete="off"></label>
       <fieldset class="clone-choice"><legend>What to copy</legend>${scopes.map(([id,label,help])=>`<label class="choice-card"><input type="radio" name="scope" value="${id}" ${(preset.scope||'everything')===id?'checked':''}><span><strong>${label}</strong><small>${help}</small></span></label>`).join('')}</fieldset>
       <label class="check-row inline"><input type="checkbox" name="keys" ${preset.keys===false?'':'checked'}> ${hermes?'Include API keys (.env)':'Include logins and API keys'} so the clone works right away</label>
       <label class="check-row inline clone-cron" ${hermes?'':'hidden'}><input type="checkbox" name="cron" ${preset.cron??(preset.scope||'everything')==='everything'?'checked':''}> Include cron jobs (scheduled tasks) <small>They will run on both agents, for example posting to Slack twice.</small></label>
@@ -3006,7 +3126,7 @@
         <p class="field-help">${PROFILE_HOW[from]?`${esc(fwName(from))} joins the container as ${esc(PROFILE_HOW[from])}, inside its data folder, so it survives an image update. The container and its agent keep running; Opaya asks once more before it changes anything.`:`${esc(fwName(from))} cannot live as a profile in someone else's container. Clone it to a machine instead.`}</p></fieldset>
       <p class="field-help">${hermes?'Chat history and OAuth logins are not copied.':`Chat history is not copied. ${esc(cliName)} keeps one setup per computer account, so a regular clone goes to another machine; what is already there is kept as a .before-clone copy.`} Later, right-click the clone &gt; Redeploy to copy the same parts again.${local?' Add a VPS to clone to a server.':''}</p>
       <div id="clone-status"></div>
-      <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Clone</button></div></div></form>`,true);
+      <div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">${preset.migrate?'Migrate':'Clone'}</button></div></div></form>`,true);
     const f=$('#clone-form');let cronTouched=preset.cron!==undefined;
     const syncRun=()=>{const profile=f.querySelector('[name="runtime"]:checked')?.value==='profile';$('#clone-containers').hidden=!profile;f.querySelector('.clone-where').closest('fieldset').hidden=profile;};
     for(const r of f.querySelectorAll('[name="runtime"]'))r.addEventListener('change',syncRun);syncRun();
@@ -3016,7 +3136,7 @@
       // The clone runs as a background job with its own window; this dialog closes right away.
       const box=data.runtime==='profile'?boxes.find(t=>t.key===data.container):null;
       if(data.runtime==='profile'&&!box){toast('Choose a container for the profile.',true);return;}
-      action(async()=>{const job=await api.cloneAgent({id:a.id,name:data.name,hostId:box?box.hostId:data.hostId||'',runtime:data.runtime,container:box?.container||'',scope:data.scope,keys:!!data.keys,cron:!!data.cron});closeModal();onJob(job);});
+      action(async()=>{const job=await api.cloneAgent({id:a.id,name:data.name,hostId:box?box.hostId:data.hostId||'',runtime:data.runtime,container:box?.container||'',scope:data.scope,keys:!!data.keys,cron:!!data.cron});closeModal();if(preset.migrate&&job?.id)migrations.set(job.id,a.id);onJob(job);});
     };
   }
   async function redeploy(a){

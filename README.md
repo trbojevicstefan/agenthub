@@ -34,6 +34,15 @@ Selecting an agent opens its **management screen**. Chat and Console sit next to
 - **Projects & git:** pull, commit and push, or start a chat in a project, from the screen.
 - Every other action is here too: model and effort, skills and tools, files, update, back up, connection (restart, copy ID or launch command), name and look, and removal.
 
+### Manage menu and the fleet (0.23)
+- **Manage** in the sidebar opens a menu with two columns: **Agents** (each one's management screen) and **Machines** (this computer, every VPS, and **All machines**).
+- **The fleet board** shows every machine as a column with its agents, its status, OS, memory and disk, and its Docker.
+  - Drag an agent onto another machine: **Clone to**, **Clone into Docker on**, **Migrate to** or **Migrate into Docker on** it. A migration is a clone; when the copy is ready, Opaya offers to uninstall the original, remove only its connection, or keep both.
+  - Drop an agent on another agent to **share** its skills, API keys and MCP servers with it.
+  - Each agent's ⋯ menu has Clone to, Migrate to and Share with, plus update, back up, uninstall and remove. Each machine's ⋯ menu tests it, opens its terminal, files, Discover, Install agents and Docker, connects or updates all its agents, and edits or removes it.
+  - Click a machine for its details: installed tools and versions, and its Docker.
+- The sidebar toggle is at the bottom of the sidebar (**Hide sidebar**, Ctrl/Cmd+B). While the sidebar is hidden, a small button at the top left brings it back.
+
 ### Chat windows and the console (0.23)
 - **Chat** opens a chat window docked at the bottom, like a desktop messenger. Keep several open, click a header to minimize it, expand it to the full chat view or close it. Windows that do not fit collapse into avatars on the right. Settings > **Chat opens as** can make Chat open the full view instead.
 - **Console** turns the main area into terminals: side by side, two columns or rows, 2 x 2, one large with two stacked, three columns or 3 x 2. Drag the gutters to resize; **Fill empty cells** opens the agent's CLI and shells.
