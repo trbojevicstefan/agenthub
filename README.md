@@ -26,7 +26,7 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 ## What you can do
 
 ### Manage every agent (0.23)
-Selecting an agent opens its **management screen**. Chat and Console sit next to Manage at the top.
+Selecting an agent opens its **chat**, with History on the right. **Manage** (below) and **Console** sit next to Chat at the top; Console opens the terminal next to or below the chat unless Settings > Chat and console says full screen.
 - **The stage:** a live 3D view of the agent and what it is connected to (its machine, container, keys, projects, skills and chats). It glows when the agent is connected and pulses while it works.
 - **Deploy & clone:** drag the agent card onto **This computer**, a **VPS** or **Docker** to clone it there, or click a target. Progress shows on the target.
 - **Docker:** the containers on the agent's machine, its own container first, with live CPU and memory, **Logs**, **Shell**, **Restart**, **Pause / Resume**, **Stop / Start**, **Inspect** (image, mounts, ports, restart policy and health; environment variables by name only) and **Remove**. Pull a newer image and prune unused ones. **Dockerize** runs a copy of an agent in its own container.
@@ -44,7 +44,7 @@ Selecting an agent opens its **management screen**. Chat and Console sit next to
 - The sidebar toggle is at the bottom of the sidebar (**Hide sidebar**, Ctrl/Cmd+B). While the sidebar is hidden, a small button at the top left brings it back.
 
 ### Chat windows and the console (0.23)
-- **Chats** in the bottom-right corner lists every chat and starts new ones. **Chat** opens a chat window docked at the bottom, like a desktop messenger: unread replies show on minimized windows and on the launcher. Keep several open, click a header to minimize it, expand it to the full chat view or close it. Windows that do not fit collapse into avatars on the right. Settings > **Chat opens as** can make Chat open the full view instead.
+- **Chat windows** (Settings > Chat and console, or Manage > Chat window) dock at the bottom like a desktop messenger: minimize, expand, unread counts on minimized windows. Keep several open, click a header to minimize it, expand it to the full chat view or close it. Windows that do not fit collapse into avatars on the right. Settings > **Chat opens as** can make Chat open the full view instead.
 - **Console** turns the main area into terminals: side by side, two columns or rows, 2 x 2, one large with two stacked, three columns or 3 x 2. Drag the gutters to resize; **Fill empty cells** opens the agent's CLI and shells.
 
 ### Chat with every agent

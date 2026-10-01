@@ -20,7 +20,7 @@
   let toastTimer, returnFocus, currentTerminal = '', lastSelected = '', modalBusy = false;
   let manageId = '', manageHtml = '', manageKeyed = {};
   // How each agent's screen shows: manage (the default a left click opens), chat (the full chat view) or console.
-  const agentModes = new Map(), modeOf = a => agentModes.get(a.id) || 'manage';
+  const agentModes = new Map(), modeOf = a => agentModes.get(a.id) || 'chat';
   // Sidebar items the user turned off in Settings > Sidebar.
   const SIDE_ITEMS = [['home','Home','Agents at a glance and quick actions'],['playground','Playground','Ask two agents the same question'],['machines','Machines','The fleet board'],['vault','Vault','API keys and tokens'],['help','Help','Connection help and shortcuts']];
   let sidebarHide = new Set();
@@ -165,6 +165,8 @@
       $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity">${badge(a,true)}<div><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p><div class="identity-meta">${meta(a)}${a.tags?.length?`<span class="heading-tags">${tagChips(a,6)}</span>`:''}</div></div></div><div class="conversation-controls"><select id="conversation-picker" aria-label="Conversation history" title="Switch between this agent's conversations"></select><button class="icon-button" data-action="new-conversation" title="New conversation (Ctrl + N)" aria-label="New conversation">+</button><button class="icon-button" data-action="export" title="Export this conversation as Markdown" aria-label="Export conversation">&#8595;</button><button class="icon-button history-button" data-action="history-toggle" title="Chat history (${mod()}Shift+H)" aria-label="Chat history"><span class="history-glyph" aria-hidden="true"></span></button>${a.install?.framework==='dsh'?'<button class="secondary" data-action="dsh-web" title="Open DeepSeek Harness\'s own Web UI in the Opaya browser">Web UI</button>':''}<button id="connect-button" class="secondary" data-action="connect"></button></div></div><div id="connection-banner"></div><div id="message-list" class="message-list"></div><div class="compose-area"><form id="message-form"><div id="compose-files" class="compose-files" hidden></div><textarea id="message-input" placeholder="Message ${esc(title(a))}..." aria-label="Message ${esc(title(a))}" rows="2" maxlength="80000"></textarea><div class="compose-bottom"><div class="compose-tools"><button type="button" class="compose-tool" data-action="compose-attach" title="Attach files (you can also drop files here or paste a screenshot)" aria-label="Attach files"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button><button type="button" class="compose-tool" data-action="compose-secret" title="Keys: see the keys this agent has, insert one into your message, or give it a new one" aria-label="This agent's keys"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3M16 7l3 3M13.5 9.5l2 2"/></svg></button><button type="button" id="compose-model" class="compose-chip" data-action="compose-model" title="Model for this chat"></button><button type="button" id="compose-effort" class="compose-chip" data-action="compose-effort" title="Reasoning effort for this chat" hidden></button><span id="compose-hint"></span></div><button type="button" id="stop-button" class="stop-button" data-action="stop" title="Stop this turn" hidden><span>&#9632;</span> Stop</button><button id="send-button" type="submit" class="send-button" title="Send message (Enter)" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption"><span class="send-caption">${sendCaption()}</span> <span>&#183;</span> Conversations stay on this computer</p></div>`;
       closePicker();
       if(!String(renderKey).startsWith(`["${a.id}"`))enter($('#content'));
+      // History on the right is open by default in the chat until the user closes it.
+      if(!historyOpen&&!projectsOpen&&!tipsSeen.has('history-closed'))queueMicrotask(()=>{if(!historyOpen&&modeOf(a)==='chat')toggleHistory(true,a.id);});
       renderKey=JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId]);$('#message-input').value=drafts.get(draftKey())??state.drafts?.[draftKey()]??'';
       $('#message-input').addEventListener('input',event=>{drafts.set(draftKey(),event.target.value);if(api.saveDraft)save(api.saveDraft({agentId:a.id,conversationId:currentConversation()?.id||'',text:event.target.value}));event.target.style.height='auto';event.target.style.height=Math.min(event.target.scrollHeight,190)+'px';updateSlash();});
       $('#message-input').addEventListener('blur',()=>setTimeout(closeSlash,120));
@@ -451,7 +453,7 @@
     const toggle=(key,label,hint='',dflt=true)=>`<label class="switch-row"><input type="checkbox" data-setting="${key}" ${on(key,dflt)?'checked':''}><span class="switch" aria-hidden="true"></span><span>${label}${hint?` <small>(${hint})</small>`:''}</span></label>`;
     const choice=(act,value,current,label,small,extra='')=>`<button type="button" class="theme-option compact ${current?'selected':''}" data-action="${act}" data-value="${value}" ${extra}><strong>${label}</strong><small>${small}</small></button>`;
     modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid">
-      <section class="settings-wide"><h3>Chat opens as</h3><p class="settings-copy">Selecting an agent opens its management screen. Chat and Console sit next to Manage at the top; this chooses what Chat opens. A chat window can always be expanded to the full view.</p><div class="theme-options"><button class="theme-option ${st.chatOpens!=='full'?'selected':''}" data-action="chat-opens" data-value="window"><span class="interface-preview chat mini" aria-hidden="true"><i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-input"></i></span><strong>A chat window</strong><small>Docked at the bottom, several at once</small></button><button class="theme-option ${st.chatOpens==='full'?'selected':''}" data-action="chat-opens" data-value="full"><span class="interface-preview chat mini" aria-hidden="true"><i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-bubble l short"></i><i class="ip-input"></i></span><strong>The full chat view</strong><small>History, projects and files in the main area</small></button></div></section>
+      <section class="settings-wide"><h3>Chat and console</h3><p class="settings-copy">Selecting an agent opens its chat; Manage and Console sit next to Chat at the top. Chat can also open as a small window docked at the bottom.</p><div class="theme-options"><button class="theme-option ${st.chatOpens==='window'?'selected':''}" data-action="chat-opens" data-value="window"><span class="interface-preview chat mini" aria-hidden="true"><i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-input"></i></span><strong>A chat window</strong><small>Docked at the bottom, several at once</small></button><button class="theme-option ${st.chatOpens!=='window'?'selected':''}" data-action="chat-opens" data-value="full"><span class="interface-preview chat mini" aria-hidden="true"><i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-bubble l short"></i><i class="ip-input"></i></span><strong>The full chat view</strong><small>History, projects and files in the main area</small></button></div><p class="settings-copy">Console opens the agent's terminal</p><div class="theme-options"><button class="theme-option ${st.consoleOpens!=='full'?'selected':''}" data-action="console-opens" data-value="panel"><strong>Next to the chat</strong><small>Below or beside it, as the terminal panel</small></button><button class="theme-option ${st.consoleOpens==='full'?'selected':''}" data-action="console-opens" data-value="full"><strong>Full screen</strong><small>Terminals fill the main area, in a grid</small></button></div></section>
       <section><h3>Sidebar</h3><p class="settings-copy">What shows in the sidebar besides your agents. Settings stays, so you can turn items back on.</p>${SIDE_ITEMS.map(([key,label,hint])=>`<label class="switch-row"><input type="checkbox" data-side-toggle="${key}" ${sidebarHide.has(key)?'':'checked'}><span class="switch" aria-hidden="true"></span><span>${label} <small>(${hint})</small></span></label>`).join('')}</section>
       <section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section>
       <section><h3>Notifications</h3><p class="settings-copy">System notifications while Opaya is not in front: hidden, minimized or behind another app. Click one to open that chat.</p>${toggle('notifyReplies','When an agent or the Opaya Agent replies')}${toggle('notifyApprovals','When something waits for your approval')}${toggle('notifyJobs','When installs, clones, updates and fixes finish')}${toggle('notifySound','With sound')}</section>
@@ -844,9 +846,9 @@
     if(name==='fleet-machine-menu'){fleetMachineMenu(id,button);return;}
     if(name==='sidebar-hide'){toggleSidebar(true);return;}
     if(name==='fleet'){openFleet();return;}
-    if(name==='select'&&manageId&&button.closest('#agent-list')){openManage(id);return;}
     if(name==='project-remote'){const p=(state.projects||[]).find(x=>x.id===id);if(p)openProjectAgents(p);return;}
     if(name==='copy-send'||name==='copy-bring'){const p=(state.projects||[]).find(x=>x.id===id),a=state.agents.find(x=>x.id===button.dataset.agent);if(p&&a)action(()=>name==='copy-send'?sendToRemote(p,a):bringFromRemote(p,a));return;}
+    if(name==='console-opens'){action(async()=>{await api.saveSettings({consoleOpens:button.dataset.value});await refresh();openSettings();toast(button.dataset.value==='full'?'Console fills the main area.':'Console opens next to the chat.');});return;}
     if(name==='chat-opens'){action(async()=>{await api.saveSettings({chatOpens:button.dataset.value});await refresh();openSettings();toast(button.dataset.value==='full'?'Chat opens the full chat view.':'Chat opens a chat window.');});return;}
     if(name==='manage-run'){const item=manageKeyed[button.dataset.key];if(item&&!item.disabled)action(()=>item.run());return;}
     if(name==='local-machine'){openLocalMachine();return;}
@@ -883,7 +885,7 @@
     if(name==='terminal-more'){openToolbarMenu(button,terminalMoreMenu(),'Terminal');return;}
     if(name==='terminal-split'){action(()=>panes.filter(Boolean).length?splitTerminal('right'):openTerminal({...(selected()&&!overview?{agentId:selected().id}:{local:true})}));return;}
     action(async()=>{
-      if(name==='select'||name==='switch-select'){closeModal();await openManage(id);}
+      if(name==='select'||name==='switch-select'){closeModal();await openChat(id);}
       else if(name==='connect-all')await connectAll();
       else if(name==='stop-agent')await api.stop({id});
       else if(name==='pg-connect')await api.connect({id});
@@ -931,7 +933,7 @@
     if(event.key.toLowerCase()==='n'&&selected()){event.preventDefault();const a=selected();action(()=>!overview&&!opayaView&&!playgroundView&&modeOf(a)==='chat'?api.newConversation({agentId:a.id}):newDockChat(a));}
     if(event.key==='`'){event.preventDefault();if(!$('#terminal-panel').hidden)$('#terminal-panel').hidden=true;else action(()=>currentTerminal&&terminalViews.has(currentTerminal)?($('#terminal-panel').hidden=false,activateTerminal(currentTerminal)):agentTerminal());}
     // Chosen from inside a terminal, the terminal panel still follows the choice (followSelectedAgent keeps a focused one).
-    if(/^[1-9]$/.test(event.key)&&state.agents[Number(event.key)-1]){event.preventDefault();overview=false;opayaView=false;playgroundView=false;const id=state.agents[Number(event.key)-1].id;if(id!==state.activeAgentId&&viewOf(document.activeElement))document.activeElement.blur();action(()=>openManage(id));}
+    if(/^[1-9]$/.test(event.key)&&state.agents[Number(event.key)-1]){event.preventDefault();overview=false;opayaView=false;playgroundView=false;const id=state.agents[Number(event.key)-1].id;if(id!==state.activeAgentId&&viewOf(document.activeElement))document.activeElement.blur();action(()=>openChat(id));}
   });
   if(!api){$('#content').innerHTML='<div class="runtime-missing"><h1>Open Opaya as a desktop app.</h1><p>This workspace needs its native bridge to discover agents, use SSH and open terminals.</p><code>npm install &amp;&amp; npm start</code></div>';return;}
   // Scrollback search (Ctrl+F in a terminal, or the search button).
@@ -972,7 +974,7 @@
     form.addEventListener('submit',event=>{event.preventDefault();const value=form.elements.displayName.value.trim();action(async()=>{await api.updateAgentDisplay({id:a.id,displayName:value===a.name?'':value});closeModal();toast('Agent renamed.');});});
   }
   async function refresh(){state=await api.snapshot();render();}
-  async function selectAgent(id,mode='manage'){if(mode==='manage'){await openManage(id);return;}agentModes.set(id,mode);overview=false;opayaView=false;playgroundView=false;closeModal();await api.select({id});render();saveView();}
+  async function selectAgent(id,mode='chat'){if(mode==='chat'){await openChat(id);return;}if(mode==='manage'){await openManage(id);return;}agentModes.set(id,mode);overview=false;opayaView=false;playgroundView=false;closeModal();await api.select({id});render();saveView();}
   // Every action for one agent, shared by the right-click menu and the Manage screen.
   function agentActions(a){
     const id=a.id,index=state.agents.findIndex(x=>x.id===id),connected=a.status==='connected',cap=a.install||{};
@@ -1118,12 +1120,24 @@
     render();saveView();
     loadInstallInfo(a);loadBackups(a);loadKeys(a);if(a.install?.kind!=='remote-api')loadDocker(dockerKeyOf(a));for(const p of agentProjects(a))if(!projectGit.get(p.id)?.info)loadProjectGit(p);
   }
+  // Selecting an agent opens its chat (agents without a chat open their console).
+  async function openChat(id){const a=state.agents.find(x=>x.id===id);if(a)await setAgentMode(a,'chat');}
   async function setAgentMode(a,mode){
     if(mode==='manage'){await openManage(a.id);return;}
     // An agent whose vendor stopped accepting chats from other apps (the service marks it) works in its console.
     if(mode==='chat'&&a.surface==='terminal'){toast(`${title(a)} does not accept chats from other apps: its own CLI opens instead.`);mode='console';}
-    if(mode==='chat'&&a.protocol!=='terminal'&&state.settings?.chatOpens!=='full'){await openChatWindow(a);return;}
+    if(mode==='chat'&&a.protocol!=='terminal'&&state.settings?.chatOpens==='window'){await openChatWindow(a);return;}
     if(mode==='chat')mode=a.protocol==='terminal'?'console':'full';
+    // Console opens the terminal next to or below the chat; full screen only when that is the preference (or the
+    // agent has no chat at all).
+    if(mode==='console'&&state.settings?.consoleOpens!=='full'&&a.protocol!=='terminal'&&a.surface!=='terminal'){
+      agentModes.set(a.id,'chat');overview=false;opayaView=false;playgroundView=false;closeModal();
+      if(state.activeAgentId!==a.id){await api.select({id:a.id});state=await api.snapshot();}
+      stageAgent='';render();saveView();
+      const mine=[...terminalViews.values()].find(v=>v.agentId===a.id&&!v.exited&&v.mode==='agent')||[...terminalViews.values()].find(v=>v.agentId===a.id&&!v.exited);
+      if(mine){$('#terminal-panel').hidden=false;activateTerminal(mine.id);}else await openTerminal(hasCli(a)?{agentId:a.id,mode:'agent'}:{agentId:a.id});
+      saveView();return;
+    }
     agentModes.set(a.id,mode==='full'?'chat':'console');overview=false;opayaView=false;playgroundView=false;closeModal();
     if(state.activeAgentId!==a.id){await api.select({id:a.id});state=await api.snapshot();}
     stageAgent='';render();saveView();
@@ -1458,25 +1472,24 @@
     catch(error){toast(error.message,true);}finally{dockSending.delete(id);renderDock();}
   }
   const dockMessage=(m,a)=>`<div class="dock-msg ${m.role==='user'?'mine':'theirs'} ${m.status==='error'?'failed':''}">${m.role==='user'?'':`<span class="dock-msg-avatar">${agentIcon(a)}</span>`}<div class="dock-bubble">${activityMarkup(m,4,m.status==='streaming'?a.id:'')}${m.content?`<div class="message-text">${format(m.content)}</div>`:m.status==='streaming'?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}${m.attachments?.length?`<small class="dock-files">${m.attachments.length} file${m.attachments.length===1?'':'s'}</small>`:''}${m.error?`<small class="dock-error">${esc(m.error)}</small>`:''}</div></div>`;
-  // Every screen shows the dock (like a messenger's corner): the Chats launcher on the right, open windows to its left.
+  // Chat windows docked at the bottom right (when Chat opens as a window, or a window is opened from Manage).
   // A window is open, minimized to its header, or waiting in the launcher when there is no room. The conversation
   // open in the full chat view is not shown twice. Replies that arrive while a window is minimized, waiting or hidden
   // count as unread on it and on the launcher.
   let launcherOpen=false;const dockSeen=new Map();
-  const LAUNCHER_W=272;
   function renderDock(){
     const root=dockRoot();chatDock=chatDock.filter(d=>dockConv(d.id));
     const talkers=state.agents.filter(a=>a.protocol!=='terminal');
     const fullId=!overview&&!opayaView&&!playgroundView&&selected()&&modeOf(selected())==='chat'?state.activeConversationId:'';
     const visible=chatDock.filter(d=>d.id!==fullId);
-    const room=Math.max(1,Math.floor((innerWidth-(sidebarHidden?60:320)-LAUNCHER_W-12)/(DOCK_W+12))),shown=visible.slice(0,room),rest=visible.slice(room);
+    const room=Math.max(1,Math.floor((innerWidth-(sidebarHidden?60:320)-60)/(DOCK_W+12))),shown=visible.slice(0,room),rest=visible.slice(room);
     // Unread: a finished reply in a chat the user cannot see right now.
     for(const d of chatDock){
       const m=state.histories[d.id];if(!m)continue;const last=m.at(-1),sig=`${m.length}:${last?.status||''}`,prev=dockSeen.get(d.id);dockSeen.set(d.id,sig);
       const out=d.min||d.id===fullId?false:!shown.includes(d);
       if(prev&&prev!==sig&&last?.role==='assistant'&&last.status!=='streaming'&&(d.min||out))dockUnread.set(d.id,(dockUnread.get(d.id)||0)+1);
     }
-    root.hidden=!chatDock.length&&!talkers.length;document.body.classList.toggle('chat-dock-shown',!root.hidden);
+    root.hidden=!chatDock.length;document.body.classList.toggle('chat-dock-shown',!root.hidden);
     document.body.classList.toggle('chat-dock-open',shown.some(d=>!d.min));
     const keep=new Set(shown.map(d=>d.id));
     for(const el of root.querySelectorAll('.chat-win'))if(!keep.has(el.dataset.conv)&&!el.classList.contains('leaving')){el.remove();dockSigs.delete(el.dataset.conv);}
@@ -1505,18 +1518,12 @@
       const note=el.querySelector('.chat-win-note'),off=a.status!=='connected';note.hidden=!off||!messages?.length;note.innerHTML=off?`${esc(status(a))} <button type="button" class="text-button" data-dock="connect" data-conv="${esc(d.id)}">Connect</button>`:'';
       el.querySelector('.chat-win-send').disabled=off||!!a.busy||dockSending.has(d.id);el.querySelector('.chat-win-send').hidden=!!a.busy;el.querySelector('.chat-win-stop').hidden=!a.busy;
     });
-    root.querySelector('.chat-more')?.remove();
-    // The launcher: every chat, newest first, and the windows waiting for room.
-    let launcher=root.querySelector('.chat-launcher');
-    if(!talkers.length&&!chatDock.length){launcher?.remove();return;}
-    if(!launcher){launcher=document.createElement('section');launcher.className='chat-launcher';launcher.setAttribute('aria-label','Chats');root.append(launcher);}
-    launcher.style.order='0';launcher.classList.toggle('open',launcherOpen);
-    const total=[...dockUnread.entries()].filter(([id])=>chatDock.some(d=>d.id===id)).reduce((n,[,v])=>n+v,0),busy=state.agents.filter(a=>a.busy).length,docked=new Set(chatDock.map(d=>d.id));
-    const waiting=rest.map(d=>{const c=dockConv(d.id),a=state.agents.find(x=>x.id===c?.agentId);return a?`<button type="button" class="chat-bubble ${dockUnread.get(d.id)?'attention':''}" data-dock="bubble" data-conv="${esc(d.id)}" title="${esc(`${title(a)}: ${chatLabel(c)}`)}${dockUnread.get(d.id)?` (${dockUnread.get(d.id)} new)`:''}">${badge(a)}${dot(a)}</button>`:'';}).join('');
-    const convs=state.conversations.filter(c=>talkers.some(a=>a.id===c.agentId)).slice().sort((x,y)=>String(y.createdAt).localeCompare(String(x.createdAt))).slice(0,40);
-    const html=`<header class="chat-launch-head" data-dock="launcher" title="${launcherOpen?'Hide':'Show'} your chats"><span class="mode-glyph chat-glyph" aria-hidden="true"></span><strong>Chats</strong>${total?`<em class="chat-win-unread">${total}</em>`:''}${busy?`<span class="chat-launch-busy" title="${busy} agent${busy===1?'':'s'} working"><span class="status-dot working"></span>${busy}</span>`:''}<span class="chat-launch-waiting">${waiting}</span><button type="button" class="chat-win-btn" data-dock="launch-new" title="New chat with an agent" aria-label="New chat">+</button><span class="chat-launch-caret" aria-hidden="true">&#9652;</span></header>
-      <div class="chat-launch-list">${convs.map(c=>{const a=state.agents.find(x=>x.id===c.agentId);return `<button type="button" class="chat-launch-row ${docked.has(c.id)?'docked':''}" data-dock="launch-open" data-conv="${esc(c.id)}">${badge(a)}<span class="chat-launch-text"><strong>${esc(title(a))}</strong><small>${esc(chatLabel(c))}</small></span><span class="chat-launch-meta"><small>${esc(ago(c.createdAt))}</small>${a.busy?'<span class="status-dot working"></span>':dot(a)}</span></button>`;}).join('')||`<p class="chat-win-empty">No chats yet. Use + to start one.</p>`}</div>`;
-    if(launcher.dataset.html!==html){launcher.dataset.html=html;const list=launcher.querySelector('.chat-launch-list'),scroll=list?.scrollTop||0;launcher.innerHTML=html;const nl=launcher.querySelector('.chat-launch-list');if(nl)nl.scrollTop=scroll;}
+    // Windows without room wait as avatars on the right; the sidebar lists the agents, so there is no other list here.
+    let more=root.querySelector('.chat-more');
+    if(rest.length){if(!more){more=document.createElement('div');more.className='chat-more';root.append(more);}more.style.order='0';
+      more.innerHTML=rest.map(d=>{const c=dockConv(d.id),a=state.agents.find(x=>x.id===c?.agentId);return a?`<button type="button" class="chat-bubble ${dockUnread.get(d.id)?'attention':''}" data-dock="bubble" data-conv="${esc(d.id)}" title="${esc(`${title(a)}: ${chatLabel(c)}`)}${dockUnread.get(d.id)?` (${dockUnread.get(d.id)} new)`:''}">${badge(a)}${dot(a)}</button>`:'';}).join('');}
+    else more?.remove();
+    root.querySelector('.chat-launcher')?.remove();
   }
   // The note about a new key, in the agent's window when no full chat is open.
   async function dockTell(a,note){await openChatWindow(a);const id=chatDock[0]?.id,box=$(`.chat-win[data-conv="${CSS.escape(id)}"] textarea`);if(!box)return;const typed=box.value.trim();if(!typed&&a.status==='connected'){await dockSend(id,note);return;}box.value=note+(typed?'\n\n'+box.value:'');box.dispatchEvent(new Event('input',{bubbles:true}));box.focus();}
@@ -2652,6 +2659,7 @@
   const chatLabel=c=>{const p=projectOf(c);return p?`[${p.name}] ${c.title}`:chatKind(c)==='playground'?c.title:c.title;};
   function toggleHistory(force,agentId){
     historyOpen=force??!historyOpen;
+    if(!historyOpen)tipsSeen.add('history-closed');else tipsSeen.delete('history-closed');saveView();
     if(historyOpen){historyAgent=agentId??selected()?.id??'';historyFollow=selected()?.id||'';if(projectsOpen){projectsOpen=false;renderProjects();saveProjectsView();}}
     historyHtml='';renderHistory();
   }

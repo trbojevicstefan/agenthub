@@ -1,3 +1,10 @@
+# Opaya 0.23.1 - chat first
+
+- **Selecting an agent opens its chat** again, with **History** open on the right by default (close it and it stays closed). **Manage** and **Console** are next to Chat at the top.
+- **Console opens the terminal next to or below the chat**, not over it. Settings > **Chat and console** can make Console fill the main area instead.
+- The **Chats** widget in the bottom-right corner is gone: the sidebar already lists every agent. Chat windows docked at the bottom still open when Chat is set to open as a window, or from Manage > Chat window.
+- Chat now opens the full chat view by default.
+
 # Opaya 0.23.0 - manage first
 
 - **Selecting an agent opens its management screen.** Chat and Console sit next to Manage at the top of every agent.

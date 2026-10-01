@@ -41,7 +41,7 @@ class Broker{
     this.data.drafts=this.data.drafts||{};this.data.lastConversation=this.data.lastConversation||{};this.data.view=this.data.view||{};
     this.data.agents=this.data.agents.map(a=>schema.agent(a));
     // 0.19: iTrust for the Opaya Agent is on by default (once for existing settings too); the user can turn it off.
-    {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:s.opayaDefaults===2?!!s.itrustOpaya:true,opayaDefaults:2,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false,interface:['chat','terminal'].includes(s.interface)?s.interface:'',chatOpens:s.chatOpens==='full'?'full':'window',
+    {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:s.opayaDefaults===2?!!s.itrustOpaya:true,opayaDefaults:2,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false,interface:['chat','terminal'].includes(s.interface)?s.interface:'',chatOpens:s.chatOpens==='window'?'window':'full',consoleOpens:s.consoleOpens==='full'?'full':'panel',
       notifyReplies:s.notifyReplies!==false,notifyApprovals:s.notifyApprovals!==false,notifyJobs:s.notifyJobs!==false,notifySound:s.notifySound!==false,tips:s.tips!==false,autoConnect:s.autoConnect===true,sendKey:s.sendKey==='mod-enter'?'mod-enter':'enter'};}
     this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
     this.migrateLinkedCopies();
@@ -186,6 +186,7 @@ class Broker{
     // Chat or Terminal first. '' until the user chooses on first launch.
     if(input.interface!==undefined){if(!['chat','terminal'].includes(input.interface))throw new Error('Choose chat or terminal.');next.interface=input.interface;}
     // What Chat opens: a window in the chat dock, or the full chat view.
+    if(input.consoleOpens!==undefined){if(!['panel','full'].includes(input.consoleOpens))throw new Error('Choose next to the chat or full screen.');next.consoleOpens=input.consoleOpens;}
     if(input.chatOpens!==undefined){if(!['window','full'].includes(input.chatOpens))throw new Error('Choose a chat window or the full view.');next.chatOpens=input.chatOpens;}
     // This computer as shown in Opaya (the sidebar, Machines, backups) and where local backups go.
     if(input.machineName!==undefined)next.machineName=schema.text(input.machineName,'machine name',60).trim();
