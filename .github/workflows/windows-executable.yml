@@ -39,7 +39,8 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add package-lock.json
           git diff --cached --quiet
-          if ($LASTEXITCODE -ne 0) {
+          # Only a run on main records the lock there; a run started on another branch builds and keeps it local.
+          if ($LASTEXITCODE -ne 0 -and $env:GITHUB_REF -eq 'refs/heads/main') {
             git commit -m 'Lock verified Windows desktop dependency tree'
             if ($LASTEXITCODE -ne 0) { throw 'Dependency lock commit failed' }
             git push origin HEAD:main
@@ -96,7 +97,9 @@ jobs:
             release/*SHA256SUMS.txt
             release/BUILDINFO.json
           if-no-files-found: error
+      # Releases come from main only (the in-app updater offers them); other branches get the installer as an artifact.
       - name: Publish immutable unsigned preview release
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
