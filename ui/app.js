@@ -803,6 +803,7 @@
     if(name==='agent-menu'){const a=state.agents.find(a=>a.id===id);if(a){const r=button.getBoundingClientRect();openMenu(r.left,r.bottom+4,agentMenu(a),title(a),button.closest('[data-agent-id]'));}return;}
     if(name==='hosts'){openHosts();return;}
     if(name==='manage'){openManage(id);return;}
+    if(name==='mg-jump'){const el=document.getElementById(button.dataset.target);if(el)el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});return;}
     if(name==='agent-mode'){const a=state.agents.find(x=>x.id===id);if(a)action(()=>setAgentMode(a,button.dataset.mode));return;}
     if(name==='chat-new'){const a=state.agents.find(x=>x.id===id);if(a)action(()=>newDockChat(a));return;}
     if(name==='chat-open'){const c=dockConv(id),a=c&&state.agents.find(x=>x.id===c.agentId);if(a)action(()=>openChatWindow(a,c.id));return;}
@@ -1104,7 +1105,7 @@
   // The top bar is the same on every screen: the page title (and that page's own few controls) on the left; on the
   // right the selected agent with Manage, Chat and Console, then the tools (browser, projects). screen marks which of
   // the agent's three ways is open here.
-  const modeSwitch=(a,screen='')=>`<div class="mode-switch agent-switch" role="tablist" aria-label="Work with ${esc(title(a))}"><button type="button" class="agent-chip" data-action="manage-nav" aria-haspopup="dialog" title="${esc(title(a))}: ${esc(status(a))}. Click to switch agent or machine.">${badge(a)}<span class="agent-chip-name">${esc(title(a))}</span>${dot(a)}</button>${[['manage','<span class="mode-glyph manage-glyph"></span>','Manage',`Everything about ${title(a)} (${mod()}Shift+M)`],['chat','<span class="mode-glyph chat-glyph"></span>','Chat','Opens a chat window; expand it for the full view'],['console','<span class="mode-glyph console-glyph"></span>','Console','Terminals in a grid you arrange']].map(([m,icon,label,hint])=>`<button type="button" role="tab" class="mode-tab ${screen===m?'selected':''}" data-action="agent-mode" data-mode="${m}" data-id="${esc(a.id)}" aria-selected="${screen===m}" title="${esc(hint)}">${icon}<span>${label}</span></button>${m==='manage'?manageCaret(screen==='manage'):''}`).join('')}</div>`;
+  const modeSwitch=(a,screen='')=>`<div class="mode-switch agent-switch" role="tablist" aria-label="Work with ${esc(title(a))}"><button type="button" class="agent-chip ${screen?'':'away'}" data-action="manage-nav" aria-haspopup="dialog" title="${esc(title(a))}: ${esc(status(a))}. ${screen?'':'The last agent you opened. '}Click to switch agent or machine.">${screen?'':'<small class="agent-chip-label">Last agent</small>'}${badge(a)}<span class="agent-chip-name">${esc(title(a))}</span>${dot(a)}<span class="nav-caret" aria-hidden="true">&#9662;</span></button>${[['manage','<span class="mode-glyph manage-glyph"></span>','Manage',`Everything about ${title(a)} (${mod()}Shift+M)`],['chat','<span class="mode-glyph chat-glyph"></span>','Chat','Opens a chat window; expand it for the full view'],['console','<span class="mode-glyph console-glyph"></span>','Console','Terminals in a grid you arrange']].map(([m,icon,label,hint])=>`<button type="button" role="tab" class="mode-tab ${screen===m?'selected':''}" data-action="agent-mode" data-mode="${m}" data-id="${esc(a.id)}" aria-selected="${screen===m}" title="${esc(hint)}">${icon}<span>${label}</span></button>${m==='manage'?manageCaret(screen==='manage'):''}`).join('')}</div>`;
   function topbar(crumb,page='',screen=''){
     const a=selected();
     $('#topbar').innerHTML=`<div class="breadcrumb">${crumb}</div>${page?`<div class="topbar-page">${page}</div>`:''}<div class="topbar-spacer"></div><div class="topbar-actions">${a?modeSwitch(a,screen):''}</div>`;
@@ -1243,7 +1244,6 @@
     if(box)keyed.containerRestart={key:'containerRestart',icon:'&#8635;',label:'Restart container',run:()=>dockerDo(dockerKeyOf(a),box,'restart')};
     if(box)keyed.containerLogs={key:'containerLogs',icon:'&#8801;',label:'Container logs',run:()=>api.dockerTerminal({hostId:a.transport==='ssh'?a.hostId:undefined,container:box,kind:'logs'})};
     manageKeyed=keyed;
-    const tile=(titleText,desc,keys,icon,cls='')=>{const buttons=[...new Set(keys)].map(k=>btn(keyed[k])).join('');return buttons?`<section class="mg-tile ${cls}"><h3><span class="manage-card-icon" aria-hidden="true">${icon}</span>${esc(titleText)}</h3><p>${esc(desc)}</p><div class="mg-tile-actions">${buttons}</div></section>`:'';};
     const chips=[['skills','&#10022;','Skills'],['keys','&#9919;',`Keys${keyLists.get(a.id)?.keys?` ${keyLists.get(a.id).keys.length}`:''}`],a.protocol!=='terminal'&&['models','&#9672;',modelText(a.activeModel||a.model)||'Model'],['files','&#9656;','Files'],['projects','&#9635;',`Projects ${agentProjects(a).length||''}`.trim()]].filter(Boolean).map(([k,icon,label])=>`<button type="button" class="mg-chip" data-action="manage-run" data-key="${k}"><span aria-hidden="true">${icon}</span>${esc(label)}</button>`).join('');
     const connect=keyed.connect;
     const hero=`<section class="mg-hero" data-drop="key" data-agent-target="${esc(a.id)}">
@@ -1266,32 +1266,65 @@
     const picker=sidebarHidden&&state.agents.length>1?`<nav class="manage-switch" aria-label="Agent to manage"><span>Agents</span>${state.agents.map(y=>`<button type="button" class="manage-pick ${y.id===a.id?'selected':''}" data-action="manage" data-id="${esc(y.id)}" title="${esc(title(y)+' / '+placeText(y)+' / '+status(y))}" ${y.id===a.id?'aria-current="page"':''}>${badge(y)}<span>${esc(title(y))}</span>${dot(y)}</button>`).join('')}</nav>`:'';
     // The screen is a list of parts. Entering an agent draws them all (their entrance plays once); later updates
     // (a status, Docker stats, keys that finished loading) replace only the parts that changed, so nothing replays.
-    const tiles=[tile('Model & reasoning','The model and reasoning effort new chats start with.',['models','effort'],'&#9672;'),
-        tile('Skills & tools','What it can do, and what it may do without asking.',['skills','transfer','itrust','browser'],'&#10022;'),
-        tile('Files & terminal','Its machine, its CLI and what Opaya exchanged with it.',['files',cliKey,hasCli(a)?'shell':'','log','gateway','containerLogs'].filter(Boolean),'&gt;_'),
-        tile('Maintenance',cap.kind==='remote-api'?'An API connection: the provider runs and updates it.':`${cap.label||'Installation'}. Update, back up, copy or move it.`,['update','backup','clone','redeploy','containerRestart'],'&#8635;'),
-        tile('Connection','How Opaya reaches this agent.',['restart','settings','clearError','copyId','copyCommand','fix'],'&#8644;'),
-        tile('Name & look','Only changes how it shows in Opaya.',['rename','icon','groupTags','pin','moveUp','moveDown'],'&#9998;'),
-        cap.backup||backs?.backups?.length?`<section class="mg-tile"><h3><span class="manage-card-icon" aria-hidden="true">&#9635;</span>Local backups</h3><p>Archives on ${esc(localName())}. <button type="button" class="text-button" data-action="backup-folder-open">Open folder</button></p>${backupRows||`<p class="field-help">${backs?backs.error?esc(backs.error):'No backups yet.':'Loading backups...'}</p>`}</section>`:'',
-        `<section class="mg-tile danger-zone"><h3><span class="manage-card-icon" aria-hidden="true">!</span>Danger zone</h3><p>${keyed.uninstall&&!keyed.uninstall.disabled?`Uninstalling removes the agent and its data from ${esc(location(a))}. `:''}Removing the connection only removes it from Opaya.</p><div class="mg-tile-actions">${btn(keyed.uninstall)}${btn(keyed.remove)}</div></section>`].join('');
+    // Controls: every action as a tile with an icon, a plain name and what it is set to now, in groups that say what
+    // they are for. The destructive ones stay apart at the very end.
+    const I=d=>`<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`,circle='<circle cx="12" cy="12" r="8"/>';
+    const ICON={chat:I('<path d="M4 5h16v11H9l-5 4z"/>'),fullChat:I('<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 9h16"/>'),console:I('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m7 10 3 2-3 2M13 15h4"/>'),terminal:I('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m7 10 3 2-3 2M13 15h4"/>'),shell:I('<path d="m5 7 5 5-5 5M12 17h7"/>'),files:I('<path d="M3 7h7l2 2h9v10H3z"/>'),history:I(circle+'<path d="M12 8v4l3 2"/>'),projects:I('<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/>'),models:I('<path d="M12 3 20 12l-8 9-8-9z"/>'),effort:I('<path d="M13 3 5 14h6l-1 7 8-11h-6z"/>'),skills:I('<path d="m12 3 2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>'),transfer:I('<path d="M4 8h13l-3-3M20 16H7l3 3"/>'),itrust:I('<path d="M12 3 20 6v6c0 5-4 8-8 9-4-1-8-4-8-9V6z"/>'),browser:I(circle+'<path d="M4 12h16M12 4c3 3 3 13 0 16-3-3-3-13 0-16"/>'),update:I('<path d="M20 12a8 8 0 1 1-3-6.2M20 4v5h-5"/>'),backup:I('<path d="M12 4v11M7 10l5 5 5-5M4 19h16"/>'),restart:I('<path d="M12 3v8M6.3 7.3a8 8 0 1 0 11.4 0"/>'),fix:I('<path d="m5 19 9-9M15 4l1.2 2.8L19 8l-2.8 1.2L15 12l-1.2-2.8L11 8l2.8-1.2z"/>'),log:I('<path d="M5 7h14M5 12h14M5 17h9"/>'),gateway:I('<path d="M13 3 5 14h6l-1 7 8-11h-6z"/>'),clone:I('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>'),redeploy:I('<path d="M4 12a8 8 0 0 1 14-5.3M20 4v5h-5M20 12a8 8 0 0 1-14 5.3M4 20v-5h5"/>'),containerRestart:I('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/>'),containerLogs:I('<path d="M5 7h14M5 12h14M5 17h9"/>'),rename:I('<path d="M4 20h4L19 9l-4-4L4 16z"/>'),icon:I(circle+'<path d="M9 10h.01M15 10h.01M8.5 14.5c2 2 5 2 7 0"/>'),groupTags:I('<path d="M3 12V4h8l10 10-8 8z"/><path d="M7.5 7.5h.01"/>'),pin:I('<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2-5.5-2.9-5.5 2.9 1-6.2L3 9.6l6.2-.9z"/>'),moveUp:I('<path d="M12 19V5M6 11l6-6 6 6"/>'),moveDown:I('<path d="M12 5v14M6 13l6 6 6-6"/>'),settings:I('<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>'),copyId:I('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4V4h11v1"/>'),copyCommand:I('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4V4h11v1"/>'),clearError:I(circle+'<path d="m9 9 6 6M15 9l-6 6"/>'),uninstall:I('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'),remove:I('<path d="m6 6 12 12M18 6 6 18"/>')};
+    const backLast=backs?.backups?.[0],infoReady=info&&info!=='loading';
+    const NAME={chat:['Chat window','Opens at the bottom'],fullChat:['Full chat','History, projects, files'],console:['Console',hasCli(a)?'Its CLI in a terminal grid':'A shell in a terminal grid'],shell:['Shell','On its machine'],files:['Files','Browse its folders'],history:['History','All its chats'],projects:['Projects',`${agentProjects(a).length} folder${agentProjects(a).length===1?'':'s'}`],
+      models:['Model',modelText(a.activeModel||a.model)||'Its own setting'],effort:['Reasoning',a.effort?EFFORT_LABELS[a.effort]||a.effort:'Auto'],skills:['Skills & MCP','What it can do'],transfer:['Share','Skills, keys, MCP to another agent'],itrust:['iTrust',a.itrust?'On: acts without asking':'Off: asks first'],browser:['Opaya browser',a.browser?'On':'Off'],
+      restart:['Reconnect',status(a)],fix:['Check & fix','The Opaya Agent repairs it'],update:['Update',infoReady&&info.version?`Now ${info.version}`:'To the latest version'],backup:['Back up',backLast?`Last ${whenText(backLast.createdAt)}`:'To this computer'],log:['Connection log','What Opaya exchanged'],gateway:['Gateway','Status and restart'],containerRestart:['Restart container',box],containerLogs:['Container logs',box],
+      clone:['Clone','Copy it to a machine'],redeploy:['Redeploy','Copy from its source again'],
+      rename:['Rename',title(a)],icon:['Icon','Change its picture'],groupTags:['Group & tags',a.group||((a.tags||[]).join(', ')||'None')],pin:['Pin to top',a.pinned?'On':'Off'],moveUp:['Move up','In the sidebar'],moveDown:['Move down','In the sidebar'],
+      settings:['Connection','How Opaya reaches it'],copyId:['Copy ID','For scripts and support'],copyCommand:['Copy launch command',[a.command,...(a.args||[])].join(' ')],clearError:['Clear error','Forget the last failure'],
+      uninstall:['Uninstall',`From ${location(a)}`],remove:['Remove connection','Only from Opaya']};
+    if(hasCli(a))NAME.terminal=[`${title(a)} CLI`,'Its own command line'];
+    const SWITCH={itrust:!!a.itrust,browser:!!a.browser,pin:!!a.pinned};
+    const act=k=>{const item=keyed[k];if(!item||item.disabled)return '';const [label,sub]=NAME[k]||[item.label.replace(/\.\.\.$/,''),''];const sw=Object.hasOwn(SWITCH,k);
+      return `<button type="button" class="mg-act ${item.danger?'danger':''} ${sw?'has-switch':''}" data-action="manage-run" data-key="${esc(k)}" ${item.hint?`title="${esc(item.hint)}"`:''} ${sw?`role="switch" aria-checked="${SWITCH[k]}"`:''}><span class="mg-act-ico">${ICON[k]||''}</span><span class="mg-act-text"><strong>${esc(label)}</strong><small>${esc(sub)}</small></span>${sw?`<span class="mg-act-switch ${SWITCH[k]?'on':''}" aria-hidden="true"></span>`:''}</button>`;};
+    const group=(name,hint,keys)=>{const tiles=[...new Set(keys)].map(act).join('');return tiles?`<section class="mg-group"><header><h3>${esc(name)}</h3><small>${esc(hint)}</small></header><div class="mg-acts">${tiles}</div></section>`:'';};
+    const controls=`<header class="mg-section-head"><div><h2><span class="mg-h-icon" aria-hidden="true"></span>Controls</h2><p>Everything you can do with ${esc(title(a))}, grouped by what it is for.</p></div></header>
+      ${group('Work with it','Talk to it, run it, look at its files',['chat','fullChat','console',hasCli(a)?'terminal':'','shell','files','history','projects'].filter(Boolean))}
+      ${group('What it can do','Its model and its powers',['models','effort','skills','transfer','itrust','browser'])}
+      ${group('Keep it healthy','When something is off, or to stay current',['restart','fix','update','backup','log','gateway','containerRestart','containerLogs','clearError'])}
+      ${group('Copy and move','Drag the agent card to a machine above for more',['clone','redeploy'])}
+      ${group('Name and place','Only how it shows in Opaya',['rename','icon','groupTags','pin','moveUp','moveDown'])}
+      ${group('Connection details','For when you need the specifics',['settings','copyId','copyCommand'])}
+      ${cap.backup||backs?.backups?.length?`<section class="mg-group"><header><h3>Local backups</h3><small>Archives on ${esc(localName())} <button type="button" class="text-button" data-action="backup-folder-open">Open folder</button></small></header>${backupRows||`<p class="field-help">${backs?backs.error?esc(backs.error):'No backups yet.':'Loading backups...'}</p>`}</section>`:''}`;
+    const danger=`<header class="mg-section-head"><div><h2><span class="mg-h-icon danger-h" aria-hidden="true"></span>Danger zone</h2><p>${keyed.uninstall&&!keyed.uninstall.disabled?`Uninstalling removes the agent and its data from ${esc(location(a))}. `:''}Removing the connection only removes it from Opaya.</p></div></header><div class="mg-acts">${act('uninstall')}${act('remove')}</div>`;
+    // Sticky bar: section links at the top; once the hero scrolls away, also the agent and its main actions.
+    const SECTIONS=[['mg-p-hero','Overview'],['mg-p-controls','Controls'],['mg-p-deploy','Deploy'],cap.kind==='remote-api'?null:['mg-docker','Docker'],['mg-p-keys','Keys'],['mg-p-work','Projects & chats'],['mg-p-danger','Danger zone']].filter(Boolean);
+    const conn=keyed.connect;
+    const nav=`<div class="mg-nav-agent">${badge(a)}<strong>${esc(title(a))}</strong>${dot(a)}${conn&&!conn.disabled?`<button type="button" class="${a.status==='connected'?'secondary':'primary'} small" data-action="manage-run" data-key="connect">${esc(conn.label)}</button>`:''}<button type="button" class="secondary small" data-action="agent-mode" data-mode="chat" data-id="${esc(a.id)}" ${a.protocol==='terminal'?'disabled':''}>Chat</button><button type="button" class="secondary small" data-action="agent-mode" data-mode="console" data-id="${esc(a.id)}">Console</button></div><nav class="mg-nav-links" aria-label="Sections">${SECTIONS.map(([id,label])=>`<button type="button" class="mg-nav-link" data-action="mg-jump" data-target="${id}">${esc(label)}</button>`).join('')}</nav>`;
     const parts=[
       ['mg-p-picker','',0,picker],
+      ['mg-p-nav','mg-nav',0,nav],
       ['mg-p-hero','',0,hero],
       ['mg-p-error','mg-reveal',1,a.error?`<div class="inline-notice error-notice"><span>!</span><div><strong>Connection needs attention</strong><p>${esc(a.error)}</p><button type="button" class="text-button" data-action="manage-run" data-key="fix">Let the Opaya Agent fix it &#8594;</button></div></div>`:''],
       ['mg-p-facts','mg-reveal',1,facts],
       ['mg-p-shared','',1,shared.length?`<p class="field-help manage-shared">Shares its ${esc(cap.label)} installation with ${esc(shared.map(title).join(', '))}: updating or uninstalling it affects them too.</p>`:''],
-      ['mg-p-deploy','mg-section mg-reveal',2,`<header class="mg-section-head"><div><h2><span class="mg-h-icon deploy-h" aria-hidden="true"></span>Deploy & clone</h2><p>Drag the agent card onto a machine or Docker to clone it there, or click a target.</p></div>${a.clone?`<div class="mg-head-actions">${btn(keyed.redeploy,'secondary small')}</div>`:''}</header>${deployTargets(a)}`],
-      ['mg-docker','mg-section mg-docker-section mg-reveal',3,cap.kind==='remote-api'?'':dockerPanel(a)],
-      ['mg-p-keys','mg-section mg-reveal',4,keysPanel(a)],
-      ['mg-p-work','mg-split two mg-reveal',5,`<section class="mg-section">${gitPanel(a)}</section><section class="mg-section">${chatsPanel(a)}</section>`],
-      ['mg-p-tiles','mg-tiles mg-reveal',6,tiles]];
+      ['mg-p-controls','mg-section mg-controls mg-reveal',2,controls],
+      ['mg-p-deploy','mg-section mg-reveal',3,`<header class="mg-section-head"><div><h2><span class="mg-h-icon deploy-h" aria-hidden="true"></span>Deploy & clone</h2><p>Drag the agent card onto a machine or Docker to clone it there, or click a target.</p></div>${a.clone?`<div class="mg-head-actions">${btn(keyed.redeploy,'secondary small')}</div>`:''}</header>${deployTargets(a)}`],
+      ['mg-docker','mg-section mg-docker-section mg-reveal',4,cap.kind==='remote-api'?'':dockerPanel(a)],
+      ['mg-p-keys','mg-section mg-reveal',5,keysPanel(a)],
+      ['mg-p-work','mg-split two mg-reveal',6,`<section class="mg-section">${gitPanel(a)}</section><section class="mg-section">${chatsPanel(a)}</section>`],
+      ['mg-p-danger','mg-section mg-danger mg-reveal',7,danger]];
     const key='manage:'+a.id,entering=renderKey!==key||!$('#mg-p-hero');
     if(entering){manageHtml={};$('#content').innerHTML=parts.map(([id,cls,i,inner])=>{manageHtml[id]=inner;return `<div id="${id}" class="${cls}" style="--i:${i}"${id==='mg-docker'?` data-key="${esc(dockerKeyOf(a))}"`:''}>${inner}</div>`;}).join('');}
     else for(const [id,,,inner] of parts)if(manageHtml[id]!==inner){const el=document.getElementById(id);if(el){manageHtml[id]=inner;el.innerHTML=inner;}}
     // The parts have their own entrance (mg-reveal), staggered after the hero; the generic view entrance would delay it.
     if(entering){$('#content').classList.remove('view-enter');$('#content').scrollTop=0;$('#content').classList.add('mg-entering');clearTimeout(renderManage.t);renderManage.t=setTimeout(()=>$('#content')?.classList.remove('mg-entering'),1400);if(!keyLists.has(a.id))loadKeys(a);if(cap.kind!=='remote-api'&&!dockerViews.has(dockerKeyOf(a)))loadDocker(dockerKeyOf(a));for(const p of agentProjects(a))if(!projectGit.get(p.id))loadProjectGit(p);}
-    renderKey=key;mountStage(a);if(!mgTimer)mgTimer=setTimeout(manageTick,600);
+    renderKey=key;mountStage(a);mgScroll();if(!mgTimer)mgTimer=setTimeout(manageTick,600);
   }
+  // The sticky bar shows the agent and its actions once the hero is out of view, and marks the section in view.
+  function mgScroll(){
+    const nav=$('#mg-p-nav'),hero=$('#mg-p-hero'),box=$('#content');if(!manageId||!nav||!hero||!box)return;
+    const top=box.getBoundingClientRect().top;nav.classList.toggle('compact',hero.getBoundingClientRect().bottom<top+70);
+    let current='mg-p-hero';for(const b of nav.querySelectorAll('[data-target]')){const el=document.getElementById(b.dataset.target);if(el&&el.getBoundingClientRect().top<top+140)current=b.dataset.target;}
+    if(box.scrollTop+box.clientHeight>=box.scrollHeight-4)current=[...nav.querySelectorAll('[data-target]')].at(-1)?.dataset.target||current;
+    for(const b of nav.querySelectorAll('[data-target]'))b.classList.toggle('active',b.dataset.target===current);
+  }
+  $('#content')?.addEventListener('scroll',()=>{if(manageId)requestAnimationFrame(mgScroll);},{passive:true});
   // ---- Moves on the management screen: give a key, clone or dockerize, push ----------------------------------------
   const flash=(el,text)=>{if(!el)return;const tag=el.querySelector('.mg-shared');if(tag){tag.textContent=text;}el.classList.remove('flash');void el.offsetWidth;el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),2200);};
   async function giveKey(keyId,agentId,from,targetEl){
@@ -1379,7 +1412,11 @@
     let root=$('#chat-dock');if(root)return root;
     root=document.createElement('div');root.id='chat-dock';root.className='chat-dock';root.setAttribute('aria-label','Chat windows');document.body.append(root);
     root.addEventListener('click',event=>{
-      const b=event.target.closest('[data-dock]'),win=event.target.closest('.chat-win'),id=win?.dataset.conv||b?.dataset.conv;if(!b||!id)return;
+      const b=event.target.closest('[data-dock]');if(!b)return;
+      if(b.dataset.dock==='launch-new'){event.stopPropagation();const r=b.getBoundingClientRect();openMenu(Math.max(8,r.right-260),Math.max(8,r.top-8-Math.min(360,state.agents.length*34+40)),state.agents.filter(a=>a.protocol!=='terminal').map(a=>({icon:'&#9993;',label:`${title(a)}${a.status==='connected'?'':` (${status(a).toLowerCase()})`}`,run:()=>action(()=>newDockChat(a))})),'New chat with');return;}
+      if(b.dataset.dock==='launcher'){launcherOpen=!launcherOpen;renderDock();return;}
+      if(b.dataset.dock==='launch-open'){const c=dockConv(b.dataset.conv),a=c&&state.agents.find(x=>x.id===c.agentId);if(a){launcherOpen=false;action(()=>openChatWindow(a,c.id));}return;}
+      const win=event.target.closest('.chat-win'),id=win?.dataset.conv||b?.dataset.conv;if(!id)return;
       const act=b.dataset.dock,d=chatDock.find(x=>x.id===id),c=dockConv(id),a=c&&state.agents.find(x=>x.id===c.agentId);
       if(act==='toggle'&&!event.target.closest('button:not([data-dock="toggle"])')){if(d){d.min=!d.min;if(!d.min)dockUnread.delete(id);saveView();renderDock();if(!d.min)win.querySelector('textarea')?.focus();}return;}
       if(act==='min'&&d){d.min=true;saveView();renderDock();return;}
@@ -1391,7 +1428,7 @@
       if(act==='manage'&&a){openManage(a.id);return;}
     });
     root.addEventListener('submit',event=>{const f=event.target.closest('.chat-win-compose');if(!f)return;event.preventDefault();dockSend(f.closest('.chat-win').dataset.conv);});
-    root.addEventListener('keydown',event=>{if(event.target.tagName!=='TEXTAREA')return;if(sendKeyPressed(event)){event.preventDefault();dockSend(event.target.closest('.chat-win').dataset.conv);}else if(event.key==='Escape'){const id=event.target.closest('.chat-win').dataset.conv,d=chatDock.find(x=>x.id===id);if(d){d.min=true;saveView();renderDock();}}});
+    root.addEventListener('keydown',event=>{if(event.key==='Escape'&&launcherOpen&&event.target.closest('.chat-launcher')){launcherOpen=false;renderDock();return;}if(event.target.tagName!=='TEXTAREA')return;if(sendKeyPressed(event)){event.preventDefault();dockSend(event.target.closest('.chat-win').dataset.conv);}else if(event.key==='Escape'){const id=event.target.closest('.chat-win').dataset.conv,d=chatDock.find(x=>x.id===id);if(d){d.min=true;saveView();renderDock();}}});
     root.addEventListener('input',event=>{const t=event.target;if(t.tagName!=='TEXTAREA')return;const id=t.closest('.chat-win').dataset.conv,c=dockConv(id);drafts.set(id,t.value);if(c&&api.saveDraft)save(api.saveDraft({agentId:c.agentId,conversationId:id,text:t.value}));t.style.height='auto';t.style.height=Math.min(t.scrollHeight,120)+'px';});
     window.addEventListener('resize',()=>renderDock());
     return root;
@@ -1421,26 +1458,45 @@
     catch(error){toast(error.message,true);}finally{dockSending.delete(id);renderDock();}
   }
   const dockMessage=(m,a)=>`<div class="dock-msg ${m.role==='user'?'mine':'theirs'} ${m.status==='error'?'failed':''}">${m.role==='user'?'':`<span class="dock-msg-avatar">${agentIcon(a)}</span>`}<div class="dock-bubble">${activityMarkup(m,4,m.status==='streaming'?a.id:'')}${m.content?`<div class="message-text">${format(m.content)}</div>`:m.status==='streaming'?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}${m.attachments?.length?`<small class="dock-files">${m.attachments.length} file${m.attachments.length===1?'':'s'}</small>`:''}${m.error?`<small class="dock-error">${esc(m.error)}</small>`:''}</div></div>`;
+  // Every screen shows the dock (like a messenger's corner): the Chats launcher on the right, open windows to its left.
+  // A window is open, minimized to its header, or waiting in the launcher when there is no room. The conversation
+  // open in the full chat view is not shown twice. Replies that arrive while a window is minimized, waiting or hidden
+  // count as unread on it and on the launcher.
+  let launcherOpen=false;const dockSeen=new Map();
+  const LAUNCHER_W=272;
   function renderDock(){
     const root=dockRoot();chatDock=chatDock.filter(d=>dockConv(d.id));
-    const room=Math.max(1,Math.floor((innerWidth-(sidebarHidden?60:320))/(DOCK_W+12))),shown=chatDock.slice(0,room),rest=chatDock.slice(room);
-    root.hidden=!chatDock.length;document.body.classList.toggle('chat-dock-open',shown.some(d=>!d.min));
+    const talkers=state.agents.filter(a=>a.protocol!=='terminal');
+    const fullId=!overview&&!opayaView&&!playgroundView&&selected()&&modeOf(selected())==='chat'?state.activeConversationId:'';
+    const visible=chatDock.filter(d=>d.id!==fullId);
+    const room=Math.max(1,Math.floor((innerWidth-(sidebarHidden?60:320)-LAUNCHER_W-12)/(DOCK_W+12))),shown=visible.slice(0,room),rest=visible.slice(room);
+    // Unread: a finished reply in a chat the user cannot see right now.
+    for(const d of chatDock){
+      const m=state.histories[d.id];if(!m)continue;const last=m.at(-1),sig=`${m.length}:${last?.status||''}`,prev=dockSeen.get(d.id);dockSeen.set(d.id,sig);
+      const out=d.min||d.id===fullId?false:!shown.includes(d);
+      if(prev&&prev!==sig&&last?.role==='assistant'&&last.status!=='streaming'&&(d.min||out))dockUnread.set(d.id,(dockUnread.get(d.id)||0)+1);
+    }
+    root.hidden=!chatDock.length&&!talkers.length;document.body.classList.toggle('chat-dock-shown',!root.hidden);
+    document.body.classList.toggle('chat-dock-open',shown.some(d=>!d.min));
     const keep=new Set(shown.map(d=>d.id));
     for(const el of root.querySelectorAll('.chat-win'))if(!keep.has(el.dataset.conv)&&!el.classList.contains('leaving')){el.remove();dockSigs.delete(el.dataset.conv);}
     shown.forEach((d,i)=>{
       const c=dockConv(d.id),a=state.agents.find(x=>x.id===c.agentId);if(!a)return;
       let el=root.querySelector(`.chat-win[data-conv="${CSS.escape(d.id)}"]`);
       if(!el){el=document.createElement('section');el.className='chat-win entering';el.dataset.conv=d.id;el.setAttribute('role','dialog');el.setAttribute('aria-label',`Chat with ${title(a)}`);
-        el.innerHTML=`<header class="chat-win-head" data-dock="toggle" data-conv="${esc(d.id)}" title="Minimize or open"><span class="chat-win-avatar"></span><span class="chat-win-who"><strong></strong><small></small></span><em class="chat-win-unread" hidden></em><button type="button" class="chat-win-btn" data-dock="manage" title="Manage this agent" aria-label="Manage"><span class="mode-glyph manage-glyph" aria-hidden="true"></span></button><button type="button" class="chat-win-btn" data-dock="expand" title="Full chat view" aria-label="Expand"><span class="expand-glyph" aria-hidden="true"></span></button><button type="button" class="chat-win-btn" data-dock="min" title="Minimize" aria-label="Minimize">&#8211;</button><button type="button" class="chat-win-btn" data-dock="close" title="Close" aria-label="Close">&#10005;</button></header>
+        el.innerHTML=`<header class="chat-win-head" data-dock="toggle" data-conv="${esc(d.id)}" title="Minimize or open"><span class="chat-win-avatar"></span><span class="chat-win-who"><strong></strong><small></small></span><em class="chat-win-unread" hidden></em><button type="button" class="chat-win-btn" data-dock="manage" title="Manage this agent" aria-label="Manage"><span class="mode-glyph manage-glyph" aria-hidden="true"></span></button><button type="button" class="chat-win-btn" data-dock="expand" title="Full chat view" aria-label="Expand"><span class="expand-glyph" aria-hidden="true"></span></button><button type="button" class="chat-win-btn chat-win-min" data-dock="min" title="Minimize (Esc)" aria-label="Minimize">&#8211;</button><button type="button" class="chat-win-btn" data-dock="close" title="Close" aria-label="Close">&#10005;</button></header>
           <div class="chat-win-body"><div class="chat-win-list" aria-live="polite"></div><div class="chat-win-note" hidden></div><form class="chat-win-compose"><textarea rows="1" maxlength="80000" placeholder="Message ${esc(title(a))}..." aria-label="Message ${esc(title(a))}"></textarea><button type="button" class="chat-win-stop" data-dock="stop" title="Stop" aria-label="Stop" hidden>&#9632;</button><button type="submit" class="chat-win-send" title="Send" aria-label="Send">&#8593;</button></form></div>`;
         root.append(el);el.querySelector('textarea').value=drafts.get(d.id)??state.drafts?.[d.id]??'';setTimeout(()=>el.classList.remove('entering'),420);}
-      el.style.order=String(i+1);el.classList.toggle('min',!!d.min);
+      el.style.order=String(i+1);
+      // Minimizing hands the keyboard back to the page; opening a window again clears its unread count.
+      if(el.classList.contains('min')!==!!d.min){el.classList.toggle('min',!!d.min);if(d.min&&el.contains(document.activeElement))document.activeElement.blur();}
+      if(!d.min)dockUnread.delete(d.id);
+      el.querySelector('.chat-win-head').title=d.min?'Open':'Minimize';
       const head=`${badge(a)}${dot(a)}`;if(el.dataset.head!==head){el.querySelector('.chat-win-avatar').innerHTML=head;el.dataset.head=head;}
       el.querySelector('.chat-win-who strong').textContent=title(a);el.querySelector('.chat-win-who small').textContent=a.busy?'Working...':`${chatLabel(c)}`;
       const messages=state.histories[d.id],last=messages?.at(-1),sig=messages?`${messages.length}:${last?.content?.length||0}:${last?.status||''}:${last?.activity?.length||0}:${a.status}`:'loading';
       if(dockSigs.get(d.id)!==sig){
         const prev=dockSigs.get(d.id),list=el.querySelector('.chat-win-list'),atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<60;
-        if(d.min&&prev&&prev!=='loading'&&messages&&last?.role==='assistant'&&last.status!=='streaming'&&!prev.startsWith(`${messages.length}:`))dockUnread.set(d.id,(dockUnread.get(d.id)||0)+1);
         dockSigs.set(d.id,sig);
         list.innerHTML=!messages?'<p class="chat-win-empty">Loading the chat...</p>':messages.length?messages.slice(-60).map(m=>dockMessage(m,a)).join(''):`<div class="chat-win-empty">${badge(a,true)}<strong>${esc(title(a))}</strong><span>${a.status==='connected'?'Say hello.':'Not connected.'}</span>${a.status==='connected'?'':`<button type="button" class="secondary small" data-dock="connect" data-conv="${esc(d.id)}">Connect</button>`}</div>`;
         if(atBottom||!prev||prev==='loading')list.scrollTop=list.scrollHeight;
@@ -1449,10 +1505,18 @@
       const note=el.querySelector('.chat-win-note'),off=a.status!=='connected';note.hidden=!off||!messages?.length;note.innerHTML=off?`${esc(status(a))} <button type="button" class="text-button" data-dock="connect" data-conv="${esc(d.id)}">Connect</button>`:'';
       el.querySelector('.chat-win-send').disabled=off||!!a.busy||dockSending.has(d.id);el.querySelector('.chat-win-send').hidden=!!a.busy;el.querySelector('.chat-win-stop').hidden=!a.busy;
     });
-    let more=root.querySelector('.chat-more');
-    if(rest.length){if(!more){more=document.createElement('div');more.className='chat-more';root.append(more);}more.style.order='0';
-      more.innerHTML=rest.map(d=>{const c=dockConv(d.id),a=state.agents.find(x=>x.id===c?.agentId);return a?`<button type="button" class="chat-bubble ${dockUnread.get(d.id)?'attention':''}" data-dock="bubble" data-conv="${esc(d.id)}" title="${esc(title(a)+': '+chatLabel(c))}">${badge(a)}${dot(a)}</button>`:'';}).join('');}
-    else more?.remove();
+    root.querySelector('.chat-more')?.remove();
+    // The launcher: every chat, newest first, and the windows waiting for room.
+    let launcher=root.querySelector('.chat-launcher');
+    if(!talkers.length&&!chatDock.length){launcher?.remove();return;}
+    if(!launcher){launcher=document.createElement('section');launcher.className='chat-launcher';launcher.setAttribute('aria-label','Chats');root.append(launcher);}
+    launcher.style.order='0';launcher.classList.toggle('open',launcherOpen);
+    const total=[...dockUnread.entries()].filter(([id])=>chatDock.some(d=>d.id===id)).reduce((n,[,v])=>n+v,0),busy=state.agents.filter(a=>a.busy).length,docked=new Set(chatDock.map(d=>d.id));
+    const waiting=rest.map(d=>{const c=dockConv(d.id),a=state.agents.find(x=>x.id===c?.agentId);return a?`<button type="button" class="chat-bubble ${dockUnread.get(d.id)?'attention':''}" data-dock="bubble" data-conv="${esc(d.id)}" title="${esc(`${title(a)}: ${chatLabel(c)}`)}${dockUnread.get(d.id)?` (${dockUnread.get(d.id)} new)`:''}">${badge(a)}${dot(a)}</button>`:'';}).join('');
+    const convs=state.conversations.filter(c=>talkers.some(a=>a.id===c.agentId)).slice().sort((x,y)=>String(y.createdAt).localeCompare(String(x.createdAt))).slice(0,40);
+    const html=`<header class="chat-launch-head" data-dock="launcher" title="${launcherOpen?'Hide':'Show'} your chats"><span class="mode-glyph chat-glyph" aria-hidden="true"></span><strong>Chats</strong>${total?`<em class="chat-win-unread">${total}</em>`:''}${busy?`<span class="chat-launch-busy" title="${busy} agent${busy===1?'':'s'} working"><span class="status-dot working"></span>${busy}</span>`:''}<span class="chat-launch-waiting">${waiting}</span><button type="button" class="chat-win-btn" data-dock="launch-new" title="New chat with an agent" aria-label="New chat">+</button><span class="chat-launch-caret" aria-hidden="true">&#9652;</span></header>
+      <div class="chat-launch-list">${convs.map(c=>{const a=state.agents.find(x=>x.id===c.agentId);return `<button type="button" class="chat-launch-row ${docked.has(c.id)?'docked':''}" data-dock="launch-open" data-conv="${esc(c.id)}">${badge(a)}<span class="chat-launch-text"><strong>${esc(title(a))}</strong><small>${esc(chatLabel(c))}</small></span><span class="chat-launch-meta"><small>${esc(ago(c.createdAt))}</small>${a.busy?'<span class="status-dot working"></span>':dot(a)}</span></button>`;}).join('')||`<p class="chat-win-empty">No chats yet. Use + to start one.</p>`}</div>`;
+    if(launcher.dataset.html!==html){launcher.dataset.html=html;const list=launcher.querySelector('.chat-launch-list'),scroll=list?.scrollTop||0;launcher.innerHTML=html;const nl=launcher.querySelector('.chat-launch-list');if(nl)nl.scrollTop=scroll;}
   }
   // The note about a new key, in the agent's window when no full chat is open.
   async function dockTell(a,note){await openChatWindow(a);const id=chatDock[0]?.id,box=$(`.chat-win[data-conv="${CSS.escape(id)}"] textarea`);if(!box)return;const typed=box.value.trim();if(!typed&&a.status==='connected'){await dockSend(id,note);return;}box.value=note+(typed?'\n\n'+box.value:'');box.dispatchEvent(new Event('input',{bubbles:true}));box.focus();}

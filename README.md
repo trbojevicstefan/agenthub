@@ -44,7 +44,7 @@ Selecting an agent opens its **management screen**. Chat and Console sit next to
 - The sidebar toggle is at the bottom of the sidebar (**Hide sidebar**, Ctrl/Cmd+B). While the sidebar is hidden, a small button at the top left brings it back.
 
 ### Chat windows and the console (0.23)
-- **Chat** opens a chat window docked at the bottom, like a desktop messenger. Keep several open, click a header to minimize it, expand it to the full chat view or close it. Windows that do not fit collapse into avatars on the right. Settings > **Chat opens as** can make Chat open the full view instead.
+- **Chats** in the bottom-right corner lists every chat and starts new ones. **Chat** opens a chat window docked at the bottom, like a desktop messenger: unread replies show on minimized windows and on the launcher. Keep several open, click a header to minimize it, expand it to the full chat view or close it. Windows that do not fit collapse into avatars on the right. Settings > **Chat opens as** can make Chat open the full view instead.
 - **Console** turns the main area into terminals: side by side, two columns or rows, 2 x 2, one large with two stacked, three columns or 3 x 2. Drag the gutters to resize; **Fill empty cells** opens the agent's CLI and shells.
 
 ### Chat with every agent

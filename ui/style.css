@@ -1897,3 +1897,78 @@ body[data-theme="light"] .manage-solo{background:#f3f6f4;border-color:#d6e0da;co
 .sidebar-bottom>button.selected{background:var(--hover);color:var(--text)}
 body[data-theme="light"] .mp-flyout{background:#fffffff9;border-color:#bcd3e8}
 body[data-theme="light"] .agent-chip{color:#22302a}
+/* Manage: sticky bar, grouped control tiles, danger zone */
+#content.command-center [id^="mg-p-"],#content.command-center #mg-docker{scroll-margin-top:64px}
+.mg-nav{position:sticky;top:-22px;z-index:30;display:flex;align-items:center;gap:14px;margin:-22px -28px 12px;padding:10px 28px;background:linear-gradient(180deg,#111315f2,#111315e6);backdrop-filter:blur(12px);border-bottom:1px solid transparent;transition:border-color .2s,box-shadow .2s;max-width:none!important}
+.mg-nav.compact{border-bottom-color:var(--border);box-shadow:0 10px 30px -18px #000}
+.mg-nav-agent{display:flex;align-items:center;gap:8px;min-width:0;max-width:0;opacity:0;overflow:hidden;transform:translateY(-6px);transition:max-width .35s cubic-bezier(.2,.8,.2,1),opacity .25s,transform .25s}
+.mg-nav.compact .mg-nav-agent{max-width:640px;opacity:1;transform:none}
+.mg-nav-agent .agent-avatar{width:26px;height:26px;margin:0}
+.mg-nav-agent strong{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+.mg-nav-agent .status-dot{width:7px;height:7px;margin-right:6px}
+.mg-nav-links{display:flex;gap:2px;margin-left:auto;overflow-x:auto;scrollbar-width:none}
+.mg-nav-link{padding:6px 11px;border-radius:8px;font-size:12px;color:#8f9ba1;white-space:nowrap}
+.mg-nav-link:hover{color:#dce4e7}
+.mg-nav-link.active{color:#dffbe9;background:#22302a;box-shadow:inset 0 0 0 1px #3d5c4b}
+.mg-controls{border-color:#2a3a32}
+.mg-group{margin-top:16px}
+.mg-group:first-of-type{margin-top:4px}
+.mg-group header{display:flex;align-items:baseline;gap:10px;margin-bottom:8px}
+.mg-group h3{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#9fd8b8;font-weight:600}
+.mg-group header small{color:#6f7c82;font-size:11px}
+.mg-acts{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px}
+.mg-act{justify-content:flex-start;text-align:left;gap:12px;padding:11px 12px;border-radius:13px;background:#1a1f22;border:1px solid #2a3236;min-width:0;transition:transform .2s cubic-bezier(.2,.8,.2,1),border-color .2s,background .2s,box-shadow .2s}
+.mg-act:hover{transform:translateY(-2px);border-color:#43544b;background:#1d2427;box-shadow:0 12px 26px -16px #000}
+.mg-act:active{transform:translateY(0)}
+.mg-act-ico{width:34px;height:34px;border-radius:10px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;background:#20302a;color:#8ff0bc;border:1px solid #2f4a3c}
+.mg-act-ico svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.mg-act-text{display:flex;flex-direction:column;min-width:0;flex:1}
+.mg-act-text strong{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mg-act-text small{font-size:11px;color:#7f8b91;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mg-act-switch{width:30px;height:17px;border-radius:10px;background:#2a3134;border:1px solid #3c4549;position:relative;flex-shrink:0;transition:background .2s}
+.mg-act-switch:after{content:"";position:absolute;left:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#8a979c;transition:transform .2s,background .2s}
+.mg-act-switch.on{background:#1f4a35;border-color:#3f8a63}.mg-act-switch.on:after{transform:translateX(13px);background:#6ee7a8}
+.mg-act.danger .mg-act-ico{background:#2e1c1a;color:#f7a59c;border-color:#5a302c}
+.mg-act.danger:hover{border-color:#6a3a35}
+.mg-danger{border-color:#3e2826;background:linear-gradient(180deg,#191514,#151212)}
+.danger-h{background:#2e1c1a;border-color:#5a302c}.danger-h:after{border-color:#f7a59c;border-radius:50%}
+.agent-chip .nav-caret{margin-left:2px}
+.agent-chip.away{opacity:.72}
+.agent-chip.away:hover{opacity:1}
+.agent-chip-label{font-size:9.5px;text-transform:uppercase;letter-spacing:.8px;color:#7f8b91;margin-right:2px}
+@media (max-width:1180px){.agent-chip-label{display:none}}
+body[data-theme="light"] .mg-nav{background:linear-gradient(180deg,#f7faf8f2,#f7faf8e6)}
+body[data-theme="light"] .mg-act{background:#fff;border-color:#dde5e0}
+body[data-theme="light"] .mg-act-ico{background:#e6f4ec;color:#1f7a45;border-color:#c4e2d0}
+/* Chat dock: the Chats launcher (always in the corner), and toasts moved away from open windows */
+.chat-launcher{pointer-events:auto;width:260px;height:46px;display:flex;flex-direction:column;border-radius:14px 14px 0 0;background:#171b1e;border:1px solid #2f383c;border-bottom:none;box-shadow:0 -8px 40px -14px #000c;overflow:hidden;transition:height .32s cubic-bezier(.2,.8,.2,1)}
+.chat-launcher.open{height:min(460px,calc(100vh - 140px))}
+.chat-launch-head{display:flex;align-items:center;gap:8px;height:46px;flex-shrink:0;padding:0 8px 0 14px;cursor:pointer;background:#1c2124;border-bottom:1px solid #293135;user-select:none}
+.chat-launch-head strong{font-size:13px}
+.chat-launch-head .chat-glyph{color:#8ff0bc}
+.chat-launch-busy{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:#dfc789}
+.chat-launch-waiting{display:flex;margin-left:auto}
+.chat-launch-waiting .chat-bubble{width:28px;height:28px;margin-left:-6px;border:2px solid #1c2124;box-shadow:none}
+.chat-launch-waiting .chat-bubble .agent-avatar{width:22px;height:22px}
+.chat-launch-waiting .chat-bubble .status-dot{width:7px;height:7px;right:-1px;bottom:-1px;border-width:1.5px}
+.chat-launch-waiting:empty+.chat-win-btn{margin-left:auto}
+.chat-launch-caret{font-size:10px;color:#7f8b91;transition:transform .25s;width:14px;text-align:center}
+.chat-launcher.open .chat-launch-caret{transform:rotate(180deg)}
+.chat-launch-list{flex:1;overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:2px;scrollbar-width:thin}
+.chat-launch-row{justify-content:flex-start;gap:10px;padding:8px;border-radius:10px;text-align:left;width:100%}
+.chat-launch-row:hover{background:#232a2e}
+.chat-launch-row.docked{background:#1b241f}
+.chat-launch-row .agent-avatar{width:30px;height:30px;margin:0}
+.chat-launch-text{display:flex;flex-direction:column;min-width:0;flex:1}
+.chat-launch-text strong{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-launch-text small{font-size:11px;color:#7f8b91;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-launch-meta{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex-shrink:0}
+.chat-launch-meta small{font-size:10px;color:#6f7c82}
+.chat-win-min{font-weight:700}
+body.chat-dock-shown .toast{bottom:62px}
+body.chat-dock-open .toast{bottom:auto;top:76px}
+
+@media (max-width:760px){.chat-launcher{width:200px}}
+body[data-theme="light"] .chat-launcher{background:#fff;border-color:#d7dfdb;box-shadow:0 -8px 30px -14px #2a4a3a44}
+body[data-theme="light"] .chat-launch-head{background:#f5f8f6;border-color:#e2e8e5}
+body[data-theme="light"] .chat-launch-row:hover{background:#eef3f0}
