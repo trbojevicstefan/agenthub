@@ -715,3 +715,9 @@
 :where(body[data-theme="light"]) .fleet-empty{color:#6f7c82;border:1px dashed #c9d1d4}
 :where(body[data-theme="light"]) .fleet-docker{color:#535b60}
 :where(body[data-theme="light"]) .fleet-docker.on{color:#11263a}
+:where(body[data-theme="light"]) .topbar-tools .icon-button:hover{border-color:#c5ced1}
+:where(body[data-theme="light"]) .mode-tab+.manage-anchor:before{border-left:1px solid #ffffff14}
+:where(body[data-theme="light"]) .manage-solo{border:1px solid #cfd6d8;background:#e4e8ea;color:#313a3d}
+:where(body[data-theme="light"]) .manage-solo:hover{border-color:#acc8b9;color:#06140b}
+:where(body[data-theme="light"]) .manage-solo.selected{background:#cfddd7;color:#06140b;border-color:#acc8b9}
+:where(body[data-theme="light"]):has(#manage-pop) .manage-anchor{color:#06140b;background:#cfddd7}

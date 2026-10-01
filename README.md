@@ -35,7 +35,7 @@ Selecting an agent opens its **management screen**. Chat and Console sit next to
 - Every other action is here too: model and effort, skills and tools, files, update, back up, connection (restart, copy ID or launch command), name and look, and removal.
 
 ### Manage menu and the fleet (0.23)
-- **Manage** in the sidebar opens a menu with two columns: **Agents** (each one's management screen) and **Machines** (this computer, every VPS, and **All machines**).
+- **Manage ▾** at the top (the caret next to an agent's Manage tab, or the Manage button in other views) opens a menu with two columns: **Agents** (each one's management screen) and **Machines** (this computer, every VPS, and **All machines**).
 - **The fleet board** shows every machine as a column with its agents, its status, OS, memory and disk, and its Docker.
   - Drag an agent onto another machine: **Clone to**, **Clone into Docker on**, **Migrate to** or **Migrate into Docker on** it. A migration is a clone; when the copy is ready, Opaya offers to uninstall the original, remove only its connection, or keep both.
   - Drop an agent on another agent to **share** its skills, API keys and MCP servers with it.

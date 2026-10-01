@@ -1854,3 +1854,21 @@ body.dragging-agent .fleet-agent[data-drop~="agent"]{animation:none;box-shadow:n
 body[data-theme="light"] .manage-pop{background:linear-gradient(160deg,#fffffff7,#f5f8f6f7);border-color:#d6e1db;box-shadow:0 30px 60px -24px #2a4a3a55}
 body[data-theme="light"] .fleet-col{background:#fbfcfb;border-color:#dce4df}
 body[data-theme="light"] .fleet-agent{background:#fff;border-color:#dde5e0}
+/* Topbar: title on the left; the view's actions, then one tools group (Manage menu, browser, projects) on the right */
+.topbar{justify-content:flex-start}
+.topbar>.breadcrumb{margin-right:auto}
+.topbar-tools{display:flex;align-items:center;gap:4px;flex-shrink:0;margin-left:2px;padding-left:10px;border-left:1px solid var(--border);min-height:30px}
+.topbar-tools .icon-button{width:32px;height:32px;min-width:32px;padding:0;border-radius:9px;border:1px solid transparent;font-size:15px}
+.topbar-tools .icon-button:hover{border-color:#333c40}
+.topbar-actions:empty{display:none}
+.mode-tab.manage-anchor:not(.manage-solo){padding:6px 7px;margin-left:-2px}
+.mode-tab:has(+.manage-anchor){border-top-right-radius:0;border-bottom-right-radius:0}
+.mode-tab+.manage-anchor{border-top-left-radius:0;border-bottom-left-radius:0;position:relative}
+.mode-tab+.manage-anchor:before{content:"";position:absolute;left:0;top:7px;bottom:7px;border-left:1px solid #ffffff14}
+.manage-anchor .nav-caret{margin:0;font-size:9px}
+.manage-solo{display:inline-flex;align-items:center;gap:7px;padding:6px 12px;margin-right:4px;border:1px solid #2b3235;background:#15191b;border-radius:10px;font-size:12px;color:#aab6bb}
+.manage-solo:hover{border-color:#3d5c4b;color:#dffbe9}
+.manage-solo.selected{background:#22302a;color:#dffbe9;border-color:#3d5c4b}
+body:has(#manage-pop) .manage-anchor{color:#dffbe9;background:#22302a}
+body:has(#manage-pop) .manage-anchor .nav-caret{transform:rotate(180deg);color:var(--accent)}
+body[data-theme="light"] .manage-solo{background:#f3f6f4;border-color:#d6e0da;color:#40524a}
