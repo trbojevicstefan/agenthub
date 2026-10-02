@@ -2458,3 +2458,50 @@ body[data-theme="light"] .mg-key.mine small{color:#1f7a45}
 .vk-agents.pick .vk-agent:has(input:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
 .mcp-form label.vk-agent{display:flex;gap:9px;font-size:inherit}
 .mcp-form label.vk-agent small{color:var(--muted)}
+/* 0.26: Deploy & clone. One card per machine with Install and Docker slots (drop targets); the clone family below. */
+.mg-machines{display:grid;grid-template-columns:repeat(auto-fill,minmax(270px,1fr));gap:12px}
+.mg-machine{display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:14px;background:#1a1f22;border:1px solid #2c3437}
+.mg-machine.current{border-color:#3b5a49;background:#17201c}
+.mg-machine header{display:flex;align-items:center;gap:11px;min-width:0}
+.mg-machine header .mg-target-text{flex:1}
+.mg-machine .mg-badge{flex-shrink:0}
+.mg-machine.add{flex-direction:row;align-items:center;justify-content:flex-start;text-align:left;border-style:dashed;min-height:84px}
+.mg-machine.add:hover{border-color:#4f6a5c;background:#1d2427}
+.mg-target-icon.local-t:after{inset:10px 8px 12px;box-shadow:0 5px 0 -3px #9fb4c0}
+.mg-slots{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px}
+.mg-slot{position:relative;overflow:hidden;display:flex;align-items:center;justify-content:flex-start;gap:9px;text-align:left;padding:9px 10px;border-radius:10px;border:1px dashed #3a4446;background:#15191b;transition:border-color .2s,background .2s,transform .2s}
+.mg-slot:hover{border-color:#5c7a6a;background:#1b2321;transform:translateY(-1px)}
+.mg-slot.here{border-style:solid;border-color:#3b5a49;background:#162119}
+.mg-slot.here small{color:#7fd8a4}
+.mg-slot.busy{border-style:solid;border-color:#6ee7a8;box-shadow:0 0 20px #6ee7a826}
+.mg-slot-icon{width:22px;height:22px;border-radius:7px;flex-shrink:0;position:relative;background:#1f2a25;border:1px solid #2c5643}
+.mg-slot-icon:after{content:"";position:absolute;inset:6px 5px;border:1.5px solid #6ee7a8;border-radius:2px}
+.mg-slot.docker .mg-slot-icon{background:#13253a;border-color:#2b4a6e}
+.mg-slot.docker .mg-slot-icon:after{border-color:#4aa8ff;inset:5px}
+.mg-slot-text{display:flex;flex-direction:column;min-width:0}
+.mg-slot-text strong{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mg-slot-text small{font-size:10.5px;color:#859197;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mg-slot.drop-over,.mg-machine.add.drop-over{border-color:#6ee7a8;border-style:solid;background:#1a2a22;box-shadow:0 0 0 3px #6ee7a826}
+.mg-copies{display:flex;flex-direction:column;gap:8px}
+.mg-copy{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:12px;background:#1a1f22;border:1px solid #2c3437}
+.mg-copy .agent-avatar{width:30px;height:30px;margin:0;border-radius:9px;font-size:12px}
+.mg-copy-text{flex:1;min-width:0;display:flex;flex-direction:column}
+.mg-copy-text strong{font-size:12.5px}
+.mg-copy-text small{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mg-copy-actions{display:flex;gap:6px}
+body[data-theme="light"] .mg-machine,body[data-theme="light"] .mg-copy{background:#fafbfa;border-color:#e0e6e2}
+body[data-theme="light"] .mg-machine.current{background:#f1f8f4;border-color:#a9cdb7}
+body[data-theme="light"] .mg-slot{background:#fff;border-color:#cfd9d3}
+body[data-theme="light"] .mg-slot.here{background:#eef8f2;border-color:#8fc0a3}
+body[data-theme="light"] .mg-slot.here small{color:#1f7a45}
+.mg-slots{grid-template-columns:1fr}
+.mg-machines{grid-template-columns:repeat(auto-fill,minmax(240px,1fr))}
+.clone-scopes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.clone-scopes legend{grid-column:1/-1}
+.clone-scopes .choice-card{margin:0}
+.clone-summary{margin:14px 0 0;padding:11px 14px;border-radius:10px;background:#16201b;border:1px solid #2c4436;font-size:12px;color:#c8d6cf;line-height:1.5}
+.clone-summary strong{color:#e9f5ee;font-weight:600}
+.clone-summary:empty{display:none}
+body[data-theme="light"] .clone-summary{background:#eef8f2;border-color:#bfdccb;color:#38544a}
+body[data-theme="light"] .clone-summary strong{color:#12301f}
+@media (max-width:720px){.clone-scopes{grid-template-columns:1fr}}

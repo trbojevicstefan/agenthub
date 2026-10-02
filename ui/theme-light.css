@@ -926,3 +926,20 @@
 :where(body[data-theme="light"]) .mg-key-glyph{color:#614b1c}
 :where(body[data-theme="light"]) .mg-key.mine{border-color:#aec8b5}
 :where(body[data-theme="light"]) .mg-key.mine small{color:#1e5130}
+:where(body[data-theme="light"]) .mg-machine{background:#dde2e5;border:1px solid #ced5d7}
+:where(body[data-theme="light"]) .mg-machine.current{border-color:#aecabb;background:#dfe8e4}
+:where(body[data-theme="light"]) .mg-machine.add:hover{border-color:#a0b8ab;background:#d8dfe2}
+:where(body[data-theme="light"]) .mg-slot{border:1px dashed #c0c9cb;background:#e4e8ea}
+:where(body[data-theme="light"]) .mg-slot:hover{border-color:#91ac9e;background:#dce4e2}
+:where(body[data-theme="light"]) .mg-slot.here{border-color:#aecabb;background:#dee9e1}
+:where(body[data-theme="light"]) .mg-slot.here small{color:#1c5c37}
+:where(body[data-theme="light"]) .mg-slot.busy{border-color:#6ee7a8}
+:where(body[data-theme="light"]) .mg-slot-icon{background:#d5e0db;border:1px solid #b2d7c6}
+:where(body[data-theme="light"]) .mg-slot-icon:after{border:1.5px solid #6ee7a8}
+:where(body[data-theme="light"]) .mg-slot.docker .mg-slot-icon{background:#cbd7e6;border-color:#a2b8d2}
+:where(body[data-theme="light"]) .mg-slot.docker .mg-slot-icon:after{border-color:#4aa8ff}
+:where(body[data-theme="light"]) .mg-slot-text small{color:#4b5458}
+:where(body[data-theme="light"]) .mg-slot.drop-over,:where(body[data-theme="light"]) .mg-machine.add.drop-over{border-color:#6ee7a8;background:#d5e5dd}
+:where(body[data-theme="light"]) .mg-copy{background:#dde2e5;border:1px solid #ced5d7}
+:where(body[data-theme="light"]) .clone-summary{background:#dfe9e4;border:1px solid #c2d7cb;color:#1e2823}
+:where(body[data-theme="light"]) .clone-summary strong{color:#07100b}
