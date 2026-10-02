@@ -1,3 +1,13 @@
+# Opaya 0.25.0 - the agents' sidebar on a switch
+
+- **Names or icons, on a switch, not on hover.** Your agents' sidebar is either a slim strip of icons or full width with names. Switch it with the « / » button at its bottom, or in Settings > Sidebar; Opaya remembers your choice. The strip no longer widens when the pointer passes over it.
+- **With names too, the selected agent flows into its own sidebar**: its row reaches the edge and joins the agent's sidebar with no border between.
+- **The agent's sidebar header shows its status and where it runs on two lines**, so neither is cut off.
+- **Opaya's tips appear at the top right** of the page instead of over the sidebars, the message box or the terminal.
+- **Console full screen** keeps the window layout buttons once, in the terminal toolbar (they were in the top bar too).
+- An agent of a kind Opaya does not name no longer shows "undefined" in the status bar.
+- Keyboard focus is visible on the status bar tray, the terminal window buttons, the layout buttons and the sidebar switch.
+
 # Opaya 0.24.0 - every agent gets its own sidebar
 
 - **A second sidebar for the agent you select.** Next to your agents, the agent's own sidebar lists, from general to specific:

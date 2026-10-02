@@ -65,3 +65,7 @@ test('terminal window arrangement and windows are validated and kept',async t=>{
   await b.saveView({layout:{grid:'grid4'}});assert.equal(b.data.view.layout.arrange,'grid');
   await b.saveView({layout:{grid:'rows2'}});assert.equal(b.data.view.layout.arrange,'rows');
   await b.saveView({layout:{arrange:'<script>'}});assert.equal(b.data.view.layout.arrange,'cols');});
+test('the agents sidebar is a strip of icons unless names were chosen',async t=>{const {b}=await fixture(t);
+  await b.saveView({});assert.equal(b.data.view.sidebarRail,true);
+  await b.saveView({sidebarRail:false});assert.equal(b.data.view.sidebarRail,false);
+  await b.saveView({sidebarRail:1});assert.equal(b.data.view.sidebarRail,true);});

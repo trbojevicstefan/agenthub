@@ -2118,51 +2118,48 @@ body[data-theme="light"] .deploy-token{color:#15803d;background:#e3f4ea;border-c
 /* 0.24 With an agent open, the agents' sidebar is a rail of icons; the selected agent flows into its own sidebar */
 :root{--side2:#1d2326}
 .agent-side{background:var(--side2);border-right:0}
-body.agent-open .sidebar{width:72px;padding:12px 0 8px 10px;border-right:0;position:relative;z-index:40}
-body.agent-open .sidebar.peek{width:236px;margin-right:-164px;padding-right:8px;box-shadow:18px 0 44px -18px #000c;animation:rail-peek .2s cubic-bezier(.2,.8,.2,1)}
-@keyframes rail-peek{from{width:72px;margin-right:0;box-shadow:none}}
-body.agent-open .sidebar:not(.peek) .brand{flex-direction:column;align-items:flex-start;gap:8px;padding:0 0 12px 4px}
-body.agent-open .sidebar:not(.peek) .nav-opaya-text,body.agent-open .sidebar:not(.peek) .agent-nav-text,body.agent-open .sidebar:not(.peek) .agent-nav-manage,body.agent-open .sidebar:not(.peek) .agent-row-actions{display:none}
-body.agent-open .sidebar:not(.peek) .brand-opaya{width:44px;min-width:0;padding:6px;justify-content:center}
-body.agent-open .sidebar:not(.peek){background:#0f1113}
-body.agent-open .sidebar:not(.peek) .nav-overview,body.agent-open .sidebar:not(.peek) .sidebar-bottom>button{width:44px;overflow:hidden;white-space:nowrap;justify-content:flex-start;padding-left:15px;padding-right:0;color:transparent}
-body.agent-open .sidebar:not(.peek) .nav-overview>span:first-child,body.agent-open .sidebar:not(.peek) .sidebar-bottom>button>span:first-child{color:#93a1a7}
-body.agent-open .sidebar:not(.peek) .nav-overview:hover>span:first-child,body.agent-open .sidebar:not(.peek) .sidebar-bottom>button:hover>span:first-child{color:#e6ecea}
-body.agent-open .sidebar:not(.peek) .nav-overview>span:not(:first-child),body.agent-open .sidebar:not(.peek) .sidebar-bottom>button>span:not(:first-child),body.agent-open .sidebar:not(.peek) .sidebar-bottom kbd{display:none}
-body.agent-open .sidebar:not(.peek) .sidebar-bottom{border-top:0;margin-right:10px;padding-left:0}
+body.sidebar-rail .sidebar{width:72px;padding:12px 0 8px 10px;border-right:0}
+body.sidebar-rail:not(.agent-open) .sidebar{border-right:1px solid #22272a}
+body.sidebar-rail .sidebar .brand{flex-direction:column;align-items:flex-start;gap:8px;padding:0 0 12px 4px}
+body.sidebar-rail .sidebar .nav-opaya-text,body.sidebar-rail .sidebar .agent-nav-text,body.sidebar-rail .sidebar .agent-nav-manage,body.sidebar-rail .sidebar .agent-row-actions{display:none}
+body.sidebar-rail .sidebar .brand-opaya{width:44px;min-width:0;padding:6px;justify-content:center}
+body.sidebar-rail .sidebar{background:#0f1113}
+body.sidebar-rail .sidebar .nav-overview,body.sidebar-rail .sidebar .sidebar-bottom>button{width:44px;overflow:hidden;white-space:nowrap;justify-content:flex-start;padding-left:15px;padding-right:0;color:transparent}
+body.sidebar-rail .sidebar .nav-overview>span:first-child,body.sidebar-rail .sidebar .sidebar-bottom>button>span:first-child{color:#93a1a7}
+body.sidebar-rail .sidebar .nav-overview:hover>span:first-child,body.sidebar-rail .sidebar .sidebar-bottom>button:hover>span:first-child{color:#e6ecea}
+body.sidebar-rail .sidebar .nav-overview>span:not(:first-child),body.sidebar-rail .sidebar .sidebar-bottom>button>span:not(:first-child),body.sidebar-rail .sidebar .sidebar-bottom kbd{display:none}
+body.sidebar-rail .sidebar .sidebar-bottom{border-top:0;margin-right:10px;padding-left:0}
 .group-short{display:none}
-body.agent-open .sidebar:not(.peek) .sidebar-section-label{display:block;width:52px;margin:12px 0 4px;padding:0;text-align:center;border:0;background:none}
-body.agent-open .sidebar:not(.peek) .sidebar-section-label>span:not(.group-short){display:none}
-body.agent-open .sidebar:not(.peek) .group-short{display:block;font-size:8.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#6f7d83;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-body.agent-open .sidebar:not(.peek) .sidebar-section-label:hover .group-short{color:#c9d4cf}
-body.agent-open .sidebar:not(.peek) .collapsed-strip{display:none}
-body.agent-open .sidebar:not(.peek) .agent-nav-row{position:relative;border-radius:14px 0 0 14px;margin:2px 0;padding:0}
-body.agent-open .sidebar:not(.peek) .agent-nav{width:62px;justify-content:flex-start;padding:7px 0 7px 8px;background:transparent;border-color:transparent}
-body.agent-open .sidebar:not(.peek) .agent-nav .agent-avatar{width:36px;height:36px;border-radius:11px;transition:transform .2s}
-body.agent-open .sidebar:not(.peek) .agent-nav:hover .agent-avatar{transform:scale(1.06)}
-body.agent-open .sidebar:not(.peek) .agent-nav>.status-dot{position:absolute;left:38px;top:7px;box-shadow:0 0 0 2px #0f1113}
+body.sidebar-rail .sidebar .sidebar-section-label{display:block;width:52px;margin:12px 0 4px;padding:0;text-align:center;border:0;background:none}
+body.sidebar-rail .sidebar .sidebar-section-label>span:not(.group-short){display:none}
+body.sidebar-rail .sidebar .group-short{display:block;font-size:8.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#6f7d83;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.sidebar-rail .sidebar .sidebar-section-label:hover .group-short{color:#c9d4cf}
+body.sidebar-rail .sidebar .collapsed-strip{display:none}
+body.sidebar-rail .sidebar .agent-nav-row{position:relative;border-radius:14px 0 0 14px;margin:2px 0;padding:0}
+body.sidebar-rail .sidebar .agent-nav{width:62px;justify-content:flex-start;padding:7px 0 7px 8px;background:transparent;border-color:transparent}
+body.sidebar-rail .sidebar .agent-nav .agent-avatar{width:36px;height:36px;border-radius:11px;transition:transform .2s}
+body.sidebar-rail .sidebar .agent-nav:hover .agent-avatar{transform:scale(1.06)}
+body.sidebar-rail .sidebar .agent-nav>.status-dot{position:absolute;left:38px;top:7px;box-shadow:0 0 0 2px #0f1113}
 /* The selected agent: a tab the colour of its sidebar, joined to it by concave corners above and below */
-body.agent-open .sidebar:not(.peek) .agent-nav-row:has(.agent-nav.selected){background:var(--side2)}
-body.agent-open .sidebar:not(.peek) .agent-nav-row:has(.agent-nav.selected)>.agent-nav>.status-dot{box-shadow:0 0 0 2px var(--side2)}
-body.agent-open .sidebar:not(.peek) .agent-nav-row:has(.agent-nav.selected):before,body.agent-open .sidebar:not(.peek) .agent-nav-row:has(.agent-nav.selected):after{content:"";position:absolute;right:0;width:16px;height:16px;pointer-events:none}
-body.agent-open .sidebar:not(.peek) .agent-nav-row:has(.agent-nav.selected):before{top:-16px;background:radial-gradient(circle at 0 0,transparent 15.5px,var(--side2) 16px)}
-body.agent-open .sidebar:not(.peek) .agent-nav-row:has(.agent-nav.selected):after{bottom:-16px;background:radial-gradient(circle at 0 100%,transparent 15.5px,var(--side2) 16px)}
-body.agent-open .sidebar:not(.peek) .agent-nav.selected .agent-avatar{box-shadow:0 0 0 2px #6ee7a8,0 0 18px -2px #6ee7a866}
+body.sidebar-rail .sidebar .agent-nav-row:has(.agent-nav.selected){background:var(--side2)}
+body.sidebar-rail .sidebar .agent-nav-row:has(.agent-nav.selected)>.agent-nav>.status-dot{box-shadow:0 0 0 2px var(--side2)}
+body.sidebar-rail .sidebar .agent-nav-row:has(.agent-nav.selected):before,body.sidebar-rail .sidebar .agent-nav-row:has(.agent-nav.selected):after{content:"";position:absolute;right:0;width:16px;height:16px;pointer-events:none}
+body.sidebar-rail .sidebar .agent-nav-row:has(.agent-nav.selected):before{top:-16px;background:radial-gradient(circle at 0 0,transparent 15.5px,var(--side2) 16px)}
+body.sidebar-rail .sidebar .agent-nav-row:has(.agent-nav.selected):after{bottom:-16px;background:radial-gradient(circle at 0 100%,transparent 15.5px,var(--side2) 16px)}
+body.sidebar-rail .sidebar .agent-nav.selected .agent-avatar{box-shadow:0 0 0 2px #6ee7a8,0 0 18px -2px #6ee7a866}
 body[data-theme="light"]{--side2:#ffffff}
-body[data-theme="light"].agent-open .sidebar:not(.peek){background:#e8ece7}
-body[data-theme="light"].agent-open .sidebar:not(.peek) .agent-nav>.status-dot{box-shadow:0 0 0 2px #e8ece7}
-body[data-theme="light"].agent-open .sidebar:not(.peek) .nav-overview>span:first-child,body[data-theme="light"].agent-open .sidebar:not(.peek) .sidebar-bottom>button>span:first-child{color:#55655c}
+body[data-theme="light"].sidebar-rail .sidebar{background:#e8ece7}
+body[data-theme="light"].sidebar-rail .sidebar .agent-nav>.status-dot{box-shadow:0 0 0 2px #e8ece7}
+body[data-theme="light"].sidebar-rail .sidebar .nav-overview>span:first-child,body[data-theme="light"].sidebar-rail .sidebar .sidebar-bottom>button>span:first-child{color:#55655c}
 body[data-theme="light"] .agent-side{background:var(--side2);border-color:transparent}
-body[data-theme="light"].agent-open .sidebar:not(.peek) .group-short{color:#6b7a71}
-body[data-theme="light"].agent-open .sidebar:not(.peek) .agent-nav.selected .agent-avatar{box-shadow:0 0 0 2px #15803d,0 0 14px -2px #15803d55}
-body[data-theme="light"].agent-open .sidebar.peek{box-shadow:18px 0 44px -18px #2a4a3a55}
-@media (prefers-reduced-motion:reduce){body.agent-open .sidebar{transition:none}}
+body[data-theme="light"].sidebar-rail .sidebar .group-short{color:#6b7a71}
+body[data-theme="light"].sidebar-rail .sidebar .agent-nav.selected .agent-avatar{box-shadow:0 0 0 2px #15803d,0 0 14px -2px #15803d55}
 /* Ctrl/Cmd held: each agent shows its number (Ctrl/Cmd+1 to 9, in sidebar order) */
 .nav-hk{display:none;position:absolute;right:30px;top:50%;transform:translateY(-50%);min-width:18px;height:18px;padding:0 4px;border-radius:6px;align-items:center;justify-content:center;font:700 10.5px/1 var(--font);color:#0e1a14;background:#6ee7a8;box-shadow:0 4px 12px -4px #000a;z-index:2}
 body.show-hk .nav-hk{display:inline-flex;animation:hk-in .14s ease-out}
-body.agent-open .sidebar:not(.peek) .nav-hk{right:auto;left:4px;top:4px;transform:none}
+body.sidebar-rail .sidebar .nav-hk{right:auto;left:4px;top:4px;transform:none}
 @keyframes hk-in{from{opacity:0;transform:translateY(-50%) scale(.7)}}
-body.agent-open .sidebar:not(.peek) .nav-hk{animation:none}
+body.sidebar-rail .sidebar .nav-hk{animation:none}
 body[data-theme="light"] .nav-hk{background:#15803d;color:#fff}
 /* Opaya Agent's sidebar: values and switches next to a row */
 .an-val{max-width:96px;font-size:11px;color:#6f7c82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2174,14 +2171,14 @@ body[data-theme="light"] .nav-hk{background:#15803d;color:#fff}
 body[data-theme="light"] .an-switch{background:#d5ddd9}
 body[data-theme="light"] .an-id .opaya-avatar{background:linear-gradient(135deg,#e6f5ec,#f3f8f4);border-color:#b8dcc6}
 /* The Opaya Agent open: its button in the rail is a tab joined to its sidebar, like a selected agent */
-body.agent-open .sidebar:not(.peek) .brand{padding-right:0}
-body.agent-open .sidebar:not(.peek) .brand-opaya.selected{width:58px;align-self:stretch;margin-right:0;justify-content:flex-start;padding:8px 0 8px 9px;border:0;border-radius:14px 0 0 14px;background:var(--side2);box-shadow:none;position:relative;overflow:visible}
-body.agent-open .sidebar:not(.peek) .brand-opaya.selected .opaya-mark{box-shadow:0 0 0 2px #6ee7a8,0 0 18px -2px #6ee7a866;border-radius:9px}
-body.agent-open .sidebar:not(.peek) .brand-opaya.selected:before,body.agent-open .sidebar:not(.peek) .brand-opaya.selected:after{content:"";position:absolute;right:0;width:16px;height:16px;pointer-events:none}
-body.agent-open .sidebar:not(.peek) .brand-opaya.selected:before{top:-16px;background:radial-gradient(circle at 0 0,transparent 15.5px,var(--side2) 16px)}
-body.agent-open .sidebar:not(.peek) .brand-opaya.selected:after{bottom:-16px;background:radial-gradient(circle at 0 100%,transparent 15.5px,var(--side2) 16px)}
-body[data-theme="light"].agent-open .sidebar:not(.peek) .brand-opaya.selected .opaya-mark{box-shadow:0 0 0 2px #15803d,0 0 14px -2px #15803d55}
-body.agent-open .sidebar:not(.peek) .nav-overview>span:first-child,body.agent-open .sidebar:not(.peek) .sidebar-bottom>button>span:first-child{flex-shrink:0}
+body.sidebar-rail .sidebar .brand{padding-right:0}
+body.sidebar-rail .sidebar .brand-opaya.selected{width:58px;align-self:stretch;margin-right:0;justify-content:flex-start;padding:8px 0 8px 9px;border:0;border-radius:14px 0 0 14px;background:var(--side2);box-shadow:none;position:relative;overflow:visible}
+body.sidebar-rail .sidebar .brand-opaya.selected .opaya-mark{box-shadow:0 0 0 2px #6ee7a8,0 0 18px -2px #6ee7a866;border-radius:9px}
+body.sidebar-rail .sidebar .brand-opaya.selected:before,body.sidebar-rail .sidebar .brand-opaya.selected:after{content:"";position:absolute;right:0;width:16px;height:16px;pointer-events:none}
+body.sidebar-rail .sidebar .brand-opaya.selected:before{top:-16px;background:radial-gradient(circle at 0 0,transparent 15.5px,var(--side2) 16px)}
+body.sidebar-rail .sidebar .brand-opaya.selected:after{bottom:-16px;background:radial-gradient(circle at 0 100%,transparent 15.5px,var(--side2) 16px)}
+body[data-theme="light"].sidebar-rail .sidebar .brand-opaya.selected .opaya-mark{box-shadow:0 0 0 2px #15803d,0 0 14px -2px #15803d55}
+body.sidebar-rail .sidebar .nav-overview>span:first-child,body.sidebar-rail .sidebar .sidebar-bottom>button>span:first-child{flex-shrink:0}
 /* The Opaya Agent's chats are listed in its sidebar: the heading keeps only Delete */
 .opaya-view #opaya-sessions,.opaya-view [data-action="opaya-new"]:not(.an-add){display:none}
 /* The open view's or section's actions, as a sub-menu under it */
@@ -2209,7 +2206,7 @@ body[data-theme="light"] .an-caret.open{color:#15803d}
 .crumb-agent:focus-visible{outline:2px solid var(--accent)}
 /* Navigation polish: carets only on the open item; room for the window's own buttons */
 .an-item:not(.active) .an-caret{display:none}
-body[data-platform="darwin"].agent-open .sidebar:not(.peek),body[data-platform="darwin"].agent-open .sidebar.peek{padding-top:44px}
+body[data-platform="darwin"].sidebar-rail .sidebar{padding-top:44px}
 body.sidebar-hidden.agent-open .agent-side{padding-top:40px}
 body.sidebar-hidden.agent-open:not(.x) .topbar{padding-left:25px}
 /* 0.24 Terminal windows: every session is a window (no tabs), side by side, stacked or in a grid */
@@ -2280,11 +2277,11 @@ body[data-theme="light"] .tray-chip{background:#fff;border-color:#d6dfda}
 body[data-theme="light"] .tray-chip>button{color:#3c4a44}
 /* Agents working in the background, and their new replies, on the sidebar and the rail */
 .agent-nav .nav-unread{position:absolute;right:30px;top:50%;transform:translateY(-50%);min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#6ee7a8;color:#0e2a1c;font:700 9.5px/16px var(--font);text-align:center;font-style:normal}
-body.agent-open .sidebar:not(.peek) .agent-nav .nav-unread{right:auto;left:36px;top:auto;bottom:4px;transform:none;box-shadow:0 0 0 2px #0f1113}
-body.agent-open .sidebar:not(.peek) .agent-nav:has(.status-dot.working) .agent-avatar{animation:rail-busy 1.6s ease-in-out infinite}
+body.sidebar-rail .sidebar .agent-nav .nav-unread{right:auto;left:36px;top:auto;bottom:4px;transform:none;box-shadow:0 0 0 2px #0f1113}
+body.sidebar-rail .sidebar .agent-nav:has(.status-dot.working) .agent-avatar{animation:rail-busy 1.6s ease-in-out infinite}
 @keyframes rail-busy{0%,100%{box-shadow:0 0 0 2px #7cc4ff55}50%{box-shadow:0 0 0 3px #7cc4ff,0 0 14px #7cc4ff66}}
-@media (prefers-reduced-motion:reduce){body.agent-open .sidebar:not(.peek) .agent-nav:has(.status-dot.working) .agent-avatar{animation:none;box-shadow:0 0 0 2px #7cc4ff}}
-body[data-theme="light"].agent-open .sidebar:not(.peek) .agent-nav .nav-unread{box-shadow:0 0 0 2px #e8ece7}
+@media (prefers-reduced-motion:reduce){body.sidebar-rail .sidebar .agent-nav:has(.status-dot.working) .agent-avatar{animation:none;box-shadow:0 0 0 2px #7cc4ff}}
+body[data-theme="light"].sidebar-rail .sidebar .agent-nav .nav-unread{box-shadow:0 0 0 2px #e8ece7}
 .an-sub-item small{font-size:10px;color:#5f6c72}
 .an-sub-item.an-win.hidden span:first-child{color:#7d8a90;font-style:italic}
 /* With the agent's sidebar open, the chat heading keeps only what the sidebar does not have (its chats, a new chat,
@@ -2294,3 +2291,27 @@ body.agent-open .content.conversation:not(.opaya-view) .conversation-controls>[d
 body.agent-open .content.conversation:not(.opaya-view) .conversation-controls>[data-action="export"],
 body.agent-open .content.conversation:not(.opaya-view) .conversation-controls>[data-action="history-toggle"],
 body.agent-open .content.conversation:not(.opaya-view) .conversation-controls>#connect-button{display:none}
+/* 0.25 The agents' sidebar: names or a strip of icons, switched with its button (no widening on hover) */
+.sidebar-rail-btn .rail-glyph{display:inline-block;width:12px;height:10px;border:1.4px solid currentColor;border-radius:2px;position:relative;flex:none}
+.sidebar-rail-btn .rail-glyph:after{content:"";position:absolute;top:0;bottom:0;left:3px;border-left:1.4px solid currentColor}
+body[data-theme="light"].sidebar-rail:not(.agent-open) .sidebar{border-color:#d7ded6}
+/* With names, the selected agent still flows into its sidebar: its row reaches the edge, with concave corners */
+body.agent-open:not(.sidebar-rail) .sidebar{padding-right:0;border-right:0}
+body.agent-open:not(.sidebar-rail) .sidebar>:not(#agent-list),body.agent-open:not(.sidebar-rail) .agent-nav-row{margin-right:8px}
+body.agent-open:not(.sidebar-rail) .agent-nav-row:has(.agent-nav.selected){margin-right:0;background:var(--side2);border-radius:10px 0 0 10px;position:relative}
+body.agent-open:not(.sidebar-rail) .agent-nav-row:has(.agent-nav.selected) .agent-nav.selected{background:transparent;border-color:transparent}
+body.agent-open:not(.sidebar-rail) .agent-nav-row:has(.agent-nav.selected):before,body.agent-open:not(.sidebar-rail) .agent-nav-row:has(.agent-nav.selected):after{content:"";position:absolute;right:0;width:12px;height:12px;pointer-events:none}
+body.agent-open:not(.sidebar-rail) .agent-nav-row:has(.agent-nav.selected):before{top:-12px;background:radial-gradient(circle at 0 0,transparent 11.5px,var(--side2) 12px)}
+body.agent-open:not(.sidebar-rail) .agent-nav-row:has(.agent-nav.selected):after{bottom:-12px;background:radial-gradient(circle at 0 100%,transparent 11.5px,var(--side2) 12px)}
+.sidebar .sidebar-bottom>button.sidebar-rail-btn>.rail-label{margin-left:0}
+/* The strip's toggle is a chevron: « folds the names away, » brings them back */
+.sidebar-rail-btn .rail-glyph{width:12px;height:12px;border:0;border-radius:0}
+.sidebar-rail-btn .rail-glyph:before,.sidebar-rail-btn .rail-glyph:after{content:"";position:absolute;top:3px;width:5px;height:5px;border-left:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(45deg);left:2px;border-top:0;bottom:auto}
+.sidebar-rail-btn .rail-glyph:after{left:6px}
+body.sidebar-rail .sidebar-rail-btn .rail-glyph{transform:scaleX(-1)}
+/* Opaya's tips sit at the top right of the page, under the top bar: clear of both sidebars, the message box and the
+   terminal (and left of an open chat column) */
+.opaya-nudge{left:auto;right:20px;top:78px;bottom:auto}
+body.chat-dock-open .opaya-nudge{right:360px}
+.an-id-text small.an-where{display:block;padding-left:0;color:#68757b;font-size:10.5px}
+.tray-chip>button:focus-visible,.pane-btn:focus-visible,.arrange-picker .grid-pick:focus-visible,.sidebar-rail-btn:focus-visible,.hidden-windows:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}

@@ -840,11 +840,12 @@
 :where(body[data-theme="light"]) .glance dd.ok{color:#1b5e3b}
 :where(body[data-theme="light"]) .glance dd.warn{color:#58411a}
 :where(body[data-theme="light"]) .glance dd.bad{color:#4d1b16}
-:where(body[data-theme="light"]).agent-open .sidebar:not(.peek){background:#eceef0}
-:where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .nav-overview>span:first-child,:where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .sidebar-bottom>button>span:first-child{color:#3f494e}
-:where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .nav-overview:hover>span:first-child,:where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .sidebar-bottom>button:hover>span:first-child{color:#0e1211}
-:where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .group-short{color:#6f7d83}
-:where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .sidebar-section-label:hover .group-short{color:#1f2723}
+:where(body[data-theme="light"]).sidebar-rail:not(.agent-open) .sidebar{border-right:1px solid #d9dee0}
+:where(body[data-theme="light"]).sidebar-rail .sidebar{background:#eceef0}
+:where(body[data-theme="light"]).sidebar-rail .sidebar .nav-overview>span:first-child,:where(body[data-theme="light"]).sidebar-rail .sidebar .sidebar-bottom>button>span:first-child{color:#3f494e}
+:where(body[data-theme="light"]).sidebar-rail .sidebar .nav-overview:hover>span:first-child,:where(body[data-theme="light"]).sidebar-rail .sidebar .sidebar-bottom>button:hover>span:first-child{color:#0e1211}
+:where(body[data-theme="light"]).sidebar-rail .sidebar .group-short{color:#6f7d83}
+:where(body[data-theme="light"]).sidebar-rail .sidebar .sidebar-section-label:hover .group-short{color:#1f2723}
 :where(body[data-theme="light"]) .nav-hk{color:#0e1a14;background:#6ee7a8}
 :where(body[data-theme="light"]) .an-val{color:#6f7c82}
 :where(body[data-theme="light"]) .an-switch{background:#c9d1d5}
@@ -888,3 +889,4 @@
 :where(body[data-theme="light"]) .agent-nav .nav-unread{background:#6ee7a8;color:#0e2a1c}
 :where(body[data-theme="light"]) .an-sub-item small{color:#5f6c72}
 :where(body[data-theme="light"]) .an-sub-item.an-win.hidden span:first-child{color:#50595e}
+:where(body[data-theme="light"]) .an-id-text small.an-where{color:#68757b}

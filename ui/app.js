@@ -30,7 +30,7 @@
   const draftKey = () => currentConversation()?.id || selected()?.id || '';
   const save = promise => { pendingWrites.add(promise); promise.catch(error=>toast(error.message,true)).finally(()=>pendingWrites.delete(promise)); return promise; };
   window.agenthubFlush = () => Promise.allSettled([...pendingWrites]);
-  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,panes:panes.filter(Boolean),paneSizes:panes.filter(Boolean).map(id=>paneSize.get(id)||1),windows:[...terminalViews.values()].filter(v=>!v.exited).map(v=>[v.id,v.ctx||'',v.hiddenPane?1:0]),theme,projects:projectsOpen,projectsOpen:[...projectsExpanded],layout,chatDock:chatDock.map(d=>({id:d.id,min:!!d.min})),sidebarHide:[...sidebarHide],sidebarHidden,tips:[...tipsSeen].slice(-300),greeted,lastVersion,terminalFont})); };
+  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,panes:panes.filter(Boolean),paneSizes:panes.filter(Boolean).map(id=>paneSize.get(id)||1),windows:[...terminalViews.values()].filter(v=>!v.exited).map(v=>[v.id,v.ctx||'',v.hiddenPane?1:0]),theme,projects:projectsOpen,projectsOpen:[...projectsExpanded],layout,chatDock:chatDock.map(d=>({id:d.id,min:!!d.min})),sidebarHide:[...sidebarHide],sidebarHidden,sidebarRail,tips:[...tipsSeen].slice(-300),greeted,lastVersion,terminalFont})); };
   const drafts = new Map(), pendingSends = new Set(), terminalViews = new Map(), terminalPending = new Map();
   const selected = () => state.agents.find(a => a.id === state.activeAgentId);
   const currentConversation = () => state.conversations.find(c => c.id === state.activeConversationId && c.agentId === state.activeAgentId);
@@ -83,7 +83,7 @@
   }
   function applyState(next) {
     state=next;document.body.dataset.platform=state.platform;
-    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya||!state.agents.length&&!state.opayaAgent?.configured;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);sidebarHidden=!!state.view?.sidebarHidden;projectsOpen=!!state.view?.projects;tipsSeen=new Set(state.view?.tips||[]);greeted=state.view?.greeted||'';lastVersion=state.view?.lastVersion||'';setTimeout(checkNudges,4000);if(state.view?.layout)layout={...layout,...state.view.layout};terminalFont=Number(state.view?.terminalFont)||13;queueMicrotask(()=>placePanes());projectsExpanded=new Set(state.view?.projectsOpen||[]);chatDock=(state.view?.chatDock||[]).map(d=>({id:d.id,min:!!d.min}));sidebarHide=new Set(state.view?.sidebarHide||[]);if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});}
+    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya||!state.agents.length&&!state.opayaAgent?.configured;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);sidebarHidden=!!state.view?.sidebarHidden;sidebarRail=state.view?.sidebarRail??true;projectsOpen=!!state.view?.projects;tipsSeen=new Set(state.view?.tips||[]);greeted=state.view?.greeted||'';lastVersion=state.view?.lastVersion||'';setTimeout(checkNudges,4000);if(state.view?.layout)layout={...layout,...state.view.layout};terminalFont=Number(state.view?.terminalFont)||13;queueMicrotask(()=>placePanes());projectsExpanded=new Set(state.view?.projectsOpen||[]);chatDock=(state.view?.chatDock||[]).map(d=>({id:d.id,min:!!d.min}));sidebarHide=new Set(state.view?.sidebarHide||[]);if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});}
     render();
   }
   // The sidebar's groups in the order they show: Pinned, custom groups, This computer, Remote. Ctrl/Cmd+1 to 9 follow
@@ -124,7 +124,7 @@
     if(opayaView)renderOpaya();else if(playgroundView)renderPlayground();else if(overview&&fleetView)renderFleet();else if(overview||!a)renderOverview();else if(manageId)renderManage(a);else if(stage)renderAgentTerminal(a);else renderAgent(a);
     const box=$('#message-input');
     if(typing&&box&&box!==typing&&!box.disabled&&(!document.activeElement||document.activeElement===document.body)){box.focus({preventScroll:true});if(box.value===caret[0])box.setSelectionRange(caret[1],caret[2]);}
-    $('#status-left').textContent=playgroundView?'Playground / ask two agents the same question':opayaView?'Opaya Agent / installs, connects and troubleshoots your agents':a&&!overview?`${labels[a.provider]} / ${a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase()} / ${location(a)}`:'One place. All your agents.';
+    $('#status-left').textContent=playgroundView?'Playground / ask two agents the same question':opayaView?'Opaya Agent / installs, connects and troubleshoots your agents':a&&!overview?`${labels[a.provider]||a.provider} / ${a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase()} / ${location(a)}`:'One place. All your agents.';
     $('#status-right').textContent=state.agents.some(a=>a.busy)?`${state.agents.filter(a=>a.busy).length} agent working`:(state.service?.persistent?'Sessions protected / safe to close window':'Local workspace / no cloud account');
     updateTurnWatch();renderToolChip();renderTitleControls();
     if(lastSelected!==state.activeAgentId)lastSelected=state.activeAgentId;
@@ -161,7 +161,7 @@
   // Entering an agent opens (or brings back) its CLI once; after that the user decides what runs where.
   const stageOpening=new Set();
   function renderAgentTerminal(a){
-    topbar('<strong>Console</strong>',arrangePicker(),'console');
+    topbar('<strong>Console</strong>','','console');
     contentKind('stage');if(renderKey!=='stage:'+a.id){$('#content').innerHTML='';renderKey='stage:'+a.id;}
     $('#terminal-panel').hidden=false;
     if(stageAgent===a.id)return;stageAgent=a.id;
@@ -467,7 +467,7 @@
     const choice=(act,value,current,label,small,extra='')=>`<button type="button" class="theme-option compact ${current?'selected':''}" data-action="${act}" data-value="${value}" ${extra}><strong>${label}</strong><small>${small}</small></button>`;
     modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid">
       <section class="settings-wide"><h3>Chat and console</h3><p class="settings-copy">Selecting an agent opens its chat. Another agent's chat can open as a window beside the page (right-click it > Open chat window); chats you leave while their agent works wait in the status bar.</p><p class="settings-copy">Console opens the agent's terminal</p><div class="theme-options"><button class="theme-option ${st.consoleOpens!=='full'?'selected':''}" data-action="console-opens" data-value="panel"><strong>Next to the chat</strong><small>Below or beside it, as terminal windows</small></button><button class="theme-option ${st.consoleOpens==='full'?'selected':''}" data-action="console-opens" data-value="full"><strong>Full screen</strong><small>Terminal windows fill the main area</small></button></div></section>
-      <section><h3>Sidebar</h3><p class="settings-copy">What shows in the sidebar besides your agents. Settings stays, so you can turn items back on.</p>${SIDE_ITEMS.map(([key,label,hint])=>`<label class="switch-row"><input type="checkbox" data-side-toggle="${key}" ${sidebarHide.has(key)?'':'checked'}><span class="switch" aria-hidden="true"></span><span>${label} <small>(${hint})</small></span></label>`).join('')}</section>
+      <section><h3>Sidebar</h3><p class="settings-copy">Your agents' sidebar shows their names, or only their icons as a slim strip. The button at its bottom switches too.</p><div class="theme-options"><button class="theme-option ${sidebarRail?'':'selected'}" data-action="rail-set" data-value="full"><strong>Names</strong><small>Full width, with machines and status</small></button><button class="theme-option ${sidebarRail?'selected':''}" data-action="rail-set" data-value="rail"><strong>Icons only</strong><small>A slim strip; more room for the page</small></button></div><p class="settings-copy">What shows in the sidebar besides your agents. Settings stays, so you can turn items back on.</p>${SIDE_ITEMS.map(([key,label,hint])=>`<label class="switch-row"><input type="checkbox" data-side-toggle="${key}" ${sidebarHide.has(key)?'':'checked'}><span class="switch" aria-hidden="true"></span><span>${label} <small>(${hint})</small></span></label>`).join('')}</section>
       <section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section>
       <section><h3>Notifications</h3><p class="settings-copy">System notifications while Opaya is not in front: hidden, minimized or behind another app. Click one to open that chat.</p>${toggle('notifyReplies','When an agent or the Opaya Agent replies')}${toggle('notifyApprovals','When something waits for your approval')}${toggle('notifyJobs','When installs, clones, updates and fixes finish')}${toggle('notifySound','With sound')}</section>
       <section><h3>Chat</h3><p class="settings-copy">How the message box sends. Models, reasoning effort and attachments are under each chat's message box.</p><div class="theme-options">${choice('send-key','enter',(st.sendKey||'enter')==='enter','Enter sends','Shift+Enter: new line')}${choice('send-key','mod-enter',st.sendKey==='mod-enter',`${mod()}Enter sends`,'Enter: new line')}</div>${toggle('tips','Tips from Opaya','now and then, when something useful applies')}</section>
@@ -884,6 +884,8 @@
     if(name==='fleet-agent-menu'){const a=state.agents.find(x=>x.id===id);if(a)fleetAgentMenu(a,button);return;}
     if(name==='fleet-machine-menu'){fleetMachineMenu(id,button);return;}
     if(name==='sidebar-hide'){toggleSidebar(true);return;}
+    if(name==='sidebar-rail'){toggleRail();return;}
+    if(name==='rail-set'){toggleRail(button.dataset.value==='rail');openSettings();return;}
     if(name==='fleet'){openFleet();return;}
     if(name==='project-remote'){const p=(state.projects||[]).find(x=>x.id===id);if(p)openProjectAgents(p);return;}
     if(name==='copy-send'||name==='copy-bring'){const p=(state.projects||[]).find(x=>x.id===id),a=state.agents.find(x=>x.id===button.dataset.agent);if(p&&a)action(()=>name==='copy-send'?sendToRemote(p,a):bringFromRemote(p,a));return;}
@@ -1312,15 +1314,6 @@
   {let t=0;const off=()=>{clearTimeout(t);document.body.classList.remove('show-hk');};
     document.addEventListener('keydown',e=>{if((e.key==='Control'||e.key==='Meta')&&!e.repeat){clearTimeout(t);t=setTimeout(()=>document.body.classList.add('show-hk'),350);}else if(!e.ctrlKey&&!e.metaKey)off();});
     document.addEventListener('keyup',e=>{if(e.key==='Control'||e.key==='Meta')off();});window.addEventListener('blur',off);}
-  // While an agent's sidebar is open, the agents' sidebar is a rail of icons; resting the pointer on it widens it over
-  // the page (peek) to show the names, without moving anything.
-  // A click in the rail ends the peek, and none starts again until the pointer leaves: it would cover the sidebar that
-  // the click just opened.
-  {const side=document.querySelector('.sidebar');let t=0,clicked=false;
-    const peek=()=>{clearTimeout(t);if(clicked)return;t=setTimeout(()=>{if(document.body.classList.contains('agent-open')&&!clicked)side.classList.add('peek');},320);};
-    side?.addEventListener('mouseenter',peek);
-    side?.addEventListener('pointerdown',()=>{clicked=true;clearTimeout(t);side.classList.remove('peek');},true);
-    side?.addEventListener('mouseleave',()=>{clicked=false;clearTimeout(t);side.classList.remove('peek');});}
   // The Opaya Agent's own sidebar: its chat and setup guide, its chats, its settings and the tools it is for.
   function opayaSideHtml(){
     const o=opaya(),label=o.busy?'Working...':o.configured?opayaModelLabel(o):'Choose a model',G=guideOn();
@@ -1366,7 +1359,7 @@
     const keys=keyLists.get(a.id),backAt=backupLists.get(a.id)?.backups?.[0]?.createdAt,running=agentJobs(a).length;
     const flag={access:keys&&!keys.keys.length?'warn':'',care:running?'busy':a.install?.backup&&backupLists.has(a.id)&&(!backAt||Date.now()-new Date(backAt)>7*864e5)?'warn':'',profile:a.error?'bad':''};
     const html=`<div class="an-head">
-        <button type="button" class="an-id" data-action="agent-section" data-key="overview" title="${esc(title(a))}: overview">${badge(a)}<span class="an-id-text"><strong>${esc(title(a))}</strong><small>${dot(a)}${esc(status(a))} <span aria-hidden="true">&#183;</span> ${esc(location(a))}</small></span></button>
+        <button type="button" class="an-id" data-action="agent-section" data-key="overview" title="${esc(title(a))}: overview">${badge(a)}<span class="an-id-text"><strong>${esc(title(a))}</strong><small>${dot(a)}${esc(status(a))}</small><small class="an-where" title="${esc(location(a))}">${esc(location(a))}</small></span></button>
         <button type="button" class="an-power ${on?'on':''} ${a.status==='connecting'||a.busy?'busy':''}" data-action="an-connect" data-id="${esc(a.id)}" title="${esc(agentActions(a).connect.label)}" aria-label="${esc(agentActions(a).connect.label)}" aria-pressed="${on}">${AN_ICON.power}</button>
       </div>
       <nav class="an-views" aria-label="${esc(title(a))}">
@@ -2444,7 +2437,8 @@
   // ---- Title bar: the sidebar toggle and the chat / terminal switch, next to the window buttons ----------------------
   // The switch shows how the selected agent is open and changes it (the agent remembers it). It replaces the Terminal,
   // Chat and Open chat buttons that sat in the middle of the top bars. Right-click the terminal half for the other ways.
-  let sidebarHidden=false,titleHtml='';
+  // sidebarRail: the agents' sidebar as a strip of icons (its toggle at the bottom, or Settings > Sidebar) or full width.
+  let sidebarHidden=false,sidebarRail=true,titleHtml='';
   const TITLE_ICONS={sidebar:'<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M6.25 3v10"/></svg>'};
   // The sidebar toggle lives at the bottom of the sidebar; while the sidebar is hidden, a small button in the title
   // bar brings it back (so does Ctrl/Cmd+B).
@@ -2453,8 +2447,10 @@
     const html=sidebarHidden?`<button type="button" class="title-btn" data-title="sidebar" aria-pressed="false" title="Show the sidebar (${mac?'&#8984;':'Ctrl+'}B)" aria-label="Show the sidebar">${TITLE_ICONS.sidebar}</button>`:'';
     const hide=$('.sidebar-hide-btn');if(hide)hide.title=`Hide the sidebar (${mac?'\u2318':'Ctrl+'}B)`;
     box.className=`title-controls ${mac?'mac':'win'}`;if(html!==titleHtml){titleHtml=html;box.innerHTML=html;}
-    document.body.classList.toggle('sidebar-hidden',sidebarHidden);
+    document.body.classList.toggle('sidebar-hidden',sidebarHidden);document.body.classList.toggle('sidebar-rail',sidebarRail);
+    const rail=$('.sidebar-rail-btn');if(rail){rail.title=sidebarRail?'Show names':'Icons only';rail.setAttribute('aria-pressed',String(sidebarRail));const label=rail.querySelector('.rail-label');if(label)label.textContent=sidebarRail?'Show names':'Icons only';}
   }
+  function toggleRail(force){sidebarRail=force??!sidebarRail;renderTitleControls();requestAnimationFrame(()=>placePanes());saveView();}
   function toggleSidebar(force){sidebarHidden=force??!sidebarHidden;renderTitleControls();requestAnimationFrame(()=>placePanes());saveView();}
   // Chat or terminal for the selected agent, leaving the Workspace, Manage, the Opaya Agent or the Playground. From a
   // project chat the CLI starts in the project's folder, as the Terminal button did (the service reuses a running one).
