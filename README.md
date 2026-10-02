@@ -25,9 +25,20 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 
 ## What you can do
 
+### The Opaya Vault: your keys in one place (0.26)
+**Vault** in the sidebar (key icon) keeps your API keys, tokens and passwords, encrypted by your OS, and gives each one to the agents that need it. Values are never shown or sent into a chat.
+- **Import keys** you already have: from a **.env, JSON, YAML or any text file** (choose it, or drop it on the Vault), from **pasted text**, or **from your tools**: every agent's own key file, your shell profiles, the environment Opaya started with, the GitHub CLI, npm, AWS and Hugging Face. Opaya lists what it found by name and a masked preview; you tick what to keep and can rename each key. Keys already in the Vault, and the same key found in two places, are marked.
+- **Every key shows who has it.** **Give to...** opens your agents right under the key (the ones that have it say *Has it*) and **Every agent**. Opaya writes the key where each agent reads keys and tells the agent its name, never the value.
+- **+ Add key** can keep a key, give it to chosen agents or to every agent.
+- An MCP server that needs a key (GitHub, Brave Search, Context7) can take it straight from the Vault.
+- On an agent's **Keys & tools**, drag a key from the Vault onto an agent, or click it; keys the agent has are marked.
+
+### Docker manager (0.26)
+**Docker manager** (Home, Machines, or **Open manager** in an agent's Machine & Docker) has a tab per machine, search, **All / Running / Stopped** and **Live** CPU and memory. Each container is a card with its state, ports (a port on this computer opens in your browser), CPU, memory, network and processes, the agents in it, and buttons for **Start / Stop**, **Restart**, **Pause / Resume**, **Logs** (its last 200 lines inside the card, or follow them in a terminal), **Shell**, **Details** and **Remove**. **Images** show their size and which containers use each, with Pull, Remove and Prune.
+
 ### Every agent has its own sidebar (0.24)
 Selecting an agent opens its **chat** and, next to your agents, **the agent's own sidebar**: its status with a power button, **Chat**, **Console** and **Overview**, its recent chats (+ for a new one, **Search chats** for History), and its **Manage** sections, from general to specific:
-- **Model & skills**: model, reasoning, skills and commands, skills library.
+- **Model & skills**: model, reasoning, skills and commands, Share skills with another agent, skills library.
 - **Keys & tools**: API keys by name, the Opaya Vault, MCP servers, Share with another agent, gateway, iTrust and the Opaya browser.
 - **Machine & Docker**: where it runs, files, its CLI and shell, installed tools, its container and Docker.
 - **Deploy & clone**: Clone, Dockerize, Redeploy, New VPS, and targets to drag it onto.
@@ -40,8 +51,8 @@ The **Opaya Agent** has its own sidebar too (chat, setup guide, its chats, model
 
 The open view or section unfolds its actions under it in the sidebar, so every action is one click away. Each section is a list of settings: what it is, its value and one action. **Overview** shows one card per section with the main facts. On the Manage screens Q W E R A S D F open the sections and Esc goes back to the Overview. Console opens the terminal next to or below the chat unless Settings > Chat and console says full screen.
 - **The stage:** a live 3D view of the agent and what it is connected to (its machine, container, keys, projects, skills and chats). It glows when the agent is connected and pulses while it works.
-- **Deploy & clone:** drag the agent onto **This computer**, a **VPS** or **Docker** to clone it there, or click a target. Progress shows on the target.
-- **Docker:** the containers on the agent's machine, its own container first, with live CPU and memory, **Logs**, **Shell**, **Restart**, **Pause / Resume**, **Stop / Start**, **Inspect** (image, mounts, ports, restart policy and health; environment variables by name only) and **Remove**. Pull a newer image and prune unused ones. **Dockerize** runs a copy of an agent in its own container.
+- **Deploy & clone:** one card per machine with **Install** and **Docker**: drag the agent onto either, or click it. Progress shows there. **Clones** lists the agent it was cloned from and its own copies, each with **Redeploy**.
+- **Docker:** the containers on the agent's machine, its own container first, as Docker manager cards: live CPU and memory, **Logs** inside the card, **Shell**, **Restart**, **Pause / Resume**, **Stop / Start**, **Details** (image, mounts, ports, restart policy and health; environment variables by name only) and **Remove**. Pull a newer image and prune unused ones. **Dockerize** runs a copy of an agent in its own container.
 - **Keys & access:** drag a key from the Opaya Vault onto any agent, on this screen or in the sidebar, to give it that key. Click a key for the same thing without dragging.
 - **Projects & git:** pull, commit and push, or start a chat in a project, from the screen.
 - Every other action is here too: model and effort, skills and tools, files, update, back up, connection (restart, copy ID or launch command), name and look, and removal.
@@ -113,10 +124,10 @@ The open view or section unfolds its actions under it in the sidebar, so every a
   - Install them to many agents at once.
 
 ### Clone and redeploy (Hermes)
-- Right-click a Hermes agent and choose **Clone**. You pick:
-  - **What to copy:** Everything, Skills + personality (SOUL.md, USER.md), Skills, or Memory. You can also include API keys.
+- Open the agent's **Deploy & clone** (R) and drag it onto a machine, or right-click it and choose **Clone**. You pick, from general to specific (a line under the choices says what will happen):
   - **Where:** this computer or any saved VPS.
   - **How it runs:** as a Hermes profile, a Docker container, or a profile in a Docker container you already have (Hermes as a profile, OpenClaw as another agent of the same gateway, Claude Code, Codex or OpenCode with their own home).
+  - **What to copy:** Everything, Skills + personality (SOUL.md, USER.md), Skills, or Memory. You can also include API keys.
 - A progress window shows the route, a live percentage, speed, time left, each step and a log. You can minimize it to the status bar.
 - **Redeploy** copies the same parts again with one click. Chat history and OAuth logins are never copied.
 
@@ -164,6 +175,7 @@ It acts only through Opaya's own tools and terminals you can watch, and every ch
 - **Home** filters agents by status and place, and each card has Manage, Connect, Terminal and Fix.
 - **The top bar is the same on every screen:** the agent and the page on the left, that page's own controls, then the browser and projects. Switch agents in the sidebar.
 - **Sidebar:** Discover next to the Opaya Agent, Home, your agents, and at the bottom Playground, Machines (the fleet board), Vault, Settings and Help. **Settings > Sidebar** hides the items you do not use.
+- **Help** opens with **Where is what**: a map of the app (your agents, the Manage sections and their keys, API keys, skills, clone and deploy, Docker, machines and the Opaya Agent), each with a button to open it.
 - Hide or show the sidebar with the button at the top left or **Cmd/Ctrl+B**.
 - **Files:** mention a file or folder in the chat or in a terminal on the same machine.
 - **Settings:** theme, Enter or Ctrl/Cmd+Enter to send, terminal text size and position, start Opaya when you sign in, connect agents at start, notifications, tips and keyboard shortcuts.

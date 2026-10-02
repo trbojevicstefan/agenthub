@@ -63,3 +63,10 @@ test('import: pasted text, binary and large files, and a file that is not there'
   await assert.rejects(()=>agent.vaultImportScan({file:path.join(root,'none.env')}),/does not exist/);
   await assert.rejects(()=>agent.vaultImportScan({}),/Choose a file/);
 });
+test('a .env saved as UTF-16 (Windows Notepad) and a PowerShell profile are read as text',async t=>{
+  const home=await temp(t),file=path.join(home,'win.env');await fs.writeFile(file,Buffer.concat([Buffer.from([0xff,0xfe]),Buffer.from(`OPENAI_API_KEY=${OPENAI_KEY}\r\n`,'utf16le')]));
+  assert.deepEqual(vaultImport.scanText(await vaultImport.readTextFile(file)).map(x=>x.name),['OPENAI_API_KEY']);
+  await fs.mkdir(path.join(home,'Documents','PowerShell'),{recursive:true});await fs.writeFile(path.join(home,'Documents','PowerShell','Microsoft.PowerShell_profile.ps1'),`$env:OPENROUTER_API_KEY = "${ROUTER_KEY}"\n`);
+  const sources=await vaultImport.scanTools({home,platform:'win32',env:{}});
+  assert.deepEqual(sources.map(s=>[s.label,s.items.map(x=>x.name)]),[['PowerShell profile',['OPENROUTER_API_KEY']]]);
+});

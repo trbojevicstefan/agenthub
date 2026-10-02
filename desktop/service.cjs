@@ -850,8 +850,9 @@ async function start({app, safeStorage}, root) {
   actions.vaultImportScan = x=>opaya.vaultImportScan({file:x.file,text:x.text,tools:!!x.tools});
   actions.vaultImportCommit = async x=>{const r=await opaya.vaultImportCommit({id:x.id,picks:x.picks});emit();return r;};
   // The Opaya Agent's tools for backup, uninstall, update, clone, transfer, MCP servers, Docker shells and jobs run these.
+  // Importing into the vault and giving an MCP server a vault key are the user's own clicks, never the Opaya Agent's.
   const USER_ONLY=new Set(['vaultImportScan','vaultImportCommit']);
-  opaya.appAction=(name,input)=>{if(!Object.hasOwn(actions,name)||USER_ONLY.has(name))throw new Error('Unsupported action.');return origin.run('opaya',()=>actions[name](input));};
+  opaya.appAction=(name,input)=>{if(!Object.hasOwn(actions,name)||USER_ONLY.has(name)||name==='mcpInstall'&&input?.vaultKey)throw new Error('Unsupported action.');return origin.run('opaya',()=>actions[name](input));};
   // Actions the user starts whose failure the Opaya Agent should handle, with how to name them.
   const nameOf=id=>{try{return broker.agent(id).name;}catch{return 'an agent';}},hostName=id=>{try{return id?broker.host(id).name:machineName();}catch{return 'a machine';}};
   const REPORTED={

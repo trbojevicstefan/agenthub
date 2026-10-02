@@ -25,7 +25,9 @@ async function readTextFile(file){
   file=String(file||'');if(!path.isAbsolute(file))throw new Error('Choose a file.');
   const info=await fs.stat(file).catch(error=>{throw new Error(error.code==='ENOENT'?`${file} does not exist.`:error.message);});
   if(!info.isFile())throw new Error(`${file} is not a file.`);if(info.size>MAX_BYTES)throw new Error(`${path.basename(file)} is larger than 1 MB. Choose a .env or settings file.`);
-  const text=await fs.readFile(file,'utf8');if(text.includes('\0'))throw new Error(`${path.basename(file)} is not a text file.`);
+  // UTF-16 with a byte order mark (Notepad on Windows can save a .env so) is read as text too.
+  const raw=await fs.readFile(file),utf16=raw[0]===0xff&&raw[1]===0xfe,text=utf16?raw.subarray(2).toString('utf16le'):raw.toString('utf8');
+  if(text.includes('\0'))throw new Error(`${path.basename(file)} is not a text file.`);
   return text;
 }
 // Files of tools on this computer that keep keys, with the names their own settings use renamed to the usual variables.
@@ -34,6 +36,8 @@ function toolFiles({home=os.homedir(),platform=process.platform,env=process.env}
   return [
     {id:'env-file',label:'.env in your home folder',file:path.join(home,'.env')},
     ...['.bashrc','.bash_profile','.profile','.zshrc','.zprofile','.zshenv'].map(f=>({id:'shell'+f,label:`Shell profile ${f}`,file:path.join(home,f)})),
+    {id:'fish',label:'Shell profile config.fish',file:path.join(config,'fish','config.fish')},
+    ...(platform==='win32'?[['PowerShell','PowerShell'],['WindowsPowerShell','Windows PowerShell']].map(([dir,name])=>({id:'ps-'+dir,label:`${name} profile`,file:path.join(home,'Documents',dir,'Microsoft.PowerShell_profile.ps1')})):[]),
     {id:'gh',label:'GitHub CLI',file:platform==='win32'?path.join(appData,'GitHub CLI','hosts.yml'):path.join(config,'gh','hosts.yml')},
     {id:'npm',label:'npm',file:path.join(home,'.npmrc'),rename:{AUTH_TOKEN:'NPM_TOKEN',_authToken:'NPM_TOKEN'}},
     {id:'aws',label:'AWS CLI',file:path.join(home,'.aws','credentials')},
