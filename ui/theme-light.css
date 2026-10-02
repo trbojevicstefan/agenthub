@@ -843,4 +843,5 @@
 :where(body[data-theme="light"]).agent-open .sidebar:not(.peek){background:#eceef0}
 :where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .nav-overview>span:first-child,:where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .sidebar-bottom>button>span:first-child{color:#3f494e}
 :where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .nav-overview:hover>span:first-child,:where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .sidebar-bottom>button:hover>span:first-child{color:#0e1211}
-:where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .sidebar-section-label{background:#cbd1d5}
+:where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .group-short{color:#6f7d83}
+:where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .sidebar-section-label:hover .group-short{color:#1f2723}
