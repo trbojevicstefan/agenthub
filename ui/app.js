@@ -3,6 +3,7 @@
 (() => {
   const api = window.agenthub;
   const $ = (selector, root = document) => root.querySelector(selector);
+  const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const labels = {hermes:'Hermes',codex:'Codex',claude:'Claude Code',openclaw:'OpenClaw',deepseek:'DeepSeek',openai:'OpenAI',google:'Google Gemini',openrouter:'OpenRouter',xai:'xAI',groq:'Groq',mistral:'Mistral',ollama:'Ollama',lmstudio:'LM Studio',custom:'Custom agent'};
   const title = a => a?.displayName || a?.name || 'Agent';
@@ -1237,13 +1238,13 @@
   }
   function keysPanel(a){
     const held=(opaya().secrets||[]).filter(k=>k.kept||k.global||k.stored?.length),has=keyLists.get(a.id),others=state.agents.filter(x=>x.id!==a.id&&!x.ephemeral).slice(0,8);
-    const chip=k=>`<button type="button" class="mg-key" data-drag="key" data-drag-id="${esc(k.id)}" data-action="key-menu" data-id="${esc(k.id)}" title="Drag onto an agent to give it ${esc(k.name)} (or click)"><span class="mg-key-glyph" aria-hidden="true"></span><span><strong>${esc(k.name)}</strong><small>${esc(k.mask||'')}</small></span>${k.global?'<em>all</em>':''}</button>`;
+    const chip=k=>{const mine=keyHolders(k).has(a.id);return `<button type="button" class="mg-key ${mine?'mine':''}" data-drag="key" data-drag-id="${esc(k.id)}" data-action="key-menu" data-id="${esc(k.id)}" title="Drag onto an agent to give it ${esc(k.name)} (or click)${mine?`. ${esc(title(a))} has it.`:''}"><span class="mg-key-glyph" aria-hidden="true">${KEY_SVG}</span><span><strong>${esc(k.name)}</strong><small>${esc(k.mask||'')}${mine?' · &#10003; has it':''}</small></span>${k.global?'<em>all</em>':''}</button>`;};
     const target=(x,big=false)=>`<div class="mg-key-target ${big?'big':''}" data-drop="key" data-agent-target="${esc(x.id)}">${badge(x)}<span><strong>${esc(title(x))}</strong><small>${esc(placeText(x))}</small></span><em class="mg-shared" aria-live="polite"></em></div>`;
     return `<header class="mg-section-head"><div><h2><span class="mg-h-icon key-h" aria-hidden="true"></span>Give a key</h2><p>Drag a key from the vault onto an agent, or click it. Opaya writes it where that agent reads keys; values never go into a chat.</p></div></header>
-      <div class="mg-keys"><div class="mg-vault"><h3>Opaya Vault <small>${held.length}</small></h3>${held.length?`<div class="mg-key-list">${held.map(chip).join('')}</div>`:'<p class="field-help">No keys yet. Add one in the Vault.</p>'}</div>
+      <div class="mg-keys"><div class="mg-vault"><h3>Opaya Vault <small>${held.length}</small></h3>${held.length?`<div class="mg-key-list">${held.map(chip).join('')}</div>`:'<p class="field-help">No keys yet. <button type="button" class="text-button" data-action="vault">Add or import keys in the Vault</button></p>'}</div>
       <div class="mg-flow" aria-hidden="true"><i></i><i></i><i></i></div>
       <div class="mg-give"><h3>Give to</h3>${target(a,true)}<div class="mg-key-others">${others.map(x=>target(x)).join('')}</div></div>
-      <div class="mg-has"><h3>${esc(title(a))} has <small>${has?.keys?.length??''}</small></h3>${!has?'<p class="field-help">Reading its keys...</p>':has.keys.length?`<div class="mg-has-list">${has.keys.map(k=>`<span class="mg-has-key" title="${esc(k.where||'')}"><span class="mg-key-glyph small" aria-hidden="true"></span>${esc(k.name)}</span>`).join('')}</div>`:`<p class="field-help">${has.error?esc(has.error):has.kind?'No keys yet.':'Opaya does not know where this agent reads keys.'}</p>`}</div></div>`;
+      <div class="mg-has"><h3>${esc(title(a))} has <small>${has?.keys?.length??''}</small></h3>${!has?'<p class="field-help">Reading its keys...</p>':has.keys.length?`<div class="mg-has-list">${has.keys.map(k=>`<span class="mg-has-key" title="${esc(k.where||'')}"><span class="mg-key-glyph small" aria-hidden="true">${KEY_SVG}</span>${esc(k.name)}</span>`).join('')}</div>`:`<p class="field-help">${has.error?esc(has.error):has.kind?'No keys yet.':'Opaya does not know where this agent reads keys.'}</p>`}</div></div>`;
   }
   // A project's git state from projectInfo: git is {branch: "main...origin/main [ahead 2]", changes: [porcelain lines]}
   // (or null outside a repository); a remote copy's info has branch, dirty and unpushed already.
@@ -1283,7 +1284,7 @@
     model:anI('<path d="M12 3 20 12l-8 9-8-9z"/>'),access:anI('<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3"/>'),machine:anI('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
     deploy:anI('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>'),projects:anI('<path d="M3 7h7l2 2h9v10H3z"/>'),care:anI('<path d="M20 12a8 8 0 1 1-3-6.2M20 4v5h-5"/>'),
     profile:anI('<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>'),danger:anI('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>')};
-  Object.assign(AN_ICON,{keys:AN_ICON.access,vault:AN_ICON.access,mcp:anI('<path d="M9 7V3M15 7V3M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>'),machines:AN_ICON.machine,newVps:AN_ICON.plus,dockerize:anI('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/>'),backups:AN_ICON.projects,surface:AN_ICON.chat,connect:AN_ICON.power,library:anI('<path d="m12 3 2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>')});
+  Object.assign(AN_ICON,{keys:AN_ICON.access,vault:AN_ICON.access,mcp:anI('<path d="M9 7V3M15 7V3M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>'),machines:AN_ICON.machine,newVps:AN_ICON.plus,dockerize:anI('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/>'),backups:AN_ICON.projects,surface:AN_ICON.chat,connect:AN_ICON.power,library:anI('<path d="m12 3 2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>'),shareSkills:anI('<path d="M4 8h13l-3-3M20 16H7l3 3"/>')});
   // From general to specific; each action of the agent is in exactly one of them. hk: its key on the Manage screens.
   const AN_SECTIONS=[
     {key:'overview',name:'Overview',desc:'Everything about it at a glance.',icon:AN_ICON.overview},
@@ -1300,7 +1301,7 @@
   const AN_SUB={
     chat:[['chatWindow','Open in a window'],['export','Export this chat']],
     console:[['terminal','CLI'],['shell','Shell'],['files','Files']],
-    model:[['models','Model'],['effort','Reasoning'],['skills','Skills & commands'],['library','Skills library']],
+    model:[['models','Model'],['effort','Reasoning'],['skills','Skills & commands'],['shareSkills','Share skills'],['library','Skills library']],
     access:[['keys','API keys'],['vault','Opaya Vault'],['mcp','MCP servers'],['transfer','Share with another agent'],['gateway','Gateway'],['itrust','iTrust'],['browser','Opaya browser']],
     machine:[['machines','Machines board'],['files','Files'],['terminal','CLI'],['shell','Shell'],['containerRestart','Restart container'],['containerLogs','Container logs']],
     deploy:[['clone','Clone'],['dockerize','Dockerize'],['redeploy','Redeploy'],['newVps','New VPS']],
@@ -1407,6 +1408,7 @@
     keyed.mcp={key:'mcp',label:'MCP servers',run:()=>openMcpManager()};
     if(cap.backup)keyed.backups={key:'backups',label:'Backups folder',run:()=>api.revealBackup({folder:true})};
     keyed.library={key:'library',label:'Skills library',run:()=>openLibrary()};
+    keyed.shareSkills={key:'shareSkills',icon:'&#8644;',label:'Share skills',disabled:state.agents.length<2,run:()=>openTransfer(a,{skills:'all',keys:'none'})};
     keyed.history={...keyed.history,label:'Search chats'};
     return keyed;
   }
@@ -1471,10 +1473,11 @@
           row('effort','Reasoning','How long it thinks before answering',a.effort?EFFORT_LABELS[a.effort]||a.effort:'Auto')],'A chat can use its own model and reasoning: pick them under the message box.')
         +card('Skills',[
           row('skills','Skills & commands','What it can do; install new skills',skillList?skillList.supported===false?'Not readable':`${skillList.skills?.length||0} skills${a.commands?.length?`, ${a.commands.length} commands`:''}`:'Reading...'),
+          row('shareSkills','Share skills','Copy its skills to another agent, here or on another machine'),
           row('library','Skills library','Opaya\'s own skills, to install on any agent')]),
       access:()=>head(S,pbtn('vault','Open Vault'))+card('Keys',[
           row('keys','API keys','Keys it can use, by name only',keysVal,{tone:keyList&&!keyList.keys.length?'warn':''}),
-          row('vault','Opaya Vault','Every key you keep in Opaya')])
+          row('vault','Opaya Vault','Every key you keep in Opaya; import them from a .env or your tools',(()=>{const all=vaultKeys(),mine=all.filter(k=>keyHolders(k).has(a.id)).length;return all.length?`${plural(all.length,'key')}${mine?` / ${mine} given to ${title(a)}`:''}`:'Empty';})())])
         +card('Tools',[
           row('mcp','MCP servers','Tools such as GitHub, a browser or files',mcps.length?mcps.map(s=>s.name).join(', '):'None'),
           row('transfer','Share with another agent','Copy its skills, keys and MCP servers'),
@@ -1631,7 +1634,8 @@
   function keyMenu(button,keyId){
     const k=(opaya().secrets||[]).find(x=>x.id===keyId);if(!k)return;
     const r=button.getBoundingClientRect(),targetEl=id=>document.querySelector(`[data-agent-target="${CSS.escape(id)}"]`)||button;
-    openMenu(r.left,r.bottom+4,[...state.agents.filter(a=>!a.ephemeral).map(a=>({icon:'&#9919;',label:`Give to ${title(a)}`,run:()=>giveKey(k.id,a.id,button,targetEl(a.id))})),'-',{icon:'&#9635;',label:'Open Vault',run:()=>openVault()}],k.name);
+    const has=keyHolders(k);
+    openMenu(r.left,r.bottom+4,[...state.agents.filter(a=>!a.ephemeral).map(a=>({icon:has.has(a.id)?'&#10003;':'&#9919;',label:has.has(a.id)?`${title(a)} has it: save again`:`Give to ${title(a)}`,run:()=>giveKey(k.id,a.id,button,targetEl(a.id))})),{icon:'&#8734;',label:'Give to every agent',run:()=>action(()=>giveAll(k.id))},'-',{icon:'&#9635;',label:'Open Vault',run:()=>openVault()}],k.name);
   }
   // ---- Chat dock: chats in their own windows along the bottom, several at once ---------------------------------------
   // Like a desktop messenger: each window is one conversation. Click its header to minimize it, expand it to the full
@@ -2219,39 +2223,130 @@
   const endpointFields=()=>`<label class="check-row"><input type="checkbox" name="hasEndpoint"> This API needs an endpoint <small>For an OpenAI-compatible provider or a self-hosted API. Saved next to the key as NAME_BASE_URL (OPENROUTER_API_KEY gets OPENROUTER_BASE_URL).</small></label><label class="field" data-endpoint hidden><span>Endpoint (base URL)</span><input name="endpoint" type="url" autocomplete="off" spellcheck="false" maxlength="2048" placeholder="https://openrouter.ai/api/v1"></label>`;
   function bindEndpoint(form){const box=form.elements.hasEndpoint,field=form.querySelector('[data-endpoint]');if(!box||!field)return;box.addEventListener('change',()=>{field.hidden=!box.checked;form.elements.endpoint.required=box.checked;if(box.checked)form.elements.endpoint.focus();});}
   const endpointOf=form=>form.elements.hasEndpoint?.checked?form.elements.endpoint.value.trim():'';
-  // ---- Opaya Vault: every key Opaya keeps, where each one went, and the agents' own connection tokens --------------
-  // From the Opaya Agent's key button (chat): each key also has Insert, and a new key is inserted as a reference.
+  // ---- Opaya Vault: every key Opaya keeps, who has each one, and the agents' own connection tokens ------------------
+  // Keys first, each with the agents it was given to; Give to opens the agents right under the key. Add a key and
+  // Import (a .env or any text file, pasted text, or the tools on this computer) open above the list. From the Opaya
+  // Agent's key button (chat) each key also has Insert, and a new key is inserted as a reference.
   // Keys pasted as text into an Opaya chat are temporary and not listed; everything given here stays until forgotten.
-  function openVault({chat=false}={}){
-    const held=(opaya().secrets||[]).filter(k=>k.kept||k.global||k.stored?.length),targets=state.agents.filter(a=>!a.ephemeral);
-    const insert=ref=>{const input=$('#message-input');if(!input||input.disabled)return;const at=input.selectionStart??input.value.length,end=input.selectionEnd??at,before=input.value.slice(0,at);input.value=before+(before&&!/\s$/.test(before)?' ':'')+ref+' '+input.value.slice(end);input.dispatchEvent(new Event('input'));input.focus();};
-    const options=targets.map(a=>`<option value="${esc(a.id)}">${esc(title(a))}${a.transport==='ssh'?` / ${esc(state.hosts.find(h=>h.id===a.hostId)?.name||'SSH')}`:''}</option>`).join('');
-    const row=k=>`<div class="vault-row" data-secret="${esc(k.id)}"><div class="vault-main"><strong>${esc(k.name)}</strong><code>${esc(k.mask)}</code>${k.global?'<em class="vault-badge" title="Written into every agent that reads keys">all agents</em>':''}${k.endpoint?`<small>Endpoint ${esc(k.endpoint)}</small>`:''}<small>${k.stored?.length?`Saved for ${esc([...new Set(k.stored.map(x=>x.agent))].join(', '))}`:'Not given to any agent yet'}</small></div><div class="vault-actions">${chat?'<button type="button" class="secondary docker-btn" data-vault="insert" title="Put its reference into your message to the Opaya Agent">Insert</button>':''}${targets.length?`<select aria-label="Agent for ${esc(k.name)}" data-vault-agent><option value="">Give to agent...</option>${options}</select><button type="button" class="secondary docker-btn" data-vault="give">Give</button>`:''}<button type="button" class="secondary docker-btn" data-vault="all" title="Write it into every agent that reads keys">All agents</button><button type="button" class="subtle docker-btn danger-text" data-vault="forget" title="Remove it from the vault. Agents keep their copy.">&#10005;</button></div></div>`;
+  const vault={chat:false,panel:'',open:'',scan:null,paste:false,filter:'',fresh:new Set(),giveTo:'keep'};
+  const vaultKeys=()=>(opaya().secrets||[]).filter(k=>k.kept||k.global||k.stored?.length);
+  // The agents a key was saved for, by id (older records by name); agents removed since are left out.
+  const keyHolders=k=>{const ids=new Set();for(const x of k.stored||[]){const a=x.agentId?state.agents.find(y=>y.id===x.agentId):state.agents.find(y=>y.name===x.agent);if(a)ids.add(a.id);}return ids;};
+  const KEY_SVG='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3M19 4l2 2"/></svg>';
+  function openVault({chat=false,panel=''}={}){
+    Object.assign(vault,{chat,panel,open:'',scan:null,paste:false,filter:'',fresh:new Set()});
+    modal('Opaya Vault','Your API keys, tokens and passwords, kept by Opaya and given to the agents you choose. Values are never shown here or sent into a chat.','<div id="vault" class="vault"></div>',true);
+    const box=$('#vault');drawVault();
+    box.addEventListener('click',vaultClick);box.addEventListener('input',vaultInput);box.addEventListener('change',vaultInput);
+    box.addEventListener('submit',vaultSubmit);
+    // A file dropped anywhere on the Vault is scanned for keys.
+    const dlg=$('#app-dialog');
+    dlg.addEventListener('dragover',event=>{if([...event.dataTransfer?.types||[]].includes('Files')){event.preventDefault();box.classList.add('drop-over');}});
+    dlg.addEventListener('dragleave',event=>{if(!dlg.contains(event.relatedTarget))box.classList.remove('drop-over');});
+    dlg.addEventListener('drop',event=>{const f=event.dataTransfer?.files?.[0];box.classList.remove('drop-over');if(!f)return;event.preventDefault();const file=api.pathForFile?.(f)||'';if(!file){toast('Opaya could not read where that file is. Use Import > From a file.',true);return;}vaultScan({file},`Reading ${f.name}...`);});
+  }
+  function drawVault(){
+    const box=$('#vault');if(!box)return;const held=vaultKeys(),targets=state.agents.filter(a=>!a.ephemeral),q=vault.filter.trim().toLowerCase(),shown=held.filter(k=>!q||k.name.toLowerCase().includes(q));
     const tokens=state.agents.filter(a=>a.hasToken);
-    modal('Opaya Vault',`Every API key, token and password Opaya keeps, encrypted by your OS. Give a key to one agent, to all of them, or forget it.${chat?' Insert puts a key\'s reference into your message, so the Opaya Agent can use it without seeing it.':''} Values are never shown here or sent into a chat.`,`<div id="vault">
-      <form id="vault-form" class="vault-add"><h3>Add a key</h3><div class="form-grid"><label class="field"><span>Name <em>optional, guessed when empty</em></span><input name="name" maxlength="80" autocomplete="off" spellcheck="false" placeholder="OPENROUTER_API_KEY"></label><label class="field"><span>Key, token or password</span><input name="value" type="password" autocomplete="off" spellcheck="false" maxlength="12000" required></label></div>${endpointFields()}<label class="check-row"><input type="checkbox" name="all" checked> Give it to every agent <small>Opaya writes it into each agent that reads keys (Hermes, OpenClaw, DeepSeek Harness, Claude Code, Codex) and tells the connected ones. Untick to only keep it here.</small></label><div class="vault-add-foot"><button type="submit" class="primary">Save key</button></div></form>
-      <section class="docker-group"><h3>Keys <small>${held.length}</small></h3>${held.length?`<div class="docker-list">${held.map(row).join('')}</div>`:'<p class="field-help">No keys yet. Add one above, or with the key button in any chat.</p>'}</section>
-      ${tokens.length?`<section class="docker-group"><h3>Connection tokens <small>${tokens.length}</small></h3><div class="docker-list">${tokens.map(a=>`<div class="vault-row"><div class="vault-main"><strong>${esc(title(a))}</strong><small>Token Opaya sends to ${esc(a.endpoint||'its API')}</small></div><div class="vault-actions"><button type="button" class="secondary docker-btn" data-action="edit" data-id="${esc(a.id)}">Change</button></div></div>`).join('')}</div></section>`:''}
-    </div>`,true);
-    const form=$('#vault-form');bindEndpoint(form);
-    form.onsubmit=event=>{event.preventDefault();const value=form.elements.value.value,all=form.elements.all.checked;form.elements.value.value='';
-      action(async()=>{const r=await api.opayaHoldSecret({name:form.elements.name.value.trim(),value,endpoint:endpointOf(form)});await refresh();if(chat){closeModal();insert(r.reference);}if(all)await giveAll(r.id);else if(chat)toast(`${r.name} is in the Opaya Vault; its reference is in your message.`);else{openVault();toast(`${r.name} is in the Opaya Vault.`);}});};
-    $('#vault').addEventListener('click',event=>{
-      const b=event.target.closest('[data-vault]'),rowEl=b?.closest('[data-secret]'),k=rowEl&&held.find(x=>x.id===rowEl.dataset.secret);if(!k)return;
-      if(b.dataset.vault==='insert'){closeModal();insert(k.reference);return;}
-      if(b.dataset.vault==='all'){action(()=>giveAll(k.id));return;}
-      if(b.dataset.vault==='give'){const agentId=rowEl.querySelector('[data-vault-agent]')?.value;if(!agentId){toast('Choose an agent first.',true);return;}
-        b.disabled=true;b.textContent='Saving...';
-        action(async()=>{try{const r=await api.vaultGiveAgent({id:k.id,agentId});await refresh();openVault({chat});toast(`${r.name} saved for ${r.agent}${r.file?` in ${r.file}`:''}. Send the note from its chat so it knows.`);}finally{b.disabled=false;b.textContent='Give';}});return;}
-      if(b.dataset.vault==='forget')action(async()=>{if(!await ask(`Forget ${k.name} (${k.mask})?\n\nOpaya removes it from its vault. Agents it was saved for keep their copy.`))return;await api.opayaForgetSecret({id:k.id});await refresh();openVault({chat});toast(`${k.name} forgotten.`);});
+    const row=k=>{const has=keyHolders(k),open=vault.open===k.id,who=[...has].map(id=>state.agents.find(a=>a.id===id));
+      return `<article class="vk ${open?'open':''} ${vault.fresh.has(k.name)?'fresh':''}" data-secret="${esc(k.id)}">
+        <span class="vk-icon">${KEY_SVG}</span>
+        <div class="vk-main"><div class="vk-title"><strong>${esc(k.name)}</strong><code>${esc(k.mask)}</code>${k.global?'<em class="vault-badge" title="Given to every agent that reads keys">all agents</em>':''}</div>
+          <div class="vk-who">${who.length?`<span class="vk-avatars">${who.map(a=>`<span title="${esc(title(a))} has it">${badge(a)}</span>`).join('')}</span><small>${esc(who.map(a=>title(a)).join(', '))}</small>`:'<small>Not given to any agent yet</small>'}${k.endpoint?`<small class="vk-endpoint">Endpoint ${esc(k.endpoint)}</small>`:''}</div></div>
+        <div class="vk-actions">${vault.chat?'<button type="button" class="secondary small" data-vault="insert" title="Put its reference into your message to the Opaya Agent">Insert</button>':''}${targets.length?`<button type="button" class="secondary small" data-vault="give-open" aria-expanded="${open}">Give to&#8230;</button>`:''}<button type="button" class="icon-button vk-forget" data-vault="forget" title="Forget ${esc(k.name)}" aria-label="Forget ${esc(k.name)}">&#10005;</button></div>
+        ${open?`<div class="vk-give" role="group" aria-label="Give ${esc(k.name)} to"><p>Opaya writes it where each agent reads keys and tells it the name, never the value.</p><div class="vk-agents">${targets.map(a=>{const h=has.has(a.id);return `<button type="button" class="vk-agent ${h?'has':''}" data-vault="give" data-agent="${esc(a.id)}" title="${esc(h?`${title(a)} has it. Click to save it again.`:`Give ${k.name} to ${title(a)}`)}">${badge(a)}<span><strong>${esc(title(a))}</strong><small>${h?'&#10003; Has it':esc(placeText(a))}</small></span></button>`;}).join('')}<button type="button" class="vk-agent all" data-vault="all" title="Write it into every agent that reads keys"><span class="vk-all-icon" aria-hidden="true">&#8734;</span><span><strong>Every agent</strong><small>Now and each that reads keys</small></span></button></div></div>`:''}
+      </article>`;};
+    const empty=!held.length&&!vault.panel?`<div class="vault-empty"><span class="vault-empty-icon">${KEY_SVG}</span><h3>The vault is empty</h3><p>Add a key, or import the ones you already have: from a .env or any text file, or from the tools and agents on this computer.</p><div><button type="button" class="primary" data-vault="panel" data-panel="import">Import keys</button><button type="button" class="secondary" data-vault="panel" data-panel="add">+ Add a key</button></div></div>`:'';
+    box.innerHTML=`<div class="vault-bar"><div class="vault-sum"><strong>${held.length}</strong> key${held.length===1?'':'s'} <span>${state.secureStorage===false?'kept in memory until Opaya closes (no OS encryption here)':'encrypted by your OS'}</span></div>${held.length>5?`<input type="search" class="vault-filter" data-vault-filter placeholder="Filter keys" aria-label="Filter keys" value="${esc(vault.filter)}">`:''}<button type="button" class="secondary small ${vault.panel==='import'?'active':''}" data-vault="panel" data-panel="import" aria-expanded="${vault.panel==='import'}">&#8615; Import</button><button type="button" class="secondary small ${vault.panel==='add'?'active':''}" data-vault="panel" data-panel="add" aria-expanded="${vault.panel==='add'}">+ Add key</button></div>
+      ${vault.panel==='add'?vaultAddForm(targets):vault.panel==='import'?vaultImportPanel():''}
+      ${empty}${held.length?`<section class="vault-keys" aria-label="Keys">${shown.map(row).join('')||'<p class="field-help">No key matches.</p>'}</section>`:''}
+      ${tokens.length?`<section class="vault-tokens"><h3>Connection tokens <small>${tokens.length}</small></h3><p class="field-help">The token Opaya sends to each API connection. Change it in the agent's connection settings.</p>${tokens.map(a=>`<div class="vk token">${badge(a)}<div class="vk-main"><strong>${esc(title(a))}</strong><small>${esc(a.endpoint||'its API')}</small></div><div class="vk-actions"><button type="button" class="secondary small" data-action="edit" data-id="${esc(a.id)}">Change</button></div></div>`).join('')}</section>`:''}
+      <p class="vault-drop-hint" aria-hidden="true">Drop a file to find keys in it</p>`;
+    if(vault.panel==='add'){const f=$('#vault-form');bindEndpoint(f);}
+    // New keys glow once, not on every redraw.
+    if(vault.fresh.size){const was=vault.fresh;setTimeout(()=>{if(vault.fresh===was)vault.fresh=new Set();},2600);}
+  }
+  function vaultAddForm(targets){
+    const pick=vault.giveTo;
+    return `<form id="vault-form" class="vault-panel vault-add"><h3>Add a key</h3><div class="form-grid"><label class="field"><span>Name <em>optional, guessed when empty</em></span><input name="name" maxlength="80" autocomplete="off" spellcheck="false" placeholder="OPENROUTER_API_KEY"></label><label class="field"><span>Key, token or password</span><input name="value" type="password" autocomplete="off" spellcheck="false" maxlength="12000" required></label></div>${endpointFields()}
+      <div class="vault-give-to"><span>Then</span><div class="segmented transfer-mode" role="radiogroup" aria-label="After saving">${[['keep','Keep it in the Vault'],['some','Give to agents'],['all','Give to every agent']].map(([v,l])=>`<label class="${pick===v?'selected':''}"><input type="radio" name="giveTo" value="${v}" ${pick===v?'checked':''}>${l}</label>`).join('')}</div></div>
+      ${pick==='some'?`<div class="vk-agents pick">${targets.map(a=>`<label class="vk-agent"><input type="checkbox" name="agent" value="${esc(a.id)}">${badge(a)}<span><strong>${esc(title(a))}</strong><small>${esc(placeText(a))}</small></span></label>`).join('')}</div>`:''}
+      ${pick==='all'?'<p class="field-help">Opaya writes it into each agent that reads keys (Hermes, OpenClaw, DeepSeek Harness, Claude Code, Codex) and tells the connected ones.</p>':''}
+      <div class="vault-add-foot"><button type="button" class="secondary" data-vault="panel" data-panel="">Cancel</button><button type="submit" class="primary">${vault.chat?'Save and insert':'Save key'}</button></div></form>`;
+  }
+  function vaultImportPanel(){
+    const s=vault.scan;
+    if(s?.loading)return `<section class="vault-panel vault-import"><p class="vi-loading"><span class="status-dot working"></span> ${esc(s.loading)}</p></section>`;
+    if(!s)return `<section class="vault-panel vault-import"><h3>Import keys</h3><p class="field-help">Opaya looks for keys and you choose which to keep. Values stay with Opaya and are never shown.</p>
+      <div class="vi-ways"><button type="button" class="vi-way" data-vault="import-file"><span class="vi-icon file" aria-hidden="true"></span><strong>From a file</strong><small>A .env, JSON, YAML or any text file. You can also drop it here.</small></button>
+      <button type="button" class="vi-way" data-vault="import-tools"><span class="vi-icon tools" aria-hidden="true"></span><strong>From my tools</strong><small>Your agents' key files, shell profiles, environment, GitHub CLI, npm, AWS and Hugging Face.</small></button>
+      <button type="button" class="vi-way ${vault.paste?'active':''}" data-vault="import-paste"><span class="vi-icon paste" aria-hidden="true"></span><strong>Paste text</strong><small>The contents of a .env, or a note with keys in it.</small></button></div>
+      ${vault.paste?`<form class="vi-paste" data-vault-form="paste"><textarea name="text" rows="5" spellcheck="false" autocomplete="off" placeholder="OPENAI_API_KEY=sk-...&#10;GITHUB_TOKEN=ghp_..." aria-label="Text with keys" required></textarea><div class="vault-add-foot"><button type="submit" class="primary small">Find keys</button></div></form>`:''}</section>`;
+    const items=s.sources.flatMap(x=>x.items),picked=items.filter(i=>s.picked.has(i.key)).length,places=s.sources.filter(x=>x.items.length).length;
+    const item=i=>{const dup=i.inVault||i.also;return `<label class="vi-item ${dup?'dup':''}"><input type="checkbox" data-vi-key="${esc(i.key)}" ${s.picked.has(i.key)?'checked':''} ${i.inVault?'disabled':''}><input class="vi-name" data-vi-name="${esc(i.key)}" value="${esc(s.names.get(i.key)??i.name)}" maxlength="80" spellcheck="false" aria-label="Name for ${esc(i.mask)}"><code>${esc(i.mask)}</code>${i.inVault?`<em>in the Vault as ${esc(i.inVault)}</em>`:i.also?`<em>same key as in ${esc(i.also)}</em>`:''}</label>`;};
+    return `<section class="vault-panel vault-import"><header class="vi-head"><h3>${items.length?`Found ${plural(items.length,'key')}${places>1?` in ${places} places`:''}`:'No keys found'}</h3>${items.length?'<div><button type="button" class="text-button" data-vault="pick-all">Select all</button><button type="button" class="text-button" data-vault="pick-none">None</button></div>':''}</header>
+      ${s.sources.map(x=>`<div class="vi-group"><div class="vi-src">${x.agentId&&state.agents.find(a=>a.id===x.agentId)?badge(state.agents.find(a=>a.id===x.agentId)):'<span class="vi-icon file small" aria-hidden="true"></span>'}<strong>${esc(x.label)}</strong>${x.path?`<small title="${esc(x.path)}">${esc(x.path)}</small>`:''}</div>${x.error?`<p class="vi-err">Could not read it: ${esc(x.error)}</p>`:x.items.length?x.items.map(item).join(''):'<p class="field-help">No keys in it.</p>'}</div>`).join('')}
+      ${!items.length?`<p class="field-help">Opaya looks for NAME=value lines with names like API_KEY, TOKEN, SECRET or PASSWORD, and for known key formats (sk-..., ghp_..., AIza...).</p>`:''}
+      <div class="vault-add-foot"><button type="button" class="secondary" data-vault="import-back">Back</button>${items.length?`<button type="button" class="primary" data-vault="import-commit" ${picked?'':'disabled'}>Import ${plural(picked,'key')}</button>`:''}</div></section>`;
+  }
+  async function vaultScan(input,loading){
+    vault.panel='import';vault.scan={loading};drawVault();
+    try{const r=await api.vaultImportScan(input);if(vault.scan?.loading!==loading)return;
+      const items=r.sources.flatMap(x=>x.items);vault.scan={...r,picked:new Set(items.filter(i=>!i.inVault&&!i.also).map(i=>i.key)),names:new Map()};}
+    catch(error){vault.scan=null;toast(error.message,true);}
+    drawVault();
+  }
+  function vaultInput(event){
+    const t=event.target;
+    if(t.matches('[data-vault-filter]')){vault.filter=t.value;const at=t.selectionStart;drawVault();const f=$('[data-vault-filter]');if(f){f.focus();f.setSelectionRange(at,at);}return;}
+    if(t.matches('[data-vi-key]')&&event.type==='change'){t.checked?vault.scan.picked.add(t.dataset.viKey):vault.scan.picked.delete(t.dataset.viKey);const b=$('[data-vault="import-commit"]');if(b){const n=vault.scan.picked.size;b.disabled=!n;b.textContent=`Import ${plural(n,'key')}`;}return;}
+    if(t.matches('[data-vi-name]')){vault.scan.names.set(t.dataset.viName,t.value);return;}
+    if(t.name==='giveTo'&&event.type==='change'){const f=$('#vault-form'),keep={name:f.elements.name.value,value:f.elements.value.value,endpoint:f.elements.endpoint?.value,hasEndpoint:f.elements.hasEndpoint?.checked};vault.giveTo=t.value;drawVault();const g=$('#vault-form');g.elements.name.value=keep.name;g.elements.value.value=keep.value;if(keep.hasEndpoint){g.elements.hasEndpoint.checked=true;g.elements.hasEndpoint.dispatchEvent(new Event('change'));g.elements.endpoint.value=keep.endpoint||'';}}
+  }
+  function vaultSubmit(event){
+    const f=event.target;event.preventDefault();
+    if(f.dataset.vaultForm==='paste'){const text=f.elements.text.value;f.elements.text.value='';if(text.trim())vaultScan({text},'Looking for keys in the text...');return;}
+    if(f.id!=='vault-form')return;
+    const value=f.elements.value.value,name=f.elements.name.value.trim(),endpoint=endpointOf(f),giveTo=vault.giveTo,agents=[...f.querySelectorAll('[name="agent"]:checked')].map(i=>i.value);
+    if(giveTo==='some'&&!agents.length){toast('Choose the agents, or keep it in the Vault.',true);return;}
+    f.elements.value.value='';const submit=f.querySelector('[type="submit"]');submit.disabled=true;
+    action(async()=>{
+      let r;try{r=await api.opayaHoldSecret({name,value,endpoint});}catch(error){submit.disabled=false;throw error;}
+      await refresh();
+      if(vault.chat){closeModal();vaultInsert(r.reference);if(giveTo==='all')await giveAll(r.id);else toast(`${r.name} is in the Opaya Vault; its reference is in your message.`);return;}
+      vault.panel='';vault.fresh=new Set([r.name]);
+      if(giveTo==='all'){await giveAll(r.id,{back:true});return;}
+      const done=[];for(const id of agents){try{const g=await api.vaultGiveAgent({id:r.id,agentId:id});done.push(g.agent);}catch(error){toast(`${title(state.agents.find(a=>a.id===id)||{name:'Agent'})}: ${error.message}`,true);}}
+      await refresh();drawVault();toast(done.length?`${r.name} saved for ${done.join(', ')}.`:`${r.name} is in the Opaya Vault.`);
     });
   }
+  const vaultInsert=ref=>{const input=$('#message-input');if(!input||input.disabled)return;const at=input.selectionStart??input.value.length,end=input.selectionEnd??at,before=input.value.slice(0,at);input.value=before+(before&&!/\s$/.test(before)?' ':'')+ref+' '+input.value.slice(end);input.dispatchEvent(new Event('input'));input.focus();};
+  function vaultClick(event){
+    const b=event.target.closest('[data-vault]');if(!b)return;const what=b.dataset.vault,rowEl=b.closest('[data-secret]'),k=rowEl&&vaultKeys().find(x=>x.id===rowEl.dataset.secret);
+    if(what==='panel'){const p=b.dataset.panel;vault.panel=vault.panel===p?'':p;if(vault.panel!=='import'){vault.scan=null;vault.paste=false;}drawVault();if(vault.panel==='add')$('#vault-form')?.elements.value.focus();return;}
+    if(what==='import-file'){api.pickSecretFile?.().then(file=>{if(file)vaultScan({file},`Reading ${file.split(/[\\/]/).pop()}...`);},error=>toast(error.message,true));return;}
+    if(what==='import-tools'){vaultScan({tools:true},'Looking at your agents and tools...');return;}
+    if(what==='import-paste'){vault.paste=!vault.paste;drawVault();$('.vi-paste textarea')?.focus();return;}
+    if(what==='import-back'){vault.scan=null;drawVault();return;}
+    if(what==='pick-all'||what==='pick-none'){for(const i of vault.scan.sources.flatMap(x=>x.items))if(!i.inVault){what==='pick-all'?vault.scan.picked.add(i.key):vault.scan.picked.delete(i.key);}drawVault();return;}
+    if(what==='import-commit'){const s=vault.scan,picks=[...s.picked].map(key=>({key,name:(s.names.get(key)??s.sources.flatMap(x=>x.items).find(i=>i.key===key)?.name??'').trim()}));b.disabled=true;b.textContent='Importing...';
+      action(async()=>{let r;try{r=await api.vaultImportCommit({id:s.id,picks});}catch(error){b.disabled=false;b.textContent='Import';throw error;}
+        await refresh();vault.scan=null;vault.panel='';vault.fresh=new Set(r.imported.map(x=>x.name));drawVault();
+        toast(r.imported.length?`Imported ${plural(r.imported.length,'key')}${r.skipped.length?`; ${r.skipped.length} skipped (${r.skipped.map(x=>`${x.name}: ${x.why}`).join(', ')})`:''}. Give them to your agents with Give to.`:`Nothing imported: ${r.skipped.map(x=>`${x.name}: ${x.why}`).join(', ')||'no keys chosen'}.`,!r.imported.length);});return;}
+    if(!k)return;
+    if(what==='insert'){closeModal();vaultInsert(k.reference);return;}
+    if(what==='give-open'){vault.open=vault.open===k.id?'':k.id;drawVault();return;}
+    if(what==='all'){action(()=>giveAll(k.id,{back:true}));return;}
+    if(what==='give'){const agentId=b.dataset.agent;b.disabled=true;b.classList.add('busy');
+      action(async()=>{try{const r=await api.vaultGiveAgent({id:k.id,agentId});await refresh();drawVault();toast(`${r.name} saved for ${r.agent}${r.file?` in ${r.file}`:''}. Send the note from its chat so it knows.`);}finally{b.disabled=false;b.classList.remove('busy');}});return;}
+    if(what==='forget')action(async()=>{if(!await ask(`Forget ${k.name} (${k.mask})?\n\nOpaya removes it from its vault. Agents it was saved for keep their copy.`))return;await api.opayaForgetSecret({id:k.id});await refresh();drawVault();toast(`${k.name} forgotten.`);});
+  }
   // A global key: Opaya writes it for every agent it can and shows where it went and what was skipped.
-  async function giveAll(id){
+  async function giveAll(id,{back=false}={}){
     toast('Giving the key to every agent...');
     const r=await api.opayaGiveAll({id});
     const list=(items,fn)=>items.map(x=>`<div class="secret-row"><span><strong>${esc(x.agent)}</strong> <small>${esc(fn(x))}</small></span></div>`).join('');
-    modal(`${r.name} is global`,`${r.stored.length} agent${r.stored.length===1?'':'s'} got it${r.told?`, ${r.told} connected agent${r.told===1?' was':'s were'} told in its chat`:''}. Agents that were not connected learn about it when you send the note from their chat (key button) or when they read their env.`,`<div class="secret-list">${r.stored.length?`<p class="field-help">Saved</p>${list(r.stored,x=>`${x.file||''} ${x.where}`.trim())}`:''}${r.skipped.length?`<p class="field-help">Skipped</p>${list(r.skipped,x=>x.reason)}`:''}</div><div class="modal-footer"><span>The value never went into a chat or a command line.</span><button type="button" class="primary" data-action="modal-close">Done</button></div>`);
+    modal(`${r.name} is global`,`${r.stored.length} agent${r.stored.length===1?'':'s'} got it${r.told?`, ${r.told} connected agent${r.told===1?' was':'s were'} told in its chat`:''}. Agents that were not connected learn about it when you send the note from their chat (key button) or when they read their env.`,`<div class="secret-list">${r.stored.length?`<p class="field-help">Saved</p>${list(r.stored,x=>`${x.file||''} ${x.where}`.trim())}`:''}${r.skipped.length?`<p class="field-help">Skipped</p>${list(r.skipped,x=>x.reason)}`:''}</div><div class="modal-footer"><span>The value never went into a chat or a command line.</span>${back?'<button type="button" class="primary" data-action="vault">Back to the Vault</button>':'<button type="button" class="primary" data-action="modal-close">Done</button>'}</div>`);
   }
   // The key button in an agent's chat: Opaya saves the key where this agent reads keys (its .env, Claude Code's
   // settings, Codex's login, or its API token) and then tells the agent in the chat what was added and where. The value
@@ -3360,14 +3455,13 @@
   api.jobs?.().then(list=>{for(const j of list||[]){jobs.set(j.id,j);if(j.status==='running'){jobShown=j.id;jobMinimized=true;}}renderJobs();}).catch(()=>{});
   setInterval(()=>{if([...jobs.values()].some(j=>j.status==='running'))renderJobs();},1000);
   // ---- Transfer between agents and the global skills library -----------------------------------------------------
-  const plural=(n,w)=>`${n} ${w}${n===1?'':'s'}`;
   const pickList=(name,items,checked=false)=>`<div class="pick-list">${items.map(i=>`<label class="pick-item"><input type="checkbox" name="${name}" value="${esc(i.value)}" ${checked?'checked':''}><span><strong>${esc(i.label)}</strong>${i.help?`<small>${esc(i.help)}</small>`:''}</span></label>`).join('')}</div>`;
   const modeRow=(name,value,extra='')=>`<div class="segmented transfer-mode" role="radiogroup">${[['none','None'],['all','All'],['some','Selected']].map(([v,l])=>`<label class="${value===v?'selected':''}"><input type="radio" name="${name}" value="${v}" ${value===v?'checked':''} ${extra}>${l}</label>`).join('')}</div>`;
   function openTransfer(a,preset={}){
     const others=state.agents.filter(x=>x.id!==a.id);if(!others.length){toast('Add another agent first.');return;}
     const mcps=(state.mcpServers||[]).filter(s=>usesMcp(s,a));
     modal(`Share from ${title(a)}`,'Copy skills, API keys and tools to another agent. Nothing is removed from this one.',`<form id="transfer-form" class="mcp-form">
-      <label>Agent that receives them<select name="targetId">${others.map(x=>`<option value="${esc(x.id)}" ${preset.targetId===x.id?'selected':''}>${esc(title(x))} / ${esc(labels[x.provider]||x.provider)} / ${esc(location(x))}</option>`).join('')}</select></label>
+      <fieldset class="transfer-part transfer-to"><legend>To</legend><div class="vk-agents pick">${others.map((x,i)=>`<label class="vk-agent"><input type="radio" name="targetId" value="${esc(x.id)}" ${(preset.targetId?preset.targetId===x.id:i===0)?'checked':''}>${badge(x)}<span><strong>${esc(title(x))}</strong><small>${esc([labels[x.provider]&&!title(x).toLowerCase().includes(String(labels[x.provider]).toLowerCase())?labels[x.provider]:'',location(x)].filter(Boolean).join(' / '))}</small></span></label>`).join('')}</div></fieldset>
       <fieldset class="transfer-part"><legend>Skills <small id="transfer-skill-count"></small></legend>${modeRow('skillsMode',preset.skills||'all')}<div id="transfer-skills"><p class="field-help">Loading skills...</p></div></fieldset>
       <fieldset class="transfer-part" id="transfer-keys-part"><legend>API keys <small>names only, values are never shown</small></legend><div id="transfer-keys"></div></fieldset>
       <fieldset class="transfer-part"><legend>Tools &amp; MCP servers</legend>${mcps.length?pickList('mcp',mcps.map(s=>({value:s.id,label:s.name,help:s.type==='stdio'?s.command:s.url})),true):`<p class="field-help">${esc(title(a))} uses no Opaya MCP servers. <button type="button" class="text-button" data-action="mcp-manage">Manage MCP servers</button></p>`}<p class="field-help" id="transfer-mcp-note"></p></fieldset>

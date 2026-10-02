@@ -159,6 +159,11 @@ if(hostMode){
       handlers.send=async input=>{const attachments=require('./attachments.cjs'),staged=await attachments.stage(input,app.getPath('userData'));try{return await client.call('send',staged.input);}catch(error){await attachments.unstage(staged.files);throw error;}};
       for(const method of ['agentModels','selectModel','gateway'])handlers[method]=input=>client.call(method,input);
       for(const method of ['opayaHoldSecret','opayaForgetSecret','agentGiveSecret','opayaGiveAll','vaultGiveAgent','agentKeys','agentWeb'])handlers[method]=input=>client.call(method,input);
+      // Vault import: reading agents on other machines can take a while. The file comes from Opaya's own picker (hidden
+      // files shown, since .env files are hidden) or a file dropped on the Vault.
+      handlers.vaultImportScan=input=>client.call('vaultImportScan',input,2*60*1000);
+      handlers.vaultImportCommit=input=>client.call('vaultImportCommit',input);
+      handlers.pickSecretFile=async()=>{const result=await dialog.showOpenDialog(win,{title:'Import keys from a file',buttonLabel:'Scan',properties:['openFile','showHiddenFiles']});return result.canceled?'':result.filePaths[0]||'';};
       // Copying an agent to a VPS can take minutes.
       for(const method of ['cloneAgent','redeployAgent'])handlers[method]=input=>client.call(method,input,20*60*1000);
       // These wait for the user's approval, which can take up to ten minutes.

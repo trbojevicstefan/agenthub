@@ -31,6 +31,8 @@ const {place,sourceHome,isLocal}=require('./clone.cjs');
 const {codexEnv,SHELL_ENV}=require('./adapters/codex.cjs');
 const dockerManager=require('./docker-manager.cjs');
 const transfer=require('./transfer.cjs');
+const vaultImport=require('./vault-import.cjs');
+const MAX_IMPORT_TEXT=1048576;
 
 const PRESETS={
   codex:{label:'Codex CLI (this computer)',kind:'codex',baseUrl:'',model:'',models:[]},
@@ -117,8 +119,8 @@ const APP_GUIDE=`Opaya app guide (tell the user where things are; you cannot cli
 - Settings: theme (dark or light), iTrust, Updates, Skills library, MCP servers. Updates: Opaya checks GitHub releases, downloads with checksum verification and installs in place (Update in the status bar, then Install and restart).
 - Connection log (right-click an agent): protocol messages, stderr, running tools, pending approvals and Hermes log tail; your agent_diagnostics tool reads the same.
 - Your chats: New chat and earlier chats at the top of your panel; Model settings chooses your model and API key.
-- Secrets: keys pasted into your chat and those typed in Opaya's secure prompt stay in Opaya's encrypted vault; you only see references such as [secret S1 · NAME · mask]. A key given to Opaya with "Give it to every agent" is written into every agent that reads keys; API connections keep their own token.
-- Opaya Vault (Vault in the sidebar, Settings, Machines, the key button next to your message box, or the key button in any agent's chat): every key the user keeps in Opaya, encrypted. Add a key (name and key; tick "This API needs an endpoint" to add a base URL, saved as NAME_BASE_URL), give it to one agent, to all agents, or forget it. The key button next to your message box opens the Vault with Insert, which puts a key's reference into the message to you. Keys pasted as text into your chat are temporary. Your vault tool does the same: list, give, give_all, forget.
+- Secrets: keys pasted into your chat and those typed in Opaya's secure prompt stay in Opaya's encrypted vault; you only see references such as [secret S1 · NAME · mask]. A key given with "Give to every agent" is written into every agent that reads keys; API connections keep their own token.
+- Opaya Vault (Vault in the sidebar, Settings, Machines, the key button next to your message box, or the key button in any agent's chat): every key the user keeps in Opaya, encrypted, each with the agents that have it. + Add key (name and key; tick "This API needs an endpoint" to add a base URL, saved as NAME_BASE_URL; then keep it, give it to chosen agents or to every agent). Import finds keys in a file (a .env, JSON, YAML or any text file; a file can also be dropped on the Vault), in pasted text, or in the tools on this computer (the agents' own key files, shell profiles, Opaya's environment, GitHub CLI, npm, AWS, Hugging Face); the user ticks which to keep and can rename them, and keys already in the Vault are marked. Only the user can import (you cannot). Give to on a key opens the agents (those with it show Has it) and Every agent; the x forgets it. The key button next to your message box opens the Vault with Insert, which puts a key's reference into the message to you. Keys pasted as text into your chat are temporary. Your vault tool does the same: list, give, give_all, forget.
 - Keys in an agent's chat: the key button lists the keys that agent has (names only, read from the file it reads keys from), Insert puts $NAME into the message, Give hands it a vault key, New key gives it one only it gets. Codex and ACP agents restart when idle so a new key is in their environment; Claude Code has it from its next message. Local Claude Code, Codex and ACP agents also have vault_list and vault_use to ask for a key themselves.
 - DeepSeek Harness (dsh, developer preview): installed with npm (@deepseek-ai/dsh, Node.js 22.19+) on this computer, a machine or in a Docker container; Opaya chats with it over ACP (dsh --profile acp) and its Web UI button (above its chat) starts dsh web where it runs and opens it in the Opaya browser (through an SSH tunnel for a machine). Keys: it looks in the environment it was started with first, then ~/.dsh/.credentials.yaml (its Web UI saves there), then .env in its working folder, then ~/.dsh/.env. Opaya writes a key given to it into both ~/.dsh/.credentials.yaml and ~/.dsh/.env, and starts dsh on this computer without a same-named variable from the environment, so Opaya's key wins. "Authentication Fails ... api key is invalid" means the key it found is wrong: ask the user for the right DEEPSEEK_API_KEY (request_secret, or vault op=give) and store_secret it; its account at platform.deepseek.com needs balance too. Other providers and models are set in its Web UI. It has no terminal chat yet (profiles: acp, web, headless), so its CLI button opens a shell where dsh headless "task" runs one task. Its data is ~/.dsh.
 - Docker manager (Docker on a machine card in Machines): containers with state, image and ports, start, stop, restart, remove, logs and a shell, and images. Your docker tool does the same on any machine. Discover also finds OpenClaw gateways running in Docker (the published port of 18789) on this computer and machines.
@@ -296,7 +298,7 @@ class OpayaAgent{
     const shown=this.messages.filter(m=>m.role==='user'||m.summary).slice(-80).map(({id,role,content,activity,createdAt,error})=>({id,role,content:content||'',activity:activity||[],createdAt,error}));
     return {configured:this.configured(),config:this.config,hasKey:!this.cli()&&this.vault.has(KEY),presets:PRESETS,busy:this.busy,status:this.status,error:this.error,messages:shown,live:this.liveReply?{...this.liveReply}:null,home:this.home,sessionId:this.sessionId,sessions:(this.sessions||[]).slice().reverse().map(({id,title,updatedAt})=>({id,title,updatedAt})),
       // Held secrets: names and masks only, newest first; current marks this chat's.
-      secrets:this.secrets.slice().reverse().map(s=>({id:s.id,name:s.name,mask:s.mask,global:!!s.global,kept:!!s.kept,endpoint:s.endpoint||'',reference:secrets.reference(s),current:s.session===this.sessionId,createdAt:s.createdAt,stored:s.stored.map(({agentName,name,at})=>({agent:agentName,name,at}))}))};
+      secrets:this.secrets.slice().reverse().map(s=>({id:s.id,name:s.name,mask:s.mask,global:!!s.global,kept:!!s.kept,endpoint:s.endpoint||'',reference:secrets.reference(s),current:s.session===this.sessionId,createdAt:s.createdAt,stored:s.stored.map(({agentId,agentName,name,at})=>({agentId,agent:agentName,name,at}))}))};
   }
   async saveConfig({preset='custom',baseUrl,model,apiKey,remember=true}){
     if(!Object.hasOwn(PRESETS,preset))throw new Error('Unknown model provider.');
@@ -791,6 +793,37 @@ class OpayaAgent{
     if(op==='give_all'){await this.ask(`Give ${s.name} to every agent?`,`${secrets.reference(s)}\n\nOpaya writes it into every agent that reads keys, on every machine and in containers, and tells the connected ones.`);return this.giveToAll({id:s.id});}
     if(op==='forget'){await this.ask(`Forget ${s.name}?`,'Opaya removes it from its vault. Agents it was saved for keep their copy.',{always:true});await this.forgetSecret(s.id);return {forgotten:s.name};}
     throw new Error('Unknown vault op.');
+  }
+  // ---- Import into the vault: a file, pasted text or the tools on this computer ------------------------------------
+  // A scan keeps the values here for 15 minutes under a random id and returns names, masks and sources; the user picks,
+  // and the picked ones are held like keys added in the Vault (kept until forgotten). A value the vault already holds is
+  // marked and never held twice.
+  async vaultImportScan({file,text,tools}={}){
+    let sources;
+    if(file){const f=String(file);sources=[{id:'file',label:path.basename(f),path:f,items:vaultImport.scanText(await vaultImport.readTextFile(f))}];}
+    else if(typeof text==='string'){if(text.length>MAX_IMPORT_TEXT)throw new Error('Paste up to 1 MB of text.');sources=[{id:'text',label:'Pasted text',path:'',items:vaultImport.scanText(text,{long:true})}];}
+    else if(tools){const b=this.broker;sources=await vaultImport.scanTools({agents:b.data.agents,hostOf:a=>a.transport==='ssh'?b.host(a.hostId):null,readKeys:transfer.readKeys,vault:b.vault,home:this.userHome||undefined,env:this.userHome?{}:process.env});}
+    else throw new Error('Choose a file, paste text or scan your tools.');
+    const held=new Map();for(const s of this.secrets){const v=this.secretValue(s,true);if(v)held.set(v,s);}
+    // The same value in two places (a shell profile and an agent's .env) is one key: later places point to the first.
+    const values=new Map(),first=new Map();let n=0;
+    const out=sources.map(src=>({id:src.id,label:src.label,path:src.path,agentId:src.agentId,error:src.error,items:src.items.map(x=>{const key=`i${++n}`;values.set(key,x.value);const h=held.get(x.value),also=first.get(x.value)||'';if(!also)first.set(x.value,src.label);return {key,name:x.name,mask:secrets.mask(x.value),inVault:h?.kept||h?.global?h.name:'',also};})}));
+    const id=randomUUID();this.imports??=new Map();for(const [k,v] of this.imports)if(Date.now()-v.at>15*60*1000)this.imports.delete(k);
+    while(this.imports.size>=5)this.imports.delete(this.imports.keys().next().value);
+    this.imports.set(id,{at:Date.now(),values});
+    return {id,sources:out,count:n};
+  }
+  async vaultImportCommit({id,picks}={}){
+    const scan=this.imports?.get(String(id||''));if(!scan||Date.now()-scan.at>15*60*1000)throw new Error('This scan has expired. Scan again.');
+    if(!Array.isArray(picks)||!picks.length)throw new Error('Choose the keys to import.');
+    const imported=[],skipped=[],seen=new Set();
+    for(const p of picks.slice(0,500)){
+      const value=scan.values.get(String(p?.key||''));if(!value||seen.has(value))continue;seen.add(value);
+      const known=this.secrets.find(s=>(s.kept||s.global)&&this.secretValue(s,true)===value);if(known){skipped.push({name:known.name,why:'already in the Vault'});continue;}
+      try{const r=await this.holdFromUser({name:p.name,value});imported.push({id:r.id,name:r.name,mask:r.mask});}catch(error){skipped.push({name:String(p.name||''),why:String(error?.message||error).slice(0,160)});}
+    }
+    this.imports.delete(String(id));this.emit();
+    return {imported,skipped};
   }
   // A key already in the Opaya Vault, given to one agent.
   async giveHeldToAgent({id,agentId}={}){
