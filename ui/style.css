@@ -2602,3 +2602,28 @@ body[data-theme="light"] .dk-image-use{color:#1f7a45}
 body[data-theme="light"] .dk-count{background:#eef2ef;color:#5b6b63}
 body[data-theme="light"] .dk-count b{color:#13201b}
 body[data-theme="light"] .dk-state{background:#eef1f2;color:#5b6b70}
+/* 0.26: Home controls with one icon set. */
+.ws-control{gap:10px}
+.ws-ico{width:26px;height:26px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;background:#1d2427;border:1px solid #2c3437;color:#9fe0b9;flex-shrink:0}
+.ws-ico svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.ws-control:hover:not(:disabled) .ws-ico{border-color:#4f6a5c;background:#20302a}
+.ws-label{flex:1;min-width:0}
+body[data-theme="light"] .ws-ico{background:#f1f6f3;border-color:#dbe4de;color:#1f7a45}
+button.fleet-docker{height:26px;padding:0 9px;border-radius:7px;border:1px solid transparent;background:transparent}
+button.fleet-docker:hover{border-color:#2f4a63;background:#14212d;color:#d8ecff}
+.fleet-tools-empty{flex:1;min-width:180px}
+.theme-option:not(:has(>span)){grid-template-columns:1fr;gap:3px;align-content:center}
+/* 0.26: Help opens with a map of where everything is. */
+.help-map{margin-bottom:22px}
+.help-map h3{font-size:14px;margin-bottom:10px}
+.help-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px}
+.help-tile{display:flex;gap:11px;padding:12px;border-radius:12px;background:#1a2022;border:1px solid #2b3335}
+.help-tile-ico{width:30px;height:30px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;background:#20302a;color:#9fe0b9;flex-shrink:0}
+.help-tile-ico svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.help-tile strong{font-size:12.5px;display:block}
+.help-where{display:block;font-size:10.5px;color:#7fd8a4;margin:1px 0 4px}
+.help-tile p{font-size:11.5px;color:var(--muted);line-height:1.45;margin:0}
+.help-tile .text-button{font-size:11.5px;margin-top:4px}
+body[data-theme="light"] .help-tile{background:#fafbfa;border-color:#e0e6e2}
+body[data-theme="light"] .help-tile-ico{background:#e9f6ee;color:#1f7a45}
+body[data-theme="light"] .help-where{color:#1f7a45}

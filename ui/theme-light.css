@@ -983,3 +983,9 @@
 :where(body[data-theme="light"]) .dk-image-use{color:#15472b}
 :where(body[data-theme="light"]) .dk-empty{border:1px dashed #c5d0ce}
 :where(body[data-theme="light"]) .dk-empty-icon{background:#cbd7e6;color:#1d4365}
+:where(body[data-theme="light"]) .ws-ico{background:#d8dfe2;border:1px solid #ced5d7;color:#164529}
+:where(body[data-theme="light"]) .ws-control:hover:not(:disabled) .ws-ico{border-color:#a0b8ab;background:#cfdfd9}
+:where(body[data-theme="light"]) button.fleet-docker:hover{border-color:#a6bed4;background:#d3dfea;color:#060e16}
+:where(body[data-theme="light"]) .help-tile{background:#dde3e5;border:1px solid #cfd7d8}
+:where(body[data-theme="light"]) .help-tile-ico{background:#cfdfd9;color:#164529}
+:where(body[data-theme="light"]) .help-where{color:#1c5c37}
