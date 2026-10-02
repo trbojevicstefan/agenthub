@@ -1,13 +1,17 @@
-# Opaya 0.24.0 - Manage like a strategy game
+# Opaya 0.24.0 - every agent gets its own sidebar
 
-- **Manage works like a strategy game's city screen.** Everything about the agent is visible at once, and every setting is at most three steps away.
-  - **Overview**: four ledgers around the agent's 3D map. **Agent** (model, reasoning, skills, name, status), **Access** (its API keys by name, MCP servers, gateway, iTrust, browser), **Machine** (where it runs, system, data folder, container, Docker), **Work** (latest chat, projects with changes to push, version, how it is installed, last backup). Click any row to change it, or a ledger's title to open that area. The map's labels open their area too; the orbit holds still under the pointer.
-  - **Panel at the bottom**, always in view: the agent's portrait (drop a key on it, or drag it onto a machine to clone), bars for Link, Keys, Backup and Version, a queue of running clones, backups, uninstalls and redeploys, and a command card.
-  - **Command card, from general to specific**: everyday commands (Connect, Chat, Console, Update, Clone, Back up) and six areas: **Agent** (Model, Reasoning, Skills, then **Identity** and **Connection** sub-menus), **Machine** (Files, CLI, Shell, Machines, then **Deploy** and **Docker** sub-menus), **Access** (keys, Vault, Skills, MCP, Share, iTrust, Browser, Gateway), **Work** (chat window, new chat, history, projects), **Care** (update, back up, backups folder, check & fix, reconnect, log) and **Danger** (uninstall, remove). Each area shows how many commands it holds; a breadcrumb shows where you are.
-  - Every command has a key (Q W E R, A S D F, Z X C V) and Esc goes up one level. A command shows a ring while it runs.
-  - Each area opens its own view above the panel: the agent's Brain, Identity and Connection; the machine, its Docker and where it can be deployed; keys and access; projects and chats; health and backups; or what uninstalling and removing do.
-- The 3D scene is quieter: fewer particles.
-- **Chat | Console | Manage** at the top are plain tabs. The agent switcher and the Manage ▾ menu are gone: pick agents in the sidebar and machines under **Machines**.
+- **A second sidebar for the agent you select.** Next to your agents, the agent's own sidebar lists, from general to specific:
+  - its name and status, with a power button to connect or disconnect;
+  - **Chat**, **Console** and **Overview**;
+  - its recent **chats**, with **+** for a new chat and **Search chats**;
+  - its **Manage** sections: Model & skills, Keys & tools, Machine & Docker, Deploy & clone, Projects, Updates & backups, Profile & connection and Danger zone. A dot marks a section that needs a look (no API keys, an old backup, a connection error, a job running).
+  - In a narrow window it becomes a row of icons.
+- **Overview**: the agent with its 3D stage, status, Connect, Chat, Console, Update and Back up, the clones and backups running for it, and one card per section with its main facts. Click a card to open its section, or a label on the stage.
+- **Each section is a calm list of settings**: what it is, its value and one action, grouped in cards. Each action lives in exactly one section, with one name: **Share with another agent** (was Transfer or Share), **Reconnect** (was Restart connection), **Restart container** and **Container logs**, **API keys**, **Connection settings**.
+- On the Manage screens a letter opens a section (Q W E R A S D F, shown in the sidebar) and Esc goes back to the Overview.
+- The top bar shows the agent and the page; Chat, Console and Manage moved into the agent's sidebar. The Manage ▾ menu is gone: machines are under **Machines**.
+- History no longer opens by itself next to the chat: the agent's chats are in its sidebar, and **Search chats** opens History.
+- The 3D stage is quieter: fewer particles. Its orbit holds still under the pointer.
 
 # Opaya 0.23.1 - chat first
 

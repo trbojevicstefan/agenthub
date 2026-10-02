@@ -25,11 +25,20 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 
 ## What you can do
 
-### Manage every agent (0.24)
-Selecting an agent opens its **chat**, with History on the right. **Manage** (below) and **Console** sit next to Chat at the top; Console opens the terminal next to or below the chat unless Settings > Chat and console says full screen.
-- **Like a strategy game:** Manage opens on an overview, four ledgers around the agent's 3D map: Agent (model, reasoning, skills, status), Access (API keys by name, MCP servers, gateway, iTrust, browser), Machine (where it runs, system, data, container, Docker) and Work (chats, projects, version, last backup). Click a row to change it. A panel at the bottom keeps the agent's portrait, its Link, Keys, Backup and Version bars, a queue of running jobs and a command card: everyday commands plus six areas from general to specific, Agent (with Identity and Connection), Machine (with Deploy and Docker), Access, Work, Care and Danger. Every command has a key (Q W E R, A S D F, Z X C V); Esc goes up one level.
+### Every agent has its own sidebar (0.24)
+Selecting an agent opens its **chat** and, next to your agents, **the agent's own sidebar**: its status with a power button, **Chat**, **Console** and **Overview**, its recent chats (+ for a new one, **Search chats** for History), and its **Manage** sections, from general to specific:
+- **Model & skills**: model, reasoning, skills and commands, skills library.
+- **Keys & tools**: API keys by name, the Opaya Vault, MCP servers, Share with another agent, gateway, iTrust and the Opaya browser.
+- **Machine & Docker**: where it runs, files, its CLI and shell, installed tools, its container and Docker.
+- **Deploy & clone**: Clone, Dockerize, Redeploy, New VPS, and targets to drag it onto.
+- **Projects**: its folders with git.
+- **Updates & backups**: Update, Back up, saved backups, Check & fix, Connection log.
+- **Profile & connection**: name, icon, group, pin, Reconnect, Connection settings, launch command and ID.
+- **Danger zone**: Uninstall, Remove connection.
+
+Each section is a list of settings: what it is, its value and one action. **Overview** shows one card per section with the main facts. On the Manage screens Q W E R A S D F open the sections and Esc goes back to the Overview. Console opens the terminal next to or below the chat unless Settings > Chat and console says full screen.
 - **The stage:** a live 3D view of the agent and what it is connected to (its machine, container, keys, projects, skills and chats). It glows when the agent is connected and pulses while it works.
-- **Deploy & clone:** drag the agent card onto **This computer**, a **VPS** or **Docker** to clone it there, or click a target. Progress shows on the target.
+- **Deploy & clone:** drag the agent onto **This computer**, a **VPS** or **Docker** to clone it there, or click a target. Progress shows on the target.
 - **Docker:** the containers on the agent's machine, its own container first, with live CPU and memory, **Logs**, **Shell**, **Restart**, **Pause / Resume**, **Stop / Start**, **Inspect** (image, mounts, ports, restart policy and health; environment variables by name only) and **Remove**. Pull a newer image and prune unused ones. **Dockerize** runs a copy of an agent in its own container.
 - **Keys & access:** drag a key from the Opaya Vault onto any agent, on this screen or in the sidebar, to give it that key. Click a key for the same thing without dragging.
 - **Projects & git:** pull, commit and push, or start a chat in a project, from the screen.
@@ -44,7 +53,7 @@ Selecting an agent opens its **chat**, with History on the right. **Manage** (be
 - The sidebar toggle is at the bottom of the sidebar (**Hide sidebar**, Ctrl/Cmd+B). While the sidebar is hidden, a small button at the top left brings it back.
 
 ### Chat windows and the console (0.23)
-- **Chat windows** (Settings > Chat and console, or Manage > Chat window) dock at the bottom like a desktop messenger: minimize, expand, unread counts on minimized windows. Keep several open, click a header to minimize it, expand it to the full chat view or close it. Windows that do not fit collapse into avatars on the right. Settings > **Chat opens as** can make Chat open the full view instead.
+- **Chat windows** (Settings > Chat and console > Chat opens as: window) dock at the bottom like a desktop messenger: minimize, expand, unread counts on minimized windows. Keep several open, click a header to minimize it, expand it to the full chat view or close it. Windows that do not fit collapse into avatars on the right. Settings > **Chat opens as** can make Chat open the full view instead.
 - **Console** turns the main area into terminals: side by side, two columns or rows, 2 x 2, one large with two stacked, three columns or 3 x 2. Drag the gutters to resize; **Fill empty cells** opens the agent's CLI and shells.
 
 ### Chat with every agent
@@ -55,7 +64,7 @@ Selecting an agent opens its **chat**, with History on the right. **Manage** (be
 - **Playground** asks two agents the same question and shows the answers side by side.
 
 ### Chat history (0.11)
-- **History** opens on the right. Use the clock button next to a chat, **Ctrl/Cmd+Shift+H**, or right-click an agent and choose **Chat history**.
+- **History** opens on the right. Use **Search chats** in the agent's sidebar, the clock button next to a chat, **Ctrl/Cmd+Shift+H**, or right-click an agent and choose **Chat history**.
 - Chats are grouped by day, with tabs for **All / Chats / Projects / Playground**. You can search them and switch between one agent and all agents.
 - **Labels:** project chats show the project name in blue, and playground chats are marked in purple.
 - **Delete** any chat (regular, project or playground). Its transcript is deleted too, but the agent's own session files are left alone.
@@ -149,7 +158,7 @@ It acts only through Opaya's own tools and terminals you can watch, and every ch
 - Dark and light themes.
 - System notifications while Opaya is not in front: an agent or the Opaya Agent replied, an approval is waiting or a long job finished. Click one to open that chat. Each kind can be turned off in Settings.
 - **Home** filters agents by status and place, and each card has Manage, Connect, Terminal and Fix.
-- **The top bar is the same on every screen:** the page title and that page's own controls on the left; on an agent's screens **Chat / Console / Manage**, then the browser and projects. Switch agents in the sidebar.
+- **The top bar is the same on every screen:** the agent and the page on the left, that page's own controls, then the browser and projects. Switch agents in the sidebar.
 - **Sidebar:** Discover next to the Opaya Agent, Home, your agents, and at the bottom Playground, Machines (the fleet board), Vault, Settings and Help. **Settings > Sidebar** hides the items you do not use.
 - Hide or show the sidebar with the button at the top left or **Cmd/Ctrl+B**.
 - **Files:** mention a file or folder in the chat or in a terminal on the same machine.

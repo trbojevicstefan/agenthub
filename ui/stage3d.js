@@ -103,10 +103,7 @@ class Hero {
     this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
     // The constellation sits on the right; the agent card covers the left of the hero.
     const half = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * this.camera.position.z * this.camera.aspect;
-    // In the compact hero (the management screen) the agent card covers more: the scene sits further right, smaller.
-    // On the full map (the first page of the management screen) nothing covers it: the scene sits in the middle.
-    this.compact = !!this.el.closest('.mg-hero-compact'); this.centered = !!this.el.closest('.rts-map-full');
-    this.world.position.x = w < 720 || this.centered ? 0 : half * (this.compact ? .72 : .36); this.world.scale.setScalar(this.compact ? .62 : this.centered ? Math.min(.9, Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 8 * this.camera.aspect / 5.4) : 1); this.dust.position.x = this.world.position.x * .5;
+    this.world.position.x = w < 720 ? 0 : half * .36; this.dust.position.x = this.world.position.x * .5;
   }
   set(opts) {
     const agentChanged = opts.agent && opts.agent !== this.opts.agent;
@@ -156,7 +153,7 @@ class Hero {
     const speed = this.opts.busy ? 2.6 : this.opts.status === 'connected' ? 1 : .35, t = now / 1000;
     const enter = Math.min(1, (now - this.entered) / 1100), e = still ? 1 : back(enter);
     const p = this.pointer; p.x += (p.tx - p.x) * .08; p.y += (p.ty - p.y) * .08;
-    this.camera.position.x = p.x * 1.2; this.camera.position.y = -p.y * .8; this.camera.position.z = 8 + (1 - e) * 5; this.camera.lookAt(this.compact || this.centered ? 0 : this.world.position.x * .6, 0, 0);
+    this.camera.position.x = p.x * 1.2; this.camera.position.y = -p.y * .8; this.camera.position.z = 8 + (1 - e) * 5; this.camera.lookAt(this.world.position.x * .6, 0, 0);
     this.core.rotation.y += dt * .35 * speed; this.core.rotation.x += dt * .12 * speed; this.shell.rotation.y -= dt * .18 * speed; this.shell.rotation.z += dt * .05;
     const breathe = 1 + Math.sin(t * (this.opts.busy ? 4 : 1.6)) * .04; this.core.scale.setScalar(e * breathe); this.shell.scale.setScalar(e); this.halo.scale.setScalar(5.2 * e * (.95 + Math.sin(t * 1.3) * .05));
     this.dust.rotation.y += dt * .01; this.dust.position.y = Math.sin(t * .2) * .2;
