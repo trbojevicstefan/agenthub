@@ -1321,24 +1321,24 @@
       const charging=job||hbBusy.has(`${a.id}:${k}`)||k==='connect'&&(a.status==='connecting'||a.busy),on=k==='connect'&&a.status==='connected'||sw;
       const action=k==='chat'||k==='console'?`data-action="agent-mode" data-mode="${k}" data-id="${esc(a.id)}"`:`data-action="manage-run" data-key="${k}"`;
       const hint=`${NAME[k]?.[0]||item.label.replace(/\.\.\.$/,'')}${NAME[k]?.[1]?`: ${NAME[k][1]}`:''}`;
-      return `<button type="button" class="rts-cmd hb-slot ${item.danger?'danger':''} ${charging?'charging':''} ${job?'progress':''} ${on?'on':''}" ${action} data-hot="${k}" data-hk="${hk}" style="--p:${job?jobPercent(job):0}" title="${esc(hint)} (${hk})"><span class="rts-ico">${ICON[k]||(k==='connect'?I('<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>'):k==='dockerize'?ICON.containerRestart:k==='vault'||k==='keys'?PAGE_ICON.keys:k==='newVps'?I('<path d="M12 5v14M5 12h14"/>'):'')}</span><span class="rts-name">${esc(SHORT[k]||k)}</span><kbd>${hk}</kbd><i class="hb-ring" aria-hidden="true"></i></button>`;}).join('')+(page!=='main'?`<button type="button" class="rts-cmd back" data-action="rts-page" data-key="main" title="Back (Esc)"><span class="rts-ico">${I('<path d="M15 6 9 12l6 6"/>')}</span><span class="rts-name">Back</span><kbd>Esc</kbd></button>`:'');
+      return `<button type="button" class="rts-cmd hb-slot ${item.danger?'danger':''} ${charging?'charging':''} ${job?'progress':''} ${on?'on':''}" ${action} data-hot="${k}" data-hk="${hk}" style="--p:${job?jobPercent(job):0}" title="${esc(hint)} (${hk})"><span class="rts-ico">${ICON[k]||(k==='chatWindow'?ICON.chat:k==='connect'?I('<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>'):k==='dockerize'?ICON.containerRestart:k==='vault'||k==='keys'?PAGE_ICON.keys:k==='newVps'?I('<path d="M12 5v14M5 12h14"/>'):'')}</span><span class="rts-name">${esc(SHORT[k]||k)}</span><kbd>${hk}</kbd><i class="hb-ring" aria-hidden="true"></i></button>`;}).join('')+(page!=='main'?`<button type="button" class="rts-cmd back" data-action="rts-page" data-key="main" title="Back (Esc)"><span class="rts-ico">${I('<path d="M15 6 9 12l6 6"/>')}</span><span class="rts-name">Back</span><kbd>Esc</kbd></button>`:'');
     const hud=`<div class="rts-hud">
-      <div class="rts-portrait ${esc(a.busy?'working':a.error?'error':a.status||'disconnected')}" data-drop="key" data-agent-target="${esc(a.id)}" title="${esc(title(a))}: ${esc(status(a))}">${badge(a,true)}<span class="rts-light" aria-hidden="true"></span></div>
+      <div class="rts-portrait ${esc(a.busy?'working':a.error?'error':a.status||'disconnected')}" data-drop="key" data-agent-target="${esc(a.id)}" data-drag="agent" data-drag-id="${esc(a.id)}" title="${esc(title(a))}: ${esc(status(a))}. Drag onto a machine in Deploy to clone it there.">${badge(a,true)}<span class="rts-light" aria-hidden="true"></span></div>
       <div class="rts-info"><div class="rts-unit"><strong>${esc(title(a))}</strong><small>${esc(labels[a.provider]||a.provider)} <span class="mg-sep">/</span> ${esc(location(a))}${box?` <span class="mg-sep">/</span> ${esc(box)}`:''}</small></div><div class="rts-bars">${bars}</div>${queueHtml}</div>
       <div class="rts-card" data-page="${page}"><header><strong>${esc(PAGE_NAME[page])}</strong>${page!=='main'?'<small>Esc to go back</small>':'<small>Press a key or click</small>'}</header><div class="rts-grid">${cmdHtml}</div></div>
     </div>`;
     // The view above the HUD shows what the open page is about.
     const details=`<dl class="mg-details"><div><dt>Runs on</dt><dd>${esc(location(a))} / ${esc(placeText(a))}</dd></div><div><dt>Installation</dt><dd>${esc(cap.label||'Unknown')}${infoReady&&!info.error?` / ${esc([info.methodLabels?.join(' + '),info.version,info.image].filter(Boolean).join(' / '))}`:''}</dd></div><div><dt>Connection</dt><dd>${esc(labels[a.provider]||a.provider)} / ${esc(a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase())}</dd></div><div><dt>Model</dt><dd>${esc(modelText(a.activeModel||a.model)||'Its own setting')}</dd></div><div><dt>Data</dt><dd>${esc(infoReady&&info.data?info.data:'--')}</dd></div></dl>`;
-    const hero=`<section class="mg-hero mg-hero-compact rts-map" data-drop="key" data-agent-target="${esc(a.id)}">
+    // The map: on the first page the agent's scene fills the space above the HUD, with nothing else in it;
+    // on the other pages it shrinks to a strip that names the page, and that page's panel sits below.
+    const PAGE_HINT={deploy:'Drag the portrait onto a machine or Docker below, or click one.',keys:'Drag a key onto the portrait or any agent in the sidebar.',work:'Its projects and chats.',settings:'Details, connection and backups.'};
+    const hero=`<section class="mg-hero rts-map ${page==='main'?'rts-map-full':'mg-hero-compact'}" data-drop="key" data-agent-target="${esc(a.id)}">
       <div class="mg-stage" id="mg-stage" aria-hidden="true"></div>
-      <div class="mg-card glass" data-drag="agent" data-drag-id="${esc(a.id)}" title="Drag onto a machine in Deploy to clone ${esc(title(a))} there">
-        <div class="mg-id">${badge(a,true)}<div class="mg-id-text"><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p></div></div>
-        <p class="rts-hint">${page==='deploy'?'Drag this card onto a machine below to clone it there.':page==='keys'?'Drag a key onto any agent to give it.':'Pick a command below, or press its key.'}</p>
-      </div>
+      ${page==='main'?'':`<div class="rts-map-title"><strong>${esc(PAGE_NAME[page])}</strong><span>${esc(PAGE_HINT[page]||'')}</span></div>`}
     </section>`;
     const view={
-      main:`${details}<div class="mg-split two rts-main-split"><section class="mg-section">${chatsPanel(a)}</section><section class="mg-section">${gitPanel(a)}</section></div>`,
-      deploy:`<section class="mg-section"><header class="mg-section-head"><div><h2>Where it can run</h2><p>Drag the card above onto a machine or Docker, or click one.</p></div></header>${deployTargets(a)}${cap.kind==='remote-api'?'':`<div id="mg-docker" class="mg-docker-inline" data-key="${esc(dockerKeyOf(a))}">${dockerPanel(a)}</div>`}</section>`,
+      main:'',
+      deploy:`<section class="mg-section">${deployTargets(a)}${cap.kind==='remote-api'?'':`<div id="mg-docker" class="mg-docker-inline" data-key="${esc(dockerKeyOf(a))}">${dockerPanel(a)}</div>`}</section>`,
       keys:`<section class="mg-section">${keysPanel(a)}</section>`,
       work:`<div class="mg-split two"><section class="mg-section">${gitPanel(a)}</section><section class="mg-section">${chatsPanel(a)}</section></div>`,
       settings:`<section class="mg-section"><header class="mg-section-head"><div><h2>Details</h2></div></header>${details}${cap.backup||backs?.backups?.length?`<header class="mg-section-head rts-sub"><div><h2>Backups</h2><p>On ${esc(localName())}. <button type="button" class="text-button" data-action="backup-folder-open">Open folder</button></p></div></header>${backupRows||`<p class="field-help">${backs?backs.error?esc(backs.error):'No backups yet.':'Loading backups...'}</p>`}`:''}</section>`}[page];
@@ -1347,7 +1347,7 @@
       ['mg-p-hero','',0,hero],
       ['mg-p-error','mg-reveal',1,a.error?`<div class="inline-notice error-notice"><span>!</span><div><strong>Connection needs attention</strong><p>${esc(a.error)}</p><button type="button" class="text-button" data-action="manage-run" data-key="fix">Let the Opaya Agent fix it &#8594;</button></div></div>`:''],
       ['mg-p-shared','',1,shared.length?`<p class="field-help manage-shared">Shares its ${esc(cap.label)} installation with ${esc(shared.map(title).join(', '))}: updating or uninstalling it affects them too.</p>`:''],
-      ['mg-p-view','rts-view',2,`<div class="rts-view-inner" data-page="${page}">${view}</div>`],
+      ['mg-p-view','rts-view',2,view?`<div class="rts-view-inner" data-page="${page}">${view}</div>`:''],
       ['mg-p-hud','rts-dock',3,hud]];
     const key='manage:'+a.id,entering=renderKey!==key||!$('#mg-p-hero');
     if(entering){manageHtml={};$('#content').innerHTML=parts.map(([id,cls,i,inner])=>{manageHtml[id]=inner;return `<div id="${id}" class="${cls}" style="--i:${i}"${id==='mg-docker'?` data-key="${esc(dockerKeyOf(a))}"`:''}>${inner}</div>`;}).join('');}
@@ -1356,6 +1356,10 @@
     if(entering){$('#content').classList.remove('view-enter');$('#content').scrollTop=0;$('#content').classList.add('mg-entering');clearTimeout(renderManage.t);renderManage.t=setTimeout(()=>$('#content')?.classList.remove('mg-entering'),1400);if(!keyLists.has(a.id))loadKeys(a);if(cap.kind!=='remote-api'&&!dockerViews.has(dockerKeyOf(a)))loadDocker(dockerKeyOf(a));for(const p of agentProjects(a))if(!projectGit.get(p.id))loadProjectGit(p);}
     renderKey=key;mountStage(a);if(!mgTimer)mgTimer=setTimeout(manageTick,600);
   }
+  // The map's labels are shortcuts: a key opens Keys, a machine or container Deploy, a project or chat Work, Skills its tools.
+  document.addEventListener('click',event=>{const label=event.target.closest('.rts-map-full .stage-label');if(!label)return;const kind=label.dataset.kind;
+    if(kind==='skill'){$('.rts-card [data-hot=skills]')?.click();return;}
+    const page={machine:'deploy',docker:'deploy',key:'keys',git:'work',chat:'work'}[kind];if(page)$(`.rts-card [data-action=rts-page][data-key=${page}]`)?.click();});
   // Hotbar: every press ripples; 1 to 8 fire the slots while the management screen is open and nothing is being typed.
   document.addEventListener('pointerdown',event=>{const slot=event.target.closest('.hb-slot');if(!slot||slot.disabled)return;slot.classList.remove('fired');void slot.offsetWidth;slot.classList.add('fired');},true);
   document.addEventListener('keydown',event=>{if(!manageId||event.ctrlKey||event.metaKey||event.altKey||$('#app-dialog')||document.querySelector('dialog[open]')||$('.context-menu'))return;const el=document.activeElement;if(el&&(el.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)||viewOf(el)))return;

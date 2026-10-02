@@ -5,8 +5,10 @@
   - **Bars**: Link, Keys, Backup and Version, each green, amber or red at a glance.
   - **Queue**: clones, backups, uninstalls and redeploys running for this agent, with their progress.
   - **Command card**: the main commands (Connect, Chat, Console, Model, Skills, Update, Back up, Clone) and four pages, **Deploy**, **Keys**, **Work** and **Settings**, each with its own commands. Every button has a key (Q W E R, A S D F, Z X C V); Esc goes back. A command shows a ring while it runs.
-  - The view above follows the page: details, chats and projects; deploy targets and Docker; keys; projects and chats; or settings and backups.
-- The 3D stage is smaller and quieter: fewer particles, the agent on the right of the header, no labels.
+  - **The map**: on the first page the agent's 3D scene fills the space above the panel and nothing else does. Its labels are shortcuts: a key opens Keys, the machine or container opens Deploy, a project or chat opens Work, Skills opens its tools. The orbit holds still under the pointer.
+  - On the other pages the map shrinks to a strip naming the page, and only that page's panel sits below: deploy targets and Docker, keys, projects and chats, or details and backups.
+  - Drag the portrait onto a machine on the Deploy page to clone the agent there.
+- The 3D scene is quieter: fewer particles.
 - **Chat | Console | Manage** at the top are plain tabs. The agent switcher and the Manage ▾ menu are gone: pick agents in the sidebar and machines under **Machines**.
 
 # Opaya 0.23.1 - chat first

@@ -104,8 +104,9 @@ class Hero {
     // The constellation sits on the right; the agent card covers the left of the hero.
     const half = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * this.camera.position.z * this.camera.aspect;
     // In the compact hero (the management screen) the agent card covers more: the scene sits further right, smaller.
-    this.compact = !!this.el.closest('.mg-hero-compact');
-    this.world.position.x = w < 720 ? 0 : half * (this.compact ? .72 : .36); this.world.scale.setScalar(this.compact ? .62 : 1); this.dust.position.x = this.world.position.x * .5;
+    // On the full map (the first page of the management screen) nothing covers it: the scene sits in the middle.
+    this.compact = !!this.el.closest('.mg-hero-compact'); this.centered = !!this.el.closest('.rts-map-full');
+    this.world.position.x = w < 720 || this.centered ? 0 : half * (this.compact ? .72 : .36); this.world.scale.setScalar(this.compact ? .62 : this.centered ? .9 : 1); this.dust.position.x = this.world.position.x * .5;
   }
   set(opts) {
     const agentChanged = opts.agent && opts.agent !== this.opts.agent;
@@ -120,7 +121,7 @@ class Hero {
     for (const r of this.rings) r.material.color.setHex(col);
     const want = this.opts.nodes.slice(0, 7), sig = want.map(n => n.kind + n.label + (n.on ? 1 : 0)).join('|');
     if (sig === this.sig) return; this.sig = sig;
-    for (const s of this.sats) { this.world.remove(s.sprite, s.line); s.line.geometry.dispose(); s.label.remove(); }
+    for (const s of this.sats) { this.world.remove(s.sprite, s.line); s.line.geometry.dispose(); s.label.remove(); } this.held = false;
     for (const p of this.packets) this.world.remove(p);
     this.sats = []; this.packets = [];
     want.forEach((n, i) => {
@@ -128,7 +129,9 @@ class Hero {
       const sprite = new T.Sprite(new T.SpriteMaterial({ map: glyph(n.kind, color), transparent: true, depthWrite: false, opacity: n.on === false ? .45 : 1 }));
       sprite.scale.setScalar(.95);
       const line = new T.Line(new T.BufferGeometry().setFromPoints([new T.Vector3(), new T.Vector3()]), new T.LineBasicMaterial({ color, transparent: true, opacity: n.on === false ? .08 : .28 }));
-      const label = document.createElement('span'); label.className = 'stage-label'; label.textContent = n.label; label.style.setProperty('--c', css(color)); if (n.on === false) label.classList.add('off'); this.labels.append(label);
+      const label = document.createElement('span'); label.className = 'stage-label'; label.dataset.kind = n.kind; label.textContent = n.label;
+      // The orbit holds still while the pointer is on a label, so it can be clicked.
+      label.addEventListener('pointerenter', () => { this.held = true; }); label.addEventListener('pointerleave', () => { this.held = false; this.kick(); }); label.style.setProperty('--c', css(color)); if (n.on === false) label.classList.add('off'); this.labels.append(label);
       const sat = { sprite, line, label, color, angle: i / want.length * Math.PI * 2 + .4, radius: 3.7, tilt: -.12, on: n.on !== false, pulse: 0, kind: n.kind };
       this.world.add(line, sprite); this.sats.push(sat);
       // A packet travels between the agent and each live connection.
@@ -153,13 +156,13 @@ class Hero {
     const speed = this.opts.busy ? 2.6 : this.opts.status === 'connected' ? 1 : .35, t = now / 1000;
     const enter = Math.min(1, (now - this.entered) / 1100), e = still ? 1 : back(enter);
     const p = this.pointer; p.x += (p.tx - p.x) * .08; p.y += (p.ty - p.y) * .08;
-    this.camera.position.x = p.x * 1.2; this.camera.position.y = -p.y * .8; this.camera.position.z = 8 + (1 - e) * 5; this.camera.lookAt(this.compact ? 0 : this.world.position.x * .6, 0, 0);
+    this.camera.position.x = p.x * 1.2; this.camera.position.y = -p.y * .8; this.camera.position.z = 8 + (1 - e) * 5; this.camera.lookAt(this.compact || this.centered ? 0 : this.world.position.x * .6, 0, 0);
     this.core.rotation.y += dt * .35 * speed; this.core.rotation.x += dt * .12 * speed; this.shell.rotation.y -= dt * .18 * speed; this.shell.rotation.z += dt * .05;
     const breathe = 1 + Math.sin(t * (this.opts.busy ? 4 : 1.6)) * .04; this.core.scale.setScalar(e * breathe); this.shell.scale.setScalar(e); this.halo.scale.setScalar(5.2 * e * (.95 + Math.sin(t * 1.3) * .05));
     this.dust.rotation.y += dt * .01; this.dust.position.y = Math.sin(t * .2) * .2;
     const v = new THREE.Vector3();
     for (const s of this.sats) {
-      s.angle += dt * .06 * speed;
+      if (!this.held) s.angle += dt * .06 * speed;
       const x = Math.cos(s.angle) * s.radius * e, y0 = Math.sin(s.angle) * s.radius * .34 * e;
       const y = x * Math.sin(s.tilt) + y0 * Math.cos(s.tilt), xx = x * Math.cos(s.tilt) - y0 * Math.sin(s.tilt), z = Math.sin(s.angle) * .8;
       s.sprite.position.set(xx, y, z); s.pulse = Math.max(0, s.pulse - dt * 1.4);

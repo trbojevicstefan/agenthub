@@ -788,6 +788,8 @@
 :where(body[data-theme="light"]) .mg-docker-inline{border-top:1px solid #d4dadd}
 :where(body[data-theme="light"]) .mg-details div{background:#e1e5e8;border:1px solid #d4dadd}
 :where(body[data-theme="light"]) .mg-details dt{color:#6c787e}
+:where(body[data-theme="light"]) .rts-map-title strong{color:#090c0a}
+:where(body[data-theme="light"]) .rts-map-title span{color:#475054}
 :where(body[data-theme="light"]) .rts-hint{color:#4f585c}
 :where(body[data-theme="light"]) .rts-dock{background:linear-gradient(180deg,#e4e8ebf2,#ebeef0fa);border-top:1px solid #cdd6d8}
 :where(body[data-theme="light"]) .rts-portrait{background:radial-gradient(circle at 50% 40%,#d2e2da,#eaefed 70%);border:1px solid #c0d1c7}
