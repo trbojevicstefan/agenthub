@@ -845,3 +845,10 @@
 :where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .nav-overview:hover>span:first-child,:where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .sidebar-bottom>button:hover>span:first-child{color:#0e1211}
 :where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .group-short{color:#6f7d83}
 :where(body[data-theme="light"]).agent-open .sidebar:not(.peek) .sidebar-section-label:hover .group-short{color:#1f2723}
+:where(body[data-theme="light"]) .nav-hk{color:#0e1a14;background:#6ee7a8}
+:where(body[data-theme="light"]) .an-val{color:#6f7c82}
+:where(body[data-theme="light"]) .an-switch{background:#c9d1d5}
+:where(body[data-theme="light"]) .an-switch:after{background:#c9d2d5}
+:where(body[data-theme="light"]) .an-switch.on{background:#badecc}
+:where(body[data-theme="light"]) .an-switch.on:after{background:#fff}
+:where(body[data-theme="light"]) .an-id .opaya-avatar{background:linear-gradient(135deg,#d5e3dc,#dfe7e3);border:1px solid #c8d5ce}

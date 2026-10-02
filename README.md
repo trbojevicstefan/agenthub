@@ -36,7 +36,7 @@ Selecting an agent opens its **chat** and, next to your agents, **the agent's ow
 - **Profile & connection**: name, icon, group, pin, Reconnect, Connection settings, launch command and ID.
 - **Danger zone**: Uninstall, Remove connection.
 
-While it is open, your agents' sidebar is a slim rail of icons; the selected agent's tab flows into its sidebar, and resting the pointer on the rail shows the names.
+The **Opaya Agent** has its own sidebar too (chat, setup guide, its chats, model, iTrust, vault and tools). **Ctrl/Cmd+1 to 9** open agents in sidebar order; hold Ctrl/Cmd to see their numbers. While it is open, your agents' sidebar is a slim rail of icons; the selected agent's tab flows into its sidebar, and resting the pointer on the rail shows the names.
 
 Each section is a list of settings: what it is, its value and one action. **Overview** shows one card per section with the main facts. On the Manage screens Q W E R A S D F open the sections and Esc goes back to the Overview. Console opens the terminal next to or below the chat unless Settings > Chat and console says full screen.
 - **The stage:** a live 3D view of the agent and what it is connected to (its machine, container, keys, projects, skills and chats). It glows when the agent is connected and pulses while it works.

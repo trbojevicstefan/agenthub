@@ -86,6 +86,13 @@
     if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya||!state.agents.length&&!state.opayaAgent?.configured;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);sidebarHidden=!!state.view?.sidebarHidden;projectsOpen=!!state.view?.projects;tipsSeen=new Set(state.view?.tips||[]);greeted=state.view?.greeted||'';lastVersion=state.view?.lastVersion||'';setTimeout(checkNudges,4000);if(state.view?.layout)layout={...layout,...state.view.layout};terminalFont=Number(state.view?.terminalFont)||13;queueMicrotask(()=>placePanes());projectsExpanded=new Set(state.view?.projectsOpen||[]);chatDock=(state.view?.chatDock||[]).map(d=>({id:d.id,min:!!d.min}));sidebarHide=new Set(state.view?.sidebarHide||[]);if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});}
     render();
   }
+  // The sidebar's groups in the order they show: Pinned, custom groups, This computer, Remote. Ctrl/Cmd+1 to 9 follow
+  // this order, so the first agent on screen is 1.
+  function navGroups(){
+    const customGroups=[...new Set(state.agents.filter(a=>!a.pinned&&a.group).map(a=>a.group))];
+    return [['pinned','PINNED',state.agents.filter(a=>a.pinned)],...customGroups.map(g=>[`group:${g}`,g,state.agents.filter(a=>!a.pinned&&a.group===g)]),['local','ON THIS COMPUTER',state.agents.filter(a=>!a.pinned&&!a.group&&a.transport!=='ssh')],['remote','REMOTE AGENTS',state.agents.filter(a=>!a.pinned&&!a.group&&a.transport==='ssh')]];
+  }
+  const navOrder=()=>navGroups().flatMap(g=>g[2]);
   function render() {
     queueMicrotask(()=>{ensureProjectsToggle();renderProjects();renderDock();const sel=selected()?.id||'';if(historyOpen&&sel!==historyFollow&&historyAgent&&sel)historyAgent=sel;historyFollow=sel;renderHistory();});
     $('#agent-count').textContent=state.agents.length;applySidebar();
@@ -93,16 +100,15 @@
     $('.nav-overview').classList.toggle('selected',overview&&!fleetView&&!opayaView&&!playgroundView);document.querySelector('[data-side="machines"]')?.classList.toggle('selected',overview&&fleetView&&!opayaView&&!playgroundView);$('.nav-playground')?.classList.toggle('selected',playgroundView);$('.nav-opaya').classList.toggle('selected',opayaView);renderOpayaNav();
     // Sections: pinned, each custom group in first-seen order, then ungrouped local and remote agents. Every section collapses
     // to a row of its agents' icons, so a collapsed section never looks like it holds only the selected agent.
-    const customGroups=[...new Set(state.agents.filter(a=>!a.pinned&&a.group).map(a=>a.group))];
-    const groups=[['pinned','PINNED',state.agents.filter(a=>a.pinned)],...customGroups.map(g=>[`group:${g}`,g,state.agents.filter(a=>!a.pinned&&a.group===g)]),['local','ON THIS COMPUTER',state.agents.filter(a=>!a.pinned&&!a.group&&a.transport!=='ssh')],['remote','REMOTE AGENTS',state.agents.filter(a=>!a.pinned&&!a.group&&a.transport==='ssh')]];
+    const groups=navGroups(),hkOf=new Map(navOrder().slice(0,9).map((a,i)=>[a.id,i+1]));
     const now=performance.now(),current=overview||opayaView||playgroundView?'':state.activeAgentId||'';let row=0;
     if(current!==navSelected){navSelected=current;navSelectedAt=now;}
-    const nav=groups.filter(g=>g[2].length).map(([key,name,all])=>{const closed=collapsedGroups.has(key),agents=closed?[]:all,busy=closed&&all.some(a=>a.busy);return `<button class="sidebar-section-label ${closed?'collapsed':''} ${key.startsWith('group:')?'custom-group':''}" data-action="toggle-group" data-group="${esc(key)}" aria-expanded="${!closed}" title="${closed?'Expand':'Collapse'} ${esc(name)} (right-click for group actions)"><span class="group-chevron" aria-hidden="true">&#9662;</span><span class="group-name">${esc(name)}</span><span class="group-short" aria-hidden="true">${esc(key==='local'?'Local':key==='remote'?'VPS':key==='pinned'?'Pinned':name)}</span>${busy?'<span class="status-dot working"></span>':''}<span class="group-count">${all.length}</span></button><div class="sidebar-group ${closed?'closed':''}">${closed?`<div class="collapsed-strip" data-section="${esc(key)}">${all.map(a=>`<button type="button" class="mini-agent ${a.id===current?'selected':''}" data-action="select" data-id="${esc(a.id)}" data-agent-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}" aria-label="${esc(title(a))}">${badge(a)}${dot(a)}</button>`).join('')}</div>`:''}${agents.map(a=>`<div class="agent-nav-row ${fresh(navSeen,a.id,now,650)?'enter':''}" style="--i:${row++}" data-agent-id="${esc(a.id)}" data-section="${esc(key)}" draggable="true"><button class="agent-nav ${!overview&&!opayaView&&!playgroundView&&a.id===state.activeAgentId?'selected':''} ${a.id===navSelected&&now-navSelectedAt<500?'just-selected':''}" data-action="select" data-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}">${badge(a)}<span class="agent-nav-text"><strong>${esc(title(a))}${trusted(a)?'<span class="itrust-mark" title="iTrust: approved automatically">iT</span>':''}</strong><small class="agent-nav-host">${esc(navSub(a))}</small></span>${dot(a)}</button><button type="button" class="agent-nav-manage" data-action="manage" data-id="${esc(a.id)}" title="Manage ${esc(title(a))}" aria-label="Manage ${esc(title(a))}">&#9881;</button></div>`).join('')}</div>`;}).join('')||'<div class="sidebar-empty"><span class="connection-dots"><i></i><i></i><i></i></span>Your agents will<br>feel at home here.</div>';
+    const nav=groups.filter(g=>g[2].length).map(([key,name,all])=>{const closed=collapsedGroups.has(key),agents=closed?[]:all,busy=closed&&all.some(a=>a.busy);return `<button class="sidebar-section-label ${closed?'collapsed':''} ${key.startsWith('group:')?'custom-group':''}" data-action="toggle-group" data-group="${esc(key)}" aria-expanded="${!closed}" title="${closed?'Expand':'Collapse'} ${esc(name)} (right-click for group actions)"><span class="group-chevron" aria-hidden="true">&#9662;</span><span class="group-name">${esc(name)}</span><span class="group-short" aria-hidden="true">${esc(key==='local'?'Local':key==='remote'?'Remote':key==='pinned'?'Pinned':name)}</span>${busy?'<span class="status-dot working"></span>':''}<span class="group-count">${all.length}</span></button><div class="sidebar-group ${closed?'closed':''}">${closed?`<div class="collapsed-strip" data-section="${esc(key)}">${all.map(a=>`<button type="button" class="mini-agent ${a.id===current?'selected':''}" data-action="select" data-id="${esc(a.id)}" data-agent-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}" aria-label="${esc(title(a))}">${badge(a)}${dot(a)}</button>`).join('')}</div>`:''}${agents.map(a=>`<div class="agent-nav-row ${fresh(navSeen,a.id,now,650)?'enter':''}" style="--i:${row++}" data-agent-id="${esc(a.id)}" data-section="${esc(key)}" draggable="true"><button class="agent-nav ${!overview&&!opayaView&&!playgroundView&&a.id===state.activeAgentId?'selected':''} ${a.id===navSelected&&now-navSelectedAt<500?'just-selected':''}" data-action="select" data-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}">${badge(a)}<span class="agent-nav-text"><strong>${esc(title(a))}${trusted(a)?'<span class="itrust-mark" title="iTrust: approved automatically">iT</span>':''}</strong><small class="agent-nav-host">${esc(navSub(a))}</small></span>${dot(a)}${hkOf.has(a.id)?`<kbd class="nav-hk" aria-hidden="true">${hkOf.get(a.id)}</kbd>`:''}</button><button type="button" class="agent-nav-manage" data-action="manage" data-id="${esc(a.id)}" title="Manage ${esc(title(a))}" aria-label="Manage ${esc(title(a))}">&#9881;</button></div>`).join('')}</div>`;}).join('')||'<div class="sidebar-empty"><span class="connection-dots"><i></i><i></i><i></i></span>Your agents will<br>feel at home here.</div>';
     if(nav!==navHtml){navHtml=nav;$('#agent-list').innerHTML=nav;}
     const a=selected();
     // A left click opens an agent's management screen; Chat and Console are the other two ways to work with it.
     const mode=!overview&&!opayaView&&!playgroundView&&a?modeOf(a):'';manageId=mode==='manage'?a.id:'';
-    renderAgentNav(mode?a:null,mode==='manage'?'manage':mode==='console'?'console':mode?'chat':'');
+    renderAgentNav(mode?a:null,mode==='manage'?'manage':mode==='console'?'console':mode?'chat':opayaView&&!playgroundView?'opaya':'');
     const stage=mode==='console';
     if(stage!==document.body.classList.contains('terminal-stage')){document.body.classList.toggle('terminal-stage',stage);placePanes();}
     if(!stage)stageAgent='';
@@ -769,6 +775,7 @@
     if(name==='dock-move'){moveDock(button.dataset.pane);return;}
     if(name==='new-vps'){openNewVps();return;}
     if(name==='job-restore'){const running=[...jobs.values()].filter(j=>j.status==='running');if(!jobs.has(jobShown))jobShown=(running[0]||[...jobs.values()].at(-1))?.id||'';jobMinimized=false;renderJobs();return;}
+    if(name==='opaya-session'){action(async()=>{await api.opayaSelectSession({id});opayaCount=-1;});return;}
     if(name==='opaya-new'){action(async()=>{await api.opayaNewSession();opayaCount=-1;$('#message-input')?.focus();});return;}
     if(name==='opaya-delete-session'){const o=opaya();action(async()=>{if(!await ask('Delete this chat with the Opaya Agent?'))return;await api.opayaDeleteSession({id:o.sessionId});opayaCount=-1;});return;}
     if(name==='discover-tab'){discover(id||undefined);return;}
@@ -936,7 +943,7 @@
     if(event.key.toLowerCase()==='n'&&selected()){event.preventDefault();const a=selected();action(()=>!overview&&!opayaView&&!playgroundView&&modeOf(a)==='chat'?api.newConversation({agentId:a.id}):newDockChat(a));}
     if(event.key==='`'){event.preventDefault();if(!$('#terminal-panel').hidden)$('#terminal-panel').hidden=true;else action(()=>currentTerminal&&terminalViews.has(currentTerminal)?($('#terminal-panel').hidden=false,activateTerminal(currentTerminal)):agentTerminal());}
     // Chosen from inside a terminal, the terminal panel still follows the choice (followSelectedAgent keeps a focused one).
-    if(/^[1-9]$/.test(event.key)&&state.agents[Number(event.key)-1]){event.preventDefault();overview=false;opayaView=false;playgroundView=false;const id=state.agents[Number(event.key)-1].id;if(id!==state.activeAgentId&&viewOf(document.activeElement))document.activeElement.blur();action(()=>openChat(id));}
+    if(/^[1-9]$/.test(event.key)&&navOrder()[Number(event.key)-1]){event.preventDefault();overview=false;opayaView=false;playgroundView=false;const id=navOrder()[Number(event.key)-1].id;if(id!==state.activeAgentId&&viewOf(document.activeElement))document.activeElement.blur();action(()=>openChat(id));}
   });
   if(!api){$('#content').innerHTML='<div class="runtime-missing"><h1>Open Opaya as a desktop app.</h1><p>This workspace needs its native bridge to discover agents, use SSH and open terminals.</p><code>npm install &amp;&amp; npm start</code></div>';return;}
   // Scrollback search (Ctrl+F in a terminal, or the search button).
@@ -1257,13 +1264,46 @@
   // Clones, backups, uninstalls and redeploys running for an agent.
   const agentJobs=a=>[...jobs.values()].filter(j=>j.status==='running'&&(j.kind==='clone'&&j.route?.from===a.name||['backup','uninstall','redeploy'].includes(j.kind)&&String(j.title||'').includes(a.name)));
   let anHtml='';
+  {let t=0;const off=()=>{clearTimeout(t);document.body.classList.remove('show-hk');};
+    document.addEventListener('keydown',e=>{if((e.key==='Control'||e.key==='Meta')&&!e.repeat){clearTimeout(t);t=setTimeout(()=>document.body.classList.add('show-hk'),350);}else if(!e.ctrlKey&&!e.metaKey)off();});
+    document.addEventListener('keyup',e=>{if(e.key==='Control'||e.key==='Meta')off();});window.addEventListener('blur',off);}
   // While an agent's sidebar is open, the agents' sidebar is a rail of icons; resting the pointer on it widens it over
   // the page (peek) to show the names, without moving anything.
   {const side=document.querySelector('.sidebar');let t=0;
     side?.addEventListener('mouseenter',()=>{clearTimeout(t);t=setTimeout(()=>{if(document.body.classList.contains('agent-open'))side.classList.add('peek');},320);});
     side?.addEventListener('mouseleave',()=>{clearTimeout(t);side.classList.remove('peek');});}
+  // The Opaya Agent's own sidebar: its chat and setup guide, its chats, its settings and the tools it is for.
+  function opayaSideHtml(){
+    const o=opaya(),label=o.busy?'Working...':o.configured?opayaModelLabel(o):'Choose a model',G=guideOn();
+    const item=(cls,attrs,icon,label,extra='')=>`<button type="button" class="an-item ${cls}" ${attrs}><span class="an-ico" aria-hidden="true">${icon}</span><span class="an-label">${esc(label)}</span>${extra}</button>`;
+    const I2=anI;
+    return `<div class="an-head">
+        <button type="button" class="an-id" data-action="opaya" title="Opaya Agent"><span class="agent-avatar opaya-avatar"><span class="opaya-mark small"><img src="assets/opaya-logo.png" alt=""><i></i></span></span><span class="an-id-text"><strong>Opaya Agent</strong><small><span class="status-dot ${o.busy?'working':o.configured?'connected':'disconnected'}"></span>${esc(label)}</small></span></button>
+      </div>
+      <nav class="an-views" aria-label="Opaya Agent">
+        ${item(G?'':'active','data-action="opaya" title="Chat with the Opaya Agent"',AN_ICON.chat,'Chat')}
+        ${item(G?'active':'','data-action="guide-open" title="A guided setup that needs no AI model"',I2('<path d="M4 19V5a2 2 0 0 1 2-2h12v18H6a2 2 0 0 1-2-2zM8 7h6M8 11h6"/>'),'Setup guide')}
+      </nav>
+      <div class="an-scroll">
+        <section class="an-group"><header><span>Chats</span><button type="button" class="an-add" data-action="opaya-new" title="New chat" aria-label="New chat">${AN_ICON.plus}</button></header>
+          ${(o.sessions||[]).length?o.sessions.slice(0,8).map(x=>`<button type="button" class="an-chat ${!G&&x.id===o.sessionId?'active':''}" data-action="opaya-session" data-id="${esc(x.id)}" title="${esc(x.title)}" ${o.busy?'disabled':''}><span>${esc(x.title)}</span></button>`).join(''):'<p class="an-empty">No chats yet</p>'}
+        </section>
+        <section class="an-group"><header><span>Settings</span></header>
+          ${item('','data-action="opaya-config" title="The model the Opaya Agent thinks with"',AN_ICON.model,'Model',`<small class="an-val">${esc(o.configured?opayaModelLabel(o):'Not set')}</small>`)}
+          ${item('','data-action="opaya-itrust" role="switch" aria-checked="'+(!!state.settings?.itrustOpaya)+'" title="Let it act without asking each time (removals still ask)"',I2('<path d="M12 3 20 6v6c0 5-4 8-8 9-4-1-8-4-8-9V6z"/>'),'iTrust',`<span class="an-switch ${state.settings?.itrustOpaya?'on':''}" aria-hidden="true"></span>`)}
+          ${item('','data-action="vault" title="Every API key and token you keep in Opaya"',AN_ICON.access,'Opaya Vault')}
+        </section>
+        <section class="an-group"><header><span>Tools</span></header>
+          ${item('','data-action="discover" title="Find agents installed here or on a machine"',I2('<circle cx="12" cy="12" r="8"/><path d="M12 12 17 7M12 4v2M20 12h-2"/>'),'Discover agents')}
+          ${item('','data-action="install-catalog" title="Install agents and their dependencies"',I2('<path d="M12 4v11M7 10l5 5 5-5M4 19h16"/>'),'Install agents')}
+          ${item('','data-action="opaya-check-all" title="Check every agent with a connection error"',AN_ICON.care,'Check all agents')}
+          ${item('','data-action="fleet" title="Every machine and its agents"',AN_ICON.machine,'Machines')}
+        </section>
+      </div>`;
+  }
   function renderAgentNav(a,screen){
     const nav=$('#agent-side');if(!nav)return;
+    if(screen==='opaya'){const html=opayaSideHtml();if(nav.hidden){nav.hidden=false;document.body.classList.add('agent-open');requestAnimationFrame(()=>placePanes());}if(html!==anHtml){anHtml=html;nav.innerHTML=html;}return;}
     if(!a||!screen){if(!nav.hidden){nav.hidden=true;anHtml='';document.body.classList.remove('agent-open');requestAnimationFrame(()=>placePanes());}return;}
     const chatty=a.protocol!=='terminal'&&a.surface!=='terminal',chats=chatty?agentChats(a):[],on=a.status==='connected',termOpen=!$('#terminal-panel')?.hidden&&[...terminalViews.values()].some(v=>v.agentId===a.id&&!v.exited);
     const item=(cls,attrs,icon,label,extra='')=>`<button type="button" class="an-item ${cls}" ${attrs}><span class="an-ico" aria-hidden="true">${icon}</span><span class="an-label">${esc(label)}</span>${extra}</button>`;
@@ -2085,7 +2125,8 @@
   }
   function renderOpaya(){
     const o=opaya(),entering=renderKey!=='opaya';
-    topbar('<strong>Opaya Agent</strong>',`<button type="button" class="itrust-toggle ${state.settings?.itrustOpaya?'on':''}" data-action="opaya-itrust" title="iTrust: let the Opaya Agent act without asking each time (removals still ask)"><span class="itrust-switch" aria-hidden="true"></span>iTrust</button><button type="button" class="status-pill ${o.configured?o.busy?'connecting':'connected':''}" data-action="opaya-config" title="The model the Opaya Agent thinks with. Click to change it.">${!o.configured?'Choose a model':o.busy?'<span class="status-dot working"></span>Working':'<span class="status-dot connected"></span>'+esc(opayaModelLabel(o))} &#9662;</button><button class="subtle" data-action="guide-open" title="Step-by-step setup of this computer">Setup guide</button>`);
+    // Its model, iTrust, setup guide and chats are in its own sidebar.
+    topbar('<strong>Opaya Agent</strong>');
     contentKind('conversation opaya-view');
     if(entering){
       $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity"><span class="agent-avatar large opaya-avatar"><span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""><i></i></span></span><div><h1>Opaya Agent</h1><p>Installs, connects, maintains and troubleshoots your agents and machines.</p><div class="identity-meta"><span class="agent-meta"><span class="meta-icon local-mark" aria-hidden="true"></span><span>Lives in Opaya's home folder</span><span class="meta-divider">/</span><span>Changes only with your approval</span></span></div></div></div><div class="conversation-controls"><select id="opaya-sessions" aria-label="Opaya Agent chats" title="Earlier chats with the Opaya Agent"></select><button class="icon-button" data-action="opaya-new" title="New chat" aria-label="New chat">+</button><button class="icon-button" data-action="opaya-delete-session" title="Delete this chat" aria-label="Delete this chat">&#10005;</button></div></div><div id="opaya-banner"></div><div id="opaya-messages" class="message-list"></div><div class="compose-area"><form id="message-form" class="opaya-form"><textarea id="message-input" class="opaya-input" rows="2" maxlength="80000" aria-label="Message the Opaya Agent" placeholder="Ask the Opaya Agent to install, connect or fix an agent..."></textarea><div class="compose-bottom"><div><span class="compose-provider">Opaya Agent</span><span id="compose-hint"></span></div><button type="button" id="opaya-secret" class="icon-button compose-secret" title="Give a key, token or password: it stays in Opaya's vault and the model sees only a reference" aria-label="Give a key, token or password"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3M16 7l3 3M13.5 9.5l2 2"/></svg></button><button type="button" id="opaya-stop" class="stop-button" data-action="opaya-stop" hidden><span>&#9632;</span> Stop</button><button id="opaya-send" type="submit" class="send-button" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption" id="opaya-caption"></p></div>`;

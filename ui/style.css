@@ -2157,3 +2157,30 @@ body[data-theme="light"].agent-open .sidebar:not(.peek) .group-short{color:#6b7a
 body[data-theme="light"].agent-open .sidebar:not(.peek) .agent-nav.selected .agent-avatar{box-shadow:0 0 0 2px #15803d,0 0 14px -2px #15803d55}
 body[data-theme="light"].agent-open .sidebar.peek{box-shadow:18px 0 44px -18px #2a4a3a55}
 @media (prefers-reduced-motion:reduce){body.agent-open .sidebar{transition:none}}
+/* Ctrl/Cmd held: each agent shows its number (Ctrl/Cmd+1 to 9, in sidebar order) */
+.nav-hk{display:none;position:absolute;right:30px;top:50%;transform:translateY(-50%);min-width:18px;height:18px;padding:0 4px;border-radius:6px;align-items:center;justify-content:center;font:700 10.5px/1 var(--font);color:#0e1a14;background:#6ee7a8;box-shadow:0 4px 12px -4px #000a;z-index:2}
+body.show-hk .nav-hk{display:inline-flex;animation:hk-in .14s ease-out}
+body.agent-open .sidebar:not(.peek) .nav-hk{right:auto;left:4px;top:4px;transform:none}
+@keyframes hk-in{from{opacity:0;transform:translateY(-50%) scale(.7)}}
+body.agent-open .sidebar:not(.peek) .nav-hk{animation:none}
+body[data-theme="light"] .nav-hk{background:#15803d;color:#fff}
+/* Opaya Agent's sidebar: values and switches next to a row */
+.an-val{max-width:96px;font-size:11px;color:#6f7c82;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.an-switch{width:28px;height:16px;border-radius:16px;background:#2a3236;position:relative;flex:none;transition:background .2s}
+.an-switch:after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#c9d2d5;transition:transform .2s}
+.an-switch.on{background:#3fae78}.an-switch.on:after{transform:translateX(12px);background:#fff}
+.an-id .opaya-avatar{display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#1c2a23,#18201c);border:1px solid #2f3d36}
+.an-chat:disabled{opacity:.5;cursor:default}
+body[data-theme="light"] .an-switch{background:#d5ddd9}
+body[data-theme="light"] .an-id .opaya-avatar{background:linear-gradient(135deg,#e6f5ec,#f3f8f4);border-color:#b8dcc6}
+/* The Opaya Agent open: its button in the rail is a tab joined to its sidebar, like a selected agent */
+body.agent-open .sidebar:not(.peek) .brand{padding-right:0}
+body.agent-open .sidebar:not(.peek) .brand-opaya.selected{width:58px;align-self:stretch;margin-right:0;justify-content:flex-start;padding:8px 0 8px 9px;border:0;border-radius:14px 0 0 14px;background:var(--side2);box-shadow:none;position:relative;overflow:visible}
+body.agent-open .sidebar:not(.peek) .brand-opaya.selected .opaya-mark{box-shadow:0 0 0 2px #6ee7a8,0 0 18px -2px #6ee7a866;border-radius:9px}
+body.agent-open .sidebar:not(.peek) .brand-opaya.selected:before,body.agent-open .sidebar:not(.peek) .brand-opaya.selected:after{content:"";position:absolute;right:0;width:16px;height:16px;pointer-events:none}
+body.agent-open .sidebar:not(.peek) .brand-opaya.selected:before{top:-16px;background:radial-gradient(circle at 0 0,transparent 15.5px,var(--side2) 16px)}
+body.agent-open .sidebar:not(.peek) .brand-opaya.selected:after{bottom:-16px;background:radial-gradient(circle at 0 100%,transparent 15.5px,var(--side2) 16px)}
+body[data-theme="light"].agent-open .sidebar:not(.peek) .brand-opaya.selected .opaya-mark{box-shadow:0 0 0 2px #15803d,0 0 14px -2px #15803d55}
+body.agent-open .sidebar:not(.peek) .nav-overview>span:first-child,body.agent-open .sidebar:not(.peek) .sidebar-bottom>button>span:first-child{flex-shrink:0}
+/* The Opaya Agent's chats are listed in its sidebar: the heading keeps only Delete */
+.opaya-view #opaya-sessions,.opaya-view [data-action="opaya-new"]:not(.an-add){display:none}
