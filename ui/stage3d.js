@@ -106,7 +106,7 @@ class Hero {
     // In the compact hero (the management screen) the agent card covers more: the scene sits further right, smaller.
     // On the full map (the first page of the management screen) nothing covers it: the scene sits in the middle.
     this.compact = !!this.el.closest('.mg-hero-compact'); this.centered = !!this.el.closest('.rts-map-full');
-    this.world.position.x = w < 720 || this.centered ? 0 : half * (this.compact ? .72 : .36); this.world.scale.setScalar(this.compact ? .62 : this.centered ? .9 : 1); this.dust.position.x = this.world.position.x * .5;
+    this.world.position.x = w < 720 || this.centered ? 0 : half * (this.compact ? .72 : .36); this.world.scale.setScalar(this.compact ? .62 : this.centered ? Math.min(.9, Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 8 * this.camera.aspect / 5.4) : 1); this.dust.position.x = this.world.position.x * .5;
   }
   set(opts) {
     const agentChanged = opts.agent && opts.agent !== this.opts.agent;

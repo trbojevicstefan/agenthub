@@ -1,13 +1,11 @@
 # Opaya 0.24.0 - Manage like a strategy game
 
-- **The Manage screen is calmer and works like a strategy game's command panel.** The agent's view sits above; a panel stays at the bottom of the screen while you scroll:
-  - **Portrait**: the agent's icon with a status light. Drop a vault key on it to give it that key.
-  - **Bars**: Link, Keys, Backup and Version, each green, amber or red at a glance.
-  - **Queue**: clones, backups, uninstalls and redeploys running for this agent, with their progress.
-  - **Command card**: the main commands (Connect, Chat, Console, Model, Skills, Update, Back up, Clone) and four pages, **Deploy**, **Keys**, **Work** and **Settings**, each with its own commands. Every button has a key (Q W E R, A S D F, Z X C V); Esc goes back. A command shows a ring while it runs.
-  - **The map**: on the first page the agent's 3D scene fills the space above the panel and nothing else does. Its labels are shortcuts: a key opens Keys, the machine or container opens Deploy, a project or chat opens Work, Skills opens its tools. The orbit holds still under the pointer.
-  - On the other pages the map shrinks to a strip naming the page, and only that page's panel sits below: deploy targets and Docker, keys, projects and chats, or details and backups.
-  - Drag the portrait onto a machine on the Deploy page to clone the agent there.
+- **Manage works like a strategy game's city screen.** Everything about the agent is visible at once, and every setting is at most three steps away.
+  - **Overview**: four ledgers around the agent's 3D map. **Agent** (model, reasoning, skills, name, status), **Access** (its API keys by name, MCP servers, gateway, iTrust, browser), **Machine** (where it runs, system, data folder, container, Docker), **Work** (latest chat, projects with changes to push, version, how it is installed, last backup). Click any row to change it, or a ledger's title to open that area. The map's labels open their area too; the orbit holds still under the pointer.
+  - **Panel at the bottom**, always in view: the agent's portrait (drop a key on it, or drag it onto a machine to clone), bars for Link, Keys, Backup and Version, a queue of running clones, backups, uninstalls and redeploys, and a command card.
+  - **Command card, from general to specific**: everyday commands (Connect, Chat, Console, Update, Clone, Back up) and six areas: **Agent** (Model, Reasoning, Skills, then **Identity** and **Connection** sub-menus), **Machine** (Files, CLI, Shell, Machines, then **Deploy** and **Docker** sub-menus), **Access** (keys, Vault, Skills, MCP, Share, iTrust, Browser, Gateway), **Work** (chat window, new chat, history, projects), **Care** (update, back up, backups folder, check & fix, reconnect, log) and **Danger** (uninstall, remove). Each area shows how many commands it holds; a breadcrumb shows where you are.
+  - Every command has a key (Q W E R, A S D F, Z X C V) and Esc goes up one level. A command shows a ring while it runs.
+  - Each area opens its own view above the panel: the agent's Brain, Identity and Connection; the machine, its Docker and where it can be deployed; keys and access; projects and chats; health and backups; or what uninstalling and removing do.
 - The 3D scene is quieter: fewer particles.
 - **Chat | Console | Manage** at the top are plain tabs. The agent switcher and the Manage ▾ menu are gone: pick agents in the sidebar and machines under **Machines**.
 
