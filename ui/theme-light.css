@@ -852,3 +852,10 @@
 :where(body[data-theme="light"]) .an-switch.on{background:#badecc}
 :where(body[data-theme="light"]) .an-switch.on:after{background:#fff}
 :where(body[data-theme="light"]) .an-id .opaya-avatar{background:linear-gradient(135deg,#d5e3dc,#dfe7e3);border:1px solid #c8d5ce}
+:where(body[data-theme="light"]) .an-caret{color:#56626a}
+:where(body[data-theme="light"]) .an-caret.open{color:#1b5e3b}
+:where(body[data-theme="light"]) .an-sub:before{background:linear-gradient(#6ee7a855,#c9d1d5)}
+:where(body[data-theme="light"]) .an-sub-item{color:#3c4549}
+:where(body[data-theme="light"]) .an-sub-item:hover{background:#d2dadd;color:#0e1211}
+:where(body[data-theme="light"]) .an-sub-item.danger{color:#4c201c}
+:where(body[data-theme="light"]) .an-sub-item.danger:hover{background:#e3d5d5;color:#381410}

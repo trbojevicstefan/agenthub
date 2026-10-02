@@ -5,6 +5,7 @@
   - **Chat**, **Console** and **Overview**;
   - its recent **chats**, with **+** for a new chat and **Search chats**;
   - its **Manage** sections: Model & skills, Keys & tools, Machine & Docker, Deploy & clone, Projects, Updates & backups, Profile & connection and Danger zone. A dot marks a section that needs a look (no API keys, an old backup, a connection error, a job running).
+  - **Sub-menus**: the open view or section unfolds its actions under it (for example Keys & tools: API keys, Opaya Vault, MCP servers, Share with another agent, Gateway, iTrust, Opaya browser; Chat: Open in a window, Export this chat; Console: CLI, Shell, Files). Click one to open its section, see its row marked, and run it; switches show their state.
   - In a narrow window it becomes a row of icons.
 - **While an agent's sidebar is open, your agents' sidebar becomes a slim rail of icons.** The selected agent sits in a tab of its sidebar's colour that flows into it, with no border between, so you always see whose sidebar it is. Groups keep a short label above their icons: **Local**, **Remote**, **Pinned** or the group's name. Rest the pointer on the rail to widen it over the page with the names; it shrinks again when you move away.
 - **The Opaya Agent has its own sidebar too**: Chat and Setup guide, its chats with +, Settings (model, iTrust, Opaya Vault) and Tools (Discover agents, Install agents, Check all agents, Machines). Its button joins its sidebar like a selected agent, and its model, iTrust and setup guide left the top bar.
