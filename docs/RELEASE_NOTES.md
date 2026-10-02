@@ -16,6 +16,14 @@
 - The top bar shows the agent and the page; Chat, Console and Manage moved into the agent's sidebar. The Manage ▾ menu is gone: machines are under **Machines**.
 - History no longer opens by itself next to the chat: the agent's chats are in its sidebar, and **Search chats** opens History.
 - The 3D stage is quieter: fewer particles. Its orbit holds still under the pointer.
+- **Navigation, checked end to end**:
+  - With Chat set to open as a window, choosing an agent now selects it too: its sidebar and Overview show behind the window (before, the previous agent stayed selected). Chat shows a dot while its window is open.
+  - Projects now read the branch, changes and commits to push from git correctly (before, Manage showed every project as clean on a detached branch).
+  - Clicking an agent in the icon rail no longer widens the rail over the sidebar it just opened.
+  - The terminal panel closes when you switch to an agent that has no session in it, instead of showing another agent's tabs; Console opens it again and the sessions keep running.
+  - The Opaya Agent's Chat leaves the setup guide. The agent's name in the top bar opens its Overview. Machines is titled Machines.
+  - One name for sharing everywhere: **Share with another agent** (and **Share between agents** on Home); **Check & fix all**; **Remote** for agents on other machines.
+  - On macOS the rail leaves room for the window buttons, and with the sidebar hidden the agent's sidebar does too.
 
 # Opaya 0.23.1 - chat first
 

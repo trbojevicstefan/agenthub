@@ -102,7 +102,7 @@ The open view or section unfolds its actions under it in the sidebar, so every a
 ### Skills, tools and MCP servers
 - **Skills** (agent header) lists an agent's skills and commands and installs Hermes skills.
 - **MCP servers:** add the Opaya browser, GitHub, Context7, Playwright, Files, Fetch, Memory, Brave Search and more with one click (or any stdio or HTTP server by hand), then choose which agents use them. Opaya passes them to Hermes and other ACP agents per session, and writes them into the config of Claude Code, Codex and OpenClaw after you approve.
-- **Transfer to another agent** (right-click an agent):
+- **Share with another agent** (right-click an agent, or Keys & tools):
   - **Skills:** all of them or only the ones you select. They work across Hermes, Claude Code, Codex and OpenClaw, local or remote.
   - **Credentials:** all or selected API keys, between any agents: each key goes where the other agent reads it (.env, Claude Code settings, Codex sign-in, OpenCode, an API connection's token). The UI shows only key names, never values.
   - **MCP servers** the agent uses, and optionally its saved gateway token.

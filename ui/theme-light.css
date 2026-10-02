@@ -859,3 +859,4 @@
 :where(body[data-theme="light"]) .an-sub-item:hover{background:#d2dadd;color:#0e1211}
 :where(body[data-theme="light"]) .an-sub-item.danger{color:#4c201c}
 :where(body[data-theme="light"]) .an-sub-item.danger:hover{background:#e3d5d5;color:#381410}
+:where(body[data-theme="light"]) .crumb-agent:hover{background:#ffffff0a}
