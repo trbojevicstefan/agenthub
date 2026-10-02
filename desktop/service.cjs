@@ -765,6 +765,8 @@ async function start({app, safeStorage}, root) {
     dockerAction:async x=>{const host=x.hostId?broker.host(x.hostId):null;const r=await dockerManager.act(host,{container:x.container,action:x.action});emit();return r;},
     dockerStats:x=>dockerManager.stats(x.hostId?broker.host(x.hostId):null),
     dockerInspect:x=>dockerManager.inspect(x.hostId?broker.host(x.hostId):null,x.container),
+    // The last lines a container printed, for the Docker manager's log view (dockerTerminal follows them live).
+    dockerLogs:async x=>({text:await dockerManager.logs(x.hostId?broker.host(x.hostId):null,x.container,x.tail)}),
     dockerTerminal:async x=>{const host=x.hostId?broker.host(x.hostId):null,command=dockerManager.terminalCommand(x);const view=await runInTerminal({label:`${x.kind==='logs'?'Logs':'Shell'}: ${x.container}`.slice(0,60),key:`docker_${x.kind==='logs'?'logs':'sh'}_${String(x.container).replace(/[^a-zA-Z0-9_-]/g,'_')}`.slice(0,60),host,command});return {id:view.id};},
     sshKeyCreate:x=>vps.createKey(x.name), hostTest:x=>vps.test(x.hostId?broker.host(x.hostId):schema.host(x.host||{})),
     saveSettings:x=>broker.saveSettings(x), cloneAgent:async x=>{

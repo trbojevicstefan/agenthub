@@ -2505,3 +2505,100 @@ body[data-theme="light"] .mg-slot.here small{color:#1f7a45}
 body[data-theme="light"] .clone-summary{background:#eef8f2;border-color:#bfdccb;color:#38544a}
 body[data-theme="light"] .clone-summary strong{color:#12301f}
 @media (max-width:720px){.clone-scopes{grid-template-columns:1fr}}
+/* 0.26: Docker manager. Machine tabs, a bar with the engine and counts, search, filter, Live and Refresh; a card per
+   container with icon controls and its log inside; an images table with what uses each image. */
+.modal.tall{height:min(860px,calc(100vh - 64px))}
+.modal.tall .modal-body{flex:1}
+.dk{display:flex;flex-direction:column;gap:14px}
+.dk-tabs{display:flex;gap:6px;flex-wrap:wrap}
+.dk-tab{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 13px;border-radius:9px;border:1px solid #2c3437;background:#181d1f;font-size:12px;color:#b8c4c9}
+.dk-tab:hover{border-color:#41504d;color:var(--text)}
+.dk-tab.active{border-color:#4aa8ff88;background:#14212d;color:#e3f0fa}
+.dk-bar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 12px;border-radius:12px;background:#171c1e;border:1px solid #273033}
+.dk-engine{flex:1;min-width:200px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:#b8c4c9}
+.dk-count{font-size:11px;color:var(--muted);padding:2px 8px;border-radius:20px;background:#1f2629}
+.dk-count b{color:var(--text);font-weight:600}
+.dk-search{width:180px;padding:6px 10px;font-size:12px}
+.dk-show{margin:0}
+.dk-btn{width:30px;height:30px;padding:0;border-radius:8px;border:1px solid #2f383b;background:#1b2124;color:#b8c4c9;flex-shrink:0}
+.dk-btn svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.dk-btn:hover{border-color:#4f6a5c;color:var(--text);background:#20292a}
+.dk-btn.active{border-color:#4aa8ff88;color:#bfe0ff;background:#14212d}
+.dk-btn.danger:hover{border-color:#7a3434;color:#ff9a9a;background:#2c1a1a}
+.dk-btn.dk-power{color:#6ee7a8;border-color:#2c5643;background:#152a22}
+.dk-btn.dk-power svg{fill:currentColor;stroke-width:1}
+.dk-btn.dk-power.on{color:#f5c35b;border-color:#5a4a20;background:#2a2417}
+.dk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px}
+.dk-card{display:flex;flex-direction:column;gap:9px;padding:14px;border-radius:14px;background:#181e23;border:1px solid #29333b;min-width:0;transition:border-color .2s,box-shadow .2s}
+.dk-card:hover{border-color:#37506a}
+.dk-card.mine{border-color:#3b6fa3;box-shadow:0 0 0 1px #3b6fa355,0 16px 40px -20px #4aa8ff55;background:linear-gradient(160deg,#172434,#161c22)}
+.dk-card.exited,.dk-card.created,.dk-card.dead{background:#171b1e}
+.dk-card header{display:flex;align-items:center;gap:10px;min-width:0}
+.dk-id{display:flex;flex-direction:column;min-width:0;flex:1}
+.dk-id strong{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dk-id small{color:#7f8c93;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dk-light{width:10px;height:10px;border-radius:50%;background:#56636a;flex-shrink:0}
+.dk-light.on{background:#6ee7a8;box-shadow:0 0 10px #6ee7a8}
+.dk-light.paused{background:#f5c35b;box-shadow:0 0 10px #f5c35b88}
+.dk-light.busy{background:#f5c35b;animation:pulse 1s infinite}
+.dk-state{font-size:10px;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:20px;color:#8b989e;background:#20272b;flex-shrink:0}
+.dk-state.running{color:#8ff0bb;background:#173024}
+.dk-state.paused,.dk-state.restarting{color:#f5d38b;background:#2c2614}
+.dk-status{font-size:11.5px;color:#96a3a9}
+.dk-ports{display:flex;flex-wrap:wrap;gap:5px}
+.dk-port{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;border-radius:6px;font:11px "Cascadia Code","SFMono-Regular",Consolas,monospace;color:#a9c9e8;background:#14212d;border:1px solid #22384d}
+.dk-port span{color:#6f8aa3}
+.dk-port svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:2}
+button.dk-port:hover{border-color:#4aa8ff;color:#d8ecff}
+.dk-gauges{display:grid;gap:5px}
+.dk-io{display:flex;gap:12px;font-size:10.5px;color:#7f8c93;padding-left:42px}
+.dk-agents{display:flex;flex-wrap:wrap;gap:6px}
+.dk-actions{display:flex;align-items:center;gap:5px;margin-top:auto;padding-top:4px}
+.dk-sep{width:1px;height:18px;background:#2c3437;margin:0 3px}
+.dk-grow{flex:1}
+.dk-logs{border-top:1px solid #29333b;padding-top:8px}
+.dk-logs-bar{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+.dk-logs-bar small{flex:1;color:var(--muted);font-size:11px}
+.dk-logs pre{max-height:220px;overflow:auto;margin:0;padding:10px;border-radius:9px;background:#0d1012;border:1px solid #232b2e;font:11px/1.45 "Cascadia Code","SFMono-Regular",Consolas,monospace;color:#c9d5d1;white-space:pre-wrap;overflow-wrap:anywhere}
+.dk-images{border:1px solid #273033;border-radius:12px;background:#171c1e}
+.dk-images summary{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;cursor:pointer;font-size:12.5px;font-weight:600;list-style:none}
+.dk-images summary::-webkit-details-marker{display:none}
+.dk-images summary>span:before{content:"\25B8";display:inline-block;margin-right:8px;color:var(--muted);transition:transform .15s}
+.dk-images[open] summary>span:before{transform:rotate(90deg)}
+.dk-images summary small{color:var(--muted);font-weight:500;margin-left:4px}
+.dk-image-list{border-top:1px solid #273033}
+.dk-image{display:grid;grid-template-columns:28px minmax(0,1fr) 80px 110px auto;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid #22292c}
+.dk-image:last-child{border-bottom:0}
+.dk-image-icon{width:28px;height:28px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;background:#13253a;color:#4aa8ff}
+.dk-image-icon svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round}
+.dk-image-ref{display:flex;flex-direction:column;min-width:0}
+.dk-image-ref strong{font:600 12px "Cascadia Code","SFMono-Regular",Consolas,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dk-image-ref small{font-size:10.5px;color:var(--muted)}
+.dk-image-size{font-size:11.5px;color:#b8c4c9;text-align:right}
+.dk-image-use{font-size:11px;color:#8ff0bb}
+.dk-image-use .unused{color:var(--muted)}
+.dk-image-actions{display:flex;gap:5px}
+.dk-empty{text-align:center;padding:40px 20px;border:1px dashed #34403d;border-radius:14px}
+.dk-empty-icon{width:48px;height:48px;border-radius:14px;display:inline-flex;align-items:center;justify-content:center;background:#13253a;color:#4aa8ff;margin-bottom:12px}
+.dk-empty-icon svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linejoin:round}
+.dk-empty h3{font-size:15px;margin-bottom:6px}
+.dk-empty p{font-size:12px;color:var(--muted);margin:0 auto 14px;max-width:460px}
+.dk-none{grid-column:1/-1}
+@media (max-width:720px){.dk-image{grid-template-columns:28px minmax(0,1fr) auto}.dk-image-size,.dk-image-use{display:none}.dk-search{width:100%}}
+body[data-theme="light"] .dk-tab,body[data-theme="light"] .dk-bar,body[data-theme="light"] .dk-images{background:#fafbfa;border-color:#e0e6e2}
+body[data-theme="light"] .dk-tab.active{background:#e8f2fc;border-color:#9cc6ee;color:#0f3d66}
+body[data-theme="light"] .dk-card{background:#fff;border-color:#dfe5e8}
+body[data-theme="light"] .dk-card.mine{background:linear-gradient(160deg,#eef6fe,#fff);border-color:#8fbbe6}
+body[data-theme="light"] .dk-card.exited,body[data-theme="light"] .dk-card.created{background:#f7f8f8}
+body[data-theme="light"] .dk-btn{background:#fff;border-color:#d6dee2;color:#43535a}
+body[data-theme="light"] .dk-btn:hover{background:#f1f6f4;border-color:#9cc0ad;color:#13201b}
+body[data-theme="light"] .dk-btn.dk-power{background:#e9f8ef;border-color:#a9d8bb;color:#1f7a45}
+body[data-theme="light"] .dk-btn.dk-power.on{background:#fdf4d6;border-color:#e6cf86;color:#8a6410}
+body[data-theme="light"] .dk-state.running{background:#e3f6ea;color:#1f7a45}
+body[data-theme="light"] .dk-port{background:#eef5fc;border-color:#cfe0f0;color:#245a8a}
+body[data-theme="light"] .dk-logs pre{background:#f6f8f7;border-color:#e0e6e2;color:#28352f}
+body[data-theme="light"] .dk-image-use{color:#1f7a45}
+.dk-grid{align-items:start}
+body[data-theme="light"] .dk-count{background:#eef2ef;color:#5b6b63}
+body[data-theme="light"] .dk-count b{color:#13201b}
+body[data-theme="light"] .dk-state{background:#eef1f2;color:#5b6b70}

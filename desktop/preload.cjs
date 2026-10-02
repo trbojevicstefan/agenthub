@@ -11,7 +11,7 @@ methods.push('opayaFreeModels','opayaFreeSetup','saveSettings','projectSave','pr
 methods.push('opayaHoldSecret','opayaForgetSecret','agentGiveSecret','opayaGiveAll','vaultGiveAgent','agentKeys','agentWeb');
 methods.push('vaultImportScan','vaultImportCommit','pickSecretFile');
 methods.push('mcpCatalog','mcpInstall');
-methods.push('dockerList','dockerAction','dockerTerminal','dockerStats','dockerInspect');
+methods.push('dockerList','dockerAction','dockerTerminal','dockerStats','dockerInspect','dockerLogs');
 for(const method of methods)api[method]=async input=>{
   const result=await ipcRenderer.invoke(`hub:${method}`,input);
   if(!result?.ok)throw new Error(result?.error||'Desktop request failed.');
