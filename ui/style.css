@@ -2627,3 +2627,20 @@ button.fleet-docker:hover{border-color:#2f4a63;background:#14212d;color:#d8ecff}
 body[data-theme="light"] .help-tile{background:#fafbfa;border-color:#e0e6e2}
 body[data-theme="light"] .help-tile-ico{background:#e9f6ee;color:#1f7a45}
 body[data-theme="light"] .help-where{color:#1f7a45}
+/* Section heads carry the same line icons as the agent's sidebar. */
+.mg-h-icon{display:inline-flex;align-items:center;justify-content:center;color:#6ee7a8;vertical-align:middle;margin-right:2px}
+.mg-h-icon:before,.mg-h-icon:after{display:none!important}
+.mg-h-icon svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.mg-h-icon.key-h{color:#f5c35b;background:#2a2617;border-color:#4d4426}
+.mg-h-icon.docker-h{color:#4aa8ff;background:#13253a;border-color:#2b4a6e}
+.mg-h-icon.git-h{color:#f0a35e;background:#2a1f16;border-color:#4d3a26}
+.mg-remote-node{opacity:.4;width:10px;height:10px}
+body[data-theme="light"] .mg-h-icon{color:#1f7a45}
+body[data-theme="light"] .mg-h-icon.key-h{color:#9a7310;background:#fdf4d6;border-color:#e6cf86}
+body[data-theme="light"] .mg-h-icon.docker-h{color:#1d6fbf;background:#e8f2fc;border-color:#9cc6ee}
+body[data-theme="light"] .mg-h-icon.git-h{color:#a4561a;background:#fbefe3;border-color:#e9c7a5}
+.mg-lead{font-size:12px;color:var(--muted);margin:0 0 12px}
+.skill-list>.field-help{margin:0;padding:4px 0 2px}
+.mcp-card .secondary.small.is-on{color:#8ff0bb;border-color:#2f5a42;background:#152a22}
+body[data-theme="light"] .mcp-card .secondary.small.is-on{color:#1f7a45;border-color:#a9d8bb;background:#e9f8ef}
+.mcp-vault-pick{display:grid;gap:4px;font-size:12px}

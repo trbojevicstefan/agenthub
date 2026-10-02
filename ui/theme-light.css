@@ -989,3 +989,8 @@
 :where(body[data-theme="light"]) .help-tile{background:#dde3e5;border:1px solid #cfd7d8}
 :where(body[data-theme="light"]) .help-tile-ico{background:#cfdfd9;color:#164529}
 :where(body[data-theme="light"]) .help-where{color:#1c5c37}
+:where(body[data-theme="light"]) .mg-h-icon{color:#1b5e3b}
+:where(body[data-theme="light"]) .mg-h-icon.key-h{color:#614b1c;background:#e8e4d5;border-color:#ddd5ba}
+:where(body[data-theme="light"]) .mg-h-icon.docker-h{color:#1d4365;background:#cbd7e6;border-color:#a2b8d2}
+:where(body[data-theme="light"]) .mg-h-icon.git-h{color:#623d1d;background:#e9ded5;border-color:#ddccba}
+:where(body[data-theme="light"]) .mcp-card .secondary.small.is-on{color:#15472b;border-color:#aed5bf;background:#d5eae2}

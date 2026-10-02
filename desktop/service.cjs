@@ -819,7 +819,7 @@ async function start({app, safeStorage}, root) {
     browserTool, browserResult:async x=>{const c=browserCalls.get(x.id);if(!c)return false;clearTimeout(c.timer);browserCalls.delete(x.id);x.ok?c.resolve(x.value):c.reject(new Error(String(x.error||'Browser action failed.')));return true;},
     mcpSave:x=>broker.saveMcpServer(x), mcpRemove:x=>broker.removeMcpServer(x.id), agentMcp:x=>broker.setAgentMcp(x), agentSkills:x=>broker.skills(x.id),
     // One-click MCP servers: Opaya's catalog (no secrets in it) and installing one with the key typed in a masked field.
-    mcpCatalog:async()=>mcp.catalog(), mcpInstall:x=>broker.installMcp({id:x.id,secret:typeof x.secret==='string'?x.secret:'',folder:typeof x.folder==='string'?x.folder:'',agents:x.agents==='all'?'all':[].concat(x.agents||[]).map(String)}),
+    mcpCatalog:async()=>mcp.catalog(), mcpInstall:x=>broker.installMcp({id:x.id,secret:typeof x.secret==='string'&&x.secret?x.secret:x.vaultKey?opaya.secretValue(opaya.secretEntry(String(x.vaultKey))):'',folder:typeof x.folder==='string'?x.folder:'',agents:x.agents==='all'?'all':[].concat(x.agents||[]).map(String)}),
     // Hermes and OpenClaw skills: browse the hub or install one with the agent's CLI in a visible terminal.
     skillAction:async x=>{
       const a=broker.agent(x.agentId),host=a.transport==='ssh'?broker.host(a.hostId):null;
