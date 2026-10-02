@@ -1257,9 +1257,14 @@
   // Clones, backups, uninstalls and redeploys running for an agent.
   const agentJobs=a=>[...jobs.values()].filter(j=>j.status==='running'&&(j.kind==='clone'&&j.route?.from===a.name||['backup','uninstall','redeploy'].includes(j.kind)&&String(j.title||'').includes(a.name)));
   let anHtml='';
+  // While an agent's sidebar is open, the agents' sidebar is a rail of icons; resting the pointer on it widens it over
+  // the page (peek) to show the names, without moving anything.
+  {const side=document.querySelector('.sidebar');let t=0;
+    side?.addEventListener('mouseenter',()=>{clearTimeout(t);t=setTimeout(()=>{if(document.body.classList.contains('agent-open'))side.classList.add('peek');},320);});
+    side?.addEventListener('mouseleave',()=>{clearTimeout(t);side.classList.remove('peek');});}
   function renderAgentNav(a,screen){
     const nav=$('#agent-side');if(!nav)return;
-    if(!a||!screen){if(!nav.hidden){nav.hidden=true;anHtml='';requestAnimationFrame(()=>placePanes());}return;}
+    if(!a||!screen){if(!nav.hidden){nav.hidden=true;anHtml='';document.body.classList.remove('agent-open');requestAnimationFrame(()=>placePanes());}return;}
     const chatty=a.protocol!=='terminal'&&a.surface!=='terminal',chats=chatty?agentChats(a):[],on=a.status==='connected',termOpen=!$('#terminal-panel')?.hidden&&[...terminalViews.values()].some(v=>v.agentId===a.id&&!v.exited);
     const item=(cls,attrs,icon,label,extra='')=>`<button type="button" class="an-item ${cls}" ${attrs}><span class="an-ico" aria-hidden="true">${icon}</span><span class="an-label">${esc(label)}</span>${extra}</button>`;
     const keys=keyLists.get(a.id),backAt=backupLists.get(a.id)?.backups?.[0]?.createdAt,running=agentJobs(a).length;
@@ -1281,7 +1286,7 @@
           ${AN_SECTIONS.slice(1).map(x=>item(`${screen==='manage'&&mgSection===x.key?'active':''} ${x.key==='danger'?'danger':''}`,`data-action="agent-section" data-key="${x.key}" title="${esc(x.desc)}${screen==='manage'?` (${x.hk})`:''}"`,x.icon,x.name,`${flag[x.key]?`<span class="an-flag ${flag[x.key]}"></span>`:''}${screen==='manage'?`<kbd>${x.hk}</kbd>`:''}`)).join('')}
         </section>
       </div>`;
-    if(nav.hidden){nav.hidden=false;requestAnimationFrame(()=>placePanes());}
+    if(nav.hidden){nav.hidden=false;document.body.classList.add('agent-open');requestAnimationFrame(()=>placePanes());}
     if(html!==anHtml){anHtml=html;nav.innerHTML=html;}
   }
   function renderManage(a){
