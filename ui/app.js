@@ -18,7 +18,7 @@
   const providerIcon = provider => agentLogos[provider]?`<img class="agent-logo ${provider}-logo" src="${agentLogos[provider]}" alt="" draggable="false">`:'<span class="mark custom-mark"><i></i></span>';
   let state = {agents:[],hosts:[],conversations:[],histories:{},secureStorage:false}, overview = true, opayaView = false, playgroundView = false, renderKey = '', initialized = false, theme = 'dark';
   let toastTimer, returnFocus, currentTerminal = '', lastSelected = '', modalBusy = false;
-  let manageId = '', manageHtml = '', manageKeyed = {};
+  let manageId = '', manageHtml = '', manageKeyed = {}, lastFullChat = '';
   // How each agent's screen shows: manage (the default a left click opens), chat (the full chat view) or console.
   const agentModes = new Map(), modeOf = a => agentModes.get(a.id) || 'chat';
   // Sidebar items the user turned off in Settings > Sidebar.
@@ -30,7 +30,7 @@
   const draftKey = () => currentConversation()?.id || selected()?.id || '';
   const save = promise => { pendingWrites.add(promise); promise.catch(error=>toast(error.message,true)).finally(()=>pendingWrites.delete(promise)); return promise; };
   window.agenthubFlush = () => Promise.allSettled([...pendingWrites]);
-  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,panes:panes.filter(Boolean),paneSizes:panes.map((id,i)=>id?paneSizes[i]:0).filter(Boolean),theme,projects:projectsOpen,projectsOpen:[...projectsExpanded],layout,chatDock:chatDock.map(d=>({id:d.id,min:!!d.min})),sidebarHide:[...sidebarHide],sidebarHidden,tips:[...tipsSeen].slice(-300),greeted,lastVersion,terminalFont})); };
+  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,panes:panes.filter(Boolean),paneSizes:panes.filter(Boolean).map(id=>paneSize.get(id)||1),windows:[...terminalViews.values()].filter(v=>!v.exited).map(v=>[v.id,v.ctx||'',v.hiddenPane?1:0]),theme,projects:projectsOpen,projectsOpen:[...projectsExpanded],layout,chatDock:chatDock.map(d=>({id:d.id,min:!!d.min})),sidebarHide:[...sidebarHide],sidebarHidden,tips:[...tipsSeen].slice(-300),greeted,lastVersion,terminalFont})); };
   const drafts = new Map(), pendingSends = new Set(), terminalViews = new Map(), terminalPending = new Map();
   const selected = () => state.agents.find(a => a.id === state.activeAgentId);
   const currentConversation = () => state.conversations.find(c => c.id === state.activeConversationId && c.agentId === state.activeAgentId);
@@ -108,10 +108,16 @@
     const a=selected();
     // A left click opens an agent's management screen; Chat and Console are the other two ways to work with it.
     const mode=!overview&&!opayaView&&!playgroundView&&a?modeOf(a):'';manageId=mode==='manage'?a.id:'';
-    renderAgentNav(mode?a:null,mode==='manage'?'manage':mode==='console'?'console':mode?'chat':opayaView&&!playgroundView?'opaya':'');
     const stage=mode==='console';
     if(stage!==document.body.classList.contains('terminal-stage')){document.body.classList.toggle('terminal-stage',stage);placePanes();}
     if(!stage)stageAgent='';
+    // The terminal windows follow the screen first, so the agent's sidebar shows them as they now are.
+    syncTerminalContext();
+    {const full=mode==='chat'&&a&&a.protocol!=='terminal'&&state.activeConversationId?`${a.id}|${state.activeConversationId}`:'';
+      if(lastFullChat&&lastFullChat!==full){const [aid,cid]=lastFullChat.split('|'),ag=state.agents.find(x=>x.id===aid);
+        if(ag?.busy&&state.conversations.some(c=>c.id===cid)&&!chatDock.some(d=>d.id===cid)){chatDock.push({id:cid,min:true});saveView();}}
+      lastFullChat=full;}
+    renderAgentNav(mode?a:null,mode==='manage'?'manage':mode==='console'?'console':mode?'chat':opayaView&&!playgroundView?'opaya':'');
     // A view can rebuild its chat box while someone is typing (a new chat gets its id, the agent's details change).
     // The new box would not have focus, so keystrokes went nowhere: keep focus and the caret in the chat box.
     const typing=document.activeElement?.id==='message-input'?document.activeElement:null,caret=typing&&[typing.value,typing.selectionStart,typing.selectionEnd];
@@ -121,7 +127,7 @@
     $('#status-left').textContent=playgroundView?'Playground / ask two agents the same question':opayaView?'Opaya Agent / installs, connects and troubleshoots your agents':a&&!overview?`${labels[a.provider]} / ${a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase()} / ${location(a)}`:'One place. All your agents.';
     $('#status-right').textContent=state.agents.some(a=>a.busy)?`${state.agents.filter(a=>a.busy).length} agent working`:(state.service?.persistent?'Sessions protected / safe to close window':'Local workspace / no cloud account');
     updateTurnWatch();renderToolChip();renderTitleControls();
-    if(lastSelected!==state.activeAgentId){lastSelected=state.activeAgentId;followSelectedAgent();}
+    if(lastSelected!==state.activeAgentId)lastSelected=state.activeAgentId;
   }
   // ---- Workspace: every control in one place, and filters for a long list of agents --------------------------------
   let wsQuery='',wsStatus='',wsPlace='';
@@ -155,13 +161,15 @@
   // Entering an agent opens (or brings back) its CLI once; after that the user decides what runs where.
   const stageOpening=new Set();
   function renderAgentTerminal(a){
-    topbar('<strong>Console</strong>',gridPicker(),'console');
+    topbar('<strong>Console</strong>',arrangePicker(),'console');
     contentKind('stage');if(renderKey!=='stage:'+a.id){$('#content').innerHTML='';renderKey='stage:'+a.id;}
     $('#terminal-panel').hidden=false;
     if(stageAgent===a.id)return;stageAgent=a.id;
+    // Its windows as they are; else its sessions from elsewhere, brought here. Someone typing in a form or dialog keeps
+    // the keyboard when the stage follows another agent.
+    const own=ctxWindows(a.id).filter(v=>!v.hiddenPane);if(own.length){activateTerminal((own.find(v=>v.mode==='agent')||own[0]).id,{focus:!typingElsewhere()});return;}
     const mine=[...terminalViews.values()].filter(v=>v.agentId===a.id&&!v.exited),cli=mine.find(v=>v.mode==='agent');
-    // Someone typing in a form or dialog keeps the keyboard when the stage follows another agent.
-    if(cli||mine[0]){activateTerminal((cli||mine[0]).id,{focus:!typingElsewhere()});return;}
+    if(cli||mine[0]){activateTerminal((cli||mine[0]).id,{focus:!typingElsewhere(),bring:true});return;}
     if(stageOpening.has(a.id))return;stageOpening.add(a.id);
     openTerminal(hasCli(a)?{agentId:a.id,mode:'agent'}:{agentId:a.id}).catch(error=>toast(error.message,true)).finally(()=>stageOpening.delete(a.id));
   }
@@ -458,7 +466,7 @@
     const toggle=(key,label,hint='',dflt=true)=>`<label class="switch-row"><input type="checkbox" data-setting="${key}" ${on(key,dflt)?'checked':''}><span class="switch" aria-hidden="true"></span><span>${label}${hint?` <small>(${hint})</small>`:''}</span></label>`;
     const choice=(act,value,current,label,small,extra='')=>`<button type="button" class="theme-option compact ${current?'selected':''}" data-action="${act}" data-value="${value}" ${extra}><strong>${label}</strong><small>${small}</small></button>`;
     modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid">
-      <section class="settings-wide"><h3>Chat and console</h3><p class="settings-copy">Selecting an agent opens its chat; Manage and Console sit next to Chat at the top. Chat can also open as a small window docked at the bottom.</p><div class="theme-options"><button class="theme-option ${st.chatOpens==='window'?'selected':''}" data-action="chat-opens" data-value="window"><span class="interface-preview chat mini" aria-hidden="true"><i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-input"></i></span><strong>A chat window</strong><small>Docked at the bottom, several at once</small></button><button class="theme-option ${st.chatOpens!=='window'?'selected':''}" data-action="chat-opens" data-value="full"><span class="interface-preview chat mini" aria-hidden="true"><i class="ip-bubble l"></i><i class="ip-bubble r"></i><i class="ip-bubble l short"></i><i class="ip-input"></i></span><strong>The full chat view</strong><small>History, projects and files in the main area</small></button></div><p class="settings-copy">Console opens the agent's terminal</p><div class="theme-options"><button class="theme-option ${st.consoleOpens!=='full'?'selected':''}" data-action="console-opens" data-value="panel"><strong>Next to the chat</strong><small>Below or beside it, as the terminal panel</small></button><button class="theme-option ${st.consoleOpens==='full'?'selected':''}" data-action="console-opens" data-value="full"><strong>Full screen</strong><small>Terminals fill the main area, in a grid</small></button></div></section>
+      <section class="settings-wide"><h3>Chat and console</h3><p class="settings-copy">Selecting an agent opens its chat. Another agent's chat can open as a window beside the page (right-click it > Open chat window); chats you leave while their agent works wait in the status bar.</p><p class="settings-copy">Console opens the agent's terminal</p><div class="theme-options"><button class="theme-option ${st.consoleOpens!=='full'?'selected':''}" data-action="console-opens" data-value="panel"><strong>Next to the chat</strong><small>Below or beside it, as terminal windows</small></button><button class="theme-option ${st.consoleOpens==='full'?'selected':''}" data-action="console-opens" data-value="full"><strong>Full screen</strong><small>Terminal windows fill the main area</small></button></div></section>
       <section><h3>Sidebar</h3><p class="settings-copy">What shows in the sidebar besides your agents. Settings stays, so you can turn items back on.</p>${SIDE_ITEMS.map(([key,label,hint])=>`<label class="switch-row"><input type="checkbox" data-side-toggle="${key}" ${sidebarHide.has(key)?'':'checked'}><span class="switch" aria-hidden="true"></span><span>${label} <small>(${hint})</small></span></label>`).join('')}</section>
       <section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section>
       <section><h3>Notifications</h3><p class="settings-copy">System notifications while Opaya is not in front: hidden, minimized or behind another app. Click one to open that chat.</p>${toggle('notifyReplies','When an agent or the Opaya Agent replies')}${toggle('notifyApprovals','When something waits for your approval')}${toggle('notifyJobs','When installs, clones, updates and fixes finish')}${toggle('notifySound','With sound')}</section>
@@ -485,83 +493,113 @@
     const update=()=>{const q=$('#switcher-search').value.toLowerCase();$('#switcher-list').innerHTML=state.agents.filter(a=>`${title(a)} ${description(a)} ${labels[a.provider]} ${location(a)} ${placeText(a)} ${a.group||''} ${(a.tags||[]).join(' ')}`.toLowerCase().includes(q)).map(a=>`<button class="switcher-row" data-action="switch-select" data-id="${esc(a.id)}">${badge(a)}<span><strong>${esc(title(a))}</strong><small>${esc(description(a))}</small></span>${dot(a)}</button>`).join('')||'<p class="field-help">No matching agents. Add a connection to get started.</p>';};
     $('#switcher-search').addEventListener('input',update);update();$('#switcher-search').focus();
   }
-  // ---- Terminal panes: terminals side by side (split left / right), each with its own session --------------------------
-  // panes: the terminal shown in each pane, left to right; paneSizes: their relative widths. Terminals that are not in a
-  // pane keep running in the background as tabs. activateTerminal(id) shows id in the focused pane, or focuses the pane
-  // that already shows it.
-  let panes=[''],paneSizes=[1],paneFocus=0;
-  const MIN_PANE=240;
-  const maxPanes=()=>gridCells()||Math.max(1,Math.floor(($('#terminal-views')?.clientWidth||960)/MIN_PANE));
+  // ---- Terminal windows: every session is a window; there are no tabs -------------------------------------------------
+  // A window belongs to the screen it was opened from: an agent (its id) or '' (Home, Machines, the Opaya Agent...). The
+  // panel shows that screen's windows side by side, stacked or in a grid (layout.arrange). A hidden window keeps running
+  // and comes back from the agent's Console menu, the panel's hidden-windows button or the right-click menu.
+  // panes: the windows on screen, in order ([''] when there are none); paneFocus: the one in use.
+  let panes=[''],paneFocus=0,termOrder=0;const paneSize=new Map();
+  const MIN_PANE=240,MIN_PANE_H=110;
+  const termCtx=()=>inAgentView()?selected().id:'';
+  const ctxWindows=(ctx=termCtx())=>[...terminalViews.values()].filter(v=>(v.ctx||'')===ctx&&!v.poppedOut).sort((x,y)=>x.order-y.order);
+  const ARRANGE={cols:['Side by side','Windows next to each other'],rows:['Stacked','Windows above each other'],grid:['Grid','Windows in a grid']};
+  // Side by side or stacked turns into a grid when the windows would get too narrow or too low.
+  function arrangeNow(n){
+    const a=ARRANGE[layout.arrange]?layout.arrange:'cols',box=$('#terminal-views');
+    if(a==='cols'&&n>Math.max(1,Math.floor((box?.clientWidth||960)/MIN_PANE)))return 'grid';
+    if(a==='rows'&&n>Math.max(1,Math.floor((box?.clientHeight||400)/MIN_PANE_H)))return 'grid';
+    return a;
+  }
   function paneRoot(){
     let root=$('#terminal-panes');
     if(!root){root=document.createElement('div');root.id='terminal-panes';root.className='terminal-panes';$('#terminal-views').prepend(root);
       root.addEventListener('pointerdown',event=>{const pane=event.target.closest('.terminal-pane');if(!pane||event.target.closest('.pane-grip'))return;const i=Number(pane.dataset.index);if(i!==paneFocus){paneFocus=i;currentTerminal=panes[i]||'';markPanes();}},true);
-      root.addEventListener('click',event=>{const b=event.target.closest('[data-pane-action]');if(!b)return;const i=Number(b.closest('.terminal-pane').dataset.index);if(b.dataset.paneAction==='close')closePane(i);else if(b.dataset.paneAction==='split')action(()=>splitTerminal('right',i));});
+      root.addEventListener('click',event=>{const b=event.target.closest('[data-pane-action]');if(!b)return;const id=panes[Number(b.closest('.terminal-pane').dataset.index)],act=b.dataset.paneAction;
+        if(act==='hide')hideWindow(id);else if(act==='popout')action(()=>popoutTerminal(id));else if(act==='close')action(()=>endWindow(id));else if(act==='show')showWindow(b.dataset.id);});
     }
     return root;
   }
   function terminalPool(){let pool=$('#terminal-pool');if(!pool){pool=document.createElement('div');pool.id='terminal-pool';pool.hidden=true;$('#terminal-views').append(pool);}return pool;}
   function normalizePanes(){
-    panes=panes.map(id=>terminalViews.has(id)&&!terminalViews.get(id).poppedOut?id:'');
-    // Several panes never show the same terminal, and empty panes go away while others remain.
-    panes=panes.map((id,i)=>id&&panes.indexOf(id)!==i?'':id);
-    // A grid keeps its cells, empty ones too; sessions beyond its cells go back to their tabs.
-    if(gridCells()){const n=gridCells();panes=panes.slice(0,n);while(panes.length<n)panes.push('');paneSizes=panes.map(()=>1);paneFocus=Math.min(Math.max(0,paneFocus),n-1);return;}
-    if(panes.length>1){const keep=panes.map((id,i)=>[id,paneSizes[i]||1]).filter(([id])=>id);if(keep.length){paneFocus=Math.max(0,keep.findIndex(([id])=>id===panes[paneFocus]));panes=keep.map(k=>k[0]);paneSizes=keep.map(k=>k[1]);}else{panes=[''];paneSizes=[1];}}
-    if(!panes.length){panes=[''];paneSizes=[1];}
-    paneSizes=panes.map((_,i)=>paneSizes[i]>0?paneSizes[i]:1);paneFocus=Math.min(Math.max(0,paneFocus),panes.length-1);
+    const shown=ctxWindows().filter(v=>!v.hiddenPane).map(v=>v.id);
+    panes=shown.length?shown:[''];
+    const at=panes.indexOf(currentTerminal);paneFocus=at>=0?at:Math.min(Math.max(0,paneFocus),panes.length-1);
   }
   function markPanes(){
     const root=paneRoot();for(const el of root.querySelectorAll('.terminal-pane'))el.classList.toggle('focused',Number(el.dataset.index)===paneFocus&&panes.length>1);
-    for(const tab of document.querySelectorAll('#terminal-tabs .terminal-tab')){const id=tab.querySelector('[data-action="terminal-tab"]')?.dataset.id;tab.classList.toggle('selected',id===currentTerminal);tab.classList.toggle('in-pane',!!id&&id!==currentTerminal&&panes.includes(id));}
+  }
+  // The toolbar's left side: how the windows are arranged, and the hidden ones.
+  function renderArrange(){
+    const box=$('#terminal-arrange');if(!box)return;const hidden=ctxWindows().filter(v=>v.hiddenPane);
+    const html=`${arrangePicker()}${hidden.length?`<button type="button" class="term-btn hidden-windows" data-action="terminal-hidden" title="Windows that keep running out of sight">${hidden.length} hidden</button>`:''}`;
+    if(box.dataset.html!==html){box.dataset.html=html;box.innerHTML=html;}
   }
   function renderPanes(){
     normalizePanes();
-    const root=paneRoot(),pool=terminalPool();
+    const root=paneRoot(),pool=terminalPool(),n=panes.filter(Boolean).length,arrange=arrangeNow(n);
     // Reuse pane elements, so terminals are only moved when they change place (moving restarts nothing, but costs a fit).
     while(root.children.length>panes.length*2-1)root.lastElementChild.remove();
     panes.forEach((id,i)=>{
       let pane=root.children[i*2];
-      if(!pane){if(i>0){const grip=document.createElement('div');grip.className='pane-grip';grip.setAttribute('role','separator');grip.setAttribute('aria-orientation','vertical');grip.setAttribute('aria-label','Resize terminals');root.append(grip);}
-        pane=document.createElement('section');pane.className='terminal-pane';pane.innerHTML='<header class="terminal-pane-head"><span class="pane-title"></span><button type="button" class="pane-btn" data-pane-action="split" title="Split right" aria-label="Split right"><span class="split-glyph" aria-hidden="true"></span></button><button type="button" class="pane-btn" data-pane-action="close" title="Close pane (the session keeps running as a tab)" aria-label="Close pane">&#10005;</button></header><div class="terminal-pane-body"></div>';root.append(pane);}
-      pane.dataset.index=i;pane.style.flex=`${paneSizes[i]} 1 0`;
+      if(!pane){if(i>0){const grip=document.createElement('div');grip.className='pane-grip';grip.setAttribute('role','separator');grip.setAttribute('aria-label','Resize terminal windows');root.append(grip);}
+        pane=document.createElement('section');pane.className='terminal-pane';pane.innerHTML='<header class="terminal-pane-head"><span class="pane-dot" aria-hidden="true"></span><span class="pane-title"></span><button type="button" class="pane-btn" data-pane-action="hide" title="Hide (keeps running)" aria-label="Hide window"><span class="pane-hide-glyph" aria-hidden="true"></span></button><button type="button" class="pane-btn" data-pane-action="popout" title="Open in a separate window" aria-label="Open in a separate window"><span class="term-popout-glyph" aria-hidden="true"></span></button><button type="button" class="pane-btn danger" data-pane-action="close" title="End session" aria-label="End session">&#10005;</button></header><div class="terminal-pane-body"></div>';root.append(pane);}
+      pane.dataset.index=i;pane.style.flex=arrange==='grid'?'':`${paneSize.get(id)||1} 1 0`;
       const view=terminalViews.get(id),body=pane.querySelector('.terminal-pane-body');
-      pane.querySelector('.pane-title').textContent=view?tabTitle(view)+(view.exited?' (saved output)':''):'';
+      pane.classList.toggle('empty',!view);pane.classList.toggle('ended',!!view?.exited);pane.classList.toggle('attention',!!view?.attention);
+      pane.querySelector('.pane-title').textContent=view?tabTitle(view)+(view.exited?' (ended)':''):'';
       if(view){if(view.element.parentElement!==body){body.replaceChildren(view.element);}view.element.hidden=false;}
-      else if(!body.querySelector('.terminal-placeholder')){const ph=document.createElement('div');ph.className='terminal-placeholder';ph.innerHTML='<div><p>No session here. Every other session keeps running in its tab.</p><div class="placeholder-actions"><button type="button" class="secondary" data-action="terminal-cli"><span class="term-play" aria-hidden="true"></span> Agent CLI</button><button type="button" class="secondary" data-action="terminal-shell">+ Shell</button></div><small>Right-click a terminal to open another beside it.</small></div>';body.replaceChildren(ph);}
+      else{const hidden=ctxWindows().filter(v=>v.hiddenPane),a=inAgentView()?selected():null;
+        body.innerHTML=`<div class="terminal-placeholder"><div><p>${a?`No terminal for ${esc(title(a))} yet.`:'No terminal here yet.'}</p><div class="placeholder-actions">${a&&hasCli(a)?'<button type="button" class="secondary" data-action="terminal-cli"><span class="term-play" aria-hidden="true"></span> Agent CLI</button>':''}<button type="button" class="secondary" data-action="terminal-shell">+ Shell</button></div>${hidden.length?`<p class="placeholder-hidden">Hidden: ${hidden.map(v=>`<button type="button" class="text-button" data-pane-action="show" data-id="${esc(v.id)}">${esc(tabTitle(v))}</button>`).join(' ')}</p>`:''}</div></div>`;}
     });
-    root.classList.toggle('split',panes.length>1);applyGrid();
+    root.dataset.arrange=arrange;root.classList.toggle('split',panes.length>1);
+    root.style.gridTemplateColumns=arrange==='grid'?`repeat(${Math.ceil(Math.sqrt(panes.length))},minmax(0,1fr))`:'';
+    for(const grip of root.querySelectorAll(':scope > .pane-grip'))grip.setAttribute('aria-orientation',arrange==='rows'?'horizontal':'vertical');
     for(const view of terminalViews.values())if(!panes.includes(view.id)&&view.element.parentElement!==pool){view.element.hidden=true;pool.append(view.element);}
-    markPanes();
+    markPanes();renderArrange();
     for(const id of panes){const view=terminalViews.get(id);if(view&&!view.poppedOut)requestAnimationFrame(()=>{if(!view.exited)view.core.fitAndReport(view.report);else{try{view.fit.fit();}catch{}}});}
   }
   // focus: false when the change comes from elsewhere (a session ended, was renamed or started again, the selected agent
-  // changed in the background); the keyboard then stays where the user is typing.
-  function activateTerminal(id,{focus=true}={}){
-    if(id&&terminalViews.has(id)){const at=panes.indexOf(id);if(at>=0)paneFocus=at;else panes[paneFocus]=id;}
-    else if(!id)panes[paneFocus]='';
-    renderPanes();currentTerminal=panes[paneFocus]||'';
-    for(const shown of panes){const v=terminalViews.get(shown);if(v)v.attention=false;}
-    $('#terminal-tabs').innerHTML=[...terminalViews.values()].map(v=>`<div class="terminal-tab ${v.exited?'archived':''} ${v.attention?'attention':''}"><button type="button" data-action="terminal-tab" data-id="${esc(v.id)}" title="${esc(v.title)}${v.exited?' (ended: press Enter in it to start it again)':''}"><span class="terminal-tab-dot" aria-hidden="true"></span><span class="terminal-tab-title">${esc(tabTitle(v))}</span></button><button type="button" class="terminal-tab-close" data-action="terminal-tab-close" data-id="${esc(v.id)}" aria-label="Close ${esc(v.title)}" title="Close">&#10005;</button></div>`).join('')||'<span class="terminal-tabs-empty"><span class="terminal-glyph">&gt;_</span> Terminal</span>';
-    markPanes();
+  // changed in the background); the keyboard then stays where the user is typing. bring: show this window on the screen in
+  // use (it was hidden, or opened from another screen).
+  function activateTerminal(id,{focus=true,bring=false}={}){
+    const view=id&&terminalViews.get(id);
+    if(view){if(bring){view.ctx=termCtx();view.hiddenPane=false;}if((view.ctx||'')===termCtx()&&!view.hiddenPane)currentTerminal=id;}
+    else if(!id)currentTerminal='';
+    renderPanes();if(!panes.includes(currentTerminal))currentTerminal=panes[paneFocus]||'';paneFocus=Math.max(0,panes.indexOf(currentTerminal));markPanes();
+    for(const shown of panes){const v=terminalViews.get(shown);if(v&&v.attention){v.attention=false;}}
     const active=terminalViews.get(currentTerminal);if(!active)closeTerminalSearch();
     if(focus&&active&&!active.poppedOut)requestAnimationFrame(()=>active.term.focus());
+  }
+  function showWindow(id){$('#terminal-panel').hidden=false;activateTerminal(id,{bring:true});saveView();render();}
+  function hideWindow(id){
+    const view=terminalViews.get(id);if(!view)return;view.hiddenPane=true;if(currentTerminal===id)currentTerminal='';
+    activateTerminal(currentTerminal,{focus:false});
+    // The last window out of sight closes the panel; Console or the hidden windows bring it back.
+    if(!panes.filter(Boolean).length&&!document.body.classList.contains('terminal-stage'))$('#terminal-panel').hidden=true;
+    saveView();render();
+  }
+  async function endWindow(id){
+    const view=terminalViews.get(id);if(!view)return;
+    if(!view.exited&&!await ask(`End ${tabTitle(view)}?\n\nIts program stops. Hide the window instead to keep it running.`))return;
+    await closeTerminalTab(id);render();
   }
   // Where the keyboard is: in a live terminal on screen (someone is typing there), or in another text field.
   function viewOf(element){const el=element?.closest?.('.terminal-view');return el?[...terminalViews.values()].find(v=>v.element===el):null;}
   function typingInTerminal(){const v=viewOf(document.activeElement);return !!v&&!v.exited&&!v.poppedOut&&!v.element.hidden&&!$('#terminal-panel').hidden;}
   function typingElsewhere(){const el=document.activeElement;return !!el&&el!==document.body&&!viewOf(el)&&(el.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));}
   function focusCurrent(){const v=terminalViews.get(currentTerminal);if(v&&!v.poppedOut&&!v.element.hidden&&!$('#terminal-panel').hidden)v.term.focus();}
-  // The terminal panel follows the selected agent. A selection made in the background (the Opaya Agent saving a
-  // connection, an install or clone finishing) no longer swaps out the terminal someone is typing in, or takes the keyboard.
-  function followSelectedAgent(){
-    if($('#terminal-panel').hidden||typingInTerminal())return;
-    const match=[...terminalViews.values()].find(v=>v.agentId===state.activeAgentId&&!v.exited);
-    // The panel was open for other agents' sessions only: it closes (they keep running) instead of showing another
-    // agent's tabs over this one's screen. Console opens it again. A shell of this computer or a machine stays.
-    const live=[...terminalViews.values()].filter(v=>!v.exited);
-    if(!match&&live.length&&live.every(v=>state.agents.some(a=>a.id===v.agentId))&&!document.body.classList.contains('terminal-stage')){$('#terminal-panel').hidden=true;saveView();queueMicrotask(()=>render());return;}
-    activateTerminal(match?.id||'',{focus:!typingElsewhere()});
+  // The panel follows the screen in use: it shows that screen's windows, and is open there if it was open the last time
+  // (or the screen has windows and the panel is open now). Someone typing in a terminal keeps it until they stop: a
+  // selection made in the background (the Opaya Agent saving a connection, an install finishing) does not swap it out.
+  let termCtxShown=null;const ctxPanelOpen=new Map();
+  function syncTerminalContext(){
+    const ctx=termCtx();if(ctx===termCtxShown)return;if(termCtxShown!==null&&typingInTerminal())return;
+    const stage=document.body.classList.contains('terminal-stage'),open=!$('#terminal-panel').hidden;
+    if(termCtxShown!==null)ctxPanelOpen.set(termCtxShown,open);
+    termCtxShown=ctx;const windows=ctxWindows(ctx).filter(v=>!v.hiddenPane);
+    currentTerminal=windows.find(v=>v.id===currentTerminal)?.id||windows[0]?.id||'';
+    $('#terminal-panel').hidden=!(stage||windows.length&&(ctxPanelOpen.get(ctx)??open));
+    activateTerminal(currentTerminal,{focus:false});
   }
   // The keyboard goes back to the terminal it was in when a menu over it closed by itself (the window lost focus) and the
   // window comes back: focus was left on the page, and typing went nowhere until the terminal was clicked again.
@@ -569,19 +607,6 @@
   document.addEventListener('focusin',event=>{if(event.target.closest?.('.context-menu,.terminal-toolbar'))return;keyboardIn=viewOf(event.target)?.id||'';});
   document.addEventListener('pointerdown',event=>{if(!event.target.closest?.('.terminal-view,.context-menu,.terminal-toolbar'))keyboardIn='';},true);
   window.addEventListener('focus',()=>setTimeout(()=>{if(document.activeElement&&document.activeElement!==document.body||$('#app-dialog'))return;const v=terminalViews.get(keyboardIn);if(v&&!v.poppedOut&&!v.element.hidden&&!$('#terminal-panel').hidden)v.term.focus();},0));
-  // Put `id` in a new pane left or right of pane `index`. Returns false when there is no room.
-  function insertPane(id,dir,index=paneFocus){
-    normalizePanes();
-    // In a grid a new session takes the first empty cell, else the focused one.
-    if(gridCells()){const from=panes.indexOf(id);if(from>=0){paneFocus=from;return true;}const empty=panes.indexOf('');paneFocus=empty>=0?empty:index;panes[paneFocus]=id;return true;}
-    const from=panes.indexOf(id);if(from>=0&&panes.length===1)return true;
-    if(from<0&&panes.length>=maxPanes()){toast('No room for another terminal side by side. Close a pane or widen the window.');return false;}
-    if(from>=0){panes.splice(from,1);const [size]=paneSizes.splice(from,1);if(from<index)index--;paneSizes[Math.min(index,paneSizes.length-1)]+=size;}
-    if(!panes.length){panes=[''];paneSizes=[1];index=0;}
-    const at=dir==='left'?index:index+1,share=(paneSizes[index]||1)/2;
-    if(panes[index]===''){panes[index]=id;paneFocus=index;return true;}
-    paneSizes[index]=share;panes.splice(at,0,id);paneSizes.splice(at,0,share);paneFocus=at;return true;
-  }
   // Where a new terminal next to `view` opens: the same agent, the same machine, or this computer.
   function terminalTarget(view){
     const id=view?.agentId||'';
@@ -589,24 +614,13 @@
     if(id.startsWith('host_')&&state.hosts.some(h=>h.id===id.slice(5)))return {hostId:id.slice(5)};
     return {local:true};
   }
-  async function splitTerminal(dir,index=paneFocus,target){
-    if(!target&&maxPanes()<=panes.filter(Boolean).length){toast('No room for another terminal side by side. Close a pane or widen the window.');return;}
-    await openTerminal({...(target||terminalTarget(terminalViews.get(panes[index]))),split:{dir,index}});
-  }
-  function showInSplit(id,dir,index=paneFocus){if(insertPane(id,dir,index))activateTerminal(id);saveView();}
-  function closePane(i){
-    normalizePanes();if(gridCells()){panes[i]='';paneFocus=i;activateTerminal('');saveView();return;}if(panes.length<2)return;
-    const [size]=paneSizes.splice(i,1);panes.splice(i,1);paneSizes[Math.max(0,i-1)]+=size;
-    paneFocus=Math.max(0,Math.min(paneFocus>=i?paneFocus-1:paneFocus,panes.length-1));
-    activateTerminal(panes[paneFocus]);saveView();
-  }
-  // Drag the grip between two panes to share their width.
+  // Drag the grip between two windows to share the space: their widths side by side, their heights stacked.
   document.addEventListener('pointerdown',event=>{
-    const grip=event.target.closest('#terminal-panes .pane-grip');if(!grip)return;event.preventDefault();
-    const left=grip.previousElementSibling,right=grip.nextElementSibling,i=Number(left.dataset.index),j=Number(right.dataset.index);
-    const total=left.offsetWidth+right.offsetWidth,share=paneSizes[i]+paneSizes[j],start=event.clientX,startLeft=left.offsetWidth;
+    const grip=event.target.closest('#terminal-panes .pane-grip');if(!grip)return;const root=$('#terminal-panes'),rows=root.dataset.arrange==='rows';if(root.dataset.arrange==='grid')return;event.preventDefault();
+    const before=grip.previousElementSibling,after=grip.nextElementSibling,a=panes[Number(before.dataset.index)],b=panes[Number(after.dataset.index)];
+    const size=el=>rows?el.offsetHeight:el.offsetWidth,total=size(before)+size(after),share=(paneSize.get(a)||1)+(paneSize.get(b)||1),start=rows?event.clientY:event.clientX,startBefore=size(before),min=(rows?MIN_PANE_H:MIN_PANE)*0.75;
     grip.setPointerCapture(event.pointerId);document.body.classList.add('pane-resizing');
-    const move=e=>{const w=Math.max(MIN_PANE*0.75,Math.min(total-MIN_PANE*0.75,startLeft+e.clientX-start));paneSizes[i]=share*w/total;paneSizes[j]=share-paneSizes[i];left.style.flex=`${paneSizes[i]} 1 0`;right.style.flex=`${paneSizes[j]} 1 0`;};
+    const move=e=>{const w=Math.max(min,Math.min(total-min,startBefore+(rows?e.clientY:e.clientX)-start));paneSize.set(a,share*w/total);paneSize.set(b,share-paneSize.get(a));before.style.flex=`${paneSize.get(a)} 1 0`;after.style.flex=`${paneSize.get(b)} 1 0`;};
     grip.addEventListener('pointermove',move);
     grip.addEventListener('lostpointercapture',()=>{grip.removeEventListener('pointermove',move);document.body.classList.remove('pane-resizing');renderPanes();saveView();},{once:true});
   });
@@ -618,7 +632,7 @@
   function newTerminalItems(split=null,view=null){
     const a=view?state.agents.find(x=>x.id===view.agentId):inAgentView()?selected():null;
     const p=a&&!view?projectOf(currentConversation()):null,project=a&&p&&fitsProject(a,p)?p:null,where=project?` in ${project.name}`:'';
-    const go=target=>split?splitTerminal(split,paneFocus,target):openTerminal(target);
+    const go=target=>openTerminal(target);
     return [
       a&&hasCli(a)&&{icon:'&#10095;',label:`${title(a)} CLI${where}`,run:()=>go({agentId:a.id,mode:'agent',projectId:project?.id})},
       a&&{icon:'&gt;_',label:`Shell: ${title(a)}${where}`,run:()=>go({agentId:a.id,projectId:project?.id})},
@@ -627,7 +641,7 @@
       ...state.hosts.filter(h=>!(view&&view.agentId==='host_'+h.id)).map(h=>({icon:'&#9635;',label:`Shell: ${h.name}`,run:()=>go({hostId:h.id})}))
     ];
   }
-  // Sessions from before a restart keep their output; they wait here instead of filling the tab bar.
+  // Sessions from before a restart keep their output; they wait here instead of opening a window each.
   const savedSessions=new Map();
   function terminalMoreMenu(){
     const view=terminalViews.get(currentTerminal),finished=[...terminalViews.values()].filter(v=>v.exited),zoom=step=>()=>{zoomTerminals(step);focusCurrent();};
@@ -635,12 +649,13 @@
       view&&{icon:'&#9906;',label:'Find...',hint:`${mod()}F`,run:()=>openTerminalSearch()},
       view&&{icon:'&#9998;',label:'Rename...',run:()=>renameTerminal(view.id)},
       view&&!view.exited&&{icon:'&#10697;',label:'Open in separate window',run:()=>popoutTerminal(view.id)},
-      view&&{icon:'&#9707;',label:'Open beside',submenu:newTerminalItems('right')},
+      view&&{icon:'&#9645;',label:'Hide (keeps running)',run:()=>hideWindow(view.id)},
       savedSessions.size&&{icon:'&#9776;',label:'Saved output',submenu:[...savedSessions.values()].map(t=>({icon:'&gt;_',label:tabTitle(t),run:()=>{savedSessions.delete(t.id);return openTerminal({terminalId:t.id});}}))},
-      finished.length&&{icon:'&#10003;',label:`Close finished tabs (${finished.length})`,run:()=>closeFinished()},
+      windowsMenu().length&&{icon:'&#9776;',label:'Windows',submenu:windowsMenu()},
+      finished.length&&{icon:'&#10003;',label:`Close ended windows (${finished.length})`,run:()=>closeFinished()},
       {icon:'A',label:'Text size',submenu:[{icon:'+',label:'Larger',hint:`${mod()}+`,run:zoom(1)},{icon:'-',label:'Smaller',hint:`${mod()}-`,run:zoom(-1)},{icon:'0',label:'Reset',hint:`${mod()}0`,run:zoom(0)}]},
       view&&'-',
-      view&&{icon:'&#10005;',label:view.exited?'Close saved output':'End session',danger:!view.exited,run:()=>closeTerminalTab(view.id)}
+      view&&{icon:'&#10005;',label:view.exited?'Close saved output':'End session',danger:!view.exited,run:()=>endWindow(view.id)}
     ];
   }
   async function closeFinished(){for(const v of [...terminalViews.values()])if(v.exited)await closeTerminalTab(v.id);}
@@ -661,7 +676,7 @@
   function terminalContextMenu(event,view){
     const pane=event.target.closest('.terminal-pane'),index=pane?Number(pane.dataset.index):paneFocus;
     if(pane&&index!==paneFocus){paneFocus=index;currentTerminal=panes[index]||'';markPanes();}
-    const hidden=[...terminalViews.values()].filter(v=>!panes.includes(v.id)&&!v.poppedOut),text=view?view.core.selection():'';
+    const text=view?view.core.selection():'';
     // The menu takes the keyboard while it is open; Copy, Paste, Select all and Clear give it back to the terminal.
     const back=run=>()=>{run();if(!view.poppedOut)view.term.focus();};
     const items=[
@@ -670,13 +685,14 @@
       view&&{icon:'&#9633;',label:'Select all',run:back(()=>view.term.selectAll())},
       view&&{icon:'&#9906;',label:'Find...',hint:`${mod()}F`,run:()=>openTerminalSearch()},
       view&&{icon:'&#8634;',label:'Clear',run:back(()=>view.term.clear())},
+      ...(()=>{const who=view&&(state.agents.find(x=>x.id===view.agentId)||(inAgentView()?selected():null));return who&&who.protocol!=='terminal'&&who.surface!=='terminal'?[{icon:'&#9993;',label:`Ask ${title(who)} about this`,disabled:!text,hint:text?'':'Select text first',run:()=>action(()=>askInChat(who,text))}]:[];})(),
       '-',
-      {icon:'&#9707;',label:'Open beside',submenu:newTerminalItems('right',view)},
-      hidden.length&&{icon:'&#9776;',label:'Show beside',submenu:hidden.map(v=>({icon:'&gt;_',label:tabTitle(v),run:()=>showInSplit(v.id,'right',index)}))},
+      {icon:'&#9707;',label:'New window',submenu:newTerminalItems(null,view)},
+      windowsMenu().length&&{icon:'&#9776;',label:'Windows',submenu:windowsMenu()},
       '-',
       view&&{icon:'&#9998;',label:'Rename...',run:()=>renameTerminal(view.id)},
       view&&!view.exited&&{icon:'&#10697;',label:'Open in separate window',run:()=>popoutTerminal(view.id)},
-      panes.length>1&&{icon:'&#9645;',label:'Close pane (keeps running)',run:()=>closePane(index)},
+      view&&{icon:'&#9645;',label:'Hide (keeps running)',run:()=>hideWindow(view.id)},
       view&&{icon:'&#10005;',label:view.exited?'Close saved output':'End session',danger:!view.exited,run:()=>closeTerminalTab(view.id)}
     ];
     openMenu(event.clientX,event.clientY,items,view?tabTitle(view):'Terminal',pane);
@@ -714,7 +730,7 @@
       const archived=!!result.exited;
       const core=window.OpayaTerminal.create(element,{id:result.id,archived,fontSize:terminalFont,windowsBuild:result.windowsBuild||0,light:theme==='light',onSearch:()=>openTerminalSearch(),onContextMenu:event=>terminalContextMenu(event,terminalViews.get(result.id)),onZoom:applyFont,onRestart:()=>action(()=>restartTerminal(result.id)),onNotice:(text,error)=>toast(text,error)}),{term,fit}=core;
       const report=(cols,rows)=>action(()=>api.terminalResize({id:result.id,cols,rows}));
-      const view={id:result.id,agentId:result.agentId||a?.id||'',mode:result.mode||mode,remote:result.remote,title:result.title||`${a?title(a):h?.name||(local?'This computer':'SSH')} / ${mode}`,term,fit,core,report,element,exited:!!result.exited,lastSeq:result.seq||0};terminalViews.set(result.id,view);
+      const owner=result.agentId||a?.id||'',view={id:result.id,agentId:owner,ctx:restoring?(state.agents.some(x=>x.id===owner)?owner:''):termCtx(),order:++termOrder,hiddenPane:false,mode:result.mode||mode,remote:result.remote,title:result.title||`${a?title(a):h?.name||(local?'This computer':'SSH')} / ${mode}`,term,fit,core,report,element,exited:!!result.exited,lastSeq:result.seq||0};terminalViews.set(result.id,view);
       // Typing goes to the live session in pieces the service accepts (a large paste used to be refused whole), in order.
       // An ended session takes none until it starts again (Enter, restartTerminal).
       term.onData(data=>{if(view.exited||view.poppedOut)return;for(const part of window.OpayaTerminal.chunks(data))action(()=>api.terminalWrite({id:result.id,data:part}));});
@@ -724,9 +740,9 @@
       if(archived)term.write(window.OpayaTerminal.endedNote(view));
       for(const event of terminalPending.get(result.id)||[])terminalEvent(event);terminalPending.delete(result.id);
     }
-    if(background){const view=terminalViews.get(result.id);if(!panes.includes(result.id)){view.attention=true;activateTerminal(currentTerminal,{focus:false});toast(`${tabTitle(view)} opened in a terminal tab.`);}return result.id;}
-    if(split)insertPane(result.id,split.dir,split.index);
-    activateTerminal(result.id,{focus});if(!restoring)saveView();
+    // Opened in the background (someone types in another terminal): its window appears, marked, and takes no keyboard.
+    if(background){const view=terminalViews.get(result.id),keep=currentTerminal;view.attention=true;activateTerminal(result.id,{focus:false,bring:true});activateTerminal(keep,{focus:false});return result.id;}
+    activateTerminal(result.id,{focus,bring:!restoring});if(!restoring)saveView();
     return result.id;
   }
   // Enter in an ended session starts it again in its tab: a remote one reattaches to its tmux session, which usually kept
@@ -736,7 +752,7 @@
     try{
       const r=await api.terminalRestart({id,cols:view.term.cols,rows:view.term.rows});
       // The same agent, mode and folder already runs in another tab (one live session each): go there.
-      if(r.id!==id){if(terminalViews.has(r.id))activateTerminal(r.id);else await openTerminal({terminalId:r.id});toast('This session already runs in another tab.');return;}
+      if(r.id!==id){if(terminalViews.has(r.id))activateTerminal(r.id,{bring:true});else await openTerminal({terminalId:r.id});toast('This session already runs in another window.');return;}
       // Normally the 'restarted' event came first; this covers it arriving later.
       if(view.exited&&r.seq>view.lastSeq){view.exited=false;view.core.setLive(true);activateTerminal(currentTerminal,{focus:false});}
     }finally{view.restarting=false;}
@@ -748,8 +764,8 @@
     if(event.type==='opened'){
       const typing=typingInTerminal()?viewOf(document.activeElement):null,busy=!!typing&&typing.id!==event.id,focus=!busy&&!typingElsewhere(),view=terminalViews.get(event.id);
       if(!view){action(()=>openTerminal({terminalId:event.id,background:busy,focus}));return;}
-      if(busy){if(!panes.includes(event.id)){view.attention=true;activateTerminal(currentTerminal,{focus:false});toast(`${tabTitle(view)} is running in its terminal tab.`);}return;}
-      $('#terminal-panel').hidden=false;activateTerminal(event.id,{focus});return;
+      if(busy){const keep=currentTerminal;view.attention=true;activateTerminal(event.id,{focus:false,bring:true});activateTerminal(keep,{focus:false});return;}
+      $('#terminal-panel').hidden=false;activateTerminal(event.id,{focus,bring:true});return;
     }
     if(event.type==='renamed'){const view=terminalViews.get(event.id);if(view){view.title=event.title;activateTerminal(currentTerminal,{focus:false});}return;}
     if(event.type==='warning'){toast(event.error,true);return;}
@@ -824,6 +840,7 @@
         // Its row on the page shows which setting this is; then the action runs (a dialog, a switch, a terminal).
         const row=!view&&document.querySelector(`#content .set-row[data-key="${CSS.escape(k)}"]`);if(row){row.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});row.classList.remove('flash');void row.offsetWidth;row.classList.add('flash');}
         const item=(row&&manageKeyed[k])||manageActions(a)[k];if(item&&!item.disabled)await item.run();});return;}
+    if(name==='an-term'){showWindow(id);return;}
     if(name==='an-chat'){action(()=>openProjectChat(id));return;}
     if(name==='an-new-chat'){const a=state.agents.find(x=>x.id===id);if(a)action(async()=>{await api.newConversation({agentId:a.id});state=await api.snapshot();await setAgentMode(a,'chat');$('#message-input')?.focus();});return;}
     if(name==='an-connect'){const a=state.agents.find(x=>x.id===id),c=a&&agentActions(a).connect;if(c&&!c.disabled)action(()=>c.run());return;}
@@ -840,8 +857,8 @@
     if(name==='git-more'){const p=(state.projects||[]).find(x=>x.id===id);if(p){const r=button.getBoundingClientRect();openMenu(r.left,r.bottom+4,gitMenu(p),p.name);}return;}
     if(name==='project-chat'){const p=(state.projects||[]).find(x=>x.id===id);if(p)action(()=>startProjectChat(p,button.dataset.agent));return;}
     if(name==='key-menu'){keyMenu(button,id);return;}
-    if(name==='terminal-grid'){openToolbarMenu(button,[...Object.keys(GRIDS).map(g=>({icon:gridIcon(g),label:GRIDS[g][0]+((layout.grid||'row')===g?'  \u2713':''),run:()=>setGrid(g)})),'-',{icon:'+',label:'Fill empty cells',disabled:!gridCells()||!panes.includes(''),run:()=>fillGrid()}],'Layout');return;}
-    if(name==='terminal-grid-set'){setGrid(button.dataset.grid);return;}
+    if(name==='terminal-arrange'){setArrange(button.dataset.arrange);return;}
+    if(name==='terminal-hidden'){openToolbarMenu(button,windowsMenu(),'Windows');return;}
     if(name==='send-key'){action(async()=>{await api.saveSettings({sendKey:button.dataset.value});await refresh();openSettings();toast(button.dataset.value==='mod-enter'?`${mod()}Enter sends; Enter starts a new line.`:'Enter sends; Shift+Enter starts a new line.');});return;}
     if(name==='font-step'){const size=Math.max(8,Math.min(28,terminalFont+Number(button.dataset.step)));applyFont(size);const out=$('#settings-font');if(out)out.textContent=size+'px';return;}
     if(name==='terminal-place'){if((layout.terminal==='right'?'right':'bottom')!==button.dataset.value)moveDock('terminal');openSettings();return;}
@@ -871,7 +888,6 @@
     if(name==='project-remote'){const p=(state.projects||[]).find(x=>x.id===id);if(p)openProjectAgents(p);return;}
     if(name==='copy-send'||name==='copy-bring'){const p=(state.projects||[]).find(x=>x.id===id),a=state.agents.find(x=>x.id===button.dataset.agent);if(p&&a)action(()=>name==='copy-send'?sendToRemote(p,a):bringFromRemote(p,a));return;}
     if(name==='console-opens'){action(async()=>{await api.saveSettings({consoleOpens:button.dataset.value});await refresh();openSettings();toast(button.dataset.value==='full'?'Console fills the main area.':'Console opens next to the chat.');});return;}
-    if(name==='chat-opens'){action(async()=>{await api.saveSettings({chatOpens:button.dataset.value});await refresh();openSettings();toast(button.dataset.value==='full'?'Chat opens the full chat view.':'Chat opens a chat window.');});return;}
     if(name==='manage-run'){const item=manageKeyed[button.dataset.key];if(item&&!item.disabled)action(()=>item.run());return;}
     if(name==='local-machine'){openLocalMachine();return;}
     if(name==='docker-manager'){openDocker(id);return;}
@@ -900,12 +916,10 @@
     if(name==='discovered-add'){const candidate=window.__discovered?.[Number(index)];openAgentForm(candidate?.existingId?state.agents.find(a=>a.id===candidate.existingId):candidate);return;}
     if(name==='starter'){const input=$('#message-input');if(input){input.value=button.dataset.text;drafts.set(draftKey(),input.value);if(api.saveDraft)save(api.saveDraft({agentId:selected().id,conversationId:currentConversation()?.id||'',text:input.value}));input.focus();}return;}
     if(name==='terminal-hide'){$('#terminal-panel').hidden=true;saveView();render();return;}
-    if(name==='terminal-tab'){activateTerminal(id);saveView();return;}
-    if(name==='terminal-tab-close'){action(()=>closeTerminalTab(id));return;}
     if(name==='terminal-search'){openTerminalSearch();return;}
     if(name==='terminal-new'){openToolbarMenu(button,newTerminalItems(),'New terminal');return;}
     if(name==='terminal-more'){openToolbarMenu(button,terminalMoreMenu(),'Terminal');return;}
-    if(name==='terminal-split'){action(()=>panes.filter(Boolean).length?splitTerminal('right'):openTerminal({...(selected()&&!overview?{agentId:selected().id}:{local:true})}));return;}
+    if(name==='terminal-split'){action(()=>openTerminal(currentTerminal?terminalTarget(terminalViews.get(currentTerminal)):inAgentView()?{agentId:selected().id}:{local:true}));return;}
     action(async()=>{
       if(name==='select'||name==='switch-select'){closeModal();await openChat(id);}
       else if(name==='connect-all')await connectAll();
@@ -952,9 +966,9 @@
     if(event.key.toLowerCase()==='b'&&!event.shiftKey&&(state.platform==='darwin'?event.metaKey:event.ctrlKey&&!viewOf(document.activeElement))&&!$('#app-dialog')){event.preventDefault();toggleSidebar();return;}
     if(event.shiftKey&&event.key.toLowerCase()==='m'&&selected()&&!$('#app-dialog')){event.preventDefault();openManage(selected().id);return;}
     if($('#app-dialog'))return;
-    if(event.key.toLowerCase()==='n'&&selected()){event.preventDefault();const a=selected();action(()=>!overview&&!opayaView&&!playgroundView&&modeOf(a)==='chat'?api.newConversation({agentId:a.id}):newDockChat(a));}
+    if(event.key.toLowerCase()==='n'&&selected()){event.preventDefault();const a=selected();if(a.protocol==='terminal'||a.surface==='terminal')return;action(async()=>{await api.newConversation({agentId:a.id});state=await api.snapshot();await setAgentMode(a,'chat');$('#message-input')?.focus();});}
     if(event.key==='`'){event.preventDefault();if(!$('#terminal-panel').hidden)$('#terminal-panel').hidden=true;else action(()=>currentTerminal&&terminalViews.has(currentTerminal)?($('#terminal-panel').hidden=false,activateTerminal(currentTerminal)):agentTerminal());}
-    // Chosen from inside a terminal, the terminal panel still follows the choice (followSelectedAgent keeps a focused one).
+    // Chosen from inside a terminal, the terminal panel still follows the choice (syncTerminalContext keeps a focused one).
     if(/^[1-9]$/.test(event.key)&&navOrder()[Number(event.key)-1]){event.preventDefault();overview=false;opayaView=false;playgroundView=false;const id=navOrder()[Number(event.key)-1].id;if(id!==state.activeAgentId&&viewOf(document.activeElement))document.activeElement.blur();action(()=>openChat(id));}
   });
   if(!api){$('#content').innerHTML='<div class="runtime-missing"><h1>Open Opaya as a desktop app.</h1><p>This workspace needs its native bridge to discover agents, use SSH and open terminals.</p><code>npm install &amp;&amp; npm start</code></div>';return;}
@@ -973,11 +987,12 @@
   $('#terminal-search')?.addEventListener('click',event=>{const b=event.target.closest('[data-find]');if(!b)return;if(b.dataset.find==='close')closeTerminalSearch();else findInTerminal(b.dataset.find==='prev');});
   async function closeTerminalTab(id){
     const view=terminalViews.get(id);if(!view||view.closing)return;view.closing=true;
-    // The tab goes away even if the service could not end the session (for example its agent was removed).
-    try{try{const r=await api.terminalClose({id});if(r?.warning)toast(`Tab closed. ${r.warning}`,true);}catch(error){toast(`Tab closed. ${error.message}`,true);}const ids=[...terminalViews.keys()].filter(x=>x!==id&&!panes.includes(x)),at=panes.indexOf(id);view.observer.disconnect();view.core.dispose();view.element.remove();terminalViews.delete(id);if(at>=0){if(panes.length>1){panes.splice(at,1);const [size]=paneSizes.splice(at,1);paneSizes[Math.max(0,at-1)]+=size;paneFocus=Math.min(paneFocus>at?paneFocus-1:paneFocus,panes.length-1);}else panes[at]=ids.at(-1)||'';}activateTerminal(panes[paneFocus]);saveView();}finally{view.closing=false;}
+    // The window goes away even if the service could not end the session (for example its agent was removed).
+    try{try{const r=await api.terminalClose({id});if(r?.warning)toast(`Window closed. ${r.warning}`,true);}catch(error){toast(`Window closed. ${error.message}`,true);}
+      view.observer.disconnect();view.core.dispose();view.element.remove();terminalViews.delete(id);paneSize.delete(id);if(currentTerminal===id)currentTerminal='';
+      activateTerminal(currentTerminal,{focus:false});if(!panes.filter(Boolean).length&&!document.body.classList.contains('terminal-stage'))$('#terminal-panel').hidden=true;saveView();}finally{view.closing=false;}
   }
-  $('#terminal-tabs').addEventListener('mousedown',event=>{if(event.button===1)event.preventDefault();});
-  $('#terminal-tabs').addEventListener('auxclick',event=>{const tab=event.target.closest('[data-action="terminal-tab"]');if(event.button===1&&tab){event.preventDefault();action(()=>closeTerminalTab(tab.dataset.id));}});
+
   async function popoutTerminal(id){
     // The window reports its own size; back in a pane, this copy reports its size again (resetSize).
     const view=terminalViews.get(id);if(!view)return;view.poppedOut=true;view.term.options.disableStdin=true;view.core.resetSize();
@@ -1005,7 +1020,7 @@
       open:a.protocol==='terminal'?{icon:'&gt;_',label:'Open console',run:()=>setAgentMode(a,'console')}:{icon:'&#9993;',label:'Open chat window',run:()=>openChatWindow(a)},
       surface:a.protocol==='terminal'?null:a.surface==='terminal'?{icon:'&#9993;',label:'Allow chat again',hint:'its vendor refused chats',run:async()=>{await api.updateAgentDisplay({id,surface:''});await refresh();toast(`${title(a)} chats in Opaya again.`);}}:{icon:'&#9634;',label:'Full chat view',run:()=>setAgentMode(a,'full')},
       console:a.protocol!=='terminal'&&{icon:'&gt;_',label:'Open console',run:()=>setAgentMode(a,'console')},
-      newChat:{icon:'+',label:'New chat window',hint:`${mod()}N`,disabled:a.protocol==='terminal',run:()=>newDockChat(a)},
+      newChat:{icon:'+',label:'New chat',hint:`${mod()}N`,disabled:a.protocol==='terminal',run:async()=>{await api.newConversation({agentId:id});state=await api.snapshot();await setAgentMode(a,'chat');$('#message-input')?.focus();}},
       connect:a.busy?{icon:'&#9632;',label:'Stop current turn',run:()=>api.stop({id})}:{icon:connected?'&#9675;':'&#9679;',label:connected?'Disconnect':a.status==='connecting'?'Connecting...':'Connect',disabled:a.status==='connecting',run:()=>connected?api.disconnect({id}):api.connect({id})},
       clearError:a.error&&{icon:'!',label:'Clear connection error',run:async()=>{await api.clearError({id});await refresh();}},
       manage:{icon:'&#9881;',label:'Manage...',run:()=>openManage(id)},
@@ -1145,13 +1160,6 @@
     if(mode==='manage'){await openManage(a.id);return;}
     // An agent whose vendor stopped accepting chats from other apps (the service marks it) works in its console.
     if(mode==='chat'&&a.surface==='terminal'){toast(`${title(a)} does not accept chats from other apps: its own CLI opens instead.`);mode='console';}
-    // Chat opens in a window at the bottom; the agent is still selected, so its sidebar and its Overview (or the view it
-    // was in) show behind the window.
-    if(mode==='chat'&&a.protocol!=='terminal'&&state.settings?.chatOpens==='window'){
-      if(state.activeAgentId!==a.id||overview||opayaView||playgroundView){overview=false;opayaView=false;playgroundView=false;closeModal();
-        if(modeOf(a)==='chat'){agentModes.set(a.id,'manage');mgSection='overview';}
-        if(state.activeAgentId!==a.id){await api.select({id:a.id});state=await api.snapshot();}render();saveView();}
-      await openChatWindow(a);render();return;}
     if(mode==='chat')mode=a.protocol==='terminal'?'console':'full';
     // Console opens the terminal next to or below the chat; full screen only when that is the preference (or the
     // agent has no chat at all).
@@ -1346,12 +1354,14 @@
     const nav=$('#agent-side');if(!nav)return;
     if(screen==='opaya'){const html=opayaSideHtml();if(nav.hidden){nav.hidden=false;document.body.classList.add('agent-open');requestAnimationFrame(()=>placePanes());}if(html!==anHtml){anHtml=html;nav.innerHTML=html;}return;}
     if(!a||!screen){if(!nav.hidden){nav.hidden=true;anHtml='';document.body.classList.remove('agent-open');requestAnimationFrame(()=>placePanes());}return;}
-    const chatty=a.protocol!=='terminal'&&a.surface!=='terminal',chats=chatty?agentChats(a):[],winOpen=chatDock.some(d=>dockConv(d.id)?.agentId===a.id),on=a.status==='connected',termOpen=!$('#terminal-panel')?.hidden&&[...terminalViews.values()].some(v=>v.agentId===a.id&&!v.exited);
+    const chatty=a.protocol!=='terminal'&&a.surface!=='terminal',chats=chatty?agentChats(a):[],winOpen=chatDock.some(d=>dockConv(d.id)?.agentId===a.id),on=a.status==='connected',termOpen=!$('#terminal-panel')?.hidden&&ctxWindows(a.id).some(v=>!v.hiddenPane);
     const item=(cls,attrs,icon,label,extra='')=>`<button type="button" class="an-item ${cls}" ${attrs}><span class="an-ico" aria-hidden="true">${icon}</span><span class="an-label">${esc(label)}</span>${extra}</button>`;
     const acts=manageActions(a),sw={itrust:!!a.itrust,browser:!!a.browser,pin:!!a.pinned},hasExport=screen==='chat'&&!!currentConversation();
     // The open view's or section's actions, indented under it; each opens its section, marks its row and runs.
     const sub=(section,open)=>{if(!open)return '';const list=(AN_SUB[section]||[]).filter(([k])=>k==='export'?hasExport:acts[k]&&!acts[k].disabled);if(!list.length)return '';
-      return `<div class="an-sub" role="group">${list.map(([k,label])=>`<button type="button" class="an-sub-item ${acts[k]?.danger?'danger':''}" data-action="an-sub" data-section="${section}" data-key="${k}" ${k in sw?`role="switch" aria-checked="${sw[k]}"`:''}><span>${esc(k==='terminal'&&!hasCli(a)?'Shell':label)}</span>${k in sw?`<span class="an-switch ${sw[k]?'on':''}" aria-hidden="true"></span>`:''}</button>`).join('')}</div>`;};
+      // Console also lists its terminal windows: a hidden one comes back with a click.
+      const wins=section==='console'?ctxWindows(a.id).map(v=>`<button type="button" class="an-sub-item an-win ${v.hiddenPane?'hidden':''} ${v.exited?'ended':''}" data-action="an-term" data-id="${esc(v.id)}" title="${v.hiddenPane?'Hidden: click to show it':'Its window'}"><span>${esc(tabTitle(v))}</span><small>${v.exited?'ended':v.hiddenPane?'hidden':'open'}</small></button>`).join(''):'';
+      return `<div class="an-sub" role="group">${wins}${list.map(([k,label])=>`<button type="button" class="an-sub-item ${acts[k]?.danger?'danger':''}" data-action="an-sub" data-section="${section}" data-key="${k}" ${k in sw?`role="switch" aria-checked="${sw[k]}"`:''}><span>${esc(k==='terminal'&&!hasCli(a)?'Shell':label)}</span>${k in sw?`<span class="an-switch ${sw[k]?'on':''}" aria-hidden="true"></span>`:''}</button>`).join('')}</div>`;};
     const caret=open=>`<span class="an-caret ${open?'open':''}" aria-hidden="true">&#8250;</span>`;
     const keys=keyLists.get(a.id),backAt=backupLists.get(a.id)?.backups?.[0]?.createdAt,running=agentJobs(a).length;
     const flag={access:keys&&!keys.keys.length?'warn':'',care:running?'busy':a.install?.backup&&backupLists.has(a.id)&&(!backAt||Date.now()-new Date(backAt)>7*864e5)?'warn':'',profile:a.error?'bad':''};
@@ -1635,11 +1645,10 @@
   // chat view, or close it. Windows that do not fit collapse into round avatars on the right. The open windows are saved
   // with the view, and the session service sends their messages with every update.
   let chatDock=[];const dockSigs=new Map(),dockUnread=new Map(),dockSending=new Set();
-  const DOCK_W=340;
   const dockConv=id=>state.conversations.find(c=>c.id===id);
   function dockRoot(){
     let root=$('#chat-dock');if(root)return root;
-    root=document.createElement('div');root.id='chat-dock';root.className='chat-dock';root.setAttribute('aria-label','Chat windows');document.body.append(root);
+    root=document.createElement('div');root.id='chat-dock';root.className='chat-dock';root.setAttribute('aria-label','Chat window');($('.work-area')||document.body).append(root);
     root.addEventListener('click',event=>{
       const b=event.target.closest('[data-dock]');if(!b)return;
       if(b.dataset.dock==='launch-new'){event.stopPropagation();const r=b.getBoundingClientRect();openMenu(Math.max(8,r.right-260),Math.max(8,r.top-8-Math.min(360,state.agents.length*34+40)),state.agents.filter(a=>a.protocol!=='terminal').map(a=>({icon:'&#9993;',label:`${title(a)}${a.status==='connected'?'':` (${status(a).toLowerCase()})`}`,run:()=>action(()=>newDockChat(a))})),'New chat with');return;}
@@ -1668,7 +1677,7 @@
     let id=conversationId||chatDock.find(d=>dockConv(d.id)?.agentId===a.id)?.id||agentChats(a)[0]?.id;
     if(!id){const c=await api.newConversation({agentId:a.id,activate:false});id=c.id;state=await api.snapshot();}
     const at=chatDock.findIndex(d=>d.id===id);if(at>=0)chatDock.splice(at,1);
-    chatDock.unshift({id,min:false});chatDock=chatDock.slice(0,6);dockUnread.delete(id);
+    for(const d of chatDock)d.min=true;chatDock.unshift({id,min:false});chatDock=chatDock.slice(0,8);dockUnread.delete(id);
     saveView();renderDock();if(manageId)render();
     requestAnimationFrame(()=>$(`.chat-win[data-conv="${CSS.escape(id)}"] textarea`)?.focus());
   }
@@ -1696,16 +1705,18 @@
     const root=dockRoot();chatDock=chatDock.filter(d=>dockConv(d.id));
     const talkers=state.agents.filter(a=>a.protocol!=='terminal');
     const fullId=!overview&&!opayaView&&!playgroundView&&selected()&&modeOf(selected())==='chat'?state.activeConversationId:'';
-    const visible=chatDock.filter(d=>d.id!==fullId);
-    const room=Math.max(1,Math.floor((innerWidth-(sidebarHidden?60:320)-60)/(DOCK_W+12))),shown=visible.slice(0,room),rest=visible.slice(room);
+    const visible=chatDock.filter(d=>d.id!==fullId),open=visible.find(d=>!d.min);
+    // One window is open, as a column beside the page; the others wait in the status bar's tray.
+    for(const d of visible)if(d!==open)d.min=true;
+    const shown=open?[open]:[],rest=[];
     // Unread: a finished reply in a chat the user cannot see right now.
     for(const d of chatDock){
       const m=state.histories[d.id];if(!m)continue;const last=m.at(-1),sig=`${m.length}:${last?.status||''}`,prev=dockSeen.get(d.id);dockSeen.set(d.id,sig);
       const out=d.min||d.id===fullId?false:!shown.includes(d);
       if(prev&&prev!==sig&&last?.role==='assistant'&&last.status!=='streaming'&&(d.min||out))dockUnread.set(d.id,(dockUnread.get(d.id)||0)+1);
     }
-    root.hidden=!chatDock.length;document.body.classList.toggle('chat-dock-shown',!root.hidden);
-    document.body.classList.toggle('chat-dock-open',shown.some(d=>!d.min));
+    root.hidden=!shown.length;document.body.classList.toggle('chat-dock-shown',visible.length>0);
+    document.body.classList.toggle('chat-dock-open',shown.length>0);renderTray(visible.filter(d=>d!==open));renderNavBadges();
     const keep=new Set(shown.map(d=>d.id));
     for(const el of root.querySelectorAll('.chat-win'))if(!keep.has(el.dataset.conv)&&!el.classList.contains('leaving')){el.remove();dockSigs.delete(el.dataset.conv);}
     shown.forEach((d,i)=>{
@@ -1740,6 +1751,23 @@
     else more?.remove();
     root.querySelector('.chat-launcher')?.remove();
   }
+  // The tray in the status bar: chats in the background, each with its agent, a spinner while it works and its new
+  // replies. A click opens it beside the page; x closes it.
+  // New replies in the background, on each agent in the sidebar (and the rail).
+  function renderNavBadges(){
+    const per=new Map();for(const [id,n] of dockUnread){const c=dockConv(id);if(c&&n)per.set(c.agentId,(per.get(c.agentId)||0)+n);}
+    for(const b of document.querySelectorAll('#agent-list .agent-nav[data-id]')){const n=per.get(b.dataset.id)||0;let em=b.querySelector('.nav-unread');
+      if(!n){em?.remove();continue;}if(!em){em=document.createElement('em');em.className='nav-unread';em.setAttribute('aria-label','new replies');b.append(em);}em.textContent=n>9?'9+':String(n);}
+  }
+  function renderTray(list){
+    const tray=$('#status-tray');if(!tray)return;
+    const html=list.map(d=>{const c=dockConv(d.id),a=c&&state.agents.find(x=>x.id===c.agentId);if(!a)return '';const n=dockUnread.get(d.id)||0;
+      return `<span class="tray-chip ${n?'unread':''} ${a.busy?'working':''}"><button type="button" data-tray="open" data-conv="${esc(d.id)}" title="${esc(`${title(a)}: ${chatLabel(c)}`)}${a.busy?' (working)':''}${n?` (${n} new)`:''}">${badge(a)}<span class="tray-name">${esc(title(a))}</span>${a.busy?'<i class="tray-spin" aria-hidden="true"></i>':''}${n?`<em>${n}</em>`:''}</button><button type="button" class="tray-x" data-tray="close" data-conv="${esc(d.id)}" title="Close" aria-label="Close ${esc(title(a))} chat">&#10005;</button></span>`;}).join('');
+    if(tray.dataset.html!==html){tray.dataset.html=html;tray.innerHTML=html;}tray.hidden=!html;
+  }
+  document.addEventListener('click',event=>{const b=event.target.closest('#status-tray [data-tray]');if(!b)return;const id=b.dataset.conv,d=chatDock.find(x=>x.id===id);
+    if(b.dataset.tray==='close'){closeChatWindow(id);return;}
+    if(d){for(const x of chatDock)x.min=x!==d;d.min=false;dockUnread.delete(id);saveView();renderDock();requestAnimationFrame(()=>$(`.chat-win[data-conv="${CSS.escape(id)}"] textarea`)?.focus());}});
   // The note about a new key, in the agent's window when no full chat is open.
   async function dockTell(a,note){await openChatWindow(a);const id=chatDock[0]?.id,box=$(`.chat-win[data-conv="${CSS.escape(id)}"] textarea`);if(!box)return;const typed=box.value.trim();if(!typed&&a.status==='connected'){await dockSend(id,note);return;}box.value=note+(typed?'\n\n'+box.value:'');box.dispatchEvent(new Event('input',{bubbles:true}));box.focus();}
   // ---- Manage menu: agents or machines -------------------------------------------------------------------------------
@@ -1883,58 +1911,32 @@
       if(how==='uninstall'){closeModal();openUninstall(src);return;}
       action(async()=>{if(await api.removeAgent({id:src.id})){closeModal();await refresh();toast(`${title(src)}'s old connection is removed; the copy stays.`);}});});
   }
-  // ---- Console: terminals in a grid ---------------------------------------------------------------------------------
-  // Besides side by side (drag the grips), the terminal area can be a grid: two columns or rows, 2 x 2, one large with
-  // two stacked, three columns or 3 x 2. Empty cells offer the agent's CLI or a shell; drag the gutters to resize.
-  const GRIDS={row:['Side by side',0],cols2:['Two columns',2],rows2:['Two rows',2],grid4:['2 × 2',4],main3:['One large, two stacked',3],cols3:['Three columns',3],grid6:['3 × 2',6]};
-  const gridCells=()=>GRIDS[layout.grid]?.[1]||0;
-  const gridIcon=g=>`<span class="grid-ico" data-g="${g}" aria-hidden="true">${'<i></i>'.repeat(Math.max(1,GRIDS[g][1]||2))}</span>`;
-  const gridPicker=()=>`<div class="grid-picker" role="radiogroup" aria-label="Terminal layout">${Object.keys(GRIDS).map(g=>`<button type="button" role="radio" class="grid-pick ${(layout.grid||'row')===g?'selected':''}" data-action="terminal-grid-set" data-grid="${g}" aria-checked="${(layout.grid||'row')===g}" title="${esc(GRIDS[g][0])}">${gridIcon(g)}</button>`).join('')}</div>`;
-  function setGrid(g){
-    if(!GRIDS[g])return;layout.grid=g;if(!gridCells()){panes=panes.filter(Boolean);if(!panes.length)panes=[''];paneSizes=panes.map(()=>1);}
-    $('#terminal-panel').hidden=false;renderPanes();saveView();
-    for(const b of document.querySelectorAll('.grid-pick')){const on=b.dataset.grid===g;b.classList.toggle('selected',on);b.setAttribute('aria-checked',String(on));}
-    toast(gridCells()?`${GRIDS[g][0]}: empty cells offer the agent's CLI or a shell.`:'Side by side: drag the grips to share the width.');
+  // ---- Arranging terminal windows -----------------------------------------------------------------------------------
+  // Side by side, stacked or a grid, in the panel next to or below the chat and in Console full screen alike.
+  const ARRANGE_ICON={cols:'<span class="arr-ico cols" aria-hidden="true"><i></i><i></i></span>',rows:'<span class="arr-ico rows" aria-hidden="true"><i></i><i></i></span>',grid:'<span class="arr-ico grid" aria-hidden="true"><i></i><i></i><i></i><i></i></span>'};
+  const arrangePicker=()=>`<div class="grid-picker arrange-picker" role="radiogroup" aria-label="Arrange terminal windows">${Object.keys(ARRANGE).map(k=>`<button type="button" role="radio" class="grid-pick ${(layout.arrange||'cols')===k?'selected':''}" data-action="terminal-arrange" data-arrange="${k}" aria-checked="${(layout.arrange||'cols')===k}" title="${esc(ARRANGE[k][0])}: ${esc(ARRANGE[k][1])}">${ARRANGE_ICON[k]}</button>`).join('')}</div>`;
+  function setArrange(k){
+    if(!ARRANGE[k])return;layout.arrange=k;renderPanes();saveView();
+    for(const b of document.querySelectorAll('[data-action="terminal-arrange"]')){const on=b.dataset.arrange===k;b.classList.toggle('selected',on);b.setAttribute('aria-checked',String(on));}
   }
-  // Every empty cell gets a session: the agent's CLI first, then shells for it.
-  async function fillGrid(){
-    const a=inAgentView()?selected():null;if(!gridCells())return;
-    for(let i=0;i<panes.length;i++){if(panes[i])continue;paneFocus=i;const cli=a&&hasCli(a)&&![...terminalViews.values()].some(v=>v.agentId===a.id&&v.mode==='agent'&&!v.exited);await openTerminal(a?{agentId:a.id,...(cli?{mode:'agent'}:{})}:{local:true});}
-  }
-  function gridTemplates(){
-    const g=layout.grid,c=layout.gridCol||.5,r=layout.gridRow||.5;
-    return {cols:{cols2:`${c}fr ${1-c}fr`,rows2:'1fr',grid4:`${c}fr ${1-c}fr`,main3:`${c}fr ${1-c}fr`,cols3:'1fr 1fr 1fr',grid6:'1fr 1fr 1fr'}[g]||'',rows:{cols2:'1fr',rows2:`${r}fr ${1-r}fr`,grid4:`${r}fr ${1-r}fr`,main3:`${r}fr ${1-r}fr`,cols3:'1fr',grid6:`${r}fr ${1-r}fr`}[g]||''};
-  }
-  function applyGrid(){
-    const root=$('#terminal-panes');if(!root)return;const n=gridCells(),g=layout.grid,t=gridTemplates();
-    root.classList.toggle('grid',!!n);root.dataset.grid=n?g:'';root.style.gridTemplateColumns=t.cols;root.style.gridTemplateRows=t.rows;
-    [...root.querySelectorAll(':scope > .terminal-pane')].forEach((p,i)=>{p.style.gridRow=n&&g==='main3'&&i===0?'1 / span 2':'';});
-    const views=$('#terminal-views'),gutter=(id,kind)=>{let el=$('#'+id);if(!el){el=document.createElement('div');el.id=id;el.className=`grid-gutter ${kind}`;el.setAttribute('role','separator');el.setAttribute('aria-orientation',kind==='col'?'vertical':'horizontal');el.setAttribute('aria-label',kind==='col'?'Resize columns':'Resize rows');el.dataset.gutter=kind;views.append(el);}return el;};
-    const col=n&&['cols2','grid4','main3'].includes(g),row=n&&['rows2','grid4','main3','grid6'].includes(g);
-    const x=root.offsetLeft,y=root.offsetTop,w=root.clientWidth,h=root.clientHeight,c=layout.gridCol||.5,r=layout.gridRow||.5;
-    const gc=col?gutter('grid-gutter-col','col'):$('#grid-gutter-col'),gr=row?gutter('grid-gutter-row','row'):$('#grid-gutter-row');
-    if(gc){gc.hidden=!col;if(col)Object.assign(gc.style,{left:`${x+w*c-4}px`,top:`${y}px`,height:`${h}px`});}
-    if(gr){gr.hidden=!row;if(row){const left=g==='main3'?x+w*c:x;Object.assign(gr.style,{left:`${left}px`,top:`${y+h*r-4}px`,width:`${g==='main3'?w*(1-c):w}px`});}}
-  }
-  document.addEventListener('pointerdown',event=>{
-    const g=event.target.closest('.grid-gutter');if(!g)return;event.preventDefault();const root=$('#terminal-panes'),kind=g.dataset.gutter;
-    g.setPointerCapture(event.pointerId);document.body.classList.add('pane-resizing');
-    const move=e=>{const r=root.getBoundingClientRect(),v=kind==='col'?(e.clientX-r.left)/r.width:(e.clientY-r.top)/r.height,clamped=Math.round(Math.max(.15,Math.min(.85,v))*1000)/1000;if(kind==='col')layout.gridCol=clamped;else layout.gridRow=clamped;applyGrid();};
-    g.addEventListener('pointermove',move);
-    g.addEventListener('lostpointercapture',()=>{g.removeEventListener('pointermove',move);document.body.classList.remove('pane-resizing');renderPanes();saveView();},{once:true});
-  });
-  window.addEventListener('resize',()=>{if(gridCells())requestAnimationFrame(applyGrid);});
+  window.addEventListener('resize',()=>{if(!$('#terminal-panel').hidden)requestAnimationFrame(renderPanes);});
+  // A window's own menu (right-click its title bar).
   function terminalMenu(id){
     const view=terminalViews.get(id);if(!view)return [];
     return [
       {icon:'&#9998;',label:'Rename...',run:()=>renameTerminal(id)},
-      {icon:'&#9707;',label:'Show on the right',disabled:panes.includes(id)&&panes.length===1,run:()=>showInSplit(id,'right')},
-      {icon:'&#9706;',label:'Show on the left',disabled:panes.includes(id)&&panes.length===1,run:()=>showInSplit(id,'left')},
-      panes.length>1&&panes.includes(id)&&{icon:'&#9645;',label:'Close pane (keeps running)',run:()=>closePane(panes.indexOf(id))},
-      {icon:'&#10697;',label:'Open in separate window',disabled:view.exited,run:()=>{activateTerminal(id);return popoutTerminal(id);}},
+      {icon:'&#9645;',label:'Hide (keeps running)',run:()=>hideWindow(id)},
+      {icon:'&#10697;',label:'Open in separate window',disabled:view.exited,run:()=>popoutTerminal(id)},
       '-',
-      {icon:'&#10005;',label:view.exited?'Close saved output':'End session',danger:!view.exited,run:()=>closeTerminalTab(id)}
+      {icon:'&#10005;',label:view.exited?'Close saved output':'End session',danger:!view.exited,run:()=>endWindow(id)}
     ];
+  }
+  // Windows that are hidden here, and the ones open on other screens (to bring here).
+  function windowsMenu(){
+    const here=termCtx(),hidden=ctxWindows(here).filter(v=>v.hiddenPane),elsewhere=[...terminalViews.values()].filter(v=>(v.ctx||'')!==here&&!v.poppedOut);
+    const whose=v=>{const a=state.agents.find(x=>x.id===v.ctx);return a?title(a):'Home and other screens';};
+    return [...hidden.map(v=>({icon:'&gt;_',label:`Show ${tabTitle(v)}`,run:()=>showWindow(v.id)})),
+      elsewhere.length&&{icon:'&#8618;',label:'Bring here',submenu:elsewhere.map(v=>({icon:'&gt;_',label:`${tabTitle(v)} (${whose(v)})`,run:()=>showWindow(v.id)}))}].filter(Boolean);
   }
   function workspaceMenu(){
     return [
@@ -2026,9 +2028,9 @@
     const point=element=>{if(event.clientX||event.clientY)return [event.clientX,event.clientY];const r=element.getBoundingClientRect();return [r.left+12,r.bottom-4];};
     const section=target.closest('.sidebar-section-label[data-group]');
     if(section){event.preventDefault();const [x,y]=point(section);openMenu(x,y,groupMenu(section.dataset.group,section.querySelector('.group-name')?.textContent||''),section.querySelector('.group-name')?.textContent||'Section');return;}
-    const agentElement=target.closest('[data-agent-id]'),tab=target.closest('[data-action="terminal-tab"]');
+    const agentElement=target.closest('[data-agent-id]'),head=target.closest('.terminal-pane-head'),headId=head&&panes[Number(head.closest('.terminal-pane').dataset.index)];
     if(agentElement){const a=state.agents.find(a=>a.id===agentElement.dataset.agentId);if(!a)return;event.preventDefault();const [x,y]=point(agentElement);openMenu(x,y,agentMenu(a),title(a),agentElement);return;}
-    if(tab){event.preventDefault();const [x,y]=point(tab);openMenu(x,y,terminalMenu(tab.dataset.id),terminalViews.get(tab.dataset.id)?.title||'Terminal');return;}
+    if(headId){event.preventDefault();const [x,y]=point(head);openMenu(x,y,terminalMenu(headId),terminalViews.get(headId)?.title||'Terminal');return;}
     if(target.closest('.sidebar,.content.overview')){event.preventDefault();const [x,y]=point(target);openMenu(x,y,workspaceMenu(),'Workspace');}
   });
   document.addEventListener('keydown',event=>{if(event.key!=='Escape'||!menu)return;event.preventDefault();event.stopPropagation();if(menu.child){const b=menu.child.button;closeSubmenu();b.focus({preventScroll:true});}else closeMenu(true);},true);
@@ -3595,13 +3597,28 @@
   });
   // ---- Rich message actions: links, copy and preview -----------------------------------------------------------------
   document.addEventListener('click',event=>{
-    const el=event.target.closest('[data-action="open-link"],[data-action="md-copy"],[data-action="md-preview"]');if(!el)return;event.preventDefault();event.stopPropagation();
+    const el=event.target.closest('[data-action="open-link"],[data-action="md-copy"],[data-action="md-preview"],[data-action="md-run"]');if(!el)return;event.preventDefault();event.stopPropagation();
     const act=el.dataset.action;
     if(act==='open-link'){const url=el.dataset.url;if(!url)return;if(url.startsWith('mailto:')||el.dataset.external||event.ctrlKey||event.metaKey||event.shiftKey)action(()=>api.openLink({url}));else openInBrowser(url);return;}
     const code=el.closest('.code-block')?.querySelector('pre')?.textContent||'';
     if(act==='md-copy'){action(async()=>{await api.clipboardWrite({text:code});el.textContent='Copied';setTimeout(()=>{el.textContent='Copy';},1400);});return;}
     if(act==='md-preview'){showBrowser();action(async()=>{browserState=await api.browserPreview({html:code});renderBrowser();});}
+    if(act==='md-run'){const win=el.closest('.chat-win'),c=win&&dockConv(win.dataset.conv),a=c?state.agents.find(x=>x.id===c.agentId):selected();if(a)action(()=>runInShell(a,code));}
   },true);
+  // Run in console: the command goes into the agent's shell window as a paste (lines wait for Enter where the shell
+  // supports bracketed paste), so nothing runs before the user looks at it. "$ " prompts copied with it are dropped.
+  async function runInShell(a,code){
+    const text=code.replace(/\n$/,'').split('\n').map(l=>l.replace(/^\s*[$>]\s+/,'')).join('\n');
+    let view=ctxWindows(a.id).find(v=>v.mode!=='agent'&&!v.exited)||[...terminalViews.values()].find(v=>v.agentId===a.id&&v.mode!=='agent'&&!v.exited);
+    if(view)showWindow(view.id);else{const id=await openTerminal({agentId:a.id});view=terminalViews.get(id);}
+    if(!view)return;view.term.paste(text);view.term.focus();toast(`In ${tabTitle(view)}: press Enter to run it.`);
+  }
+  // Ask the agent: text selected in a terminal goes into the agent's chat box as a quote, to send with a question.
+  async function askInChat(a,text){
+    if(state.activeAgentId!==a.id||modeOf(a)!=='chat'||overview||opayaView||playgroundView)await setAgentMode(a,'chat');
+    const box=$('#message-input');if(!box)return;const quote='```\n'+text.replace(/\s+$/,'')+'\n```\n';
+    box.value=(box.value.trim()?box.value.replace(/\s+$/,'')+'\n\n':'')+quote;drafts.set(draftKey(),box.value);box.dispatchEvent(new Event('input',{bubbles:true}));box.focus();box.setSelectionRange(box.value.length,box.value.length);
+  }
   placePanes();
   const approvalQueue=[];let approvalVisible=false;
   function showApproval(){
@@ -3623,15 +3640,16 @@
     dialog.addEventListener('click',e=>{const choice=e.target.closest('[data-choice]');if(choice)finish(choice.dataset.choice);});dialog.addEventListener('cancel',e=>{e.preventDefault();finish('deny');});document.body.append(dialog);dialog.showModal();dialog.querySelector('button').focus();
   }
   api.onApproval?.(request=>{approvalQueue.push(request);showApproval();});
-  api.onTerminalDocked?.(({id})=>{const view=terminalViews.get(id);if(view){view.poppedOut=false;view.term.options.disableStdin=view.exited;$('#terminal-panel').hidden=false;activateTerminal(id);}});
+  api.onTerminalDocked?.(({id})=>{const view=terminalViews.get(id);if(view){view.poppedOut=false;view.term.options.disableStdin=view.exited;$('#terminal-panel').hidden=false;activateTerminal(id,{bring:true});}});
   api.onState(applyState);api.onTerminal(terminalEvent);api.onServiceError?.(message=>toast(message,true));
   action(async()=>{
     const initial=await api.snapshot();applyState(initial);
     for(const t of initial.terminals||[]){if(t.exited)savedSessions.set(t.id,t);else await openTerminal({terminalId:t.id,restoring:true});}
     $('#terminal-panel').hidden=!initial.view?.terminalVisible;
-    // The split as it was: panes whose sessions still exist, with their widths.
-    const saved=(initial.view?.panes||[]).map((id,i)=>[id,initial.view?.paneSizes?.[i]||1]).filter(([id])=>terminalViews.has(id));
-    if(saved.length){panes=saved.map(x=>x[0]);paneSizes=saved.map(x=>x[1]);paneFocus=Math.max(0,panes.indexOf(initial.view?.terminalId));activateTerminal(panes[paneFocus]);}
-    else if(initial.view?.terminalId&&terminalViews.has(initial.view.terminalId))activateTerminal(initial.view.terminalId);
+    // Each window back on its screen, hidden or not, with its size; then the panel for the screen in use.
+    for(const [id,ctx,hidden] of initial.view?.windows||[]){const v=terminalViews.get(id);if(v){v.ctx=state.agents.some(a=>a.id===ctx)?ctx:'';v.hiddenPane=!!hidden;}}
+    (initial.view?.panes||[]).forEach((id,i)=>{if(terminalViews.has(id))paneSize.set(id,initial.view?.paneSizes?.[i]||1);});
+    if(initial.view?.terminalId&&terminalViews.has(initial.view.terminalId))currentTerminal=initial.view.terminalId;
+    termCtxShown=termCtx();activateTerminal(currentTerminal,{focus:false});if(!panes.filter(Boolean).length)$('#terminal-panel').hidden=true;
   });
 })();

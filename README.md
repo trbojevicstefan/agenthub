@@ -54,9 +54,11 @@ The open view or section unfolds its actions under it in the sidebar, so every a
   - Click a machine for its details: installed tools and versions, and its Docker.
 - The sidebar toggle is at the bottom of the sidebar (**Hide sidebar**, Ctrl/Cmd+B). While the sidebar is hidden, a small button at the top left brings it back.
 
-### Chat windows and the console (0.23)
-- **Chat windows** (Settings > Chat and console > Chat opens as: window) dock at the bottom like a desktop messenger: minimize, expand, unread counts on minimized windows. Keep several open, click a header to minimize it, expand it to the full chat view or close it. Windows that do not fit collapse into avatars on the right. Settings > **Chat opens as** can make Chat open the full view instead.
-- **Console** turns the main area into terminals: side by side, two columns or rows, 2 x 2, one large with two stacked, three columns or 3 x 2. Drag the gutters to resize; **Fill empty cells** opens the agent's CLI and shells.
+### Chats in the background and terminal windows (0.24)
+- **Chat** always opens the full chat view. **Another agent's chat** can open as a window: a column beside the page that covers nothing (right-click the agent > Open chat window).
+- **The tray** in the status bar holds chats in the background: minimize a chat window, or leave a chat while its agent still works, and it waits there with a spinner while the agent works and a count of new replies (also shown on the agent in the sidebar). Click it to open it beside the page.
+- **Terminal windows, no tabs:** every session is a window with its own title bar (hide, separate window, end). Arrange them **side by side, stacked or in a grid**, below the chat or beside it, and drag the gaps to resize. Windows belong to the agent you opened them from; hidden ones keep running and come back from the agent's Console menu or the toolbar.
+- **Chat and terminal together:** shell code in a reply has **Run**, which pastes the command into the agent's shell window (Enter runs it); right-click text in a terminal > **Ask the agent about this** puts it in the chat box as a quote.
 
 ### Chat with every agent
 - Every agent gets its own chats, and each chat keeps its exact provider session.
@@ -85,7 +87,7 @@ The open view or section unfolds its actions under it in the sidebar, so every a
 - You can add an existing folder or clone a repository.
 
 ### Terminals
-- Integrated xterm.js terminals come with tabs, search, rename and **pop-out windows**.
+- Integrated xterm.js terminals: every session is a window, with search, rename and **pop-out windows**.
 - You can open a shell or the agent's native CLI. The switch at the top left, above the Opaya Agent, opens the selected agent as a chat or in its terminal.
 - **Paste** text, screenshots (as the path of a saved PNG) and files copied in Finder or Explorer (as quoted paths). On an SSH machine or in a container the files are copied there first.
 - Terminals keep running when you close the window.
@@ -154,7 +156,7 @@ Or connect it to any model in **Model settings**: DeepSeek, OpenAI, Google Gemin
 It acts only through Opaya's own tools and terminals you can watch, and every change or command asks for your approval unless iTrust is on (removals always ask). Opaya's tools never show it the values of API keys, tokens or secret files, and it cannot modify the app.
 
 ### Everyday comforts
-- Right-click menus everywhere: agents, workspace, terminal tabs, projects and chats.
+- Right-click menus everywhere: agents, workspace, terminal windows, projects and chats.
 - Groups and tags, pinning, drag to reorder, **Connect all**.
 - Official agent logos, an icon library or your own icon.
 - Dark and light themes.

@@ -860,3 +860,31 @@
 :where(body[data-theme="light"]) .an-sub-item.danger{color:#4c201c}
 :where(body[data-theme="light"]) .an-sub-item.danger:hover{background:#e3d5d5;color:#381410}
 :where(body[data-theme="light"]) .crumb-agent:hover{background:#ffffff0a}
+:where(body[data-theme="light"]) .arrange-picker{border:1px solid #d4dadd;background:#eaedef}
+:where(body[data-theme="light"]) .arrange-picker .grid-pick{color:#50595e}
+:where(body[data-theme="light"]) .arrange-picker .grid-pick:hover{color:#0e1211;background:#dae0e3}
+:where(body[data-theme="light"]) .arrange-picker .grid-pick.selected{background:#d5e0db;color:#1b5e3b}
+:where(body[data-theme="light"]) .hidden-windows{border:1px dashed #bec7cb;color:#3c4549}
+:where(body[data-theme="light"]) .hidden-windows:hover{color:#0e1211}
+:where(body[data-theme="light"]) .terminal-pane{border:1px solid #d7dcdf;background:#ebeef0}
+:where(body[data-theme="light"]) .terminal-panes.split>.terminal-pane.focused{border-color:#acc8b9}
+:where(body[data-theme="light"]) .terminal-pane-head,:where(body[data-theme="light"]) .terminal-panes.split .terminal-pane-head{background:#e5e9eb;border-bottom:1px solid #d9dfe2;color:#3c4549}
+:where(body[data-theme="light"]) .terminal-pane.focused .terminal-pane-head{background:#dfe9e4;color:#0e1913}
+:where(body[data-theme="light"]) .pane-dot{background:#6ee7a8}
+:where(body[data-theme="light"]) .terminal-pane.ended .pane-dot{background:#c7ced1}
+:where(body[data-theme="light"]) .terminal-pane.attention .pane-dot{background:#7cc4ff}
+:where(body[data-theme="light"]) .pane-btn.danger:hover{background:#ddc5c5;color:#381410}
+:where(body[data-theme="light"]) .placeholder-hidden{color:#50595e}
+:where(body[data-theme="light"]) .chat-dock,:where(body[data-theme="light"]).job-open .chat-dock{border-left:1px solid #d9dee0;background:#e1e5e8}
+:where(body[data-theme="light"]) .tray-chip{border:1px solid #ced6d9;background:#e4e8ea}
+:where(body[data-theme="light"]) .tray-chip>button{color:#2b3336}
+:where(body[data-theme="light"]) .tray-chip>button:hover{color:#090c0a;background:#dae0e3}
+:where(body[data-theme="light"]) .tray-chip em{background:#6ee7a8;color:#0e2a1c}
+:where(body[data-theme="light"]) .tray-chip.unread{border-color:#9fc8b2}
+:where(body[data-theme="light"]) .tray-chip.working{border-color:#a9c1d5}
+:where(body[data-theme="light"]) .tray-spin{border:1.5px solid #7cc4ff55;border-top-color:#7cc4ff}
+:where(body[data-theme="light"]) .tray-x{color:#6f7c82!important}
+:where(body[data-theme="light"]) .tray-x:hover{color:#381410!important}
+:where(body[data-theme="light"]) .agent-nav .nav-unread{background:#6ee7a8;color:#0e2a1c}
+:where(body[data-theme="light"]) .an-sub-item small{color:#5f6c72}
+:where(body[data-theme="light"]) .an-sub-item.an-win.hidden span:first-child{color:#50595e}

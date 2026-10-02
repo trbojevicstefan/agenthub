@@ -1,7 +1,7 @@
 'use strict';
 // Rich agent messages: a small, safe Markdown renderer. Text is escaped first; only http(s) links and images become
 // elements, and links open in Opaya's browser pane. Supports headings, lists (nested, numbered, task), tables, quotes,
-// rules, fenced code with Copy (and Preview for HTML/SVG), bold, italic, strike, inline code and bare URLs.
+// rules, fenced code with Copy (Preview for HTML/SVG, Run for shell commands), bold, italic, strike, inline code and bare URLs.
 (()=>{
   const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const safeUrl=u=>{try{const x=new URL(u);return ['http:','https:','mailto:'].includes(x.protocol)?x.toString():'';}catch{return '';}};
@@ -23,8 +23,8 @@
   }
   const restore=(html,slots)=>html.replace(/\u0000(\d+)\u0000/g,(_,i)=>slots[Number(i)]??'');
   function codeBlock(lang,code){
-    const l=String(lang||'').trim().split(/\s+/)[0].slice(0,24),preview=/^(html|svg|xml)$/i.test(l);
-    return `<div class="code-block"><div class="code-head"><span>${esc(l||'code')}</span><span class="code-actions">${preview?'<button type="button" class="text-button" data-action="md-preview">Preview</button>':''}<button type="button" class="text-button" data-action="md-copy">Copy</button></span></div><pre><code>${esc(code.replace(/\n$/,''))}</code></pre></div>`;
+    const l=String(lang||'').trim().split(/\s+/)[0].slice(0,24),preview=/^(html|svg|xml)$/i.test(l),shell=/^(bash|sh|shell|zsh|fish|console|terminal|powershell|pwsh|ps1|cmd|bat)$/i.test(l);
+    return `<div class="code-block"><div class="code-head"><span>${esc(l||'code')}</span><span class="code-actions">${preview?'<button type="button" class="text-button" data-action="md-preview">Preview</button>':''}${shell?'<button type="button" class="text-button" data-action="md-run" title="Paste into the agent\'s shell; press Enter there to run it">Run</button>':''}<button type="button" class="text-button" data-action="md-copy">Copy</button></span></div><pre><code>${esc(code.replace(/\n$/,''))}</code></pre></div>`;
   }
   const isTableSep=l=>/^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/.test(l);
   const cells=l=>l.trim().replace(/^\||\|$/g,'').split(/(?<!\\)\|/).map(c=>c.trim().replace(/\\\|/g,'|'));

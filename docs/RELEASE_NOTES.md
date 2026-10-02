@@ -8,7 +8,7 @@
   - **Sub-menus**: the open view or section unfolds its actions under it (for example Keys & tools: API keys, Opaya Vault, MCP servers, Share with another agent, Gateway, iTrust, Opaya browser; Chat: Open in a window, Export this chat; Console: CLI, Shell, Files). Click one to open its section, see its row marked, and run it; switches show their state.
   - In a narrow window it becomes a row of icons.
 - **While an agent's sidebar is open, your agents' sidebar becomes a slim rail of icons.** The selected agent sits in a tab of its sidebar's colour that flows into it, with no border between, so you always see whose sidebar it is. Groups keep a short label above their icons: **Local**, **Remote**, **Pinned** or the group's name. Rest the pointer on the rail to widen it over the page with the names; it shrinks again when you move away.
-- **The Opaya Agent has its own sidebar too**: Chat and Setup guide, its chats with +, Settings (model, iTrust, Opaya Vault) and Tools (Discover agents, Install agents, Check all agents, Machines). Its button joins its sidebar like a selected agent, and its model, iTrust and setup guide left the top bar.
+- **The Opaya Agent has its own sidebar too**: Chat and Setup guide, its chats with +, Settings (model, iTrust, Opaya Vault) and Tools (Discover agents, Install agents, Check & fix all, Machines). Its button joins its sidebar like a selected agent, and its model, iTrust and setup guide left the top bar.
 - **Ctrl/Cmd+1 to 9 follow the sidebar's order** (Pinned, your groups, This computer, Remote), so 1 is the first agent you see. Hold Ctrl/Cmd for a moment and each agent shows its number.
 - **Overview**: the agent with its 3D stage, status, Connect, Chat, Console, Update and Back up, the clones and backups running for it, and one card per section with its main facts. Click a card to open its section, or a label on the stage.
 - **Each section is a calm list of settings**: what it is, its value and one action, grouped in cards. Each action lives in exactly one section, with one name: **Share with another agent** (was Transfer or Share), **Reconnect** (was Restart connection), **Restart container** and **Container logs**, **API keys**, **Connection settings**.
@@ -16,11 +16,20 @@
 - The top bar shows the agent and the page; Chat, Console and Manage moved into the agent's sidebar. The Manage ▾ menu is gone: machines are under **Machines**.
 - History no longer opens by itself next to the chat: the agent's chats are in its sidebar, and **Search chats** opens History.
 - The 3D stage is quieter: fewer particles. Its orbit holds still under the pointer.
-- **Navigation, checked end to end**:
-  - With Chat set to open as a window, choosing an agent now selects it too: its sidebar and Overview show behind the window (before, the previous agent stayed selected). Chat shows a dot while its window is open.
+- **Terminal windows instead of tabs**: every session is a window with its own title bar (hide, open in a separate window, end session).
+  - Arrange them **side by side, stacked or in a grid** with the three buttons at the left of the terminal toolbar, below the chat or beside it; drag the gaps to resize.
+  - Windows belong to the agent (or screen) they were opened from: switching agents shows that agent's windows, and the panel comes back as you left it. Hidden windows keep running; the agent's Console menu lists its windows, and the toolbar's hidden button or right-click > Windows shows them again or brings one over from another agent.
+  - Console full screen uses the same windows. The fixed grids of 0.23 (2 x 2, 3 x 2...) become side by side, stacked or grid.
+- **Chats in the background**:
+  - Chat always opens the full chat view; the setting to open it as a window is gone.
+  - Another agent's chat window is now a column beside the page, so it no longer covers the message box or the terminal. One is open at a time.
+  - Minimized chats, and chats you leave while their agent still works, wait in a **tray in the status bar** with a spinner while it works and their new replies; the agent in the sidebar shows the count too, and its icon in the rail pulses while it works.
+  - Ctrl/Cmd+N and New chat open a new chat in the full view.
+- **Chat and terminal together**: shell code in a reply has **Run** (pastes the command into the agent's shell window; Enter runs it), and right-click selected text in a terminal > **Ask (the agent) about this** puts it in the chat box as a quote.
+- With the agent's sidebar open, the chat heading no longer repeats its chats, new chat, export, history and connect.
+- **Fixes from a check of the whole navigation**:
   - Projects now read the branch, changes and commits to push from git correctly (before, Manage showed every project as clean on a detached branch).
   - Clicking an agent in the icon rail no longer widens the rail over the sidebar it just opened.
-  - The terminal panel closes when you switch to an agent that has no session in it, instead of showing another agent's tabs; Console opens it again and the sessions keep running.
   - The Opaya Agent's Chat leaves the setup guide. The agent's name in the top bar opens its Overview. Machines is titled Machines.
   - One name for sharing everywhere: **Share with another agent** (and **Share between agents** on Home); **Check & fix all**; **Remote** for agents on other machines.
   - On macOS the rail leaves room for the window buttons, and with the sidebar hidden the agent's sidebar does too.

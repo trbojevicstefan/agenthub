@@ -2212,3 +2212,85 @@ body[data-theme="light"] .an-caret.open{color:#15803d}
 body[data-platform="darwin"].agent-open .sidebar:not(.peek),body[data-platform="darwin"].agent-open .sidebar.peek{padding-top:44px}
 body.sidebar-hidden.agent-open .agent-side{padding-top:40px}
 body.sidebar-hidden.agent-open:not(.x) .topbar{padding-left:25px}
+/* 0.24 Terminal windows: every session is a window (no tabs), side by side, stacked or in a grid */
+.terminal-arrange{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+.arrange-picker{display:inline-flex;gap:2px;padding:2px;border:1px solid #262d30;border-radius:8px;background:#101315}
+.arrange-picker .grid-pick{width:28px;height:22px;padding:0;border:0;border-radius:6px;background:transparent;color:#7d8a90;display:inline-flex;align-items:center;justify-content:center}
+.arrange-picker .grid-pick:hover{color:#e6ecea;background:#1c2225}
+.arrange-picker .grid-pick.selected{background:#1f2a25;color:#6ee7a8}
+.arr-ico{display:inline-grid;gap:1.5px;width:14px;height:11px}
+.arr-ico i{border:1.3px solid currentColor;border-radius:1.5px;min-width:0;min-height:0}
+.arr-ico.cols{grid-template-columns:1fr 1fr}.arr-ico.rows{grid-template-rows:1fr 1fr}.arr-ico.grid{grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr}
+.hidden-windows{height:24px;padding:0 9px;border-radius:12px;border:1px dashed #3a4448;background:transparent;color:#9aa6ab;font-size:11px}
+.hidden-windows:hover{border-style:solid;color:#e6ecea}
+.terminal-panes{display:flex;height:100%;min-width:0;min-height:0;gap:0;padding:6px}
+.terminal-panes[data-arrange="rows"]{flex-direction:column}
+.terminal-panes[data-arrange="grid"]{display:grid;gap:6px;grid-auto-rows:minmax(0,1fr)}
+.terminal-panes[data-arrange="grid"]>.pane-grip{display:none}
+.terminal-pane{border:1px solid #242a2d;border-radius:10px;background:#0f1214;overflow:hidden;transition:border-color .15s,box-shadow .15s}
+.terminal-panes.split>.terminal-pane.focused{border-color:#3d5c4b;box-shadow:0 0 0 1px #6ee7a81f}
+.terminal-pane-head,.terminal-panes.split .terminal-pane-head{display:flex;align-items:center;gap:6px;height:28px;margin:0;padding:0 4px 0 10px;border-radius:0;background:#14181a;border-bottom:1px solid #20262a;color:#9aa6ab;font-size:11px;box-shadow:none}
+.terminal-pane.focused .terminal-pane-head{background:#16201b;color:#dcebe2;box-shadow:none}
+.terminal-pane.empty .terminal-pane-head{display:none}
+.pane-dot{width:7px;height:7px;border-radius:50%;background:#6ee7a8;flex:none}
+.terminal-pane.ended .pane-dot{background:#5f6c72}
+.terminal-pane.attention .pane-dot{background:#7cc4ff;animation:an-pulse 1.2s ease-in-out infinite}
+.pane-btn{width:22px;height:20px;border-radius:5px}
+.pane-btn.danger:hover{background:#3a2222;color:#f6aaa3}
+.pane-hide-glyph{display:inline-block;width:9px;height:1.6px;background:currentColor;border-radius:1px}
+.terminal-pane-body{padding:4px 2px 2px 6px}
+.terminal-panes>.pane-grip{flex:0 0 7px;cursor:col-resize}
+.terminal-panes>.pane-grip::after{left:3px}
+.terminal-panes[data-arrange="rows"]>.pane-grip{cursor:row-resize}
+.terminal-panes[data-arrange="rows"]>.pane-grip::after{top:3px;bottom:auto;left:6px;right:6px;width:auto;height:1px}
+body.pane-resizing:has(.terminal-panes[data-arrange="rows"]){cursor:row-resize}
+.terminal-pane.empty{border-style:dashed;background:transparent}
+.placeholder-hidden{margin-top:10px;font-size:11.5px;color:#7d8a90}
+.placeholder-hidden .text-button{margin-left:6px}
+body[data-theme="light"] .arrange-picker{background:#fff;border-color:#d6dfda}
+body[data-theme="light"] .arrange-picker .grid-pick.selected{background:#e3f4ea;color:#15803d}
+body[data-theme="light"] .terminal-pane{background:#fff;border-color:#d6dfda}
+body[data-theme="light"] .terminal-pane-head,body[data-theme="light"] .terminal-panes.split .terminal-pane-head{background:#f4f7f5;border-color:#e3e9e5;color:#55655c}
+body[data-theme="light"] .terminal-pane.focused .terminal-pane-head{background:#e8f4ed;color:#123222}
+body[data-theme="light"] .hidden-windows{border-color:#c4cec8;color:#55655c}
+/* 0.24 Chat window: a column beside the page (it covers nothing); chats in the background wait in the status bar */
+.chat-dock,body.job-open .chat-dock{position:relative;right:auto;bottom:auto;z-index:3;flex:none;width:340px;display:flex;flex-direction:column;align-items:stretch;gap:0;pointer-events:auto;perspective:none;border-left:1px solid #22272a;background:#171b1e}
+.chat-dock[hidden]{display:none}
+.chat-dock .chat-win,.chat-dock .chat-win:not(.min){width:100%;height:100%;flex:1;border:0;border-radius:0;box-shadow:none}
+.chat-dock .chat-win.min{display:none}
+.chat-dock .chat-win.entering{animation:chat-col-in .28s cubic-bezier(.2,.8,.2,1)}
+@keyframes chat-col-in{from{opacity:0;transform:translateX(16px)}}
+.status-tray{display:flex;align-items:center;gap:6px;min-width:0;overflow:hidden;margin-right:auto;margin-left:12px}
+.status-tray[hidden]{display:none}
+.tray-chip{display:inline-flex;align-items:center;height:22px;border-radius:11px;border:1px solid #2a3236;background:#15191b;overflow:hidden;flex:none}
+.tray-chip>button{all:unset;cursor:pointer;display:inline-flex;align-items:center;gap:5px;height:100%;padding:0 4px 0 3px;font-size:10.5px;color:#b4bfc3}
+.tray-chip>button:hover{color:#eef3f0;background:#1c2225}
+.tray-chip .agent-avatar{width:16px;height:16px;border-radius:5px;margin:0}
+.tray-name{max-width:110px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tray-chip em{font-style:normal;min-width:15px;height:15px;padding:0 4px;border-radius:8px;background:#6ee7a8;color:#0e2a1c;font-size:9.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.tray-chip.unread{border-color:#3d6b52;box-shadow:0 0 0 2px #6ee7a81a}
+.tray-chip.working{border-color:#2b4a63}
+.tray-spin{width:9px;height:9px;border-radius:50%;border:1.5px solid #7cc4ff55;border-top-color:#7cc4ff;animation:tray-spin .8s linear infinite}
+@keyframes tray-spin{to{transform:rotate(360deg)}}
+.tray-x{padding:0 7px!important;color:#6f7c82!important;font-size:9px!important}
+.tray-x:hover{color:#f6aaa3!important}
+@media (prefers-reduced-motion:reduce){.tray-spin{animation:none}}
+body[data-theme="light"] .chat-dock{background:#fff;border-color:#e0e6e2}
+body[data-theme="light"] .tray-chip{background:#fff;border-color:#d6dfda}
+body[data-theme="light"] .tray-chip>button{color:#3c4a44}
+/* Agents working in the background, and their new replies, on the sidebar and the rail */
+.agent-nav .nav-unread{position:absolute;right:30px;top:50%;transform:translateY(-50%);min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:#6ee7a8;color:#0e2a1c;font:700 9.5px/16px var(--font);text-align:center;font-style:normal}
+body.agent-open .sidebar:not(.peek) .agent-nav .nav-unread{right:auto;left:36px;top:auto;bottom:4px;transform:none;box-shadow:0 0 0 2px #0f1113}
+body.agent-open .sidebar:not(.peek) .agent-nav:has(.status-dot.working) .agent-avatar{animation:rail-busy 1.6s ease-in-out infinite}
+@keyframes rail-busy{0%,100%{box-shadow:0 0 0 2px #7cc4ff55}50%{box-shadow:0 0 0 3px #7cc4ff,0 0 14px #7cc4ff66}}
+@media (prefers-reduced-motion:reduce){body.agent-open .sidebar:not(.peek) .agent-nav:has(.status-dot.working) .agent-avatar{animation:none;box-shadow:0 0 0 2px #7cc4ff}}
+body[data-theme="light"].agent-open .sidebar:not(.peek) .agent-nav .nav-unread{box-shadow:0 0 0 2px #e8ece7}
+.an-sub-item small{font-size:10px;color:#5f6c72}
+.an-sub-item.an-win.hidden span:first-child{color:#7d8a90;font-style:italic}
+/* With the agent's sidebar open, the chat heading keeps only what the sidebar does not have (its chats, a new chat,
+   export, history and connect are there) */
+body.agent-open .content.conversation:not(.opaya-view) .conversation-controls>#conversation-picker,
+body.agent-open .content.conversation:not(.opaya-view) .conversation-controls>[data-action="new-conversation"],
+body.agent-open .content.conversation:not(.opaya-view) .conversation-controls>[data-action="export"],
+body.agent-open .content.conversation:not(.opaya-view) .conversation-controls>[data-action="history-toggle"],
+body.agent-open .content.conversation:not(.opaya-view) .conversation-controls>#connect-button{display:none}

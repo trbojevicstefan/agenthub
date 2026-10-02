@@ -58,6 +58,10 @@ test('chat windows in the dock get their messages without switching the open age
   await b.send({agentId:two.id,conversationId:quiet.id,text:'from the dock'});assert.equal(b.snapshot().histories[quiet.id][0].content,'from the dock');assert.equal(b.data.activeAgentId,one.id);
   await b.saveView({chatDock:[]});assert.equal(b.snapshot().histories[quiet.id],undefined,'closed windows stop receiving histories');
   runs[0].resolve({});await Promise.all([...b.turns.values()].map(t=>t.done));});
-test('console grid layouts are validated and kept',async t=>{const {b}=await fixture(t);
-  await b.saveView({layout:{grid:'grid4',gridCol:0.3,gridRow:2}});assert.deepEqual([b.data.view.layout.grid,b.data.view.layout.gridCol,b.data.view.layout.gridRow],['grid4',0.3,0.5]);
-  await b.saveView({layout:{grid:'<script>'}});assert.equal(b.data.view.layout.grid,'row');});
+test('terminal window arrangement and windows are validated and kept',async t=>{const {b}=await fixture(t);
+  await b.saveView({layout:{arrange:'rows'},windows:[['t1','a1',1],['t2','',0],['<x>','a1',0],['t3','bad id!',1]]});
+  assert.equal(b.data.view.layout.arrange,'rows');assert.deepEqual(b.data.view.windows,[['t1','a1',1],['t2','',0],['t3','',1]]);
+  // The grids of 0.23 map onto an arrangement; anything else is side by side.
+  await b.saveView({layout:{grid:'grid4'}});assert.equal(b.data.view.layout.arrange,'grid');
+  await b.saveView({layout:{grid:'rows2'}});assert.equal(b.data.view.layout.arrange,'rows');
+  await b.saveView({layout:{arrange:'<script>'}});assert.equal(b.data.view.layout.arrange,'cols');});
