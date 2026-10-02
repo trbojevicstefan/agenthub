@@ -103,8 +103,8 @@
     const groups=navGroups(),hkOf=new Map(navOrder().slice(0,9).map((a,i)=>[a.id,i+1]));
     const now=performance.now(),current=overview||opayaView||playgroundView?'':state.activeAgentId||'';let row=0;
     if(current!==navSelected){navSelected=current;navSelectedAt=now;}
-    const nav=groups.filter(g=>g[2].length).map(([key,name,all])=>{const closed=collapsedGroups.has(key),agents=closed?[]:all,busy=closed&&all.some(a=>a.busy);return `<button class="sidebar-section-label ${closed?'collapsed':''} ${key.startsWith('group:')?'custom-group':''}" data-action="toggle-group" data-group="${esc(key)}" aria-expanded="${!closed}" title="${closed?'Expand':'Collapse'} ${esc(name)} (right-click for group actions)"><span class="group-chevron" aria-hidden="true">&#9662;</span><span class="group-name">${esc(name)}</span><span class="group-short" aria-hidden="true">${esc(key==='local'?'Local':key==='remote'?'Remote':key==='pinned'?'Pinned':name)}</span>${busy?'<span class="status-dot working"></span>':''}<span class="group-count">${all.length}</span></button><div class="sidebar-group ${closed?'closed':''}">${closed?`<div class="collapsed-strip" data-section="${esc(key)}">${all.map(a=>`<button type="button" class="mini-agent ${a.id===current?'selected':''}" data-action="select" data-id="${esc(a.id)}" data-agent-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}" aria-label="${esc(title(a))}">${badge(a)}${dot(a)}</button>`).join('')}</div>`:''}${agents.map(a=>`<div class="agent-nav-row ${fresh(navSeen,a.id,now,650)?'enter':''}" style="--i:${row++}" data-agent-id="${esc(a.id)}" data-section="${esc(key)}" draggable="true"><button class="agent-nav ${!overview&&!opayaView&&!playgroundView&&a.id===state.activeAgentId?'selected':''} ${a.id===navSelected&&now-navSelectedAt<500?'just-selected':''}" data-action="select" data-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}">${badge(a)}<span class="agent-nav-text"><strong>${esc(title(a))}${trusted(a)?'<span class="itrust-mark" title="iTrust: approved automatically">iT</span>':''}</strong><small class="agent-nav-host">${esc(navSub(a))}</small></span>${dot(a)}${hkOf.has(a.id)?`<kbd class="nav-hk" aria-hidden="true">${hkOf.get(a.id)}</kbd>`:''}</button><button type="button" class="agent-nav-manage" data-action="manage" data-id="${esc(a.id)}" title="Manage ${esc(title(a))}" aria-label="Manage ${esc(title(a))}">&#9881;</button></div>`).join('')}</div>`;}).join('')||'<div class="sidebar-empty"><span class="connection-dots"><i></i><i></i><i></i></span>Your agents will<br>feel at home here.</div>';
-    if(nav!==navHtml){navHtml=nav;$('#agent-list').innerHTML=nav;}
+    const nav=groups.filter(g=>g[2].length).map(([key,name,all])=>{const closed=collapsedGroups.has(key),agents=closed?[]:all,busy=closed&&all.some(a=>a.busy);return `<button class="sidebar-section-label ${closed?'collapsed':''} ${key.startsWith('group:')?'custom-group':''}" data-action="toggle-group" data-group="${esc(key)}" aria-expanded="${!closed}" title="${closed?'Expand':'Collapse'} ${esc(name)} (right-click for group actions)"><span class="group-chevron" aria-hidden="true">&#9662;</span><span class="group-name">${esc(name)}</span><span class="group-short" aria-hidden="true">${esc(key==='local'?'Local':key==='remote'?'Remote':key==='pinned'?'Pinned':name)}</span>${busy?'<span class="status-dot working"></span>':''}<span class="group-count">${all.length}</span></button><div class="sidebar-group ${closed?'closed':''}">${closed?`<div class="collapsed-strip" data-section="${esc(key)}">${all.map(a=>`<button type="button" class="mini-agent ${a.id===current?'selected':''}" data-action="select" data-id="${esc(a.id)}" data-agent-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}" aria-label="${esc(title(a))}">${badge(a)}${dot(a)}</button>`).join('')}</div>`:''}${agents.map(a=>`<div class="agent-nav-row ${fresh(navSeen,a.id,now,650)?'enter':''}" style="--i:${row++}" data-agent-id="${esc(a.id)}" data-section="${esc(key)}" draggable="true"><button class="agent-nav ${!overview&&!opayaView&&!playgroundView&&a.id===state.activeAgentId?'selected':''} ${a.id===navSelected&&now-navSelectedAt<500?'just-selected':''}" data-action="select" data-id="${esc(a.id)}" aria-label="${esc(title(a)+', '+status(a)+', '+location(a))}">${badge(a)}<span class="agent-nav-text"><strong>${esc(title(a))}${trusted(a)?'<span class="itrust-mark" title="iTrust: approved automatically">iT</span>':''}</strong><small class="agent-nav-host">${esc(navSub(a))}</small></span>${dot(a)}${hkOf.has(a.id)?`<kbd class="nav-hk" aria-hidden="true">${hkOf.get(a.id)}</kbd>`:''}</button><button type="button" class="agent-nav-manage" data-action="manage" data-id="${esc(a.id)}" title="Manage ${esc(title(a))}" aria-label="Manage ${esc(title(a))}">&#9881;</button></div>`).join('')}</div>`;}).join('')||'<div class="sidebar-empty"><span class="connection-dots"><i></i><i></i><i></i></span>Your agents will<br>feel at home here.</div>';
+    if(nav!==navHtml){navHtml=nav;$('#agent-list').innerHTML=nav;}refreshRailCard();
     const a=selected();
     // A left click opens an agent's management screen; Chat and Console are the other two ways to work with it.
     const mode=!overview&&!opayaView&&!playgroundView&&a?modeOf(a):'';manageId=mode==='manage'?a.id:'';
@@ -2438,7 +2438,7 @@
   // The switch shows how the selected agent is open and changes it (the agent remembers it). It replaces the Terminal,
   // Chat and Open chat buttons that sat in the middle of the top bars. Right-click the terminal half for the other ways.
   // sidebarRail: the agents' sidebar as a strip of icons (its toggle at the bottom, or Settings > Sidebar) or full width.
-  let sidebarHidden=false,sidebarRail=true,titleHtml='';
+  let sidebarHidden=false,sidebarRail=true,railAnchor=null,railMuted=null,titleHtml='';
   const TITLE_ICONS={sidebar:'<svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.75" y="2.75" width="12.5" height="10.5" rx="2"/><path d="M6.25 3v10"/></svg>'};
   // The sidebar toggle lives at the bottom of the sidebar; while the sidebar is hidden, a small button in the title
   // bar brings it back (so does Ctrl/Cmd+B).
@@ -2450,7 +2450,51 @@
     document.body.classList.toggle('sidebar-hidden',sidebarHidden);document.body.classList.toggle('sidebar-rail',sidebarRail);
     const rail=$('.sidebar-rail-btn');if(rail){rail.title=sidebarRail?'Show names':'Icons only';rail.setAttribute('aria-pressed',String(sidebarRail));const label=rail.querySelector('.rail-label');if(label)label.textContent=sidebarRail?'Show names':'Icons only';}
   }
-  function toggleRail(force){sidebarRail=force??!sidebarRail;renderTitleControls();requestAnimationFrame(()=>placePanes());saveView();}
+  function toggleRail(force){sidebarRail=force??!sidebarRail;renderTitleControls();requestAnimationFrame(()=>placePanes());hideRailCard();saveView();}
+  // Icons only: hovering or focusing an icon shows its card at once (no native tooltip delay). An agent's card holds its name,
+  // state and the machine it runs on; any other icon shows its label. The card lives outside the scrolling list, so it is never clipped.
+  const railCard=Object.assign(document.createElement('div'),{id:'rail-card',className:'rail-card',hidden:true});railCard.setAttribute('role','tooltip');document.body.append(railCard);
+  const RAIL_TARGETS='.agent-nav,.brand-opaya,.nav-overview,.sidebar-bottom>button,.sidebar-section-label';
+  const railTarget=el=>sidebarRail&&!sidebarHidden&&el?.closest?.('.sidebar')?el.closest(RAIL_TARGETS):null;
+  function railCardHtml(el){
+    const a=el.matches('.agent-nav')&&state.agents.find(x=>x.id===el.dataset.id);
+    if(a){const hk=navOrder().slice(0,9).findIndex(x=>x.id===a.id),kind=[(a.transport==='ssh'?'Remote':'Local')+(isDocker(a)?' Docker':''),labels[a.provider]||a.provider].filter(Boolean).join(' · '),unread=el.querySelector('.nav-unread')?.textContent;
+      return `<div class="rc-head">${badge(a)}<span class="rc-name"><strong>${esc(title(a))}</strong><small>${dot(a)}${esc(status(a))}${unread?` · ${esc(unread)} unread`:''}</small></span>${hk>=0?`<kbd>${esc(mod())}${hk+1}</kbd>`:''}</div><div class="rc-machine"><span class="rc-ico" aria-hidden="true">${AN_ICON.machine||''}</span><span><strong>${esc(location(a))}</strong><small>${esc(kind)}</small></span></div>`;}
+    const text=el.dataset.railTitle||el.getAttribute('title')||el.getAttribute('aria-label')||el.textContent.trim(),[head,...rest]=text.split(/:\s+/);
+    return `<div class="rc-tip"><strong>${esc(head)}</strong>${rest.length?`<small>${esc(rest.join(': '))}</small>`:''}</div>`;
+  }
+  function showRailCard(el){
+    if(railAnchor&&railAnchor!==el)hideRailCard();
+    // The card replaces the native tooltip, which would otherwise show a second later on top of it.
+    if(el.hasAttribute('title')){el.dataset.railTitle=el.title;el.removeAttribute('title');}
+    railAnchor=el;railCard.innerHTML=railCardHtml(el);railCard.hidden=false;placeRailCard();
+  }
+  function placeRailCard(){
+    if(!railAnchor)return;const r=railAnchor.getBoundingClientRect(),side=$('.sidebar').getBoundingClientRect(),h=railCard.offsetHeight;
+    const top=Math.max(8,Math.min(innerHeight-h-8,r.top+r.height/2-h/2));
+    railCard.style.left=`${Math.round(side.right+8)}px`;railCard.style.top=`${Math.round(top)}px`;railCard.style.setProperty('--arrow',`${Math.round(r.top+r.height/2-top)}px`);
+  }
+  function hideRailCard(){
+    if(railAnchor?.dataset.railTitle){railAnchor.title=railAnchor.dataset.railTitle;delete railAnchor.dataset.railTitle;}
+    railAnchor=railMuted=null;railCard.hidden=true;
+  }
+  // The list re-renders as agents change state; a hovered icon that was replaced gets its card refreshed from the new one.
+  function refreshRailCard(){
+    if(!railAnchor)return;if(!sidebarRail||sidebarHidden)return hideRailCard();if(railMuted){if(!railAnchor.isConnected)railAnchor=null;return;}if(railAnchor.isConnected){railCard.innerHTML=railCardHtml(railAnchor);placeRailCard();return;}
+    const id=railAnchor.dataset.id,next=id&&$(`.sidebar .agent-nav[data-id="${CSS.escape(id)}"]`);railAnchor=null;
+    if(next&&next.matches(':hover,:focus-visible'))showRailCard(next);else railCard.hidden=true;
+  }
+  // A re-render replaces the elements; an agent's icon stays the same icon by its id.
+  const sameRailIcon=(x,y)=>x===y||!!(x&&y&&x.dataset.id&&x.dataset.id===y.dataset.id);
+  const sidebarEl=$('.sidebar');
+  sidebarEl.addEventListener('mouseover',event=>{const el=railTarget(event.target);if(!sameRailIcon(el,railMuted))railMuted=null;if(el&&el!==railAnchor&&!railMuted)showRailCard(el);else if(!el&&railAnchor)hideRailCard();});
+  // A click opens the agent's own sidebar right where the card was, so the card steps aside until the pointer moves to another icon.
+  sidebarEl.addEventListener('pointerdown',event=>{if(railAnchor&&railTarget(event.target)===railAnchor){railMuted=railAnchor;railCard.hidden=true;}});
+  sidebarEl.addEventListener('mouseleave',()=>{railMuted=null;if(railAnchor&&!railAnchor.matches(':focus-visible'))hideRailCard();});
+  sidebarEl.addEventListener('focusin',event=>{const el=railTarget(event.target);if(el&&el.matches(':focus-visible'))showRailCard(el);});
+  sidebarEl.addEventListener('focusout',()=>{if(railAnchor&&!railAnchor.matches(':hover'))hideRailCard();});
+  sidebarEl.addEventListener('scroll',()=>{if(railAnchor)placeRailCard();},true);
+  addEventListener('blur',()=>hideRailCard());
   function toggleSidebar(force){sidebarHidden=force??!sidebarHidden;renderTitleControls();requestAnimationFrame(()=>placePanes());saveView();}
   // Chat or terminal for the selected agent, leaving the Workspace, Manage, the Opaya Agent or the Playground. From a
   // project chat the CLI starts in the project's folder, as the Terminal button did (the service reuses a running one).

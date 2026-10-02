@@ -2315,3 +2315,22 @@ body.sidebar-rail .sidebar-rail-btn .rail-glyph{transform:scaleX(-1)}
 body.chat-dock-open .opaya-nudge{right:360px}
 .an-id-text small.an-where{display:block;padding-left:0;color:#68757b;font-size:10.5px}
 .tray-chip>button:focus-visible,.pane-btn:focus-visible,.arrange-picker .grid-pick:focus-visible,.sidebar-rail-btn:focus-visible,.hidden-windows:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* 0.25.1: the agents' list never scrolls sideways. In icons-only mode its vertical scrollbar is hidden too (it would eat the
+   rail's width and push the icons sideways); the wheel and keyboard still scroll it. */
+.agent-list{overflow-x:hidden}
+body.sidebar-rail .sidebar .agent-list{scrollbar-width:none}
+body.sidebar-rail .sidebar .agent-list::-webkit-scrollbar{display:none;width:0;height:0}
+/* Icons-only hover card: shows at once, right of the rail, with an arrow to the hovered icon. */
+.rail-card{position:fixed;z-index:400;min-width:150px;max-width:280px;padding:9px 11px;border-radius:11px;background:#1b2022;border:1px solid #343c40;color:#e6ecea;box-shadow:0 14px 34px -10px #000000b3;pointer-events:none;font-size:12px;line-height:1.35}
+.rail-card:before{content:"";position:absolute;left:-6px;top:calc(var(--arrow,20px) - 6px);width:10px;height:10px;background:#1b2022;border-left:1px solid #343c40;border-bottom:1px solid #343c40;transform:rotate(45deg)}
+.rail-card strong{display:block;font-weight:620;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rail-card small{display:flex;align-items:center;gap:6px;color:#93a1a7;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rail-card .rc-head{display:flex;align-items:center;gap:10px}
+.rail-card .rc-head .agent-avatar{width:34px;height:34px;margin:0;font-size:14px;border-radius:10px}
+.rail-card .rc-name{min-width:0;flex:1}
+.rail-card .rc-head kbd{align-self:flex-start;margin-left:4px}
+.rail-card .rc-machine{display:flex;align-items:center;gap:10px;margin-top:8px;padding-top:8px;border-top:1px solid #2c3336}
+.rail-card .rc-ico{width:34px;display:inline-flex;justify-content:center;color:#93a1a7;flex-shrink:0}
+.rail-card .rc-ico svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.rail-card .rc-machine>span:last-child{min-width:0}
+.rail-card .rc-tip small{display:block;white-space:normal}

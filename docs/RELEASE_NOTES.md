@@ -1,3 +1,8 @@
+# Opaya 0.25.1 - icon cards without the wait
+
+- **Point at an agent in the icon strip and its card shows at once**: its name, status, its Ctrl+number and the machine it runs on (this computer or the remote server, Local or Remote, Docker, its kind). The other icons in the strip (Opaya Agent, Overview, the group labels and the bottom buttons) show their name the same way. A click opens the agent's sidebar, and the card steps aside until you point at another icon. Keyboard focus shows the card too.
+- **The agents' list no longer scrolls sideways.** In the icon strip its scrollbar is hidden, so it never pushes the icons over; the mouse wheel and the keyboard still scroll it.
+
 # Opaya 0.25.0 - the agents' sidebar on a switch
 
 - **Names or icons, on a switch, not on hover.** Your agents' sidebar is either a slim strip of icons or full width with names. Switch it with the « / » button at its bottom, or in Settings > Sidebar; Opaya remembers your choice. The strip no longer widens when the pointer passes over it.

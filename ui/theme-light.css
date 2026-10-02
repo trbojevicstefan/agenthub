@@ -890,3 +890,8 @@
 :where(body[data-theme="light"]) .an-sub-item small{color:#5f6c72}
 :where(body[data-theme="light"]) .an-sub-item.an-win.hidden span:first-child{color:#50595e}
 :where(body[data-theme="light"]) .an-id-text small.an-where{color:#68757b}
+:where(body[data-theme="light"]) .rail-card{background:#dde2e4;border:1px solid #c5cdd0;color:#0e1211}
+:where(body[data-theme="light"]) .rail-card:before{background:#dde2e4;border-left:1px solid #c5cdd0;border-bottom:1px solid #c5cdd0}
+:where(body[data-theme="light"]) .rail-card small{color:#3f494e}
+:where(body[data-theme="light"]) .rail-card .rc-machine{border-top:1px solid #ced5d7}
+:where(body[data-theme="light"]) .rail-card .rc-ico{color:#3f494e}
