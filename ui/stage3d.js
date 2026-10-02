@@ -72,10 +72,10 @@ class Hero {
     this.scene = new T.Scene(); this.camera = new T.PerspectiveCamera(40, 2, .1, 100); this.camera.position.set(0, 0, 8);
     this.world = new T.Group(); this.scene.add(this.world);
     // Background dust, drifting slowly.
-    const n = 420, pos = new Float32Array(n * 3);
+    const n = 160, pos = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { pos[i * 3] = (Math.random() - .5) * 30; pos[i * 3 + 1] = (Math.random() - .5) * 14; pos[i * 3 + 2] = -Math.random() * 14 + 2; }
     const dust = new T.BufferGeometry(); dust.setAttribute('position', new T.BufferAttribute(pos, 3));
-    this.dust = new T.Points(dust, new T.PointsMaterial({ size: .05, color: 0x6ee7a8, transparent: true, opacity: .35, depthWrite: false, blending: T.AdditiveBlending }));
+    this.dust = new T.Points(dust, new T.PointsMaterial({ size: .04, color: 0x6ee7a8, transparent: true, opacity: .22, depthWrite: false, blending: T.AdditiveBlending }));
     this.scene.add(this.dust);
     // The agent: a faceted core, a wire shell and a soft glow.
     this.coreMat = new T.MeshStandardMaterial({ color: 0x0e1a14, emissive: 0x6ee7a8, emissiveIntensity: .35, metalness: .4, roughness: .35, flatShading: true });
@@ -103,13 +103,15 @@ class Hero {
     this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
     // The constellation sits on the right; the agent card covers the left of the hero.
     const half = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * this.camera.position.z * this.camera.aspect;
-    this.world.position.x = w < 720 ? 0 : half * .36; this.dust.position.x = this.world.position.x * .5;
+    // In the compact hero (the management screen) the agent card covers more: the scene sits further right, smaller.
+    this.compact = !!this.el.closest('.mg-hero-compact');
+    this.world.position.x = w < 720 ? 0 : half * (this.compact ? .72 : .36); this.world.scale.setScalar(this.compact ? .62 : 1); this.dust.position.x = this.world.position.x * .5;
   }
   set(opts) {
     const agentChanged = opts.agent && opts.agent !== this.opts.agent;
     this.opts = { ...this.opts, ...opts };
     if (!this.renderer) return;
-    this.applyNodes(); if (agentChanged) this.entered = performance.now();
+    this.resize(); this.applyNodes(); if (agentChanged) this.entered = performance.now();
     this.kick();
   }
   applyNodes() {
@@ -151,7 +153,7 @@ class Hero {
     const speed = this.opts.busy ? 2.6 : this.opts.status === 'connected' ? 1 : .35, t = now / 1000;
     const enter = Math.min(1, (now - this.entered) / 1100), e = still ? 1 : back(enter);
     const p = this.pointer; p.x += (p.tx - p.x) * .08; p.y += (p.ty - p.y) * .08;
-    this.camera.position.x = p.x * 1.2; this.camera.position.y = -p.y * .8; this.camera.position.z = 8 + (1 - e) * 5; this.camera.lookAt(this.world.position.x * .6, 0, 0);
+    this.camera.position.x = p.x * 1.2; this.camera.position.y = -p.y * .8; this.camera.position.z = 8 + (1 - e) * 5; this.camera.lookAt(this.compact ? 0 : this.world.position.x * .6, 0, 0);
     this.core.rotation.y += dt * .35 * speed; this.core.rotation.x += dt * .12 * speed; this.shell.rotation.y -= dt * .18 * speed; this.shell.rotation.z += dt * .05;
     const breathe = 1 + Math.sin(t * (this.opts.busy ? 4 : 1.6)) * .04; this.core.scale.setScalar(e * breathe); this.shell.scale.setScalar(e); this.halo.scale.setScalar(5.2 * e * (.95 + Math.sin(t * 1.3) * .05));
     this.dust.rotation.y += dt * .01; this.dust.position.y = Math.sin(t * .2) * .2;

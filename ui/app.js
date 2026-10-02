@@ -805,6 +805,8 @@
     if(name==='agent-menu'){const a=state.agents.find(a=>a.id===id);if(a){const r=button.getBoundingClientRect();openMenu(r.left,r.bottom+4,agentMenu(a),title(a),button.closest('[data-agent-id]'));}return;}
     if(name==='hosts'){openHosts();return;}
     if(name==='manage'){openManage(id);return;}
+    if(name==='rts-page'){rtsPage=button.dataset.key;render();const card=$('.rts-card');if(card){card.classList.remove('flip');void card.offsetWidth;card.classList.add('flip');}$('#content')?.scrollTo({top:0,behavior:'smooth'});return;}
+    if(name==='mg-tab'){mgTab=button.dataset.key;const panel=$('#mg-p-panel');render();panel?.querySelector('.mg-panel-inner')?.classList.add('swap');return;}
     if(name==='mg-jump'){const el=document.getElementById(button.dataset.target);if(el)el.scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth',block:'start'});return;}
     if(name==='agent-mode'){const a=state.agents.find(x=>x.id===id);if(a)action(()=>setAgentMode(a,button.dataset.mode));return;}
     if(name==='chat-new'){const a=state.agents.find(x=>x.id===id);if(a)action(()=>newDockChat(a));return;}
@@ -850,7 +852,11 @@
     if(name==='copy-send'||name==='copy-bring'){const p=(state.projects||[]).find(x=>x.id===id),a=state.agents.find(x=>x.id===button.dataset.agent);if(p&&a)action(()=>name==='copy-send'?sendToRemote(p,a):bringFromRemote(p,a));return;}
     if(name==='console-opens'){action(async()=>{await api.saveSettings({consoleOpens:button.dataset.value});await refresh();openSettings();toast(button.dataset.value==='full'?'Console fills the main area.':'Console opens next to the chat.');});return;}
     if(name==='chat-opens'){action(async()=>{await api.saveSettings({chatOpens:button.dataset.value});await refresh();openSettings();toast(button.dataset.value==='full'?'Chat opens the full chat view.':'Chat opens a chat window.');});return;}
-    if(name==='manage-run'){const item=manageKeyed[button.dataset.key];if(item&&!item.disabled)action(()=>item.run());return;}
+    if(name==='manage-run'){const item=manageKeyed[button.dataset.key];if(!item||item.disabled)return;
+      // A hotbar slot charges while its action works; Connect ends with a burst on the slot when the agent is online.
+      const slot=button.closest('.hb-slot'),a=selected();if(!slot||!a){action(()=>item.run());return;}
+      const k=`${a.id}:${button.dataset.key}`;hbBusy.set(k,1);slot.classList.add('charging');
+      action(async()=>{try{await item.run();}finally{hbBusy.delete(k);render();const el=$(`.hb-slot[data-hot="${button.dataset.key}"]`);if(el&&button.dataset.key==='connect'){el.classList.add('done');setTimeout(()=>el.classList.remove('done'),900);if(selected()?.status==='connected')stage()?.burst(el,'clone');}}});return;}
     if(name==='local-machine'){openLocalMachine();return;}
     if(name==='docker-manager'){openDocker(id);return;}
     if(name==='docker-refresh'){loadDocker(id);return;}
@@ -1094,6 +1100,8 @@
   // onto a machine or Docker to clone it there), keys (drag a vault key onto an agent to give it), Docker on its machine,
   // its projects with git, recent chats and every maintenance action. Chat opens in a window of the chat dock; Console
   // turns the main area into a grid of terminals.
+  // mgTab: the open tab on the management screen; hbBusy: hotbar actions charging until their effect shows.
+  let mgTab='setup',rtsPage='main';const hbBusy=new Map();
   const keyLists=new Map(),dockerStatsOf=new Map();let heroCtl=null,statsTimer=0,mgTimer=0;
   const stage=()=>window.OpayaStage;
   const dockerKeyOf=a=>a.transport==='ssh'?a.hostId:'local';
@@ -1107,10 +1115,10 @@
   // The top bar is the same on every screen: the page title (and that page's own few controls) on the left; on the
   // right the selected agent with Manage, Chat and Console, then the tools (browser, projects). screen marks which of
   // the agent's three ways is open here.
-  const modeSwitch=(a,screen='')=>`<div class="mode-switch agent-switch" role="tablist" aria-label="Work with ${esc(title(a))}"><button type="button" class="agent-chip ${screen?'':'away'}" data-action="manage-nav" aria-haspopup="dialog" title="${esc(title(a))}: ${esc(status(a))}. ${screen?'':'The last agent you opened. '}Click to switch agent or machine.">${screen?'':'<small class="agent-chip-label">Last agent</small>'}${badge(a)}<span class="agent-chip-name">${esc(title(a))}</span>${dot(a)}<span class="nav-caret" aria-hidden="true">&#9662;</span></button>${[['manage','<span class="mode-glyph manage-glyph"></span>','Manage',`Everything about ${title(a)} (${mod()}Shift+M)`],['chat','<span class="mode-glyph chat-glyph"></span>','Chat','Opens a chat window; expand it for the full view'],['console','<span class="mode-glyph console-glyph"></span>','Console','Terminals in a grid you arrange']].map(([m,icon,label,hint])=>`<button type="button" role="tab" class="mode-tab ${screen===m?'selected':''}" data-action="agent-mode" data-mode="${m}" data-id="${esc(a.id)}" aria-selected="${screen===m}" title="${esc(hint)}">${icon}<span>${label}</span></button>${m==='manage'?manageCaret(screen==='manage'):''}`).join('')}</div>`;
+  const modeSwitch=(a,screen='')=>`<div class="mode-switch" role="tablist" aria-label="Work with ${esc(title(a))}">${[['chat','<span class="mode-glyph chat-glyph"></span>','Chat','Talk to it'],['console','<span class="mode-glyph console-glyph"></span>','Console','Its terminal, next to the chat'],['manage','<span class="mode-glyph manage-glyph"></span>','Manage',`Its controls (${mod()}Shift+M)`]].map(([m,icon,label,hint])=>`<button type="button" role="tab" class="mode-tab ${screen===m?'selected':''}" data-action="agent-mode" data-mode="${m}" data-id="${esc(a.id)}" aria-selected="${screen===m}" title="${esc(hint)}">${icon}<span>${label}</span></button>`).join('')}</div>`;
   function topbar(crumb,page='',screen=''){
     const a=selected();
-    $('#topbar').innerHTML=`<div class="breadcrumb">${crumb}</div>${page?`<div class="topbar-page">${page}</div>`:''}<div class="topbar-spacer"></div><div class="topbar-actions">${a?modeSwitch(a,screen):''}</div>`;
+    $('#topbar').innerHTML=`<div class="breadcrumb">${crumb}</div>${page?`<div class="topbar-page">${page}</div>`:''}<div class="topbar-spacer"></div><div class="topbar-actions">${a&&screen?modeSwitch(a,screen):''}</div>`;
   }
   async function openManage(id){
     const a=state.agents.find(x=>x.id===id);if(!a)return;
@@ -1235,6 +1243,8 @@
   }
   window.addEventListener('opaya-stage',()=>{if(manageId)render();});
   function renderManage(a){
+    // Coming back to Manage from another screen starts on the main command page.
+    if(!String(renderKey).startsWith('manage:'))rtsPage='main';
     const x=agentActions(a),cap=a.install||{},info=installInfo.get(a.id),backs=backupLists.get(a.id),shared=sharedWith(a),box=containerOf(a);
     topbar('<strong>Manage</strong>','','manage');
     contentKind('overview manage command-center');
@@ -1258,30 +1268,8 @@
     if(box)keyed.containerRestart={key:'containerRestart',icon:'&#8635;',label:'Restart container',run:()=>dockerDo(dockerKeyOf(a),box,'restart')};
     if(box)keyed.containerLogs={key:'containerLogs',icon:'&#8801;',label:'Container logs',run:()=>api.dockerTerminal({hostId:a.transport==='ssh'?a.hostId:undefined,container:box,kind:'logs'})};
     manageKeyed=keyed;
-    const chips=[['skills','&#10022;','Skills'],['keys','&#9919;',`Keys${keyLists.get(a.id)?.keys?` ${keyLists.get(a.id).keys.length}`:''}`],a.protocol!=='terminal'&&['models','&#9672;',modelText(a.activeModel||a.model)||'Model'],['files','&#9656;','Files'],['projects','&#9635;',`Projects ${agentProjects(a).length||''}`.trim()]].filter(Boolean).map(([k,icon,label])=>`<button type="button" class="mg-chip" data-action="manage-run" data-key="${k}"><span aria-hidden="true">${icon}</span>${esc(label)}</button>`).join('');
-    const connect=keyed.connect;
-    const hero=`<section class="mg-hero" data-drop="key" data-agent-target="${esc(a.id)}">
-      <div class="mg-stage" id="mg-stage" aria-hidden="true"></div>
-      <div class="mg-card glass" data-drag="agent" data-drag-id="${esc(a.id)}" title="Drag onto a machine or Docker to clone ${esc(title(a))} there">
-        <div class="mg-id">${badge(a,true)}<div class="mg-id-text"><h1>${esc(title(a))}</h1><p>${esc(location(a))}${box?` <span class="mg-sep">/</span> ${esc(box)}`:''}</p></div><span class="mg-live ${esc(a.busy?'working':a.error?'error':a.status||'disconnected')}" title="${esc(status(a))}"></span></div>
-        <div class="mg-chips">${chips}</div>
-        <div class="mg-hero-actions">${connect&&!connect.disabled?`<button type="button" class="${a.status==='connected'?'secondary':'primary'}" data-action="manage-run" data-key="connect">${esc(connect.label)}</button>`:connect?`<button type="button" class="secondary" disabled>${esc(connect.label)}</button>`:''}<button type="button" class="secondary" data-action="agent-mode" data-mode="chat" data-id="${esc(a.id)}" ${a.protocol==='terminal'?'disabled':''}><span class="mode-glyph chat-glyph" aria-hidden="true"></span>Chat</button><button type="button" class="secondary" data-action="agent-mode" data-mode="console" data-id="${esc(a.id)}"><span class="mode-glyph console-glyph" aria-hidden="true"></span>Console</button><button type="button" class="secondary mg-more" data-action="agent-menu" data-id="${esc(a.id)}" title="Every action" aria-label="More actions">&#8943;</button></div>
-        <span class="mg-drag-hint" aria-hidden="true">&#10303; drag to deploy</span>
-      </div>
-    </section>`;
-    const facts=`<div class="mg-facts">
-        <div><small>Runs on</small><strong>${esc(location(a))}</strong><span>${esc(placeText(a))}${a.transport==='ssh'?' / over SSH':''}</span></div>
-        <div><small>Installation</small><strong>${esc(cap.label||'Unknown')}</strong><span>${info==='loading'||!info?'Checking...':esc(info.error&&!info.methods?.length?info.error:[info.methodLabels?.join(' + '),info.version,info.image,info.state].filter(Boolean).join(' / ')||'Not detected')}</span></div>
-        <div><small>Connection</small><strong>${esc(labels[a.provider]||a.provider)} / ${esc(a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase())}</strong><span>${esc(modelText(a.activeModel||a.model)||'Agent\'s own model')}${a.agentVersion?` / ${esc(a.agentVersion)}`:''}</span></div>
-        <div><small>Data</small><strong>${esc(info&&info!=='loading'&&info.data?info.data:'--')}</strong><span>${backs?.backups?.length?`${backs.backups.length} backup${backs.backups.length===1?'':'s'}, last ${esc(whenText(backs.backups[0].createdAt))}`:'No local backups'}</span></div>
-        <div><small>Activity</small><strong>${agentChats(a).length} chat${agentChats(a).length===1?'':'s'}</strong><span>${a.busy?'Working now':agentChats(a)[0]?`Last ${esc(ago(agentChats(a)[0].createdAt))} ago`:'Not used yet'}</span></div>
-      </div>`;
     const backupRows=backs?.backups?.length?`<div class="backup-list">${backs.backups.slice(0,4).map(b=>`<div class="backup-row"><span class="backup-file" title="${esc(b.file)}">${esc(whenText(b.createdAt))}</span><small>${esc(fmtSize(b.bytes))}${b.history===false?' / no history':''}${b.keys===false?' / no keys':''}</small><button type="button" class="text-button" data-action="backup-reveal" data-file="${esc(b.file)}">Show</button><button type="button" class="text-button danger-text" data-action="backup-delete" data-file="${esc(b.file)}" data-id="${esc(a.id)}">Delete</button></div>`).join('')}</div>`:'';
     const picker=sidebarHidden&&state.agents.length>1?`<nav class="manage-switch" aria-label="Agent to manage"><span>Agents</span>${state.agents.map(y=>`<button type="button" class="manage-pick ${y.id===a.id?'selected':''}" data-action="manage" data-id="${esc(y.id)}" title="${esc(title(y)+' / '+placeText(y)+' / '+status(y))}" ${y.id===a.id?'aria-current="page"':''}>${badge(y)}<span>${esc(title(y))}</span>${dot(y)}</button>`).join('')}</nav>`:'';
-    // The screen is a list of parts. Entering an agent draws them all (their entrance plays once); later updates
-    // (a status, Docker stats, keys that finished loading) replace only the parts that changed, so nothing replays.
-    // Controls: every action as a tile with an icon, a plain name and what it is set to now, in groups that say what
-    // they are for. The destructive ones stay apart at the very end.
     const I=d=>`<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`,circle='<circle cx="12" cy="12" r="8"/>';
     const ICON={chat:I('<path d="M4 5h16v11H9l-5 4z"/>'),fullChat:I('<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 9h16"/>'),console:I('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m7 10 3 2-3 2M13 15h4"/>'),terminal:I('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m7 10 3 2-3 2M13 15h4"/>'),shell:I('<path d="m5 7 5 5-5 5M12 17h7"/>'),files:I('<path d="M3 7h7l2 2h9v10H3z"/>'),history:I(circle+'<path d="M12 8v4l3 2"/>'),projects:I('<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/>'),models:I('<path d="M12 3 20 12l-8 9-8-9z"/>'),effort:I('<path d="M13 3 5 14h6l-1 7 8-11h-6z"/>'),skills:I('<path d="m12 3 2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>'),transfer:I('<path d="M4 8h13l-3-3M20 16H7l3 3"/>'),itrust:I('<path d="M12 3 20 6v6c0 5-4 8-8 9-4-1-8-4-8-9V6z"/>'),browser:I(circle+'<path d="M4 12h16M12 4c3 3 3 13 0 16-3-3-3-13 0-16"/>'),update:I('<path d="M20 12a8 8 0 1 1-3-6.2M20 4v5h-5"/>'),backup:I('<path d="M12 4v11M7 10l5 5 5-5M4 19h16"/>'),restart:I('<path d="M12 3v8M6.3 7.3a8 8 0 1 0 11.4 0"/>'),fix:I('<path d="m5 19 9-9M15 4l1.2 2.8L19 8l-2.8 1.2L15 12l-1.2-2.8L11 8l2.8-1.2z"/>'),log:I('<path d="M5 7h14M5 12h14M5 17h9"/>'),gateway:I('<path d="M13 3 5 14h6l-1 7 8-11h-6z"/>'),clone:I('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>'),redeploy:I('<path d="M4 12a8 8 0 0 1 14-5.3M20 4v5h-5M20 12a8 8 0 0 1-14 5.3M4 20v-5h5"/>'),containerRestart:I('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/>'),containerLogs:I('<path d="M5 7h14M5 12h14M5 17h9"/>'),rename:I('<path d="M4 20h4L19 9l-4-4L4 16z"/>'),icon:I(circle+'<path d="M9 10h.01M15 10h.01M8.5 14.5c2 2 5 2 7 0"/>'),groupTags:I('<path d="M3 12V4h8l10 10-8 8z"/><path d="M7.5 7.5h.01"/>'),pin:I('<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2-5.5-2.9-5.5 2.9 1-6.2L3 9.6l6.2-.9z"/>'),moveUp:I('<path d="M12 19V5M6 11l6-6 6 6"/>'),moveDown:I('<path d="M12 5v14M6 13l6 6 6-6"/>'),settings:I('<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>'),copyId:I('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4V4h11v1"/>'),copyCommand:I('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4V4h11v1"/>'),clearError:I(circle+'<path d="m9 9 6 6M15 9l-6 6"/>'),uninstall:I('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'),remove:I('<path d="m6 6 12 12M18 6 6 18"/>')};
     const backLast=backs?.backups?.[0],infoReady=info&&info!=='loading';
@@ -1297,39 +1285,82 @@
     const act=k=>{const item=keyed[k];if(!item||item.disabled)return '';const [label,sub]=NAME[k]||[item.label.replace(/\.\.\.$/,''),''];const sw=Object.hasOwn(SWITCH,k);
       return `<button type="button" class="mg-act ${item.danger?'danger':''} ${sw?'has-switch':''}" data-action="manage-run" data-key="${esc(k)}" ${item.hint?`title="${esc(item.hint)}"`:''} ${sw?`role="switch" aria-checked="${SWITCH[k]}"`:''}><span class="mg-act-ico">${ICON[k]||''}</span><span class="mg-act-text"><strong>${esc(label)}</strong><small>${esc(sub)}</small></span>${sw?`<span class="mg-act-switch ${SWITCH[k]?'on':''}" aria-hidden="true"></span>`:''}</button>`;};
     const group=(name,hint,keys)=>{const tiles=[...new Set(keys)].map(act).join('');return tiles?`<section class="mg-group"><header><h3>${esc(name)}</h3><small>${esc(hint)}</small></header><div class="mg-acts">${tiles}</div></section>`:'';};
-    const controls=`<header class="mg-section-head"><div><h2><span class="mg-h-icon" aria-hidden="true"></span>Controls</h2><p>Everything you can do with ${esc(title(a))}, grouped by what it is for.</p></div></header>
-      ${group('Work with it','Talk to it, run it, look at its files',['chat','fullChat','console',hasCli(a)?'terminal':'','shell','files','history','projects'].filter(Boolean))}
-      ${group('What it can do','Its model and its powers',['models','effort','skills','transfer','itrust','browser'])}
-      ${group('Keep it healthy','When something is off, or to stay current',['restart','fix','update','backup','log','gateway','containerRestart','containerLogs','clearError'])}
-      ${group('Copy and move','Drag the agent card to a machine above for more',['clone','redeploy'])}
-      ${group('Name and place','Only how it shows in Opaya',['rename','icon','groupTags','pin','moveUp','moveDown'])}
-      ${group('Connection details','For when you need the specifics',['settings','copyId','copyCommand'])}
-      ${cap.backup||backs?.backups?.length?`<section class="mg-group"><header><h3>Local backups</h3><small>Archives on ${esc(localName())} <button type="button" class="text-button" data-action="backup-folder-open">Open folder</button></small></header>${backupRows||`<p class="field-help">${backs?backs.error?esc(backs.error):'No backups yet.':'Loading backups...'}</p>`}</section>`:''}`;
-    const danger=`<header class="mg-section-head"><div><h2><span class="mg-h-icon danger-h" aria-hidden="true"></span>Danger zone</h2><p>${keyed.uninstall&&!keyed.uninstall.disabled?`Uninstalling removes the agent and its data from ${esc(location(a))}. `:''}Removing the connection only removes it from Opaya.</p></div></header><div class="mg-acts">${act('uninstall')}${act('remove')}</div>`;
-    // Sticky bar: section links at the top; once the hero scrolls away, also the agent and its main actions.
-    const SECTIONS=[['mg-p-hero','Overview'],['mg-p-controls','Controls'],['mg-p-deploy','Deploy'],cap.kind==='remote-api'?null:['mg-docker','Docker'],['mg-p-keys','Keys'],['mg-p-work','Projects & chats'],['mg-p-danger','Danger zone']].filter(Boolean);
-    const conn=keyed.connect;
-    const nav=`<div class="mg-nav-agent">${badge(a)}<strong>${esc(title(a))}</strong>${dot(a)}${conn&&!conn.disabled?`<button type="button" class="${a.status==='connected'?'secondary':'primary'} small" data-action="manage-run" data-key="connect">${esc(conn.label)}</button>`:''}<button type="button" class="secondary small" data-action="agent-mode" data-mode="chat" data-id="${esc(a.id)}" ${a.protocol==='terminal'?'disabled':''}>Chat</button><button type="button" class="secondary small" data-action="agent-mode" data-mode="console" data-id="${esc(a.id)}">Console</button></div><nav class="mg-nav-links" aria-label="Sections">${SECTIONS.map(([id,label])=>`<button type="button" class="mg-nav-link" data-action="mg-jump" data-target="${id}">${esc(label)}</button>`).join('')}</nav>`;
+    keyed.chat={key:'chat',icon:'&#9993;',label:'Chat',run:()=>setAgentMode(a,'chat')};
+    keyed.chatWindow={key:'chatWindow',icon:'&#9993;',label:'Chat window',run:()=>openChatWindow(a)};
+    keyed.vault={key:'vault',icon:'&#9919;',label:'Opaya Vault',run:()=>openVault()};
+    keyed.newVps={key:'newVps',icon:'+',label:'New VPS',run:()=>openNewVps()};
+    if(cloneable(a)&&canDocker(a)&&!box)keyed.dockerize={key:'dockerize',icon:'&#9635;',label:'Dockerize',run:()=>deployTo(a,a.transport==='ssh'?a.hostId:'','docker',$('.mg-card')||$('.rts-portrait'),$('.mg-dockerize')||$('.mg-target[data-deploy-runtime="docker"]')||$('.rts-portrait'))};
+    // ---- RTS layout: the view above, the HUD below (portrait, unit info with a build queue, command card) ----------
+    const keysN=keyLists.get(a.id)?.keys?.length,lastBack=backs?.backups?.[0],backAge=lastBack?(Date.now()-new Date(lastBack.createdAt))/86400000:Infinity;
+    // Vitals as resource bars: how full each one is says how well that part is doing.
+    const bar=(label,value,fill,tone,act,key,hint)=>`<button type="button" class="rts-bar ${tone}" data-action="${act}" ${key?`data-key="${esc(key)}"`:''} title="${esc(hint)}"><span class="rts-bar-label">${esc(label)}</span><span class="rts-bar-track"><i style="--f:${Math.max(4,Math.min(100,fill))}%"></i></span><span class="rts-bar-value">${esc(value)}</span></button>`;
+    const conn=a.busy?['Working',100,'busy']:a.error||a.status==='error'?['Needs attention',25,'bad']:a.status==='connected'?['Online',100,'ok']:a.status==='connecting'?['Connecting',60,'busy']:['Offline',8,'warn'];
+    const bars=[
+      bar('Link',conn[0],conn[1],conn[2],'manage-run',a.error?'fix':'connect',a.error?'Let the Opaya Agent fix it':'Connect or disconnect'),
+      cap.backup?bar('Backup',lastBack?`${ago(lastBack.createdAt)} ago`:'Never',lastBack?100-Math.min(92,backAge/14*100):6,!lastBack||backAge>7?'warn':'ok','manage-run','backup','Back up now'):'',
+      bar('Keys',keysN===undefined?'...':String(keysN),keysN?Math.min(100,25+keysN*25):6,keysN?'ok':'idle','rts-page','keys','Keys & access'),
+      infoReady&&info.version?bar('Version',`v${String(info.version).replace(/^v/,'')}`,100,'ok','manage-run','update','Update to the latest version'):''].join('');
+    // Build queue: what this agent is producing right now (clones, backups), like an RTS production queue.
+    const queue=[...jobs.values()].filter(j=>j.status==='running'&&(j.kind==='clone'&&j.route?.from===a.name||['backup','uninstall','redeploy'].includes(j.kind)&&String(j.title||'').includes(a.name)));
+    const queueHtml=`<div class="rts-queue" aria-label="Running">${queue.length?queue.slice(0,4).map(j=>`<button type="button" class="rts-job" data-action="job-restore" title="${esc(j.title)}"><span class="rts-job-ico">${ICON[j.kind==='backup'?'backup':'clone']||''}</span><i style="--p:${jobPercent(j)}%"></i><small>${jobPercent(j)}%</small></button>`).join(''):'<span class="rts-queue-empty">Queue empty</span>'}</div>`;
+    // Command card: one page of commands at a time. The last row opens the other pages; Esc goes back.
+    const PAGES={
+      main:[['connect'],['chat'],['console'],['models'],['skills'],['update'],['backup'],['clone'],['>deploy','Deploy'],['>keys','Keys'],['>work','Work'],['>settings','Settings']],
+      deploy:[['clone'],['dockerize'],['redeploy'],['newVps'],['containerRestart'],['containerLogs'],['uninstall'],['remove']],
+      keys:[['keys'],['vault'],['transfer'],['itrust'],['browser']],
+      work:[['chatWindow'],['files'],['history'],[hasCli(a)?'terminal':'shell'],[hasCli(a)?'shell':''],['projects']],
+      settings:[['effort'],['restart'],['fix'],['log'],['gateway'],['rename'],['icon'],['groupTags'],['pin'],['settings'],['copyId'],['copyCommand']]};
+    const page=PAGES[rtsPage]?rtsPage:'main',HOTKEYS='QWERASDFZXCVTGBY';
+    const PAGE_ICON={deploy:ICON.clone,keys:I('<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3"/>'),work:ICON.projects,settings:ICON.settings};
+    const PAGE_NAME={main:'Commands',deploy:'Deploy',keys:'Keys & access',work:'Work',settings:'Settings'};
+    const SHORT={connect:a.busy?'Stop':a.status==='connected'?'Disconnect':'Connect',chat:'Chat',console:'Console',models:'Model',skills:'Skills',update:'Update',backup:'Back up',clone:'Clone',dockerize:'Dockerize',redeploy:'Redeploy',newVps:'New VPS',containerRestart:'Restart box',containerLogs:'Box logs',uninstall:'Uninstall',remove:'Remove',keys:'Its keys',vault:'Vault',transfer:'Share',itrust:'iTrust',browser:'Browser',chatWindow:'Chat window',files:'Files',history:'History',terminal:'CLI',shell:'Shell',projects:'Projects',effort:'Reasoning',restart:'Reconnect',fix:'Check & fix',log:'Log',gateway:'Gateway',rename:'Rename',icon:'Icon',groupTags:'Group',pin:'Pin',settings:'Connection',copyId:'Copy ID',copyCommand:'Copy cmd'};
+    const cmds=PAGES[page].map(([k,name])=>k&&(k.startsWith('>')||keyed[k]&&!keyed[k].disabled)?[k,name]:null).filter(Boolean);
+    const cmdHtml=cmds.map(([k,name],i)=>{const hk=HOTKEYS[i];
+      if(k.startsWith('>')){const p=k.slice(1);return `<button type="button" class="rts-cmd page" data-action="rts-page" data-key="${p}" data-hk="${hk}" title="${esc(name)} (${hk})"><span class="rts-ico">${PAGE_ICON[p]||''}</span><span class="rts-name">${esc(name)}</span><kbd>${hk}</kbd><span class="rts-more" aria-hidden="true">&#9656;</span></button>`;}
+      const item=keyed[k],job=k==='backup'?queue.find(j=>j.kind==='backup'):k==='clone'?queue.find(j=>j.kind==='clone'):null,sw={itrust:a.itrust,browser:a.browser,pin:a.pinned}[k];
+      const charging=job||hbBusy.has(`${a.id}:${k}`)||k==='connect'&&(a.status==='connecting'||a.busy),on=k==='connect'&&a.status==='connected'||sw;
+      const action=k==='chat'||k==='console'?`data-action="agent-mode" data-mode="${k}" data-id="${esc(a.id)}"`:`data-action="manage-run" data-key="${k}"`;
+      const hint=`${NAME[k]?.[0]||item.label.replace(/\.\.\.$/,'')}${NAME[k]?.[1]?`: ${NAME[k][1]}`:''}`;
+      return `<button type="button" class="rts-cmd hb-slot ${item.danger?'danger':''} ${charging?'charging':''} ${job?'progress':''} ${on?'on':''}" ${action} data-hot="${k}" data-hk="${hk}" style="--p:${job?jobPercent(job):0}" title="${esc(hint)} (${hk})"><span class="rts-ico">${ICON[k]||(k==='connect'?I('<path d="M9 3v5M15 3v5M6 8h12v3a6 6 0 0 1-12 0zM12 17v4"/>'):k==='dockerize'?ICON.containerRestart:k==='vault'||k==='keys'?PAGE_ICON.keys:k==='newVps'?I('<path d="M12 5v14M5 12h14"/>'):'')}</span><span class="rts-name">${esc(SHORT[k]||k)}</span><kbd>${hk}</kbd><i class="hb-ring" aria-hidden="true"></i></button>`;}).join('')+(page!=='main'?`<button type="button" class="rts-cmd back" data-action="rts-page" data-key="main" title="Back (Esc)"><span class="rts-ico">${I('<path d="M15 6 9 12l6 6"/>')}</span><span class="rts-name">Back</span><kbd>Esc</kbd></button>`:'');
+    const hud=`<div class="rts-hud">
+      <div class="rts-portrait ${esc(a.busy?'working':a.error?'error':a.status||'disconnected')}" data-drop="key" data-agent-target="${esc(a.id)}" title="${esc(title(a))}: ${esc(status(a))}">${badge(a,true)}<span class="rts-light" aria-hidden="true"></span></div>
+      <div class="rts-info"><div class="rts-unit"><strong>${esc(title(a))}</strong><small>${esc(labels[a.provider]||a.provider)} <span class="mg-sep">/</span> ${esc(location(a))}${box?` <span class="mg-sep">/</span> ${esc(box)}`:''}</small></div><div class="rts-bars">${bars}</div>${queueHtml}</div>
+      <div class="rts-card" data-page="${page}"><header><strong>${esc(PAGE_NAME[page])}</strong>${page!=='main'?'<small>Esc to go back</small>':'<small>Press a key or click</small>'}</header><div class="rts-grid">${cmdHtml}</div></div>
+    </div>`;
+    // The view above the HUD shows what the open page is about.
+    const details=`<dl class="mg-details"><div><dt>Runs on</dt><dd>${esc(location(a))} / ${esc(placeText(a))}</dd></div><div><dt>Installation</dt><dd>${esc(cap.label||'Unknown')}${infoReady&&!info.error?` / ${esc([info.methodLabels?.join(' + '),info.version,info.image].filter(Boolean).join(' / '))}`:''}</dd></div><div><dt>Connection</dt><dd>${esc(labels[a.provider]||a.provider)} / ${esc(a.protocol==='openai'?'Gateway API':a.protocol.toUpperCase())}</dd></div><div><dt>Model</dt><dd>${esc(modelText(a.activeModel||a.model)||'Its own setting')}</dd></div><div><dt>Data</dt><dd>${esc(infoReady&&info.data?info.data:'--')}</dd></div></dl>`;
+    const hero=`<section class="mg-hero mg-hero-compact rts-map" data-drop="key" data-agent-target="${esc(a.id)}">
+      <div class="mg-stage" id="mg-stage" aria-hidden="true"></div>
+      <div class="mg-card glass" data-drag="agent" data-drag-id="${esc(a.id)}" title="Drag onto a machine in Deploy to clone ${esc(title(a))} there">
+        <div class="mg-id">${badge(a,true)}<div class="mg-id-text"><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p></div></div>
+        <p class="rts-hint">${page==='deploy'?'Drag this card onto a machine below to clone it there.':page==='keys'?'Drag a key onto any agent to give it.':'Pick a command below, or press its key.'}</p>
+      </div>
+    </section>`;
+    const view={
+      main:`${details}<div class="mg-split two rts-main-split"><section class="mg-section">${chatsPanel(a)}</section><section class="mg-section">${gitPanel(a)}</section></div>`,
+      deploy:`<section class="mg-section"><header class="mg-section-head"><div><h2>Where it can run</h2><p>Drag the card above onto a machine or Docker, or click one.</p></div></header>${deployTargets(a)}${cap.kind==='remote-api'?'':`<div id="mg-docker" class="mg-docker-inline" data-key="${esc(dockerKeyOf(a))}">${dockerPanel(a)}</div>`}</section>`,
+      keys:`<section class="mg-section">${keysPanel(a)}</section>`,
+      work:`<div class="mg-split two"><section class="mg-section">${gitPanel(a)}</section><section class="mg-section">${chatsPanel(a)}</section></div>`,
+      settings:`<section class="mg-section"><header class="mg-section-head"><div><h2>Details</h2></div></header>${details}${cap.backup||backs?.backups?.length?`<header class="mg-section-head rts-sub"><div><h2>Backups</h2><p>On ${esc(localName())}. <button type="button" class="text-button" data-action="backup-folder-open">Open folder</button></p></div></header>${backupRows||`<p class="field-help">${backs?backs.error?esc(backs.error):'No backups yet.':'Loading backups...'}</p>`}`:''}</section>`}[page];
     const parts=[
       ['mg-p-picker','',0,picker],
-      ['mg-p-nav','mg-nav',0,nav],
       ['mg-p-hero','',0,hero],
       ['mg-p-error','mg-reveal',1,a.error?`<div class="inline-notice error-notice"><span>!</span><div><strong>Connection needs attention</strong><p>${esc(a.error)}</p><button type="button" class="text-button" data-action="manage-run" data-key="fix">Let the Opaya Agent fix it &#8594;</button></div></div>`:''],
-      ['mg-p-facts','mg-reveal',1,facts],
       ['mg-p-shared','',1,shared.length?`<p class="field-help manage-shared">Shares its ${esc(cap.label)} installation with ${esc(shared.map(title).join(', '))}: updating or uninstalling it affects them too.</p>`:''],
-      ['mg-p-controls','mg-section mg-controls mg-reveal',2,controls],
-      ['mg-p-deploy','mg-section mg-reveal',3,`<header class="mg-section-head"><div><h2><span class="mg-h-icon deploy-h" aria-hidden="true"></span>Deploy & clone</h2><p>Drag the agent card onto a machine or Docker to clone it there, or click a target.</p></div>${a.clone?`<div class="mg-head-actions">${btn(keyed.redeploy,'secondary small')}</div>`:''}</header>${deployTargets(a)}`],
-      ['mg-docker','mg-section mg-docker-section mg-reveal',4,cap.kind==='remote-api'?'':dockerPanel(a)],
-      ['mg-p-keys','mg-section mg-reveal',5,keysPanel(a)],
-      ['mg-p-work','mg-split two mg-reveal',6,`<section class="mg-section">${gitPanel(a)}</section><section class="mg-section">${chatsPanel(a)}</section>`],
-      ['mg-p-danger','mg-section mg-danger mg-reveal',7,danger]];
+      ['mg-p-view','rts-view',2,`<div class="rts-view-inner" data-page="${page}">${view}</div>`],
+      ['mg-p-hud','rts-dock',3,hud]];
     const key='manage:'+a.id,entering=renderKey!==key||!$('#mg-p-hero');
     if(entering){manageHtml={};$('#content').innerHTML=parts.map(([id,cls,i,inner])=>{manageHtml[id]=inner;return `<div id="${id}" class="${cls}" style="--i:${i}"${id==='mg-docker'?` data-key="${esc(dockerKeyOf(a))}"`:''}>${inner}</div>`;}).join('');}
     else for(const [id,,,inner] of parts)if(manageHtml[id]!==inner){const el=document.getElementById(id);if(el){manageHtml[id]=inner;el.innerHTML=inner;}}
     // The parts have their own entrance (mg-reveal), staggered after the hero; the generic view entrance would delay it.
     if(entering){$('#content').classList.remove('view-enter');$('#content').scrollTop=0;$('#content').classList.add('mg-entering');clearTimeout(renderManage.t);renderManage.t=setTimeout(()=>$('#content')?.classList.remove('mg-entering'),1400);if(!keyLists.has(a.id))loadKeys(a);if(cap.kind!=='remote-api'&&!dockerViews.has(dockerKeyOf(a)))loadDocker(dockerKeyOf(a));for(const p of agentProjects(a))if(!projectGit.get(p.id))loadProjectGit(p);}
-    renderKey=key;mountStage(a);mgScroll();if(!mgTimer)mgTimer=setTimeout(manageTick,600);
+    renderKey=key;mountStage(a);if(!mgTimer)mgTimer=setTimeout(manageTick,600);
   }
+  // Hotbar: every press ripples; 1 to 8 fire the slots while the management screen is open and nothing is being typed.
+  document.addEventListener('pointerdown',event=>{const slot=event.target.closest('.hb-slot');if(!slot||slot.disabled)return;slot.classList.remove('fired');void slot.offsetWidth;slot.classList.add('fired');},true);
+  document.addEventListener('keydown',event=>{if(!manageId||event.ctrlKey||event.metaKey||event.altKey||$('#app-dialog')||document.querySelector('dialog[open]')||$('.context-menu'))return;const el=document.activeElement;if(el&&(el.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)||viewOf(el)))return;
+    if(event.key==='Escape'&&rtsPage!=='main'){event.preventDefault();$('.rts-cmd.back')?.click();return;}
+    const hk=event.key.length===1?event.key.toUpperCase():'';const cmd=hk&&document.querySelector(`.rts-card [data-hk="${hk}"]`);if(cmd&&!cmd.disabled){event.preventDefault();cmd.classList.remove('fired');void cmd.offsetWidth;cmd.classList.add('fired');cmd.click();}});
   // The sticky bar shows the agent and its actions once the hero is out of view, and marks the section in view.
   function mgScroll(){
     const nav=$('#mg-p-nav'),hero=$('#mg-p-hero'),box=$('#content');if(!manageId||!nav||!hero||!box)return;
@@ -2783,9 +2814,8 @@
     button.classList.toggle('selected',projectsOpen);
     const web=document.createElement('button');web.id='browser-toggle';web.type='button';web.className='icon-button projects-toggle';web.dataset.action='browser-toggle';web.title='Opaya browser';web.setAttribute('aria-label','Opaya browser');web.innerHTML='<span class="globe-glyph" aria-hidden="true"></span>';
     web.classList.toggle('selected',!$('#browser-panel').hidden);
-    // One group at the right end, after the view's own actions; views without an agent switch get the Manage menu here.
+    // One group at the right end, after the view's own actions.
     const tools=document.createElement('div');tools.className='topbar-tools';
-    if(!$('.manage-anchor',bar)){const m=document.createElement('button');m.type='button';m.className='mode-tab manage-anchor manage-solo';m.dataset.action='manage-nav';m.setAttribute('aria-haspopup','dialog');m.title='Manage agents or machines: clone, migrate, share, update, uninstall';m.innerHTML='<span class="mode-glyph manage-glyph" aria-hidden="true"></span><span>Manage</span><span class="nav-caret" aria-hidden="true">&#9662;</span>';tools.append(m);}
     tools.append(web,button);bar.append(tools);
   }
   async function startProjectChat(p,agentId){

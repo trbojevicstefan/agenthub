@@ -1,3 +1,14 @@
+# Opaya 0.24.0 - Manage like a strategy game
+
+- **The Manage screen is calmer and works like a strategy game's command panel.** The agent's view sits above; a panel stays at the bottom of the screen while you scroll:
+  - **Portrait**: the agent's icon with a status light. Drop a vault key on it to give it that key.
+  - **Bars**: Link, Keys, Backup and Version, each green, amber or red at a glance.
+  - **Queue**: clones, backups, uninstalls and redeploys running for this agent, with their progress.
+  - **Command card**: the main commands (Connect, Chat, Console, Model, Skills, Update, Back up, Clone) and four pages, **Deploy**, **Keys**, **Work** and **Settings**, each with its own commands. Every button has a key (Q W E R, A S D F, Z X C V); Esc goes back. A command shows a ring while it runs.
+  - The view above follows the page: details, chats and projects; deploy targets and Docker; keys; projects and chats; or settings and backups.
+- The 3D stage is smaller and quieter: fewer particles, the agent on the right of the header, no labels.
+- **Chat | Console | Manage** at the top are plain tabs. The agent switcher and the Manage ▾ menu are gone: pick agents in the sidebar and machines under **Machines**.
+
 # Opaya 0.23.1 - chat first
 
 - **Selecting an agent opens its chat** again, with **History** open on the right by default (close it and it stays closed). **Manage** and **Console** are next to Chat at the top.

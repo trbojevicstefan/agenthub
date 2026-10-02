@@ -25,8 +25,9 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 
 ## What you can do
 
-### Manage every agent (0.23)
+### Manage every agent (0.24)
 Selecting an agent opens its **chat**, with History on the right. **Manage** (below) and **Console** sit next to Chat at the top; Console opens the terminal next to or below the chat unless Settings > Chat and console says full screen.
+- **The command panel:** Manage keeps a panel at the bottom like a strategy game: the agent's portrait (drop a key on it), bars for Link, Keys, Backup and Version, a queue of running clones and backups, and a command card. Its main commands sit on the first page; **Deploy**, **Keys**, **Work** and **Settings** pages hold the rest. Every command has a key (Q W E R, A S D F, Z X C V) and Esc goes back.
 - **The stage:** a live 3D view of the agent and what it is connected to (its machine, container, keys, projects, skills and chats). It glows when the agent is connected and pulses while it works.
 - **Deploy & clone:** drag the agent card onto **This computer**, a **VPS** or **Docker** to clone it there, or click a target. Progress shows on the target.
 - **Docker:** the containers on the agent's machine, its own container first, with live CPU and memory, **Logs**, **Shell**, **Restart**, **Pause / Resume**, **Stop / Start**, **Inspect** (image, mounts, ports, restart policy and health; environment variables by name only) and **Remove**. Pull a newer image and prune unused ones. **Dockerize** runs a copy of an agent in its own container.
@@ -34,9 +35,8 @@ Selecting an agent opens its **chat**, with History on the right. **Manage** (be
 - **Projects & git:** pull, commit and push, or start a chat in a project, from the screen.
 - Every other action is here too: model and effort, skills and tools, files, update, back up, connection (restart, copy ID or launch command), name and look, and removal.
 
-### Manage menu and the fleet (0.23)
-- **Manage ▾** at the top (the caret next to an agent's Manage tab, or the Manage button in other views) opens a menu with two columns: **Agents** (each one's management screen) and **Machines** (this computer, every VPS, and **All machines**).
-- **The fleet board** shows every machine as a column with its agents, its status, OS, memory and disk, and its Docker.
+### The fleet (0.23)
+- **Machines** in the sidebar opens **the fleet board**. It shows every machine as a column with its agents, its status, OS, memory and disk, and its Docker.
   - Drag an agent onto another machine: **Clone to**, **Clone into Docker on**, **Migrate to** or **Migrate into Docker on** it. A migration is a clone; when the copy is ready, Opaya offers to uninstall the original, remove only its connection, or keep both.
   - Drop an agent on another agent to **share** its skills, API keys and MCP servers with it.
   - Each agent's ⋯ menu has Clone to, Migrate to and Share with, plus update, back up, uninstall and remove. Each machine's ⋯ menu tests it, opens its terminal, files, Discover, Install agents and Docker, connects or updates all its agents, and edits or removes it.
@@ -149,7 +149,7 @@ It acts only through Opaya's own tools and terminals you can watch, and every ch
 - Dark and light themes.
 - System notifications while Opaya is not in front: an agent or the Opaya Agent replied, an approval is waiting or a long job finished. Click one to open that chat. Each kind can be turned off in Settings.
 - **Home** filters agents by status and place, and each card has Manage, Connect, Terminal and Fix.
-- **The top bar is the same on every screen:** the page title and that page's own controls on the left; on the right the selected agent with **Manage ▾ / Chat / Console**, then the browser and projects. Click the agent to switch agent or machine.
+- **The top bar is the same on every screen:** the page title and that page's own controls on the left; on an agent's screens **Chat / Console / Manage**, then the browser and projects. Switch agents in the sidebar.
 - **Sidebar:** Discover next to the Opaya Agent, Home, your agents, and at the bottom Playground, Machines (the fleet board), Vault, Settings and Help. **Settings > Sidebar** hides the items you do not use.
 - Hide or show the sidebar with the button at the top left or **Cmd/Ctrl+B**.
 - **Files:** mention a file or folder in the chat or in a terminal on the same machine.
