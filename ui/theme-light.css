@@ -1030,3 +1030,5 @@
 :where(body[data-theme="light"]) .ws-start-tag{color:#143425}
 :where(body[data-theme="light"]).sidebar-rail .sidebar .sidebar-empty-add{border:1px dashed #a0b8ab;color:#164529}
 :where(body[data-theme="light"]).sidebar-rail .sidebar .sidebar-empty-add:hover{background:#d5e0dc}
+:where(body[data-theme="light"]) .wn-item{background:#dde3e5;border:1px solid #cfd7d8}
+:where(body[data-theme="light"]) .wn-ico{background:#cfdfd9;color:#164529}

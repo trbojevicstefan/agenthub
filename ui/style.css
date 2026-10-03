@@ -2790,3 +2790,12 @@ body[data-theme="light"] .ws-start-card:hover{border-color:#1f7a45;background:#f
 body[data-theme="light"] .ws-start-ico{background:#e9f6ee;color:#1f7a45}
 /* While terminals are open, Opaya's tips sit at the bottom right, over output rather than over the window buttons. */
 body:has(#terminal-panel:not([hidden])) .opaya-nudge{top:auto;bottom:40px}
+.notice-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px}.notice-actions .text-button{margin-left:4px}
+.whats-new{display:flex;flex-direction:column;gap:10px;margin-bottom:6px}
+.wn-item{display:flex;gap:12px;padding:12px;border-radius:12px;background:#1a2022;border:1px solid #2b3335}
+.wn-ico{width:32px;height:32px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;background:#20302a;color:#9fe0b9;flex-shrink:0}
+.wn-ico svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.wn-item strong{font-size:13px}
+.wn-item p{font-size:12px;color:var(--muted);margin-top:2px;line-height:1.45}
+body[data-theme="light"] .wn-item{background:#fafbfa;border-color:#e0e6e2}
+body[data-theme="light"] .wn-ico{background:#e9f6ee;color:#1f7a45}
