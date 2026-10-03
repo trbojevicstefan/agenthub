@@ -514,8 +514,8 @@
     const map=`<section class="help-map"><h3>Where is what</h3><p class="help-find">Looking for something? Press <kbd>${esc(k)}${state.platform==='darwin'?'':'+'}K</kbd> or <strong>Search</strong> at the top of every screen: it finds agents, their settings and actions, machines, chats and keys, and shows where each one lives. <button type="button" class="text-button" data-action="find">Search now &#8594;</button></p><div class="help-tiles">
       ${tile(AN_ICON.chat,'Your agents','Left sidebar',`Click an agent to open its chat; ${k}+1 to 9 open them in sidebar order. Its own sidebar holds Chat, Console, Overview and Manage.`)}
       ${tile(AN_ICON.overview,'Manage an agent','Agent sidebar > Manage',`Model &amp; skills (Q), Keys &amp; tools (W), Machine &amp; Docker (E), Deploy &amp; clone (R), Projects (A), Updates &amp; backups (S), Profile (D), Danger zone (F).`)}
-      ${tile(AN_ICON.access,'API keys','Vault (key icon in the sidebar)','Add keys, import them from a .env or your tools, and give each to the agents that need it. Values never show or go into a chat.','vault')}
-      ${tile(AN_ICON.library,'Skills','Model &amp; skills, Skills library','See and install an agent\'s skills, Share skills with another agent, or keep global skills in the library.','library')}
+      ${tile(AN_ICON.access,'API keys','Vault (sidebar), an agent\'s Keys &amp; tools','Add keys, import them from a .env or your tools, and give each to the agents that need it. Values never show or go into a chat.','vault')}
+      ${tile(AN_ICON.library,'Skills and MCP servers','Skills &amp; tools (sidebar), an agent\'s Model &amp; skills','The skills library and MCP servers are shared by all agents; an agent\'s Model &amp; skills shows its own and shares them with another agent.','library')}
       ${tile(AN_ICON.deploy,'Clone and deploy','Deploy &amp; clone (R)','Drag the agent onto a machine, or click Install or Docker there. Clones keep a link to their source for Redeploy.')}
       ${tile(dkIcon('box'),'Docker','Machine &amp; Docker (E), Docker manager','Start, stop, logs, shell and details of every container, with live CPU and memory.','docker-manager','data-id="local"')}
       ${tile(AN_ICON.machine,'Machines','Machines (sidebar)','This computer and your servers: agents on each, versions, Docker, New VPS.','hosts')}
@@ -604,8 +604,10 @@
         out.push({group:'Actions',icon:AN_ICON[k]||AN_ICON[sec]||'',label:it.label&&!/\.\.\.$/.test(label)&&it.label.length<40?it.label.replace(/\.\.\.$/,''):label,path:[who,secName(sec)],words:`${who} ${label} ${secName(sec)} ${FIND_WORDS[k]||''}`,boost:mine?15:0,agentOnly:true,agentId:a.id,
           run:async()=>{if(sec==='chat'||sec==='console'){if(state.activeAgentId!==a.id)await openChat(a.id);}else await openManage(a.id,sec);const row=sec!=='chat'&&sec!=='console'&&document.querySelector(`#content .set-row[data-key="${CSS.escape(k)}"]`);if(row){row.scrollIntoView({block:'center'});row.classList.remove('flash');void row.offsetWidth;row.classList.add('flash');}const now=manageActions(state.agents.find(x=>x.id===a.id)||a)[k];if(now&&!now.disabled)await now.run();}});}
     }
-    for(const [act,label,where,help,data] of FIND_PLACES)out.push({group:'Places',icon:'',label,path:[where],words:help,run:()=>fire(act,data)});
-    for(const [t,words] of SETTINGS_INDEX)out.push({group:'Settings',icon:'',label:t,path:['Settings'],words,run:()=>openSettings(t)});
+    const gear=anI('<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>');
+    const PLACE_ICON={overview:AN_ICON.overview,fleet:AN_ICON.machine,vault:AN_ICON.access,'vault-import':dkIcon('pull'),library:AN_ICON.library,'mcp-manage':AN_ICON.mcp,'docker-manager':dkIcon('box'),playground:AN_ICON.chat,opaya:AN_ICON.chat,'install-catalog':dkIcon('pull'),discover:dkIcon('inspect'),add:AN_ICON.plus,'new-vps':AN_ICON.plus,'connect-all':AN_ICON.power,'tool-updates':dkIcon('refresh'),'update-all':dkIcon('refresh'),'local-terminal':dkIcon('shell'),'files-local':AN_ICON.projects,settings:gear,help:dkIcon('inspect')};
+    for(const [act,label,where,help,data] of FIND_PLACES)out.push({group:'Places',icon:PLACE_ICON[act]||'',label,path:[where],words:help,run:()=>fire(act,data)});
+    for(const [t,words] of SETTINGS_INDEX)out.push({group:'Settings',icon:gear,label:t,path:['Settings'],words,run:()=>openSettings(t)});
     for(const [k,n] of [['local',localName()],...state.hosts.map(h=>[h.id,h.name])])out.push({group:'Machines',icon:AN_ICON.machine,label:n,path:['Machines'],words:`${k==='local'?'this computer local':`${state.hosts.find(h=>h.id===k)?.hostname||''} vps server remote`}`,run:()=>openFleet(k)});
     for(const c of state.conversations.slice().sort((x,y)=>String(y.createdAt).localeCompare(String(x.createdAt))).slice(0,200)){const a=state.agents.find(x=>x.id===c.agentId);if(!a)continue;out.push({group:'Chats',icon:AN_ICON.chat,label:chatLabel(c),path:[title(a),'Chats'],words:'',run:()=>fire('an-chat',{id:c.id})});}
     for(const k of vaultKeys())out.push({group:'Keys',icon:KEY_SVG,label:k.name,path:['Opaya Vault'],words:`${k.mask} key`,run:()=>{openVault();vault.filter=k.name;vault.open=k.id;drawVault();}});
@@ -1207,7 +1209,7 @@
       shell:{icon:'&gt;_',label:'Open shell',run:()=>openTerminal({agentId:id})},
       cli:{icon:'&#10095;',label:'Run native CLI',run:()=>openTerminal({agentId:id,mode:'agent'})},
       log:{icon:'&#8801;',label:'Connection log...',run:()=>openDiagnostics(id)},
-      skills:{icon:'&#10022;',label:'Skills, tools & MCP...',run:()=>openSkills(id)},
+      skills:{icon:'&#10022;',label:'Skills & commands...',run:()=>openSkills(id)},
       transfer:{icon:'&#8644;',label:'Share with another agent...',disabled:state.agents.length<2,run:()=>openTransfer(a)},
       itrust:{icon:'&#9888;',label:a.itrust?'Turn off iTrust':'Turn on iTrust...',run:()=>toggleAgentTrust(a)},
       // The browser needs a model that can see images; text-only models (DeepSeek, Qwen3, gpt-oss...) do not get it.
@@ -1231,19 +1233,18 @@
       remove:{icon:'&#10005;',label:'Remove connection...',danger:true,run:async()=>{if(await api.removeAgent({id})){closeModal();if(state.activeAgentId===id)overview=true;opayaView=false;playgroundView=false;await refresh();toast('Connection removed.');}}}
     };
   }
+  // The right-click menu mirrors the agent's sidebar: its quick actions, then one submenu per Manage section with the
+  // same items in the same order, so every action is found in the same place both ways.
   function agentMenu(a){
-    const x=agentActions(a);
+    const x=agentActions(a);let acts={};try{acts=manageActions(a);}catch{}
+    const section=s=>{const items=(AN_SUB[s.key]||[]).map(([k,label])=>acts[k]&&{...acts[k],label:acts[k].label||label}).filter(Boolean);
+      return {icon:s.icon,label:s.name,danger:s.key==='danger',submenu:[{icon:'&#8599;',label:`Open ${s.name}`,run:()=>openManage(a.id,s.key)},...(items.length?['-',...items]:[])]};};
     return [
       x.open,x.newChat,x.surface,x.console,x.connect,x.clearError,
       '-',
-      x.manage,x.history,
+      {...x.manage,label:'Overview',icon:AN_ICON.overview},x.history,
       '-',
-      {icon:'&gt;_',label:'Files & terminal',submenu:[x.files,x.shell,x.cli,'-',x.log]},
-      {icon:'&#10022;',label:'Skills & tools',submenu:[x.skills,x.projects,x.transfer,'-',x.itrust,x.browser]},
-      {icon:'&#9998;',label:'Name & look',submenu:[x.rename,x.icon,x.groupTags,'-',x.pin,x.moveUp,x.moveDown]},
-      {icon:'&#8635;',label:'Maintenance',submenu:[x.update,x.backup,'-',x.clone,x.redeploy,'-',x.uninstall]},
-      '-',
-      x.settings,x.remove
+      ...AN_SECTIONS.filter(s=>s.key!=='overview').map(section)
     ];
   }
   // ---- Chat or terminal ---------------------------------------------------------------------------------------------
@@ -1491,7 +1492,7 @@
     console:[['terminal','CLI'],['shell','Shell'],['files','Files']],
     model:[['models','Model'],['effort','Reasoning'],['skills','Skills & commands'],['shareSkills','Share skills'],['library','Skills library']],
     access:[['keys','API keys'],['vault','Opaya Vault'],['mcp','MCP servers'],['transfer','Share with another agent'],['gateway','Gateway'],['itrust','iTrust'],['browser','Opaya browser']],
-    machine:[['machines','Machines board'],['files','Files'],['terminal','CLI'],['shell','Shell'],['containerRestart','Restart container'],['containerLogs','Container logs']],
+    machine:[['machines','Its machine in Machines'],['files','Files'],['terminal','CLI'],['shell','Shell'],['containerRestart','Restart container'],['containerLogs','Container logs']],
     deploy:[['clone','Clone'],['dockerize','Dockerize'],['redeploy','Redeploy'],['newVps','New VPS']],
     projects:[['projects','Add project']],
     care:[['update','Update'],['backup','Back up'],['backups','Backups folder'],['fix','Check & fix'],['log','Connection log']],
@@ -1592,7 +1593,7 @@
     if(cloneable(a)&&canDocker(a)&&!box)keyed.dockerize={key:'dockerize',icon:'&#9635;',label:'Dockerize',run:()=>deployTo(a,a.transport==='ssh'?a.hostId:'','docker',$('.deploy-token')||$('.mg-card')||$('.an-head .agent-avatar'),$('.mg-dockerize')||$('.mg-target[data-deploy-runtime="docker"]')||$('.an-head .agent-avatar'))};
     // "surface" is either Allow chat again (its vendor refused chats) or the full chat view; only the first is a setting.
     if(keyed.surface&&!/^Allow/.test(keyed.surface.label))delete keyed.surface;
-    keyed.machines={key:'machines',label:'Machines board',run:()=>openFleet(dockerKeyOf(a))};
+    keyed.machines={key:'machines',label:'Its machine in Machines',run:()=>openFleet(dockerKeyOf(a))};
     keyed.mcp={key:'mcp',label:'MCP servers',run:()=>openMcpManager()};
     if(cap.backup)keyed.backups={key:'backups',label:'Backups folder',run:()=>api.revealBackup({folder:true})};
     keyed.library={key:'library',label:'Skills library',run:()=>openLibrary()};
@@ -1674,7 +1675,7 @@
           row('itrust','iTrust','Approves its tool requests without asking','',{sw:!!a.itrust}),
           row('browser','Opaya browser',keyed.browser?.disabled?keyed.browser.hint||'Needs a model that can see images':'Lets it open, read and use web pages','',{sw:!!a.browser,always:true})])
         +`<section class="mg-section set-wide">${keysPanel(a)}</section>`,
-      machine:()=>head(S,pbtn('machines','Machines board'))+card('Where it runs',[
+      machine:()=>head(S,pbtn('machines','Open in Machines'))+card('Where it runs',[
           row('machines','Machine','Opens the board of all machines',location(a)),
           row('',`System`,'',sys,{always:true,icon:AN_ICON.machine}),
           row('files','Files',infoReady&&info.data?`Data in ${info.data}`:'Browse its folders',''),
@@ -3541,8 +3542,10 @@
     for(const a of state.agents)if(a.busy&&a.turnStartedAt&&now-a.turnStartedAt>5*60000)out.push({id:`long:${a.id}:${a.turnStartedAt}`,urgent:true,text:`${title(a)} has been working for ${Math.round((now-a.turnStartedAt)/60000)} minutes. I'm keeping an eye on it.`,actions:[['Open',()=>{overview=false;opayaView=false;playgroundView=false;action(async()=>{await api.select({id:a.id});await refresh();});}],['Connection log',()=>openDiagnostics(a.id)]]});
     if(greeted!==today&&state.agents.length){const on=state.agents.filter(a=>a.status==='connected').length;out.push({id:`greet:${today}`,greet:today,text:`${hour<12?'Good morning':hour<18?'Good afternoon':'Good evening'}! ${state.agents.length} agent${state.agents.length===1?'':'s'} here, ${on} connected.${state.hosts.length?` ${state.hosts.length} machine${state.hosts.length===1?'':'s'} ready.`:''}`,actions:on<state.agents.length?[['Connect all',()=>action(()=>connectAll())]]:[]});}
     if(state.hosts.length>=1&&state.agents.some(a=>a.provider==='hermes')&&!state.agents.some(a=>a.clone))out.push({id:'tip:clone',text:`You have ${state.hosts.length} machine${state.hosts.length===1?'':'s'}. Open a Hermes agent's Deploy & clone (R) and drag it onto a VPS to copy it there, as a profile or a Docker container.`,actions:[]});
+    if(state.agents.length)out.push({id:'tip:find',text:`Looking for a setting or an action? Press ${mod().trim()}${state.platform==='darwin'?'':'+'}K or Search at the top: it finds anything and shows where it lives. Back (Alt+Left) returns to the previous screen.`,actions:[['Search',()=>openFind()]]});
+    if(state.agents.length&&!vaultKeys().length)out.push({id:'tip:vault-import',text:'Already have API keys in .env files or your tools? Import them into the Opaya Vault and give each to the agents that need it.',actions:[['Import keys',()=>openVault({panel:'import'})]]});
     if(!state.hosts.length&&state.agents.length>=2)out.push({id:'tip:vps',text:'Want an agent running around the clock? Add a new VPS: I create the SSH key and check the connection.',actions:[['New VPS',()=>openNewVps()]]});
-    const browserable=state.agents.find(a=>browserCapable(a)&&!a.browser&&a.vision?.vision);if(browserable)out.push({id:'tip:browser',text:`${title(browserable)} can browse the web with you watching. Right-click it > Give Opaya browser.`,actions:[]});
+    const browserable=state.agents.find(a=>browserCapable(a)&&!a.browser&&a.vision?.vision);if(browserable)out.push({id:'tip:browser',text:`${title(browserable)} can browse the web with you watching. Its Keys & tools > Give Opaya browser.`,actions:[]});
     if(!(state.projects||[]).length&&state.agents.some(a=>a.cwd))out.push({id:'tip:projects',text:'Keep folders, their agents, chats and git together in Projects. Press Ctrl+Shift+P.',actions:[['Open Projects',()=>toggleProjects(true)]]});
     // Updates: each outdated tool is announced once per new version. Closing the note (or letting it fade) dismisses
     // those versions; the note comes back only when something newer appears. Hermes counts commits behind, which grow
