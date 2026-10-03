@@ -2739,3 +2739,54 @@ body.sidebar-rail .sidebar .side-caption{display:none}
 .agent-chat-context{display:flex;align-items:center;gap:8px;flex-basis:100%;min-width:0}
 .ov-manage-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin:0 0 18px;gap:14px;align-items:start}
 .ov-manage-actions .manage-quick{max-width:none}
+/* 0.28: Chat / Terminal / Manage read as one switch with icons; the open Manage section shows after the status. */
+.agent-destinations{gap:0;padding:3px;border-radius:10px;background:#15191b;border:1px solid #2a3234;flex-wrap:nowrap}
+.agent-destinations .dest-tab{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 12px;border:1px solid transparent;border-radius:8px;background:transparent;color:#a0afb6;font-size:12px}
+.agent-destinations .dest-tab svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.agent-destinations .dest-tab:hover{background:#1f2628;color:var(--text)}
+.agent-destinations .dest-tab.selected{background:#22302a;border-color:#3b5a49;color:#e6f5ec}
+.agent-context .ac-section{font-size:12px;color:#c8d6cf;font-weight:600}
+.pane-split svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:2}
+body[data-theme="light"] .agent-destinations{background:#f1f5f2;border-color:#dbe3de}
+body[data-theme="light"] .agent-destinations .dest-tab{color:#4d5f57}
+body[data-theme="light"] .agent-destinations .dest-tab.selected{background:#fff;border-color:#bfdccb;color:#12301f}
+body[data-theme="light"] .agent-context .ac-section{color:#2b3d34}
+.ov-manage-actions{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:14px 0 18px}
+.ov-qa{display:flex;align-items:center;gap:11px;justify-content:flex-start;text-align:left;padding:11px 12px;border-radius:12px;background:#1a1f22;border:1px solid #2c3437;min-width:0}
+.ov-qa:hover:not(:disabled){border-color:#4f6a5c;background:#1d2724;transform:translateY(-1px)}
+.ov-qa:disabled{opacity:.55}
+.ov-qa-ico{width:32px;height:32px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;background:#20302a;color:#9fe0b9;flex-shrink:0}
+.ov-qa-ico svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.ov-qa-text{display:flex;flex-direction:column;min-width:0}
+.ov-qa-text strong{font-size:12.5px}
+.ov-qa-text small{font-size:10.5px;color:var(--muted);line-height:1.35}
+body[data-theme="light"] .ov-qa{background:#fafbfa;border-color:#e0e6e2}
+body[data-theme="light"] .ov-qa-ico{background:#e9f6ee;color:#1f7a45}
+.terminal-chat-note{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.terminal-chat-note .text-button{font-size:11px}
+/* 0.28: first launch. Home starts with three ways to bring an agent in; the empty icon strip shows a + instead of squeezed text. */
+.ws-start{margin:0 0 30px;padding:26px;border-radius:18px;background:linear-gradient(160deg,#18231e,#15191b);border:1px solid #2c4436}
+.ws-start h2{font-size:20px;margin-bottom:6px}
+.ws-start>p{font-size:13px;color:#a8b8b0;max-width:680px;margin-bottom:18px}
+.ws-start-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.ws-start-card{position:relative;display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:6px;text-align:left;padding:18px;border-radius:14px;background:#1a2022;border:1px solid #2f3a36}
+.ws-start-card:hover{border-color:#6ee7a8;background:#1c2824;transform:translateY(-2px)}
+.ws-start-card strong{font-size:14px}
+.ws-start-card small{font-size:12px;color:var(--muted);line-height:1.45}
+.ws-start-ico{width:38px;height:38px;border-radius:11px;display:inline-flex;align-items:center;justify-content:center;background:#20302a;color:#9fe0b9;margin-bottom:6px}
+.ws-start-ico svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.ws-start-tag{position:absolute;top:14px;right:14px;font-style:normal;font-size:10px;font-weight:600;color:#143425;background:var(--accent);border-radius:20px;padding:2px 8px}
+.ws-start-more{font-size:12px;color:var(--muted);margin-top:16px}
+.ws-start-more .text-button{font-size:12px}
+.ws-start~.section-heading,.ws-start~.ws-filters,.ws-start~.agent-grid,.ws-start~.getting-started{display:none}
+.sidebar-empty-add{display:none}
+body.sidebar-rail .sidebar .sidebar-empty{display:flex;flex-direction:column;align-items:center;gap:10px;width:52px;padding:14px 0}
+body.sidebar-rail .sidebar .sidebar-empty-text{display:none}
+body.sidebar-rail .sidebar .sidebar-empty-add{display:inline-flex;width:38px;height:38px;border-radius:11px;border:1px dashed #4f6a5c;color:#9fe0b9;font-size:20px}
+body.sidebar-rail .sidebar .sidebar-empty-add:hover{border-style:solid;background:#1f2a26}
+body[data-theme="light"] .ws-start{background:linear-gradient(160deg,#eef8f2,#fafbfa);border-color:#bfdccb}
+body[data-theme="light"] .ws-start>p{color:#4d5f57}
+body[data-theme="light"] .ws-start-card{background:#fff;border-color:#dfe6e1}
+body[data-theme="light"] .ws-start-card:hover{border-color:#1f7a45;background:#f4fbf7}
+body[data-theme="light"] .ws-start-ico{background:#e9f6ee;color:#1f7a45}
+/* While terminals are open, Opaya's tips sit at the bottom right, over output rather than over the window buttons. */
+body:has(#terminal-panel:not([hidden])) .opaya-nudge{top:auto;bottom:40px}
