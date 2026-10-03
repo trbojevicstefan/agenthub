@@ -658,17 +658,19 @@ async function start({app, safeStorage}, root) {
     send:x=>broker.send(x), stop:x=>broker.stop(x.id), saveDraft:x=>broker.saveDraft(x), saveView:x=>broker.saveView(x),
     transcript:async x=>{const c=broker.data.conversations.find(c=>c.id===schema.id(x.id));if(!c)throw new Error('Conversation not found.');return {conversation:c,agent:broker.agent(c.agentId),messages:broker.histories.get(c.id)||await broker.store.transcript(c.id)};},
     terminalOpen:async x=>{
-      const a=x.local===true?localShell():x.agentId?broker.agent(x.agentId):hostShell(x.hostId);
+      const source=x.sourceId?terminals.attach(schema.id(x.sourceId)):null;
+      const a=source?sessionAgent(source):x.local===true?localShell():x.agentId?broker.agent(x.agentId):hostShell(x.hostId);
+      const mode=source?.mode||x.mode||'shell';
       // A project: the agent's CLI (or a shell) starts in the project's folder on the machine where it runs.
-      let cwd='',title='';
-      if(x.projectId){
+      let cwd=source?.cwd||'',title='';
+      if(x.projectId&&!source){
         const p=broker.project(x.projectId);
         if(x.agentId&&!x.local){cwd=projects.folderFor(a,p);if(!cwd)throw new Error(`${a.name} runs on a different machine than ${p.name}.`);}
         else{if((p.hostId||'')!==(x.local===true?'':String(x.hostId||'')))throw new Error(`${p.name} is on another machine.`);cwd=p.path;}
         title=`${x.mode==='agent'?a.name:a.name+' shell'} · ${p.name}`.slice(0,80);
       }
-      if(x.mode==='agent'&&a.provider==='hermes'&&!terminals.hasLive(a.id,x.mode)&&!await approve(a,'Start a new Hermes CLI process?','This does not attach to an existing gateway. Do not run another writer against a Hermes profile already used by a gateway. Use its gateway API or existing tmux session instead.'))throw new Error('CLI launch cancelled.');
-      const result=terminals.open(a,a.transport==='ssh'?broker.host(a.hostId):null,x.mode||'shell',{cols:x.cols||100,rows:x.rows||28},{cwd,title});emit();return result;
+      if(mode==='agent'&&a.provider==='hermes'&&(x.newSession===true||!terminals.hasLive(a.id,mode))&&!await approve(a,'Start a new Hermes CLI process?','This does not attach to an existing gateway. Do not run another writer against a Hermes profile already used by a gateway. Use its gateway API or existing tmux session instead.'))throw new Error('CLI launch cancelled.');
+      const result=terminals.open(a,a.transport==='ssh'?broker.host(a.hostId):null,mode,{cols:x.cols||100,rows:x.rows||28},{cwd,title,newSession:x.newSession===true});emit();return result;
     },
     // Enter in an ended terminal starts it again in its tab: the same agent or shell, machine, mode and folder. A remote one
     // reattaches to its tmux session, which usually outlived the dropped SSH connection.

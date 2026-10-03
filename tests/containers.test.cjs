@@ -7,7 +7,14 @@ async function fakeDocker(dir,{info=true,exists=false}={}){
   await fs.mkdir(dir,{recursive:true});
   await fs.writeFile(path.join(dir,'docker'),`#!/bin/sh\necho "$*" >> "${path.join(dir,'calls.log')}"\ncase "$1" in info) ${info?'exit 0':'exit 1'};; inspect) ${exists?'exit 0':'exit 1'};; esac\nexit 0\n`,{mode:0o755});
 }
-const runPlan=(plan,home,bin,withDocker=true)=>spawnSync('sh',['-c',plan.command],{env:{HOME:home,PATH:withDocker?`${bin}:/usr/bin:/bin`:'/usr/bin:/bin'},encoding:'utf8',input:''});
+// Production prepends /usr/local/bin, which can select the real Docker ahead of the fixture.
+// Keep the test PATH fixed while exercising the generated installation steps.
+const runPlan=(plan,home,bin,withDocker=true)=>{
+  const setup='export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"\n';
+  assert(plan.command.includes(setup));
+  const command=plan.command.replace(setup,'');
+  return spawnSync('sh',['-c',command],{env:{HOME:home,PATH:withDocker?`${bin}:/usr/bin:/bin`:'/usr/bin:/bin'},encoding:'utf8',input:'',timeout:10000});
+};
 test('agents that can be installed as a container, and their connections',()=>{
   assert.deepEqual(catalog.list().filter(f=>f.docker).map(f=>f.id).sort(),['claude','codex','dsh','hermes','openclaw','opencode']);
   const codex=containers.plan('codex',{name:'Work Bot'});

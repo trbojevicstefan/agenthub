@@ -70,20 +70,22 @@ class Terminals{
   }
   // xterm needs the Windows build to match ConPTY's line wrapping; without it resized TUIs draw duplicate lines.
   attach(id){const item=this.sessions.get(id);if(!item)throw new Error('Terminal not found.');const {process,...view}=item;return {...view,windowsBuild:WINDOWS_BUILD};}
-  // cwd: a project folder to start in (the agent's CLI or a shell there). One live session per agent, mode and folder.
+  // newSession creates an independent process; otherwise opening the same target reuses a live session.
   // into: an ended session to start again in place (restart).
-  open(agent,host,mode='shell',size={cols:100,rows:28},{cwd='',title='',into=null}={}){
+  open(agent,host,mode='shell',size={cols:100,rows:28},{cwd='',title='',into=null,newSession=false}={}){
     if(!['shell','agent'].includes(mode))throw new Error('Invalid terminal mode.');
     // DeepSeek Harness has no terminal chat yet (its profiles are acp, web and headless): its CLI is a shell where it runs.
     const dshHint=mode==='agent'&&isDsh(agent)?'\x1b[90mDeepSeek Harness has no terminal chat yet. Chat with it in Opaya or its Web UI; here, dsh headless "task" runs one task.\x1b[0m\r\n':'';
     if(dshHint)mode='shell';
     if(typeof cwd!=='string'||cwd.length>2048||/[\0\r\n]/.test(cwd))throw new Error('Invalid terminal folder.');
-    const previous=[...this.sessions.values()].find(s=>s!==into&&s.agentId===agent.id&&s.mode===mode&&(s.cwd||'')===cwd&&!s.exited);
+    const requestedCwd=cwd,docker=agent.command==='docker'&&dockerExecContainerIndex(agent.args)>=0;
+    if(!docker)cwd=cwd||agent.cwd||'';
+    const previous=!into&&!newSession&&[...this.sessions.values()].find(s=>s.agentId===agent.id&&s.mode===mode&&(s.cwd||'')===cwd&&!s.exited);
     if(previous)return this.attach(previous.id);
-    if([...this.sessions.values()].filter(s=>!s.exited).length>=12)throw new Error('Close an existing terminal before opening another.');
+    if([...this.sessions.values()].filter(s=>!s.exited).length>=12)throw new Error('The limit is 12 live terminal sessions. End a session before creating another. Hidden sessions also count.');
     let pty=this.ptyFactory;
     if(!pty){try{pty=require('node-pty');}catch(error){throw new Error('The native terminal could not load. Install the matching Opaya Windows build; do not copy node_modules between operating systems. '+error.message.slice(0,300));}}
-    const docker=agent.command==='docker'&&dockerExecContainerIndex(agent.args)>=0,workdir=docker?cwd:'';
+    const workdir=docker?cwd:'',id=into?.id||randomUUID();
     if(cwd&&!docker){if(agent.transport!=='ssh'&&!fs.existsSync(cwd))throw new Error(`The folder ${cwd} does not exist on this computer.`);agent={...agent,cwd};}
     const env=environment({...(agent.hermesHome&&agent.transport!=='ssh'?{HERMES_HOME:agent.hermesHome}:{}),TERM:'xterm-256color'});
     let command,args,dir=agent.cwd||os.homedir(),sessionName='';
@@ -98,7 +100,10 @@ class Terminals{
       // Service-run commands (installs, diagnostics) go to ssh as the remote command, so SSH prompts cannot swallow them.
       if(agent.ephemeral&&agent.run)remote=`${agent.run}; printf '\n[Finished. This shell stays open.]\n'; exec "\${SHELL:-/bin/sh}" -l`;
       // One-off service terminals (installs, diagnostics) must work on fresh hosts without tmux.
-      if(!agent.ephemeral){sessionName=tmuxName(agent,cwd?`${mode}:${cwd}`:mode);remote=tmuxCommand(sessionName,remote,{existing:!!agent.tmuxSession});}
+      if(!agent.ephemeral){
+        sessionName=into?.tmuxSession||(newSession?tmuxName({...agent,tmuxSession:''},id):tmuxName(agent,requestedCwd?`${mode}:${requestedCwd}`:mode));
+        remote=tmuxCommand(sessionName,remote,{existing:!!agent.tmuxSession&&sessionName===agent.tmuxSession});
+      }
       args=[...sshArgs(host,{interactive:true}),'-tt',target(host),remote];dir=os.homedir();
     }else if(agent.command==='docker'&&dockerExecContainerIndex(agent.args)>=0){
       command=findExecutable('docker',env);if(!command)throw new Error('Docker client is not installed on this computer.');
@@ -112,7 +117,6 @@ class Terminals{
       args=process.platform==='win32'?['-NoLogo']:['-l'];
       if(/cmd\.exe$/i.test(command))args=[];
     }
-    const id=into?.id||randomUUID();
     const initial=dimensions(size.cols,size.rows);
     const processPty=pty.spawn(command,args,{name:'xterm-256color',...initial,cwd:dir,env});
     const fields={process:processPty,exited:false,restored:false,detached:false,detaching:false,remote:agent.transport==='ssh',hostId:host?.id||'',tmuxSession:sessionName,...initial};

@@ -20,8 +20,9 @@
   let state = {agents:[],hosts:[],conversations:[],histories:{},secureStorage:false}, overview = true, opayaView = false, playgroundView = false, renderKey = '', initialized = false, theme = 'dark';
   let toastTimer, returnFocus, currentTerminal = '', lastSelected = '', modalBusy = false;
   let manageId = '', manageHtml = '', manageKeyed = {}, lastFullChat = '';
-  // How each agent's screen shows: manage (the default a left click opens), chat (the full chat view) or console.
-  const agentModes = new Map(), modeOf = a => agentModes.get(a.id) || 'chat';
+  // Remember each agent's destination. Graphical agents start in Chat; terminal-only agents start in Terminal.
+  const agentModes=new Map(),manageSections=new Map();
+  const modeOf=a=>agentModes.get(a.id)==='manage'?'manage':a.protocol==='terminal'||a.surface==='terminal'?'console':agentModes.get(a.id)||'chat';
   // Back: the screens you came through (Home, Machines, an agent's chat, console or Manage section...), newest last.
   let navBack=[],navCur='',navRestoring=false;
   // Sidebar items the user turned off in Settings > Sidebar.
@@ -33,7 +34,7 @@
   const draftKey = () => currentConversation()?.id || selected()?.id || '';
   const save = promise => { pendingWrites.add(promise); promise.catch(error=>toast(error.message,true)).finally(()=>pendingWrites.delete(promise)); return promise; };
   window.agenthubFlush = () => Promise.allSettled([...pendingWrites]);
-  const saveView = () => { if(api.saveView)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,panes:panes.filter(Boolean),paneSizes:panes.filter(Boolean).map(id=>paneSize.get(id)||1),windows:[...terminalViews.values()].filter(v=>!v.exited).map(v=>[v.id,v.ctx||'',v.hiddenPane?1:0]),theme,projects:projectsOpen,projectsOpen:[...projectsExpanded],layout,chatDock:chatDock.map(d=>({id:d.id,min:!!d.min})),sidebarHide:[...sidebarHide],sidebarHidden,sidebarRail,tips:[...tipsSeen].slice(-300),greeted,lastVersion,terminalFont})); };
+  const saveView = () => { if(api.saveView&&!restoringWorkspace)save(api.saveView({overview,opaya:opayaView,playground:playgroundView,collapsed:[...collapsedGroups],terminalVisible:!$('#terminal-panel').hidden,terminalId:currentTerminal,panes:panes.filter(Boolean),terminalWorkspaces:savedWorkspaces(),agentNavigation:[...agentModes].map(([id,mode])=>({id,mode,section:manageSections.get(id)||'overview'})),windows:[...terminalViews.values()].filter(v=>!v.exited).map(v=>[v.id,v.ctx||'',v.hiddenPane?1:0]),theme,projects:projectsOpen,projectsOpen:[...projectsExpanded],layout,chatDock:chatDock.map(d=>({id:d.id,min:!!d.min})),sidebarHide:[...sidebarHide],sidebarHidden,sidebarRail,tips:[...tipsSeen].slice(-300),greeted,lastVersion,terminalFont})); };
   const drafts = new Map(), pendingSends = new Set(), terminalViews = new Map(), terminalPending = new Map();
   const selected = () => state.agents.find(a => a.id === state.activeAgentId);
   const currentConversation = () => state.conversations.find(c => c.id === state.activeConversationId && c.agentId === state.activeAgentId);
@@ -59,7 +60,7 @@
   const hasCli=a=>!!a?.command&&!(a.protocol==='openai'&&!['hermes','openclaw'].includes(a.provider));
   // Motion bookkeeping: state updates re-render often, so entrance animations are keyed to first appearance, not to every render.
   let terminalFont=13,lastVersion='',tipsSeen=new Set(),greeted='',collapsedGroups=new Set(),projectsOpen=false,projectsExpanded=new Set(),layout={terminal:'bottom',browser:'right',bottomHeight:280,rightWidth:520};
-  const navSeen=new Map(),messageSeen=new Map();let navHtml='',navSelected='',navSelectedAt=0,messageConversation=null,overviewHtml='';
+  const navSeen=new Map(),messageSeen=new Map(),chatScroll=new Map();let navHtml='',navSelected='',navSelectedAt=0,messageConversation=null,overviewHtml='';
   const fresh=(map,key,now,ms)=>{if(!map.has(key))map.set(key,now);return now-map.get(key)<ms;};
   function enter(element){element.classList.remove('view-enter');void element.offsetWidth;element.classList.add('view-enter');clearTimeout(element.enterTimer);element.enterTimer=setTimeout(()=>element.classList.remove('view-enter'),900);}
   function contentKind(kind){const c=$('#content');c.className=`content ${kind}${c.classList.contains('view-enter')?' view-enter':''}`;}
@@ -86,7 +87,7 @@
   }
   function applyState(next) {
     state=next;document.body.dataset.platform=state.platform;
-    if(!initialized){overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya||!state.agents.length&&!state.opayaAgent?.configured;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);sidebarHidden=!!state.view?.sidebarHidden;sidebarRail=state.view?.sidebarRail??true;projectsOpen=!!state.view?.projects;tipsSeen=new Set(state.view?.tips||[]);greeted=state.view?.greeted||'';lastVersion=state.view?.lastVersion||'';setTimeout(checkNudges,4000);if(state.view?.layout)layout={...layout,...state.view.layout};terminalFont=Number(state.view?.terminalFont)||13;queueMicrotask(()=>placePanes());projectsExpanded=new Set(state.view?.projectsOpen||[]);chatDock=(state.view?.chatDock||[]).map(d=>({id:d.id,min:!!d.min}));sidebarHide=new Set(state.view?.sidebarHide||[]);if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});}
+    if(!initialized){for(const n of state.view?.agentNavigation||[]){agentModes.set(n.id,n.mode);manageSections.set(n.id,n.section);}overview=state.view?.overview??!state.activeAgentId;opayaView=!!state.view?.opaya||!state.agents.length&&!state.opayaAgent?.configured;playgroundView=!!state.view?.playground&&!opayaView;collapsedGroups=new Set(state.view?.collapsed||[]);sidebarHidden=!!state.view?.sidebarHidden;sidebarRail=state.view?.sidebarRail??true;projectsOpen=!!state.view?.projects;tipsSeen=new Set(state.view?.tips||[]);greeted=state.view?.greeted||'';lastVersion=state.view?.lastVersion||'';setTimeout(checkNudges,4000);if(state.view?.layout)layout={...layout,...state.view.layout};terminalFont=Number(state.view?.terminalFont)||13;queueMicrotask(()=>placePanes());projectsExpanded=new Set(state.view?.projectsOpen||[]);chatDock=(state.view?.chatDock||[]).map(d=>({id:d.id,min:!!d.min}));sidebarHide=new Set(state.view?.sidebarHide||[]);if(projectsOpen)setTimeout(()=>refreshProjectGit(),300);applyTheme(state.view?.theme||'dark');for(const [key,value]of Object.entries(state.drafts||{}))drafts.set(key,value);initialized=true;if(state.recoveryNotice)toast(state.recoveryNotice,true);renderWindowControls();api.windowControl?.({action:'state'}).then(v=>{windowState=v;renderWindowControls();}).catch(()=>{});}
     render();
   }
   // The sidebar's groups in the order they show: Pinned, custom groups, This computer, Remote. Ctrl/Cmd+1 to 9 follow
@@ -99,7 +100,7 @@
   // One string per screen; each change pushes the previous one, unless Back itself is moving.
   function navSig(){if(playgroundView)return 'pg';if(opayaView)return 'opaya';if(overview)return fleetView?'fleet':'home';const a=selected();if(!a)return 'home';const m=modeOf(a);return `a|${a.id}|${m}|${m==='manage'?mgSection:''}`;}
   function trackNav(){const sig=navSig();if(sig===navCur)return;if(navCur&&!navRestoring){navBack=navBack.filter(x=>x!==sig);navBack.push(navCur);if(navBack.length>40)navBack.shift();}navCur=sig;queueMicrotask(()=>{const b=$('.topbar-back');if(b){b.disabled=!navBack.length;b.title=navBack.length?`Back to ${navLabel(navBack.at(-1))} (Alt+Left)`:'Back';}});}
-  function navLabel(sig){if(sig==='pg')return 'Playground';if(sig==='opaya')return 'Opaya Agent';if(sig==='home')return 'Home';if(sig==='fleet')return 'Machines';const [,id,m,sec]=sig.split('|'),a=state.agents.find(x=>x.id===id);if(!a)return 'the previous screen';return `${title(a)}: ${m==='manage'?(AN_SECTIONS.find(x=>x.key===sec)?.name||'Manage'):m==='console'?'Console':'Chat'}`;}
+  function navLabel(sig){if(sig==='pg')return 'Playground';if(sig==='opaya')return 'Opaya Agent';if(sig==='home')return 'Home';if(sig==='fleet')return 'Machines';const [,id,m,sec]=sig.split('|'),a=state.agents.find(x=>x.id===id);if(!a)return 'the previous screen';return `${title(a)}: ${m==='manage'?(AN_SECTIONS.find(x=>x.key===sec)?.name||'Manage'):m==='console'?'Terminal':'Chat'}`;}
   async function navGoBack(){
     while(navBack.length){const sig=navBack.pop(),parts=sig.split('|');if(parts[0]==='a'&&!state.agents.some(x=>x.id===parts[1]))continue;
       navRestoring=true;
@@ -109,6 +110,7 @@
   }
   function render() {
     trackNav();
+    const oldMessages=$('#message-list');if(oldMessages?.dataset.conversation)chatScroll.set(oldMessages.dataset.conversation,{top:oldMessages.scrollTop,bottom:oldMessages.scrollHeight-oldMessages.scrollTop-oldMessages.clientHeight<110});
     queueMicrotask(()=>{ensureProjectsToggle();renderProjects();renderDock();const sel=selected()?.id||'';if(historyOpen&&sel!==historyFollow&&historyAgent&&sel)historyAgent=sel;historyFollow=sel;renderHistory();});
     $('#agent-count').textContent=state.agents.length;applySidebar();
     $('#host-count').textContent=state.hosts.length;const vc=$('#vault-count');if(vc)vc.textContent=(state.opayaAgent?.secrets||[]).filter(k=>k.kept||k.global||k.stored?.length).length||'';
@@ -121,9 +123,9 @@
     const nav=groups.filter(g=>g[2].length).map(([key,name,all])=>{const closed=collapsedGroups.has(key),agents=closed?[]:all,busy=closed&&all.some(a=>a.busy);return `<button class="sidebar-section-label ${closed?'collapsed':''} ${key.startsWith('group:')?'custom-group':''}" data-action="toggle-group" data-group="${esc(key)}" aria-expanded="${!closed}" title="${closed?'Expand':'Collapse'} ${esc(name)} (right-click for group actions)"><span class="group-chevron" aria-hidden="true">&#9662;</span><span class="group-name">${esc(name)}</span><span class="group-short" aria-hidden="true">${esc(key==='local'?'Local':key==='remote'?'Remote':key==='pinned'?'Pinned':name)}</span>${busy?'<span class="status-dot working"></span>':''}<span class="group-count">${all.length}</span></button><div class="sidebar-group ${closed?'closed':''}">${closed?`<div class="collapsed-strip" data-section="${esc(key)}">${all.map(a=>`<button type="button" class="mini-agent ${a.id===current?'selected':''}" data-action="select" data-id="${esc(a.id)}" data-agent-id="${esc(a.id)}" title="${esc(title(a)+' / '+placeText(a)+' / '+status(a))}" aria-label="${esc(title(a))}">${badge(a)}${dot(a)}</button>`).join('')}</div>`:''}${agents.map(a=>`<div class="agent-nav-row ${fresh(navSeen,a.id,now,650)?'enter':''}" style="--i:${row++}" data-agent-id="${esc(a.id)}" data-section="${esc(key)}" draggable="true"><button class="agent-nav ${!overview&&!opayaView&&!playgroundView&&a.id===state.activeAgentId?'selected':''} ${a.id===navSelected&&now-navSelectedAt<500?'just-selected':''}" data-action="select" data-id="${esc(a.id)}" aria-label="${esc(title(a)+', '+status(a)+', '+location(a))}">${badge(a)}<span class="agent-nav-text"><strong>${esc(title(a))}${trusted(a)?'<span class="itrust-mark" title="iTrust: approved automatically">iT</span>':''}</strong><small class="agent-nav-host">${esc(navSub(a))}</small></span>${dot(a)}${hkOf.has(a.id)?`<kbd class="nav-hk" aria-hidden="true">${hkOf.get(a.id)}</kbd>`:''}</button><button type="button" class="agent-nav-manage" data-action="manage" data-id="${esc(a.id)}" title="Manage ${esc(title(a))}" aria-label="Manage ${esc(title(a))}">&#9881;</button></div>`).join('')}</div>`;}).join('')||'<div class="sidebar-empty"><span class="connection-dots"><i></i><i></i><i></i></span>Your agents will<br>feel at home here.</div>';
     if(nav!==navHtml){navHtml=nav;$('#agent-list').innerHTML=nav;}refreshRailCard();
     const a=selected();
-    // A left click opens an agent's management screen; Chat and Console are the other two ways to work with it.
+    // A left click opens an agent's management screen; Chat and Terminal are the other two ways to work with it.
     const mode=!overview&&!opayaView&&!playgroundView&&a?modeOf(a):'';manageId=mode==='manage'?a.id:'';
-    const stage=mode==='console';
+    const stage=mode==='console';if(manageId)mgSection=manageSections.get(a.id)||'overview';
     if(stage!==document.body.classList.contains('terminal-stage')){document.body.classList.toggle('terminal-stage',stage);placePanes();}
     if(!stage)stageAgent='';
     // The terminal windows follow the screen first, so the agent's sidebar shows them as they now are.
@@ -168,7 +170,7 @@
     topbar('Home');
     const connected=state.agents.filter(a=>a.status==='connected').length,entering=renderKey!=='overview';
     contentKind('overview');
-    const html=`<div class="workspace-heading"><div><div class="eyebrow"><span class="tiny-square"></span> HOME</div><h1>One place.<br>All your agents.</h1><p>From the machine in front of you to the server across the world.<br>Connect, switch, and keep the conversation going.</p></div><div class="workspace-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="art-center"><span class="opaya-mark large"><img src="assets/opaya-logo.png" alt=""><i></i></span></div><span class="art-node node-one">${providerIcon('hermes')}</span><span class="art-node node-two">${providerIcon('codex')}</span><span class="art-node node-three">${providerIcon('claude')}</span><span class="art-node node-four">${providerIcon('openclaw')}</span><span class="orbit-signal"></span></div></div><div class="workspace-stats"><div><span class="status-dot connected"></span><strong>${connected}</strong> connected</div><div><span class="machine-icon"></span><strong>${state.hosts.length}</strong> remote machines</div><div><span class="terminal-glyph">&gt;_</span> Native terminal built in</div><div class="stats-private"><span class="lock-symbol">&#9906;</span> Private by default</div></div>${workspaceControls()}<div class="section-heading"><div><h2>Your agents <span>${state.agents.length}</span></h2><p>Different runtimes. One familiar workspace.</p></div><div class="section-actions"><button class="text-button" data-action="install-catalog">&#8595; Install agents</button><button class="text-button" data-action="add">+ Add connection</button></div></div><div class="ws-filters"><label class="ws-search"><span class="search-icon" aria-hidden="true"></span><input id="ws-search" value="${esc(wsQuery)}" placeholder="Filter agents" aria-label="Filter agents" autocomplete="off" spellcheck="false"></label>${[['','All'],['connected','Connected'],['attention','Needs attention'],['offline','Not connected']].map(([v,l])=>`<button type="button" class="tag-chip ${wsStatus===v?'active':''}" data-action="ws-status" data-value="${v}">${l} <small>${wsCount('status',v)}</small></button>`).join('')}<span class="ws-filter-gap"></span>${[['','Everywhere'],['local','This computer'],['vps','Remote'],['docker','Docker'],['api','API']].filter(([v])=>!v||state.agents.some(a=>wsPlaceOf(a)===v)).map(([v,l])=>`<button type="button" class="tag-chip ${wsPlace===v?'active':''}" data-action="ws-place" data-value="${v}">${l} <small>${wsCount('place',v)}</small></button>`).join('')}${allTags().length?`<span class="ws-filter-gap"></span>${allTags().map(t=>`<button class="tag-chip ${t===tagFilter?'active':''}" data-action="tag-filter" data-tag="${esc(t)}">#${esc(t)}</button>`).join('')}`:''}</div>${(n=>n&&n<state.agents.length?`<div class="ws-showing">Showing ${n} of ${state.agents.length} agents. <button type="button" class="text-button" data-action="ws-clear">Show all</button></div>`:'')(wsAgents().length)}<div class="agent-grid">${wsAgents().map((a,i)=>`<article class="agent-card" data-agent-id="${esc(a.id)}" style="--i:${i}"><div class="card-top">${badge(a,true)}<span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span></div><h3>${esc(title(a))}</h3><div class="agent-card-meta">${meta(a)}</div><p>${esc(description(a))}</p>${a.tags?.length?`<div class="card-tags">${tagChips(a)}</div>`:''}<div class="card-connection">${envIcon(a)}${esc(connectionLabel(a))}</div>${a.error?`<p class="card-error" title="${esc(a.error)}">${esc(a.error)}</p>`:''}<div class="card-quick"><button type="button" class="${a.status==='connected'?'secondary':'primary'}" data-action="card-connect" data-id="${esc(a.id)}" ${a.status==='connecting'?'disabled':''}>${a.status==='connected'?'Disconnect':a.status==='connecting'?'Connecting...':'Connect'}</button><button type="button" class="secondary" data-action="select" data-id="${esc(a.id)}" title="Open ${esc(title(a))}">Manage</button><button type="button" class="secondary" data-action="card-terminal" data-id="${esc(a.id)}" title="${esc(hasCli(a)?`Open ${title(a)}'s CLI`:'Open a shell')}">&gt;_ Terminal</button><button type="button" class="secondary" data-action="manage" data-id="${esc(a.id)}" title="Update, skills, clone, back up, uninstall and more">&#9881; Manage</button>${a.error?`<button type="button" class="secondary" data-action="card-fix" data-id="${esc(a.id)}" title="The Opaya Agent checks it end to end and fixes it">&#10038; Fix</button>`:''}</div>${a.group?`<span class="card-group">${esc(a.group)}</span>`:''}</article>`).join('')}${wsAgents().length||!state.agents.length?'':'<div class="ws-none">No agent matches these filters. <button type="button" class="text-button" data-action="ws-clear">Show all</button></div>'}<button class="add-card" data-action="add" style="--i:${state.agents.length}"><span class="add-card-plus">+</span><strong>${state.agents.length?'Make room for another.':'Meet your first agent.'}</strong><small>Hermes, Codex, Claude, OpenClaw<br>or any ACP / compatible API agent.</small><span class="add-card-link">Add an agent &#8594;</span></button></div>${!state.agents.length?'<div class="getting-started"><span class="step-number">01</span><div><strong>Already have agents installed?</strong><p>Discover checks known install folders, CLI tools and local API ports. Review what it finds before connecting.</p></div><button class="secondary" data-action="discover">Discover this computer</button></div>':''}<div class="workspace-footnote">No account to create. No credentials to route through someone else\'s server. Just your agents, connected.</div>`;
+    const html=`<div class="workspace-heading"><div><div class="eyebrow"><span class="tiny-square"></span> HOME</div><h1>One place.<br>All your agents.</h1><p>From the machine in front of you to the server across the world.<br>Connect, switch, and keep the conversation going.</p></div><div class="workspace-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="art-center"><span class="opaya-mark large"><img src="assets/opaya-logo.png" alt=""><i></i></span></div><span class="art-node node-one">${providerIcon('hermes')}</span><span class="art-node node-two">${providerIcon('codex')}</span><span class="art-node node-three">${providerIcon('claude')}</span><span class="art-node node-four">${providerIcon('openclaw')}</span><span class="orbit-signal"></span></div></div><div class="workspace-stats"><div><span class="status-dot connected"></span><strong>${connected}</strong> connected</div><div><span class="machine-icon"></span><strong>${state.hosts.length}</strong> remote machines</div><div><span class="terminal-glyph">&gt;_</span> Native terminal built in</div><div class="stats-private"><span class="lock-symbol">&#9906;</span> Private by default</div></div>${workspaceControls()}<div class="section-heading"><div><h2>Your agents <span>${state.agents.length}</span></h2><p>Different runtimes. One familiar workspace.</p></div><div class="section-actions"><button class="text-button" data-action="install-catalog">&#8595; Install agents</button><button class="text-button" data-action="add">+ Add connection</button></div></div><div class="ws-filters"><label class="ws-search"><span class="search-icon" aria-hidden="true"></span><input id="ws-search" value="${esc(wsQuery)}" placeholder="Filter agents" aria-label="Filter agents" autocomplete="off" spellcheck="false"></label>${[['','All'],['connected','Connected'],['attention','Needs attention'],['offline','Not connected']].map(([v,l])=>`<button type="button" class="tag-chip ${wsStatus===v?'active':''}" data-action="ws-status" data-value="${v}">${l} <small>${wsCount('status',v)}</small></button>`).join('')}<span class="ws-filter-gap"></span>${[['','Everywhere'],['local','This computer'],['vps','Remote'],['docker','Docker'],['api','API']].filter(([v])=>!v||state.agents.some(a=>wsPlaceOf(a)===v)).map(([v,l])=>`<button type="button" class="tag-chip ${wsPlace===v?'active':''}" data-action="ws-place" data-value="${v}">${l} <small>${wsCount('place',v)}</small></button>`).join('')}${allTags().length?`<span class="ws-filter-gap"></span>${allTags().map(t=>`<button class="tag-chip ${t===tagFilter?'active':''}" data-action="tag-filter" data-tag="${esc(t)}">#${esc(t)}</button>`).join('')}`:''}</div>${(n=>n&&n<state.agents.length?`<div class="ws-showing">Showing ${n} of ${state.agents.length} agents. <button type="button" class="text-button" data-action="ws-clear">Show all</button></div>`:'')(wsAgents().length)}<div class="agent-grid">${wsAgents().map((a,i)=>`<article class="agent-card" data-agent-id="${esc(a.id)}" style="--i:${i}"><div class="card-top">${badge(a,true)}<span class="status-pill ${esc(a.status)}">${dot(a)}${status(a)}</span></div><h3>${esc(title(a))}</h3><div class="agent-card-meta">${meta(a)}</div><p>${esc(description(a))}</p>${a.tags?.length?`<div class="card-tags">${tagChips(a)}</div>`:''}<div class="card-connection">${envIcon(a)}${esc(connectionLabel(a))}</div>${a.error?`<p class="card-error" title="${esc(a.error)}">${esc(a.error)}</p>`:''}<div class="card-quick"><button type="button" class="${a.status==='connected'?'secondary':'primary'}" data-action="card-connect" data-id="${esc(a.id)}" ${a.status==='connecting'?'disabled':''}>${a.status==='connected'?'Disconnect':a.status==='connecting'?'Connecting...':'Connect'}</button><button type="button" class="secondary" data-action="select" data-id="${esc(a.id)}" title="Open ${esc(title(a))}">Open</button><button type="button" class="secondary" data-action="card-terminal" data-id="${esc(a.id)}" title="${esc(hasCli(a)?`Open ${title(a)}'s CLI`:'Open a shell')}">&gt;_ Terminal</button><button type="button" class="secondary" data-action="manage" data-id="${esc(a.id)}" title="Update, skills, clone, back up, uninstall and more">&#9881; Manage</button>${a.error?`<button type="button" class="secondary" data-action="card-fix" data-id="${esc(a.id)}" title="The Opaya Agent checks it end to end and fixes it">&#10038; Fix</button>`:''}</div>${a.group?`<span class="card-group">${esc(a.group)}</span>`:''}</article>`).join('')}${wsAgents().length||!state.agents.length?'':'<div class="ws-none">No agent matches these filters. <button type="button" class="text-button" data-action="ws-clear">Show all</button></div>'}<button class="add-card" data-action="add" style="--i:${state.agents.length}"><span class="add-card-plus">+</span><strong>${state.agents.length?'Make room for another.':'Meet your first agent.'}</strong><small>Hermes, Codex, Claude, OpenClaw<br>or any ACP / compatible API agent.</small><span class="add-card-link">Add an agent &#8594;</span></button></div>${!state.agents.length?'<div class="getting-started"><span class="step-number">01</span><div><strong>Already have agents installed?</strong><p>Discover checks known install folders, CLI tools and local API ports. Review what it finds before connecting.</p></div><button class="secondary" data-action="discover">Discover this computer</button></div>':''}<div class="workspace-footnote">No account to create. No credentials to route through someone else\'s server. Just your agents, connected.</div>`;
     if(entering||html!==overviewHtml){const searching=document.activeElement?.id==='ws-search'?document.activeElement:null,caret=searching&&[searching.selectionStart,searching.selectionEnd];overviewHtml=html;$('#content').innerHTML=html;if(searching){const box=$('#ws-search');box?.focus({preventScroll:true});box?.setSelectionRange(...caret);}}
     if(entering)enter($('#content'));
     renderKey='overview';
@@ -177,23 +179,24 @@
   // Entering an agent opens (or brings back) its CLI once; after that the user decides what runs where.
   const stageOpening=new Set();
   function renderAgentTerminal(a){
-    topbar('<strong>Console</strong>','','console');
+    topbar('<strong>Terminal</strong>','','console');
     contentKind('stage');if(renderKey!=='stage:'+a.id){$('#content').innerHTML='';renderKey='stage:'+a.id;}
     $('#terminal-panel').hidden=false;
-    if(stageAgent===a.id)return;stageAgent=a.id;
+    if(restoringWorkspace||stageAgent===a.id)return;stageAgent=a.id;
     // Its windows as they are; else its sessions from elsewhere, brought here. Someone typing in a form or dialog keeps
     // the keyboard when the stage follows another agent.
-    const own=ctxWindows(a.id).filter(v=>!v.hiddenPane);if(own.length){activateTerminal((own.find(v=>v.mode==='agent')||own[0]).id,{focus:!typingElsewhere()});return;}
-    const mine=[...terminalViews.values()].filter(v=>v.agentId===a.id&&!v.exited),cli=mine.find(v=>v.mode==='agent');
+    const own=ctxWindows(a.id).filter(v=>!v.hiddenPane);if(own.length){activateTerminal((own.find(v=>v.id===workspace().active)||own[0]).id,{focus:!typingElsewhere()});return;}
+    if(ctxWindows(a.id).length)return;
+    const mine=[...terminalViews.values()].filter(v=>v.agentId===a.id&&!v.exited&&!v.poppedOut),cli=mine.find(v=>v.mode==='agent');
     if(cli||mine[0]){activateTerminal((cli||mine[0]).id,{focus:!typingElsewhere(),bring:true});return;}
     if(stageOpening.has(a.id))return;stageOpening.add(a.id);
     openTerminal(hasCli(a)?{agentId:a.id,mode:'agent'}:{agentId:a.id}).catch(error=>toast(error.message,true)).finally(()=>stageOpening.delete(a.id));
   }
   function renderAgent(a) {
-    const proj=projectOf(currentConversation());topbar(`${proj?`<button type="button" class="crumb-project" data-action="project-focus" data-id="${esc(proj.id)}" title="${esc(proj.path)}"><span class="project-folder" aria-hidden="true"></span>${esc(proj.name)}</button> <span>/</span> `:''}<strong>Chat</strong>`,trusted(a)?`<button type="button" class="itrust-pill" data-action="itrust-agent" data-id="${esc(a.id)}" title="iTrust is on: ${esc(title(a))}'s tool requests are approved automatically. Click to change.">iTrust</button>`:'','chat');
+    const proj=projectOf(currentConversation());topbar(`${proj?`<button type="button" class="crumb-project" data-action="project-focus" data-id="${esc(proj.id)}" title="${esc(proj.path)}"><span class="project-folder" aria-hidden="true"></span>${esc(proj.name)}</button>`:''}`,trusted(a)?`<button type="button" class="itrust-pill" data-action="itrust-agent" data-id="${esc(a.id)}" title="iTrust is on: ${esc(title(a))}'s tool requests are approved automatically. Click to change.">iTrust</button>`:'','chat');
     contentKind('conversation');
     if(renderKey!==JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId])) {
-      $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity">${badge(a,true)}<div><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p><div class="identity-meta">${meta(a)}${a.tags?.length?`<span class="heading-tags">${tagChips(a,6)}</span>`:''}</div></div></div><div class="conversation-controls"><select id="conversation-picker" aria-label="Conversation history" title="Switch between this agent's conversations"></select><button class="icon-button" data-action="new-conversation" title="New conversation (Ctrl + N)" aria-label="New conversation">+</button><button class="icon-button" data-action="export" title="Export this conversation as Markdown" aria-label="Export conversation">&#8595;</button><button class="icon-button history-button" data-action="history-toggle" title="Chat history (${mod()}Shift+H)" aria-label="Chat history"><span class="history-glyph" aria-hidden="true"></span></button>${a.install?.framework==='dsh'?'<button class="secondary" data-action="dsh-web" title="Open DeepSeek Harness\'s own Web UI in the Opaya browser">Web UI</button>':''}<button id="connect-button" class="secondary" data-action="connect"></button></div></div><div id="connection-banner"></div><div id="message-list" class="message-list"></div><div class="compose-area"><form id="message-form"><div id="compose-files" class="compose-files" hidden></div><textarea id="message-input" placeholder="Message ${esc(title(a))}..." aria-label="Message ${esc(title(a))}" rows="2" maxlength="80000"></textarea><div class="compose-bottom"><div class="compose-tools"><button type="button" class="compose-tool" data-action="compose-attach" title="Attach files (you can also drop files here or paste a screenshot)" aria-label="Attach files"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button><button type="button" class="compose-tool" data-action="compose-secret" title="Keys: see the keys this agent has, insert one into your message, or give it a new one" aria-label="This agent's keys"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3M16 7l3 3M13.5 9.5l2 2"/></svg></button><button type="button" id="compose-model" class="compose-chip" data-action="compose-model" title="Model for this chat"></button><button type="button" id="compose-effort" class="compose-chip" data-action="compose-effort" title="Reasoning effort for this chat" hidden></button><span id="compose-hint"></span></div><button type="button" id="stop-button" class="stop-button" data-action="stop" title="Stop this turn" hidden><span>&#9632;</span> Stop</button><button id="send-button" type="submit" class="send-button" title="Send message (Enter)" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption"><span class="send-caption">${sendCaption()}</span> <span>&#183;</span> Conversations stay on this computer</p></div>`;
+      $('#content').innerHTML=`<div class="conversation-heading"><div class="conversation-identity">${badge(a,true)}<div><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p><div class="identity-meta">${meta(a)}${a.tags?.length?`<span class="heading-tags">${tagChips(a,6)}</span>`:''}</div></div></div><div class="conversation-controls"><button type="button" class="secondary" data-action="chat-terminal">Show terminal beside chat</button><select id="conversation-picker" aria-label="Conversation history" title="Switch between this agent's conversations"></select><button class="icon-button" data-action="new-conversation" title="New conversation (Ctrl + N)" aria-label="New conversation">+</button><button class="icon-button" data-action="export" title="Export this conversation as Markdown" aria-label="Export conversation">&#8595;</button><button class="icon-button history-button" data-action="history-toggle" title="Chat history (${mod()}Shift+H)" aria-label="Chat history"><span class="history-glyph" aria-hidden="true"></span></button>${a.install?.framework==='dsh'?'<button class="secondary" data-action="dsh-web" title="Open DeepSeek Harness\'s own Web UI in the Opaya browser">Web UI</button>':''}<button id="connect-button" class="secondary" data-action="connect"></button></div></div><p class="terminal-chat-note">Chat and the native CLI can use separate conversations. Switching views does not transfer messages.</p><div id="connection-banner"></div><div id="message-list" class="message-list"></div><div class="compose-area"><form id="message-form"><div id="compose-files" class="compose-files" hidden></div><textarea id="message-input" placeholder="Message ${esc(title(a))}..." aria-label="Message ${esc(title(a))}" rows="2" maxlength="80000"></textarea><div class="compose-bottom"><div class="compose-tools"><button type="button" class="compose-tool" data-action="compose-attach" title="Attach files (you can also drop files here or paste a screenshot)" aria-label="Attach files"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg></button><button type="button" class="compose-tool" data-action="compose-secret" title="Keys: see the keys this agent has, insert one into your message, or give it a new one" aria-label="This agent's keys"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 20 3M16 7l3 3M13.5 9.5l2 2"/></svg></button><button type="button" id="compose-model" class="compose-chip" data-action="compose-model" title="Model for this chat"></button><button type="button" id="compose-effort" class="compose-chip" data-action="compose-effort" title="Reasoning effort for this chat" hidden></button><span id="compose-hint"></span></div><button type="button" id="stop-button" class="stop-button" data-action="stop" title="Stop this turn" hidden><span>&#9632;</span> Stop</button><button id="send-button" type="submit" class="send-button" title="Send message (Enter)" aria-label="Send message">&#8593;</button></div></form><p class="compose-caption"><span class="send-caption">${sendCaption()}</span> <span>&#183;</span> Conversations stay on this computer</p></div>`;
       closePicker();
       if(!String(renderKey).startsWith(`["${a.id}"`))enter($('#content'));
       renderKey=JSON.stringify([a.id,title(a),a.description,a.icon,a.provider,location(a),state.activeConversationId]);$('#message-input').value=drafts.get(draftKey())??state.drafts?.[draftKey()]??'';
@@ -214,9 +217,9 @@
     const c=currentConversation(),messages=c?state.histories[c.id]||[]:[],now=performance.now(),conversationKey=`${a.id}/${c?.id||''}`;
     // Existing history appears at once; only messages that arrive while this conversation is open animate in.
     if(messageConversation!==conversationKey){const continuing=messageConversation===`${a.id}/`;messageSeen.clear();messageConversation=conversationKey;if(!continuing)messages.forEach((m,i)=>messageSeen.set(m.id||i,-1e9));}
-    const list=$('#message-list'),atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<110;
+    const list=$('#message-list'),changed=list.dataset.conversation!==conversationKey,previous=chatScroll.get(conversationKey),atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<110;list.dataset.conversation=conversationKey;
     list.innerHTML=messages.length?messages.map((m,i)=>`<article class="message ${m.role==='user'?'user-message':'assistant-message'} ${fresh(messageSeen,m.id||i,now,450)?'message-enter':''}"><div class="message-avatar ${m.role==='user'?'you-avatar':esc(a.provider)}">${m.role==='user'?'S':agentIcon(a)}</div><div class="message-body"><div class="message-meta"><strong>${m.role==='user'?'You':esc(title(a))}</strong><time>${esc(new Date(m.createdAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}</time>${m.status==='streaming'?'<span class="stream-label"><span class="status-dot working"></span> Working</span>':''}</div>${activityMarkup(m,20,a.id)}<div class="message-text">${format(m.content)}${m.status==='streaming'&&!m.content?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}</div>${m.attachments?.length?`<div class="message-files">${m.attachments.map(f=>`<span class="file-chip ${esc(f.kind||'file')}" title="${esc(f.name)}"><span class="file-chip-icon" aria-hidden="true">${fileIcon(f)}</span><span class="file-chip-name">${esc(f.name)}</span><small>${esc(fmtSize(f.size||0))}</small></span>`).join('')}</div>`:''}${m.error?`<div class="message-error">${esc(m.error)}${KEY_ERROR.test(m.error)?' <button type="button" class="text-button" data-action="compose-secret">Give it a key</button>':''}</div>`:''}</div></article>`).join(''):`<div class="chat-empty">${badge(a,true)}<h2>A direct line to ${esc(title(a))}.</h2><p>${a.transport==='ssh'?'The agent runs on your remote machine. Opaya is the window into it.':'Your agent stays on your computer. Opaya brings the conversation together.'}</p><div class="starter-prompts"><button data-action="starter" data-text="What can you help me with, and which tools do you have?">What can you help me with? <span>&#8599;</span></button><button data-action="starter" data-text="Tell me about your current workspace. Please only inspect it; do not change anything.">Get to know this workspace <span>&#8599;</span></button></div><span class="chat-empty-note">${a.status==='connected'?'Connected and ready for your first message.':'Connect above when you are ready.'}</span></div>`;
-    if(atBottom||!messages.length)list.scrollTop=list.scrollHeight;
+    if(changed&&previous&&!previous.bottom)list.scrollTop=previous.top;else if(atBottom||changed||!messages.length)list.scrollTop=list.scrollHeight;
     $('#send-button').disabled=a.status!=='connected'||a.busy||a.protocol==='terminal'||pendingSends.has(a.id);$('#send-button').hidden=!!a.busy;$('#stop-button').hidden=!a.busy;
     $('#compose-hint').textContent=a.busy?'Agent is working':a.status==='connected'?'':'Connect to start chatting';
     renderCompose(a);
@@ -497,7 +500,7 @@
   function openHelp(){
     const k=mod().trim(),tile=(icon,t,where,how,act='',attrs='')=>`<div class="help-tile"><span class="help-tile-ico" aria-hidden="true">${icon}</span><div><strong>${t}</strong><small class="help-where">${where}</small><p>${how}</p>${act?`<button type="button" class="text-button" data-action="${act}" ${attrs}>Open &#8594;</button>`:''}</div></div>`;
     const map=`<section class="help-map"><h3>Where is what</h3><p class="help-find">Looking for something? Press <kbd>${esc(k)}${state.platform==='darwin'?'':'+'}K</kbd> or <strong>Search</strong> at the top of every screen: it finds agents, their settings and actions, machines, chats and keys, and shows where each one lives. <button type="button" class="text-button" data-action="find">Search now &#8594;</button></p><div class="help-tiles">
-      ${tile(AN_ICON.chat,'Your agents','Left sidebar',`Click an agent to open its chat; ${k}+1 to 9 open them in sidebar order. Its own sidebar holds Chat, Console, Overview and Manage.`)}
+      ${tile(AN_ICON.chat,'Your agents','Left sidebar',`Click an agent to restore its last destination; ${k}+1 to 9 open them in sidebar order. Its own sidebar holds Chat, Terminal, and Manage.`)}
       ${tile(AN_ICON.overview,'Manage an agent','Agent sidebar > Manage',`Model &amp; skills (Q), Keys &amp; tools (W), Machine &amp; Docker (E), Deploy &amp; clone (R), Projects (A), Updates &amp; backups (S), Profile (D), Danger zone (F).`)}
       ${tile(AN_ICON.access,'API keys','Vault (sidebar), an agent\'s Keys &amp; tools','Add keys, import them from a .env or your tools, and give each to the agents that need it. Values never show or go into a chat.','vault')}
       ${tile(AN_ICON.library,'Skills and MCP servers','Skills &amp; tools (sidebar), an agent\'s Model &amp; skills','The skills library and MCP servers are shared by all agents; an agent\'s Model &amp; skills shows its own and shares them with another agent.','library')}
@@ -535,7 +538,7 @@
     const toggle=(key,label,hint='',dflt=true)=>`<label class="switch-row"><input type="checkbox" data-setting="${key}" ${on(key,dflt)?'checked':''}><span class="switch" aria-hidden="true"></span><span>${label}${hint?` <small>(${hint})</small>`:''}</span></label>`;
     const choice=(act,value,current,label,small,extra='')=>`<button type="button" class="theme-option compact ${current?'selected':''}" data-action="${act}" data-value="${value}" ${extra}><strong>${label}</strong><small>${small}</small></button>`;
     modal('Settings.','Tune the workspace without changing any agent credentials.',`<div class="settings-grid">
-      <section class="settings-wide"><h3>Chat and console</h3><p class="settings-copy">Selecting an agent opens its chat. Another agent's chat can open as a window beside the page (right-click it > Open chat window); chats you leave while their agent works wait in the status bar.</p><p class="settings-copy">Console opens the agent's terminal</p><div class="theme-options"><button class="theme-option ${st.consoleOpens!=='full'?'selected':''}" data-action="console-opens" data-value="panel"><strong>Next to the chat</strong><small>Below or beside it, as terminal windows</small></button><button class="theme-option ${st.consoleOpens==='full'?'selected':''}" data-action="console-opens" data-value="full"><strong>Full screen</strong><small>Terminal windows fill the main area</small></button></div></section>
+      <section class="settings-wide"><h3>Chat and Terminal</h3><p class="settings-copy">Selecting an agent restores its last destination. Chat shows its graphical conversation. Terminal shows its terminal workspace. Use “Show terminal beside chat” in Chat to combine them. Chat and the native CLI can use separate conversations.</p></section>
       <section><h3>Sidebar</h3><p class="settings-copy">Your agents' sidebar shows their names, or only their icons as a slim strip. The button at its bottom switches too.</p><div class="theme-options"><button class="theme-option ${sidebarRail?'':'selected'}" data-action="rail-set" data-value="full"><strong>Names</strong><small>Full width, with machines and status</small></button><button class="theme-option ${sidebarRail?'selected':''}" data-action="rail-set" data-value="rail"><strong>Icons only</strong><small>A slim strip; more room for the page</small></button></div><p class="settings-copy">What shows in the sidebar besides your agents. Settings stays, so you can turn items back on.</p>${SIDE_ITEMS.map(([key,label,hint])=>`<label class="switch-row"><input type="checkbox" data-side-toggle="${key}" ${sidebarHide.has(key)?'':'checked'}><span class="switch" aria-hidden="true"></span><span>${label} <small>(${hint})</small></span></label>`).join('')}</section>
       <section><h3>Theme</h3><div class="theme-options"><button class="theme-option ${theme==='dark'?'selected':''}" data-action="theme" data-theme="dark"><span class="theme-swatch dark-swatch"></span><strong>Dark</strong><small>Original Opaya look</small></button><button class="theme-option ${theme==='light'?'selected':''}" data-action="theme" data-theme="light"><span class="theme-swatch light-swatch"></span><strong>White</strong><small>Bright workspace</small></button></div></section>
       <section><h3>Notifications</h3><p class="settings-copy">System notifications while Opaya is not in front: hidden, minimized or behind another app. Click one to open that chat.</p>${toggle('notifyReplies','When an agent or the Opaya Agent replies')}${toggle('notifyApprovals','When something waits for your approval')}${toggle('notifyJobs','When installs, clones, updates and fixes finish')}${toggle('notifySound','With sound')}</section>
@@ -550,7 +553,7 @@
       <section><h3>Machines</h3><p class="settings-copy">This computer is <strong>${esc(localName())}</strong>${state.hosts.length?`, with ${state.hosts.length} server${state.hosts.length===1?'':'s'}`:''}. Backups go to <code>${esc(st.backupDir||'Opaya Backups in your home folder')}</code>.</p><div class="settings-buttons"><button class="secondary" data-action="hosts">Open Machines</button><button class="secondary" data-action="local-machine">Name and backup folder</button></div></section>
       <section><h3>Skills and MCP servers</h3><p class="settings-copy">Global skills kept by Opaya, and ${(state.mcpServers||[]).length} saved MCP server${(state.mcpServers||[]).length===1?'':'s'} (GitHub, a browser, a database) that Opaya passes to your agents.</p><div class="settings-buttons"><button class="secondary" data-action="library">Skills library</button><button class="secondary" data-action="mcp-manage">MCP servers</button></div></section>
       <section><h3>Data and privacy</h3><p class="settings-copy">No account and no telemetry. Chats, transcripts and settings stay in Opaya's folder on this computer; API keys and tokens are encrypted with the OS keychain${state.secureStorage===false?' <strong>(not available here)</strong>':''}.</p><button class="secondary" data-action="open-data-folder">Open Opaya's folder</button></section>
-      <section class="settings-wide"><h3>Keyboard shortcuts</h3><div class="shortcut-grid">${[[`${cmd}K`,'Find anything'],[`${cmd}1 to 9`,'Open agent 1 to 9'],[`${cmd}N`,'New chat'],[`${cmd}\``,'Show or hide the terminal'],[`${cmd}B`,'Show or hide the sidebar'],[`${cmd}Shift+M`,'Manage the agent'],[`${cmd}Shift+H`,'Chat history'],[`${cmd}Shift+P`,'Projects'],[`${cmd}+ / ${cmd}-`,'Terminal text size'],['Right-click','Menus for agents, tabs and chats']].map(([k,t])=>`<span><kbd>${esc(k)}</kbd>${esc(t)}</span>`).join('')}</div></section>
+      <section class="settings-wide"><h3>Keyboard shortcuts</h3><div class="shortcut-grid">${[[`${cmd}K`,'Find anything'],[`${cmd}1 to 9`,'Open agent 1 to 9'],[`${cmd}N`,'New chat'],[`${cmd}\``,'Show or hide the terminal'],[`${cmd}B`,'Show or hide the sidebar'],[`${cmd}Shift+M`,'Manage the agent'],[`${cmd}Shift+H`,'Chat history'],[`${cmd}Shift+P`,'Projects'],[`${cmd}+ / ${cmd}-`,'Terminal text size'],[`${cmd}Shift+Arrow`,'Focus terminal pane'],[`${cmd}Shift+[ / ]`,'Previous / next terminal pane'],[`${cmd}Shift+Enter`,'Maximize / restore terminal pane'],['Arrow keys on a separator','Resize terminal panes'],['Right-click','Menus for agents, tabs and chats']].map(([k,t])=>`<span><kbd>${esc(k)}</kbd>${esc(t)}</span>`).join('')}</div></section>
       <section class="settings-wide about"><h3>About</h3><p class="settings-copy">${version}. One place. All your agents.</p><div class="settings-buttons"><button class="text-button" data-action="open-link" data-external="1" data-url="https://github.com/trbojevicstefan/agenthub/blob/main/docs/RELEASE_NOTES.md">What's new &#8599;</button><button class="text-button" data-action="open-link" data-external="1" data-url="https://github.com/trbojevicstefan/agenthub">GitHub &#8599;</button><button class="text-button" data-action="open-link" data-external="1" data-url="https://opaya.dev">opaya.dev &#8599;</button></div></section>
     </div>`,true);
     // The OS keeps "start at sign-in"; ask it, then let the switch change it.
@@ -573,12 +576,12 @@
   // Every result says where it lives (Hermes > Keys & tools, Settings > Theme), so finding something also shows where to
   // find it next time. Enter runs the highlighted result; arrows move; Esc closes.
   const FIND_WORDS={keys:'api key token secret env password',vault:'api key token secret',backup:'save copy restore',backups:'restore folder',uninstall:'delete remove',remove:'delete',clone:'copy duplicate deploy',dockerize:'docker container',update:'upgrade version',restart:'reconnect',itrust:'trust approve automatically permissions',browser:'web pages',transfer:'share copy skills keys',shareSkills:'share copy transfer',mcp:'tools github',models:'model llm',effort:'reasoning thinking',terminal:'cli command line',shell:'terminal command line',files:'folder browse',rename:'name title',groupTags:'group tag',containerLogs:'docker logs',containerRestart:'docker restart',settings:'connection endpoint command',newVps:'server ssh machine'};
-  const SETTINGS_INDEX=[['Chat and console','console terminal opens full screen chat window'],['Sidebar','icons names strip rail hide items'],['Theme','dark light white look'],['Notifications','notify sound replies approvals'],['Chat','enter send ctrl enter tips'],['Terminal','text size font bottom side'],['Startup','start sign in login connect at start'],['iTrust mode','trust approve automatically'],['Opaya Agent','model setup guide'],['Updates','check for updates fix errors automatically version'],['Opaya Vault','keys import'],['Machines','computer name backup folder'],['Skills and MCP servers','skills library tools'],['Data and privacy','folder telemetry privacy'],['Keyboard shortcuts','keys hotkeys shortcuts']];
+  const SETTINGS_INDEX=[['Sidebar','icons names strip rail hide items'],['Theme','dark light white look'],['Notifications','notify sound replies approvals'],['Chat','enter send ctrl enter tips'],['Terminal','text size font bottom side'],['Startup','start sign in login connect at start'],['iTrust mode','trust approve automatically'],['Opaya Agent','model setup guide'],['Updates','check for updates fix errors automatically version'],['Opaya Vault','keys import'],['Machines','computer name backup folder'],['Skills and MCP servers','skills library tools'],['Data and privacy','folder telemetry privacy'],['Keyboard shortcuts','keys hotkeys shortcuts']];
   // Places: the shared screens and windows, run through the same handlers as their buttons.
   const FIND_PLACES=[['overview','Home','Sidebar','Your agents at a glance'],['fleet','Machines','Sidebar','Every machine and its agents'],['vault','Opaya Vault','Sidebar','API keys: add, import, give to agents'],['vault-import','Import keys','Opaya Vault','From a .env, any text file or your tools'],['library','Skills library','Library','Global skills for any agent'],['mcp-manage','MCP servers','Library','Tools such as GitHub or a browser'],['docker-manager','Docker manager','Machines','Containers and images',{id:'local'}],['playground','Playground','Sidebar','Ask two agents the same question'],['opaya','Opaya Agent','Sidebar','Install, connect or repair by asking'],['install-catalog','Install agents','Home','Hermes, Claude Code, Codex, OpenClaw and more'],['discover','Discover agents','Sidebar','Find agents on this computer'],['add','Add connection','Home','An agent or an API by hand'],['new-vps','New VPS','Machines','A new server with its own SSH key'],['connect-all','Connect all','Home','Connect every agent'],['tool-updates','Check for updates','Home','Agents and tools with newer versions'],['update-all','Update all agents','Home','Every installation on every machine'],['local-terminal','Local terminal','Home','A shell on this computer'],['files-local','Files','Home','Browse files on this computer'],['settings','Settings','Sidebar','Theme, chat, terminal, notifications'],['help','Help','Sidebar','Where is what, and connection help']];
   const fire=(name,data={})=>{const b=document.createElement('button');b.type='button';b.hidden=true;b.dataset.action=name;Object.assign(b.dataset,data);document.body.append(b);b.click();b.remove();};
   function findIndex(){
-    const out=[],sel=selected(),secName=k=>AN_SECTIONS.find(s=>s.key===k)?.name||({chat:'Chat',console:'Console'})[k]||k;
+    const out=[],sel=selected(),secName=k=>AN_SECTIONS.find(s=>s.key===k)?.name||({chat:'Chat',console:'Terminal'})[k]||k;
     const agents=[...state.agents].sort((x,y)=>(y.id===sel?.id)-(x.id===sel?.id));
     for(const a of agents){const mine=a.id===sel?.id,who=title(a);
       out.push({group:'Agents',icon:badge(a),label:who,path:[`${description(a)}`,location(a)],words:`${labels[a.provider]||''} ${placeText(a)} ${a.group||''} ${(a.tags||[]).join(' ')}`,run:()=>openChat(a.id),boost:mine?20:0,status:a});
@@ -646,71 +649,121 @@
     list.addEventListener('mousemove',e=>{const b=e.target.closest('[data-find]');if(b&&Number(b.dataset.find)!==at){at=Number(b.dataset.find);for(const r of list.querySelectorAll('.find-row'))r.classList.toggle('active',r===b);}});
     draw();input.focus();input.select();
   }
-  // ---- Terminal windows: every session is a window; there are no tabs -------------------------------------------------
-  // A window belongs to the screen it was opened from: an agent (its id) or '' (Home, Machines, the Opaya Agent...). The
-  // panel shows that screen's windows side by side, stacked or in a grid (layout.arrange). A hidden window keeps running
-  // and comes back from the agent's Console menu, the panel's hidden-windows button or the right-click menu.
-  // panes: the windows on screen, in order ([''] when there are none); paneFocus: the one in use.
-  let panes=[''],paneFocus=0,termOrder=0;const paneSize=new Map();
-  const MIN_PANE=240,MIN_PANE_H=110;
+  // Terminal layouts belong to an agent context; the session service owns the processes.
+  const TL=window.OpayaTerminalLayout,terminalWorkspaces=new Map();
+  let panes=[''],paneFocus=0,termOrder=0,restoringWorkspace=true;
   const termCtx=()=>inAgentView()?selected().id:'';
   const ctxWindows=(ctx=termCtx())=>[...terminalViews.values()].filter(v=>(v.ctx||'')===ctx&&!v.poppedOut).sort((x,y)=>x.order-y.order);
-  const ARRANGE={cols:['Side by side','Windows next to each other'],rows:['Stacked','Windows above each other'],grid:['Grid','Windows in a grid']};
-  // Side by side or stacked turns into a grid when the windows would get too narrow or too low.
-  function arrangeNow(n){
-    const a=ARRANGE[layout.arrange]?layout.arrange:'cols',box=$('#terminal-views');
-    if(a==='cols'&&n>Math.max(1,Math.floor((box?.clientWidth||960)/MIN_PANE)))return 'grid';
-    if(a==='rows'&&n>Math.max(1,Math.floor((box?.clientHeight||400)/MIN_PANE_H)))return 'grid';
-    return a;
+  const ARRANGE={cols:['Side by side','Replace this layout with columns'],rows:['Stacked','Replace this layout with rows'],grid:['Grid','Replace this layout with a grid']};
+  function workspace(ctx=termCtx()){
+    if(!terminalWorkspaces.has(ctx))terminalWorkspaces.set(ctx,{ctx,tree:null,active:'',visible:false,dock:'bottom'});
+    return terminalWorkspaces.get(ctx);
+  }
+  function savedWorkspaces(){
+    if(!restoringWorkspace&&termCtxShown!==null){const w=workspace(termCtxShown);w.active=currentTerminal;w.dock=layout.terminal;if(!document.body.classList.contains('terminal-stage'))w.visible=!$('#terminal-panel').hidden;}
+    return [...terminalWorkspaces.values()];
   }
   function paneRoot(){
     let root=$('#terminal-panes');
     if(!root){root=document.createElement('div');root.id='terminal-panes';root.className='terminal-panes';$('#terminal-views').prepend(root);
-      root.addEventListener('pointerdown',event=>{const pane=event.target.closest('.terminal-pane');if(!pane||event.target.closest('.pane-grip'))return;const i=Number(pane.dataset.index);if(i!==paneFocus){paneFocus=i;currentTerminal=panes[i]||'';markPanes();}},true);
-      root.addEventListener('click',event=>{const b=event.target.closest('[data-pane-action]');if(!b)return;const id=panes[Number(b.closest('.terminal-pane').dataset.index)],act=b.dataset.paneAction;
-        if(act==='hide')hideWindow(id);else if(act==='popout')action(()=>popoutTerminal(id));else if(act==='close')action(()=>endWindow(id));else if(act==='show')showWindow(b.dataset.id);});
+      root.addEventListener('pointerdown',event=>{const pane=event.target.closest('.terminal-pane');if(!pane||event.target.closest('.pane-grip'))return;const i=Number(pane.dataset.index);if(i!==paneFocus){paneFocus=i;currentTerminal=panes[i]||'';workspace().active=currentTerminal;markPanes();saveView();}},true);
+      root.addEventListener('click',event=>{const b=event.target.closest('[data-pane-action]');if(!b)return;const id=b.closest('.terminal-pane').dataset.id,act=b.dataset.paneAction;
+        if(act==='hide')hideWindow(id);else if(act==='popout')action(()=>popoutTerminal(id));else if(act==='close')action(()=>endWindow(id));else if(act==='show')showWindow(b.dataset.id);
+        else if(act==='split')openToolbarMenu(b,splitItems(id),'Split terminal');else if(act==='maximize')maximizePane(id);});
     }
     return root;
   }
   function terminalPool(){let pool=$('#terminal-pool');if(!pool){pool=document.createElement('div');pool.id='terminal-pool';pool.hidden=true;$('#terminal-views').append(pool);}return pool;}
   function normalizePanes(){
-    const shown=ctxWindows().filter(v=>!v.hiddenPane).map(v=>v.id);
-    panes=shown.length?shown:[''];
-    const at=panes.indexOf(currentTerminal);paneFocus=at>=0?at:Math.min(Math.max(0,paneFocus),panes.length-1);
+    const w=workspace(),shown=ctxWindows().filter(v=>!v.hiddenPane).map(v=>v.id);
+    w.tree=TL.reconcile(w.tree,shown);
+    if(w.maximized&&!shown.includes(w.maximized))w.maximized='';
+    panes=TL.leaves(w.tree);if(!panes.length)panes=[''];
+    if(!panes.includes(currentTerminal))currentTerminal=panes.includes(w.active)?w.active:panes[0];
+    paneFocus=Math.max(0,panes.indexOf(currentTerminal));w.active=currentTerminal;
   }
-  function markPanes(){
-    const root=paneRoot();for(const el of root.querySelectorAll('.terminal-pane'))el.classList.toggle('focused',Number(el.dataset.index)===paneFocus&&panes.length>1);
-  }
-  // The toolbar's left side: how the windows are arranged, and the hidden ones.
+  function markPanes(){for(const el of paneRoot().querySelectorAll('.terminal-pane'))el.classList.toggle('focused',el.dataset.id===currentTerminal);}
   function renderArrange(){
     const box=$('#terminal-arrange');if(!box)return;const hidden=ctxWindows().filter(v=>v.hiddenPane);
-    const html=`${arrangePicker()}${hidden.length?`<button type="button" class="term-btn hidden-windows" data-action="terminal-hidden" title="Windows that keep running out of sight">${hidden.length} hidden</button>`:''}`;
+    const html=`${arrangePicker()}${workspace().maximized?'<button type="button" class="term-btn" data-action="terminal-maximize">Restore panes</button>':''}${hidden.length?`<button type="button" class="term-btn hidden-windows" data-action="terminal-hidden" title="Sessions that keep running out of sight">${hidden.length} hidden</button>`:''}`;
     if(box.dataset.html!==html){box.dataset.html=html;box.innerHTML=html;}
   }
   function renderPanes(){
     normalizePanes();
-    const root=paneRoot(),pool=terminalPool(),n=panes.filter(Boolean).length,arrange=arrangeNow(n);
-    // Reuse pane elements, so terminals are only moved when they change place (moving restarts nothing, but costs a fit).
-    while(root.children.length>panes.length*2-1)root.lastElementChild.remove();
-    panes.forEach((id,i)=>{
-      let pane=root.children[i*2];
-      if(!pane){if(i>0){const grip=document.createElement('div');grip.className='pane-grip';grip.setAttribute('role','separator');grip.setAttribute('aria-label','Resize terminal windows');root.append(grip);}
-        pane=document.createElement('section');pane.className='terminal-pane';pane.innerHTML='<header class="terminal-pane-head"><span class="pane-dot" aria-hidden="true"></span><span class="pane-title"></span><button type="button" class="pane-btn" data-pane-action="hide" title="Hide (keeps running)" aria-label="Hide window"><span class="pane-hide-glyph" aria-hidden="true"></span></button><button type="button" class="pane-btn" data-pane-action="popout" title="Open in a separate window" aria-label="Open in a separate window"><span class="term-popout-glyph" aria-hidden="true"></span></button><button type="button" class="pane-btn danger" data-pane-action="close" title="End session" aria-label="End session">&#10005;</button></header><div class="terminal-pane-body"></div>';root.append(pane);}
-      pane.dataset.index=i;pane.style.flex=arrange==='grid'?'':`${paneSize.get(id)||1} 1 0`;
-      const view=terminalViews.get(id),body=pane.querySelector('.terminal-pane-body');
+    const root=paneRoot(),pool=terminalPool(),w=workspace(),tree=w.maximized?{id:w.maximized}:w.tree;
+    const signature=JSON.stringify(tree,(key,value)=>key==='ratio'?undefined:value),focused=viewOf(document.activeElement);
+    if(root.dataset.tree!==signature){
+      const existing=new Map([...root.querySelectorAll('.terminal-pane')].map(el=>[el.dataset.id,el]));
+      for(const view of terminalViews.values())if(!TL.leaves(tree).includes(view.id)){view.element.hidden=true;pool.append(view.element);}
+      function build(node,path=''){
+        if(!node||node.id){
+          const id=node?.id||'';let pane=existing.get(id);
+          if(!pane){pane=document.createElement('section');pane.className='terminal-pane';pane.dataset.id=id;
+            pane.innerHTML='<header class="terminal-pane-head"><span class="pane-dot" aria-hidden="true"></span><span class="pane-title"></span><button type="button" class="pane-btn" data-pane-action="split" title="Split terminal" aria-label="Split terminal">+</button><button type="button" class="pane-btn" data-pane-action="maximize" title="Maximize or restore pane" aria-label="Maximize or restore pane">&#9633;</button><button type="button" class="pane-btn" data-pane-action="hide" title="Hide (keeps running)" aria-label="Hide terminal">&#8722;</button><button type="button" class="pane-btn" data-pane-action="popout" title="Open in separate window" aria-label="Open in separate window">&#8599;</button><button type="button" class="pane-btn danger" data-pane-action="close" title="End session" aria-label="End session">&#10005;</button></header><div class="terminal-pane-body"></div>';}
+          return pane;
+        }
+        const split=document.createElement('div');split.className='terminal-branch';split.dataset.axis=node.axis;split.dataset.path=path;
+        const grip=document.createElement('div');grip.className='pane-grip';grip.tabIndex=0;grip.dataset.path=path;grip.setAttribute('role','separator');grip.setAttribute('aria-label','Resize terminal panes');grip.setAttribute('aria-orientation',node.axis==='x'?'vertical':'horizontal');
+        split.append(build(node.first,path+'0'),grip,build(node.second,path+'1'));return split;
+      }
+      root.replaceChildren(build(tree));root.dataset.tree=signature;
+    }
+    for(const branch of root.querySelectorAll('.terminal-branch')){
+      const node=TL.at(w.tree,branch.dataset.path),[first,grip,second]=branch.children;
+      first.style.flex=`${node.ratio} 1 0`;second.style.flex=`${1-node.ratio} 1 0`;
+      const minimum=TL.minimum(node);branch.style.minWidth=minimum.width+'px';branch.style.minHeight=minimum.height+'px';
+      grip.setAttribute('aria-valuenow',Math.round(node.ratio*100));grip.setAttribute('aria-valuemin','5');grip.setAttribute('aria-valuemax','95');
+    }
+    for(const pane of root.querySelectorAll('.terminal-pane')){
+      const id=pane.dataset.id,view=terminalViews.get(id),body=pane.querySelector('.terminal-pane-body');pane.dataset.index=panes.indexOf(id);
       pane.classList.toggle('empty',!view);pane.classList.toggle('ended',!!view?.exited);pane.classList.toggle('attention',!!view?.attention);
       pane.querySelector('.pane-title').textContent=view?tabTitle(view)+(view.exited?' (ended)':''):'';
-      if(view){if(view.element.parentElement!==body){body.replaceChildren(view.element);}view.element.hidden=false;}
+      if(view){if(view.element.parentElement!==body)body.replaceChildren(view.element);view.element.hidden=false;}
       else{const hidden=ctxWindows().filter(v=>v.hiddenPane),a=inAgentView()?selected():null;
-        body.innerHTML=`<div class="terminal-placeholder"><div><p>${a?`No terminal for ${esc(title(a))} yet.`:'No terminal here yet.'}</p><div class="placeholder-actions">${a&&hasCli(a)?'<button type="button" class="secondary" data-action="terminal-cli"><span class="term-play" aria-hidden="true"></span> Agent CLI</button>':''}<button type="button" class="secondary" data-action="terminal-shell">+ Shell</button></div>${hidden.length?`<p class="placeholder-hidden">Hidden: ${hidden.map(v=>`<button type="button" class="text-button" data-pane-action="show" data-id="${esc(v.id)}">${esc(tabTitle(v))}</button>`).join(' ')}</p>`:''}</div></div>`;}
-    });
-    root.dataset.arrange=arrange;root.classList.toggle('split',panes.length>1);
-    root.style.gridTemplateColumns=arrange==='grid'?`repeat(${Math.ceil(Math.sqrt(panes.length))},minmax(0,1fr))`:'';
-    for(const grip of root.querySelectorAll(':scope > .pane-grip'))grip.setAttribute('aria-orientation',arrange==='rows'?'horizontal':'vertical');
-    for(const view of terminalViews.values())if(!panes.includes(view.id)&&view.element.parentElement!==pool){view.element.hidden=true;pool.append(view.element);}
+        body.innerHTML=`<div class="terminal-placeholder"><div><p>${a?`No terminal for ${esc(title(a))} yet.`:'No terminal here yet.'}</p><div class="placeholder-actions">${a&&hasCli(a)?'<button type="button" class="secondary" data-action="terminal-cli">Agent CLI</button>':''}<button type="button" class="secondary" data-action="terminal-shell">+ Shell</button></div>${hidden.length?`<p>Hidden: ${hidden.map(v=>`<button type="button" class="text-button" data-pane-action="show" data-id="${esc(v.id)}">${esc(tabTitle(v))}</button>`).join(' ')}</p>`:''}</div></div>`;}
+    }
     markPanes();renderArrange();
-    for(const id of panes){const view=terminalViews.get(id);if(view&&!view.poppedOut)requestAnimationFrame(()=>{if(!view.exited)view.core.fitAndReport(view.report);else{try{view.fit.fit();}catch{}}});}
+    for(const id of TL.leaves(tree)){const view=terminalViews.get(id);if(view)requestAnimationFrame(()=>{if(!view.exited)view.core.fitAndReport(view.report);else{try{view.fit.fit();}catch{}}});}
+    if(focused&&!focused.element.hidden&&!focused.poppedOut)focused.term.focus();
   }
+  const splitItems=id=>[['left','Split left'],['right','Split right'],['above','Split above'],['below','Split below']].map(([direction,label])=>({label,run:()=>splitTerminal(id,direction)}));
+  async function splitTerminal(id,direction){
+    const view=terminalViews.get(id);if(!view)return;
+    await openTerminal({sourceId:id,newSession:true,split:direction});
+  }
+  function maximizePane(id=currentTerminal){const w=workspace();w.maximized=w.maximized?'':id;renderPanes();focusCurrent();}
+  function focusPane(direction){
+    const w=workspace();if(w.maximized){w.maximized='';renderPanes();}
+    const rects=[...paneRoot().querySelectorAll('.terminal-pane')].map(el=>{const r=el.getBoundingClientRect();return {id:el.dataset.id,left:r.left,right:r.right,top:r.top,bottom:r.bottom};});
+    const id=direction==='next'||direction==='previous'?panes[(paneFocus+(direction==='next'?1:panes.length-1))%panes.length]:TL.neighbor(rects,currentTerminal,direction);
+    activateTerminal(id);saveView();
+  }
+  function resizePane(grip,ratio){
+    const node=TL.at(workspace().tree,grip.dataset.path);if(!node||node.id)return;
+    const box=grip.parentElement,pixels=(node.axis==='x'?box.clientWidth:box.clientHeight)-7;
+    node.ratio=TL.resize(node,ratio,pixels);renderPanes();
+  }
+  document.addEventListener('pointerdown',event=>{
+    const grip=event.target.closest('#terminal-panes .pane-grip');if(!grip)return;event.preventDefault();
+    const node=TL.at(workspace().tree,grip.dataset.path),rect=grip.parentElement.getBoundingClientRect();
+    grip.setPointerCapture(event.pointerId);
+    const move=e=>resizePane(grip,(node.axis==='x'?e.clientX-rect.left:e.clientY-rect.top)/((node.axis==='x'?rect.width:rect.height)-7));
+    grip.addEventListener('pointermove',move);grip.addEventListener('lostpointercapture',()=>{grip.removeEventListener('pointermove',move);saveView();},{once:true});
+  });
+  document.addEventListener('keydown',event=>{
+    const grip=event.target.closest('#terminal-panes .pane-grip');if(!grip)return;
+    const node=TL.at(workspace().tree,grip.dataset.path),keys=node.axis==='x'?['ArrowLeft','ArrowRight']:['ArrowUp','ArrowDown'];
+    if(!keys.includes(event.key))return;event.preventDefault();resizePane(grip,node.ratio+(event.key===keys[0]?-.05:.05));saveView();
+  });
+  // Ctrl/Cmd+Shift avoids AltGr and the shell's unmodified navigation keys.
+  function paneShortcut(event){
+    if(event.type!=='keydown'||event.altKey||!event.shiftKey||!(state.platform==='darwin'?event.metaKey:event.ctrlKey)||$('#app-dialog')||$('#terminal-panel').hidden)return false;
+    const directions={ArrowLeft:'left',ArrowRight:'right',ArrowUp:'above',ArrowDown:'below',BracketLeft:'previous',BracketRight:'next'};
+    const direction=directions[event.code||event.key];
+    if(direction)focusPane(direction);else if(event.code==='Enter'||event.key==='Enter')maximizePane();else return false;
+    event.preventDefault();event.stopPropagation();return true;
+  }
+  document.addEventListener('keydown',event=>{if(event.target.closest('.terminal-pane,.terminal-toolbar'))paneShortcut(event);},true);
   // focus: false when the change comes from elsewhere (a session ended, was renamed or started again, the selected agent
   // changed in the background); the keyboard then stays where the user is typing. bring: show this window on the screen in
   // use (it was hidden, or opened from another screen).
@@ -721,13 +774,13 @@
     renderPanes();if(!panes.includes(currentTerminal))currentTerminal=panes[paneFocus]||'';paneFocus=Math.max(0,panes.indexOf(currentTerminal));markPanes();
     for(const shown of panes){const v=terminalViews.get(shown);if(v&&v.attention){v.attention=false;}}
     const active=terminalViews.get(currentTerminal);if(!active)closeTerminalSearch();
-    if(focus&&active&&!active.poppedOut)requestAnimationFrame(()=>active.term.focus());
+    if(focus&&active&&!active.poppedOut)requestAnimationFrame(()=>{if(currentTerminal===active.id&&(active.ctx||'')===termCtx()&&!active.element.hidden&&!$('#terminal-panel').hidden)active.term.focus();});
   }
   function showWindow(id){$('#terminal-panel').hidden=false;activateTerminal(id,{bring:true});saveView();render();}
   function hideWindow(id){
-    const view=terminalViews.get(id);if(!view)return;view.hiddenPane=true;if(currentTerminal===id)currentTerminal='';
+    const view=terminalViews.get(id);if(!view)return;view.hiddenPane=true;workspace().maximized='';if(currentTerminal===id)currentTerminal='';
     activateTerminal(currentTerminal,{focus:false});
-    // The last window out of sight closes the panel; Console or the hidden windows bring it back.
+    // The last window out of sight closes the panel; Terminal or the hidden windows bring it back.
     if(!panes.filter(Boolean).length&&!document.body.classList.contains('terminal-stage'))$('#terminal-panel').hidden=true;
     saveView();render();
   }
@@ -741,18 +794,14 @@
   function typingInTerminal(){const v=viewOf(document.activeElement);return !!v&&!v.exited&&!v.poppedOut&&!v.element.hidden&&!$('#terminal-panel').hidden;}
   function typingElsewhere(){const el=document.activeElement;return !!el&&el!==document.body&&!viewOf(el)&&(el.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));}
   function focusCurrent(){const v=terminalViews.get(currentTerminal);if(v&&!v.poppedOut&&!v.element.hidden&&!$('#terminal-panel').hidden)v.term.focus();}
-  // The panel follows the screen in use: it shows that screen's windows, and is open there if it was open the last time
-  // (or the screen has windows and the panel is open now). Someone typing in a terminal keeps it until they stop: a
-  // selection made in the background (the Opaya Agent saving a connection, an install finishing) does not swap it out.
-  let termCtxShown=null;const ctxPanelOpen=new Map();
+  // The panel follows the selected context and restores that context's active pane, dock position and visibility.
+  let termCtxShown=null;
   function syncTerminalContext(){
-    const ctx=termCtx();if(ctx===termCtxShown)return;if(termCtxShown!==null&&typingInTerminal())return;
-    const stage=document.body.classList.contains('terminal-stage'),open=!$('#terminal-panel').hidden;
-    if(termCtxShown!==null)ctxPanelOpen.set(termCtxShown,open);
-    termCtxShown=ctx;const windows=ctxWindows(ctx).filter(v=>!v.hiddenPane);
-    currentTerminal=windows.find(v=>v.id===currentTerminal)?.id||windows[0]?.id||'';
-    $('#terminal-panel').hidden=!(stage||windows.length&&(ctxPanelOpen.get(ctx)??open));
-    activateTerminal(currentTerminal,{focus:false});
+    const ctx=termCtx();if(ctx===termCtxShown)return;
+    if(termCtxShown!==null)workspace(termCtxShown).active=currentTerminal;
+    termCtxShown=ctx;const w=workspace(ctx);currentTerminal=w.active;layout.terminal=w.dock;
+    $('#terminal-panel').hidden=!(document.body.classList.contains('terminal-stage')||w.visible);
+    placePanes();activateTerminal(currentTerminal,{focus:false});
   }
   // The keyboard goes back to the terminal it was in when a menu over it closed by itself (the window lost focus) and the
   // window comes back: focus was left on the page, and typing went nowhere until the terminal was clicked again.
@@ -767,25 +816,15 @@
     if(id.startsWith('host_')&&state.hosts.some(h=>h.id===id.slice(5)))return {hostId:id.slice(5)};
     return {local:true};
   }
-  // Drag the grip between two windows to share the space: their widths side by side, their heights stacked.
-  document.addEventListener('pointerdown',event=>{
-    const grip=event.target.closest('#terminal-panes .pane-grip');if(!grip)return;const root=$('#terminal-panes'),rows=root.dataset.arrange==='rows';if(root.dataset.arrange==='grid')return;event.preventDefault();
-    const before=grip.previousElementSibling,after=grip.nextElementSibling,a=panes[Number(before.dataset.index)],b=panes[Number(after.dataset.index)];
-    const size=el=>rows?el.offsetHeight:el.offsetWidth,total=size(before)+size(after),share=(paneSize.get(a)||1)+(paneSize.get(b)||1),start=rows?event.clientY:event.clientX,startBefore=size(before),min=(rows?MIN_PANE_H:MIN_PANE)*0.75;
-    grip.setPointerCapture(event.pointerId);document.body.classList.add('pane-resizing');
-    const move=e=>{const w=Math.max(min,Math.min(total-min,startBefore+(rows?e.clientY:e.clientX)-start));paneSize.set(a,share*w/total);paneSize.set(b,share-paneSize.get(a));before.style.flex=`${paneSize.get(a)} 1 0`;after.style.flex=`${paneSize.get(b)} 1 0`;};
-    grip.addEventListener('pointermove',move);
-    grip.addEventListener('lostpointercapture',()=>{grip.removeEventListener('pointermove',move);document.body.classList.remove('pane-resizing');renderPanes();saveView();},{once:true});
-  });
   // Tab names: an agent's CLI is just the agent; shells say so.
-  const tabTitle=v=>String(v.title||'').replace(/ \/ agent$/,'').replace(/ \/ shell$/,' \u00b7 shell');
+  const tabTitle=v=>String(v.title||'').replace(/ \/ agent$/,' · CLI').replace(/ \/ shell$/,' \u00b7 shell');
   const inAgentView=()=>!overview&&!opayaView&&!playgroundView&&!!selected();
   // What a new terminal can be: an agent's CLI (in the open chat's project), a shell for that agent, this computer or a
-  // saved machine. split: open beside the focused pane instead of as a tab.
-  function newTerminalItems(split=null,view=null){
+  // saved machine.
+  function newTerminalItems(view=null){
     const a=view?state.agents.find(x=>x.id===view.agentId):inAgentView()?selected():null;
     const p=a&&!view?projectOf(currentConversation()):null,project=a&&p&&fitsProject(a,p)?p:null,where=project?` in ${project.name}`:'';
-    const go=target=>openTerminal(target);
+    const go=target=>openTerminal({...target,newSession:true});
     return [
       a&&hasCli(a)&&{icon:'&#10095;',label:`${title(a)} CLI${where}`,run:()=>go({agentId:a.id,mode:'agent',projectId:project?.id})},
       a&&{icon:'&gt;_',label:`Shell: ${title(a)}${where}`,run:()=>go({agentId:a.id,projectId:project?.id})},
@@ -840,13 +879,15 @@
       view&&{icon:'&#8634;',label:'Clear',run:back(()=>view.term.clear())},
       ...(()=>{const who=view&&(state.agents.find(x=>x.id===view.agentId)||(inAgentView()?selected():null));return who&&who.protocol!=='terminal'&&who.surface!=='terminal'?[{icon:'&#9993;',label:`Ask ${title(who)} about this`,disabled:!text,hint:text?'':'Select text first',run:()=>action(()=>askInChat(who,text))}]:[];})(),
       '-',
-      {icon:'&#9707;',label:'New window',submenu:newTerminalItems(null,view)},
+      {icon:'&#9707;',label:'New window',submenu:newTerminalItems(view)},
+      view&&{label:'Split terminal',submenu:splitItems(view.id)},
+      view&&{label:workspace().maximized?'Restore panes':'Maximize pane',run:()=>maximizePane(view.id)},
       windowsMenu().length&&{icon:'&#9776;',label:'Windows',submenu:windowsMenu()},
       '-',
       view&&{icon:'&#9998;',label:'Rename...',run:()=>renameTerminal(view.id)},
       view&&!view.exited&&{icon:'&#10697;',label:'Open in separate window',run:()=>popoutTerminal(view.id)},
       view&&{icon:'&#9645;',label:'Hide (keeps running)',run:()=>hideWindow(view.id)},
-      view&&{icon:'&#10005;',label:view.exited?'Close saved output':'End session',danger:!view.exited,run:()=>closeTerminalTab(view.id)}
+      view&&{icon:'&#10005;',label:view.exited?'Close saved output':'End session',danger:!view.exited,run:()=>endWindow(view.id)}
     ];
     openMenu(event.clientX,event.clientY,items,view?tabTitle(view):'Terminal',pane);
   }
@@ -871,19 +912,20 @@
   });
   // background: only add a tab (a terminal the service opened while someone types in another one). focus: false leaves the
   // keyboard, and an open dialog, where they are (someone typing in the chat box or a form).
-  async function openTerminal({agentId=selected()?.id,hostId,mode='shell',local=false,terminalId,restoring=false,split=null,projectId,background=false,focus=true}={}){
-    if(!agentId&&!hostId&&!local&&!terminalId){toast('Select an agent, or open a machine from Machines.');return;}
+  async function openTerminal({agentId=selected()?.id,hostId,mode='shell',local=false,terminalId,restoring=false,split=null,sourceId,newSession=false,projectId,background=false,focus=true}={}){
+    const source=sourceId&&terminalViews.get(sourceId),context=source?.ctx??termCtx(),target=sourceId||currentTerminal;
+    if(!agentId&&!hostId&&!local&&!terminalId&&!sourceId){toast('Select an agent, or open a machine from Machines.');return;}
     if(typeof window.Terminal!=='function'||!window.FitAddon||!window.OpayaTerminal){toast('The terminal UI did not load. Reinstall the complete Opaya build rather than moving the executable out of its installation folder.',true);return;}
     if(!restoring&&!background){if(focus)closeModal();$('#terminal-panel').hidden=false;}
     const a=local?null:state.agents.find(a=>a.id===agentId),h=state.hosts.find(h=>h.id===hostId);
     const active=terminalViews.get(currentTerminal),size=active&&!active.exited?{cols:active.term.cols,rows:active.term.rows}:{};
-    const result=terminalId?await api.terminalAttach({id:terminalId}):await api.terminalOpen({agentId:hostId||local?undefined:agentId,hostId,mode,local,projectId,...size});
+    const result=terminalId?await api.terminalAttach({id:terminalId}):await api.terminalOpen({agentId:hostId||local?undefined:agentId,hostId,mode,local,projectId,sourceId,newSession,...size});
     if(!terminalViews.has(result.id)){
       const element=document.createElement('div');element.className='terminal-view';$('#terminal-views').append(element);
       const archived=!!result.exited;
       const core=window.OpayaTerminal.create(element,{id:result.id,archived,fontSize:terminalFont,windowsBuild:result.windowsBuild||0,light:theme==='light',onSearch:()=>openTerminalSearch(),onContextMenu:event=>terminalContextMenu(event,terminalViews.get(result.id)),onZoom:applyFont,onRestart:()=>action(()=>restartTerminal(result.id)),onNotice:(text,error)=>toast(text,error)}),{term,fit}=core;
       const report=(cols,rows)=>action(()=>api.terminalResize({id:result.id,cols,rows}));
-      const owner=result.agentId||a?.id||'',view={id:result.id,agentId:owner,ctx:restoring?(state.agents.some(x=>x.id===owner)?owner:''):termCtx(),order:++termOrder,hiddenPane:false,mode:result.mode||mode,remote:result.remote,title:result.title||`${a?title(a):h?.name||(local?'This computer':'SSH')} / ${mode}`,term,fit,core,report,element,exited:!!result.exited,lastSeq:result.seq||0};terminalViews.set(result.id,view);
+      const owner=result.agentId||a?.id||'',view={id:result.id,agentId:owner,ctx:restoring?(state.agents.some(x=>x.id===owner)?owner:''):context,order:++termOrder,hiddenPane:false,mode:result.mode||mode,remote:result.remote,title:result.title||`${a?title(a):h?.name||(local?'This computer':'SSH')} / ${mode}`,term,fit,core,report,element,exited:!!result.exited,lastSeq:result.seq||0};terminalViews.set(result.id,view);
       // Typing goes to the live session in pieces the service accepts (a large paste used to be refused whole), in order.
       // An ended session takes none until it starts again (Enter, restartTerminal).
       term.onData(data=>{if(view.exited||view.poppedOut)return;for(const part of window.OpayaTerminal.chunks(data))action(()=>api.terminalWrite({id:result.id,data:part}));});
@@ -893,9 +935,11 @@
       if(archived)term.write(window.OpayaTerminal.endedNote(view));
       for(const event of terminalPending.get(result.id)||[])terminalEvent(event);terminalPending.delete(result.id);
     }
+    if(split){const w=workspace(context);w.tree=TL.split(w.tree,target,result.id,split);w.maximized='';}
+    if(context!==termCtx()&&!restoring){render();saveView();return result.id;}
     // Opened in the background (someone types in another terminal): its window appears, marked, and takes no keyboard.
-    if(background){const view=terminalViews.get(result.id),keep=currentTerminal;view.attention=true;activateTerminal(result.id,{focus:false,bring:true});activateTerminal(keep,{focus:false});return result.id;}
-    activateTerminal(result.id,{focus,bring:!restoring});if(!restoring)saveView();
+    if(background){const view=terminalViews.get(result.id),keep=currentTerminal;view.attention=true;activateTerminal(result.id,{focus:false,bring:true});activateTerminal(keep,{focus:false});render();saveView();return result.id;}
+    activateTerminal(result.id,{focus,bring:!restoring});if(!restoring){render();saveView();}
     return result.id;
   }
   // Enter in an ended session starts it again in its tab: a remote one reattaches to its tmux session, which usually kept
@@ -904,8 +948,6 @@
     const view=terminalViews.get(id);if(!view||!view.exited||view.poppedOut||view.restarting)return;view.restarting=true;
     try{
       const r=await api.terminalRestart({id,cols:view.term.cols,rows:view.term.rows});
-      // The same agent, mode and folder already runs in another tab (one live session each): go there.
-      if(r.id!==id){if(terminalViews.has(r.id))activateTerminal(r.id,{bring:true});else await openTerminal({terminalId:r.id});toast('This session already runs in another window.');return;}
       // Normally the 'restarted' event came first; this covers it arriving later.
       if(view.exited&&r.seq>view.lastSeq){view.exited=false;view.core.setLive(true);activateTerminal(currentTerminal,{focus:false});}
     }finally{view.restarting=false;}
@@ -986,6 +1028,8 @@
     if(name==='agent-menu'){const a=state.agents.find(a=>a.id===id);if(a){const r=button.getBoundingClientRect();openMenu(r.left,r.bottom+4,agentMenu(a),title(a),button.closest('[data-agent-id]'));}return;}
     if(name==='hosts'){openHosts();return;}
     if(name==='manage'){openManage(id);return;}
+    if(name==='agent-machine'){const a=selected();if(a)openFleet(dockerKeyOf(a));return;}
+    if(name==='chat-terminal'){openToolbarMenu(button,[{label:'Show terminal beside chat',run:()=>showTerminalWithChat('right')},{label:'Show terminal below chat',run:()=>showTerminalWithChat('bottom')}],'Terminal placement');return;}
     if(name==='agent-section'){const a=selected();if(a)action(()=>openManage(a.id,button.dataset.key||'overview'));return;}
     if(name==='an-sub'){const a=selected(),sec=button.dataset.section,k=button.dataset.key;if(!a)return;
       if(k==='export'){button.dataset.action='export';button.click();button.dataset.action='an-sub';return;}
@@ -1043,7 +1087,6 @@
     if(name==='fleet'){openFleet();return;}
     if(name==='project-remote'){const p=(state.projects||[]).find(x=>x.id===id);if(p)openProjectAgents(p);return;}
     if(name==='copy-send'||name==='copy-bring'){const p=(state.projects||[]).find(x=>x.id===id),a=state.agents.find(x=>x.id===button.dataset.agent);if(p&&a)action(()=>name==='copy-send'?sendToRemote(p,a):bringFromRemote(p,a));return;}
-    if(name==='console-opens'){action(async()=>{await api.saveSettings({consoleOpens:button.dataset.value});await refresh();openSettings();toast(button.dataset.value==='full'?'Console fills the main area.':'Console opens next to the chat.');});return;}
     if(name==='manage-run'){const item=manageKeyed[button.dataset.key];if(item&&!item.disabled)action(()=>item.run());return;}
     if(name==='local-machine'){openLocalMachine();return;}
     if(name==='docker-manager'){openDocker(id);return;}
@@ -1083,7 +1126,8 @@
     if(name==='terminal-search'){openTerminalSearch();return;}
     if(name==='terminal-new'){openToolbarMenu(button,newTerminalItems(),'New terminal');return;}
     if(name==='terminal-more'){openToolbarMenu(button,terminalMoreMenu(),'Terminal');return;}
-    if(name==='terminal-split'){action(()=>openTerminal(currentTerminal?terminalTarget(terminalViews.get(currentTerminal)):inAgentView()?{agentId:selected().id}:{local:true}));return;}
+    if(name==='terminal-split'){openToolbarMenu(button,splitItems(currentTerminal),'Split terminal');return;}
+    if(name==='terminal-maximize'){maximizePane();return;}
     action(async()=>{
       if(name==='select'||name==='switch-select'){closeModal();await openChat(id);}
       else if(name==='connect-all')await connectAll();
@@ -1156,14 +1200,14 @@
     const view=terminalViews.get(id);if(!view||view.closing)return;view.closing=true;
     // The window goes away even if the service could not end the session (for example its agent was removed).
     try{try{const r=await api.terminalClose({id});if(r?.warning)toast(`Window closed. ${r.warning}`,true);}catch(error){toast(`Window closed. ${error.message}`,true);}
-      view.observer.disconnect();view.core.dispose();view.element.remove();terminalViews.delete(id);paneSize.delete(id);if(currentTerminal===id)currentTerminal='';
+      view.observer.disconnect();view.core.dispose();view.element.remove();terminalViews.delete(id);if(currentTerminal===id)currentTerminal='';
       activateTerminal(currentTerminal,{focus:false});if(!panes.filter(Boolean).length&&!document.body.classList.contains('terminal-stage'))$('#terminal-panel').hidden=true;saveView();}finally{view.closing=false;}
   }
 
   async function popoutTerminal(id){
     // The window reports its own size; back in a pane, this copy reports its size again (resetSize).
     const view=terminalViews.get(id);if(!view)return;view.poppedOut=true;view.term.options.disableStdin=true;view.core.resetSize();
-    try{await api.terminalPopout({id});if(panes.filter(x=>x&&x!==id).length)activateTerminal(panes.find(x=>x&&x!==id));else if(currentTerminal===id)$('#terminal-panel').hidden=true;}catch(error){view.poppedOut=false;view.term.options.disableStdin=view.exited;throw error;}
+    try{await api.terminalPopout({id});if(panes.filter(x=>x&&x!==id).length)activateTerminal(panes.find(x=>x&&x!==id));else if(currentTerminal===id)$('#terminal-panel').hidden=true;render();saveView();}catch(error){view.poppedOut=false;view.term.options.disableStdin=view.exited;throw error;}
   }
   function renameTerminal(id){
     const view=terminalViews.get(id);if(!view)return;
@@ -1184,9 +1228,9 @@
     const id=a.id,index=state.agents.findIndex(x=>x.id===id),connected=a.status==='connected',cap=a.install||{};
     const source=a.clone&&state.agents.find(x=>x.id===a.clone.from);
     return {
-      open:a.protocol==='terminal'?{icon:'&gt;_',label:'Open console',run:()=>setAgentMode(a,'console')}:{icon:'&#9993;',label:'Open chat window',run:()=>openChatWindow(a)},
+      open:a.protocol==='terminal'?{icon:'&gt;_',label:'Open terminal',run:()=>setAgentMode(a,'console')}:{icon:'&#9993;',label:'Open chat window',run:()=>openChatWindow(a)},
       surface:a.protocol==='terminal'?null:a.surface==='terminal'?{icon:'&#9993;',label:'Allow chat again',hint:'its vendor refused chats',run:async()=>{await api.updateAgentDisplay({id,surface:''});await refresh();toast(`${title(a)} chats in Opaya again.`);}}:{icon:'&#9634;',label:'Full chat view',run:()=>setAgentMode(a,'full')},
-      console:a.protocol!=='terminal'&&{icon:'&gt;_',label:'Open console',run:()=>setAgentMode(a,'console')},
+      console:a.protocol!=='terminal'&&{icon:'&gt;_',label:'Open terminal',run:()=>setAgentMode(a,'console')},
       newChat:{icon:'+',label:'New chat',hint:`${mod()}N`,disabled:a.protocol==='terminal',run:async()=>{await api.newConversation({agentId:id});state=await api.snapshot();await setAgentMode(a,'chat');$('#message-input')?.focus();}},
       connect:a.busy?{icon:'&#9632;',label:'Stop current turn',run:()=>api.stop({id})}:{icon:connected?'&#9675;':'&#9679;',label:connected?'Disconnect':a.status==='connecting'?'Connecting...':'Connect',disabled:a.status==='connecting',run:()=>connected?api.disconnect({id}):api.connect({id})},
       clearError:a.error&&{icon:'!',label:'Clear connection error',run:async()=>{await api.clearError({id});await refresh();}},
@@ -1195,7 +1239,7 @@
       projects:{icon:'&#9635;',label:'Projects...',run:()=>openAgentProjects(a)},
       files:{icon:'&#9656;',label:'Browse files',run:()=>openFiles({agentId:id,label:`${title(a)} / ${location(a)}`})},
       shell:{icon:'&gt;_',label:'Open shell',run:()=>openTerminal({agentId:id})},
-      cli:{icon:'&#10095;',label:'Run native CLI',run:()=>openTerminal({agentId:id,mode:'agent'})},
+      cli:{icon:'&#10095;',label:'Run native CLI',disabled:!hasCli(a),hint:hasCli(a)?'':'This connection has no native CLI.',run:()=>openTerminal({agentId:id,mode:'agent'})},
       log:{icon:'&#8801;',label:'Connection log...',run:()=>openDiagnostics(id)},
       skills:{icon:'&#10022;',label:'Skills & commands...',run:()=>openSkills(id)},
       transfer:{icon:'&#8644;',label:'Share with another agent...',disabled:state.agents.length<2,run:()=>openTransfer(a)},
@@ -1212,11 +1256,11 @@
       groupTags:{icon:'&#9776;',label:'Group & tags...',run:()=>openGroupTags(a)},
       moveUp:{icon:'&#8593;',label:'Move up',disabled:index<=0,run:async()=>{await api.reorderAgents({id,direction:'up'});await refresh();}},
       moveDown:{icon:'&#8595;',label:'Move down',disabled:index>=state.agents.length-1,run:async()=>{await api.reorderAgents({id,direction:'down'});await refresh();}},
-      update:{icon:'&#8635;',label:cap.kind==='docker'?'Update container...':cap.kind==='hermes-profile'?'Update Hermes...':'Update...',disabled:!cap.update,hint:cap.update?'':'nothing to update',run:()=>updateAgent(a)},
-      backup:{icon:'&#8615;',label:'Back up to this computer...',disabled:!cap.backup,run:()=>openBackup(a)},
-      clone:{icon:'&#10697;',label:'Clone...',disabled:!cloneable(a),hint:cloneable(a)?'':'API connection',run:()=>openClone(a)},
+      update:{icon:'&#8635;',label:cap.kind==='docker'?'Update container...':cap.kind==='hermes-profile'?'Update Hermes...':'Update...',disabled:!cap.update,hint:cap.update?'':'This installation does not support updates.',run:()=>updateAgent(a)},
+      backup:{icon:'&#8615;',label:'Back up to this computer...',disabled:!cap.backup,hint:cap.backup?'':'This installation does not support backups.',run:()=>openBackup(a)},
+      clone:{icon:'&#10697;',label:'Clone...',disabled:!cloneable(a),hint:cloneable(a)?'':'This connection has no cloneable installation.',run:()=>openClone(a)},
       redeploy:a.clone&&{icon:'&#8634;',label:`Redeploy from ${title(source||{name:'source'})}`,run:()=>redeploy(a)},
-      uninstall:{icon:'&#10006;',label:cap.kind==='hermes-profile'?'Delete Hermes profile...':cap.kind==='docker'?'Remove container...':'Uninstall...',danger:true,disabled:!cap.uninstall,hint:cap.uninstall?'':'API connection',run:()=>openUninstall(a)},
+      uninstall:{icon:'&#10006;',label:cap.kind==='hermes-profile'?'Delete Hermes profile...':cap.kind==='docker'?'Remove container...':'Uninstall...',danger:true,disabled:!cap.uninstall,hint:cap.uninstall?'':'This connection has no managed installation to uninstall.',run:()=>openUninstall(a)},
       settings:{icon:'&#9881;',label:'Connection settings...',run:()=>openAgentForm(a)},
       remove:{icon:'&#10005;',label:'Remove connection...',danger:true,run:async()=>{if(await api.removeAgent({id})){closeModal();if(state.activeAgentId===id)overview=true;opayaView=false;playgroundView=false;await refresh();toast('Connection removed.');}}}
     };
@@ -1295,7 +1339,7 @@
   // ---- Manage: the agent's command center, the screen a left click on an agent opens ------------------------------
   // One screen per agent: a 3D stage with what it is connected to, quick actions, where it can run (drag the agent card
   // onto a machine or Docker to clone it there), keys (drag a vault key onto an agent to give it), Docker on its machine,
-  // its projects with git, recent chats and every maintenance action. Chat opens in a window of the chat dock; Console
+  // its projects with git, recent chats and every maintenance action. Chat opens in a window of the chat dock; Terminal
   // turns the main area into a grid of terminals.
   // mgSection: the Manage section open for the selected agent (overview or one of AN_SECTIONS).
   let mgSection='overview';
@@ -1308,38 +1352,39 @@
   const agentProjects=a=>(state.projects||[]).filter(p=>(p.agentIds||[]).includes(a.id));
   const agentChats=a=>state.conversations.filter(c=>c.agentId===a.id).slice().sort((x,y)=>String(y.createdAt).localeCompare(String(x.createdAt)));
   function topbar(crumb,page='',screen=''){
-    const a=selected();
-    $('#topbar').innerHTML=`<button type="button" class="topbar-back" data-action="nav-back" ${navBack.length?'':'disabled'} title="${navBack.length?esc(`Back to ${navLabel(navBack.at(-1))} (Alt+Left)`):'Back'}" aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><div class="breadcrumb">${a&&screen?`<button type="button" class="crumb-agent" data-action="agent-section" data-key="overview" title="${esc(title(a))}: overview">${esc(title(a))}</button> <span>/</span> `:''}${crumb}</div>${page?`<div class="topbar-page">${page}</div>`:''}<div class="topbar-spacer"></div><button type="button" class="topbar-search" data-action="find" title="Find anything: agents, settings, actions, machines, chats and keys"><span class="topbar-search-ico" aria-hidden="true">${dkIcon('inspect')}</span><span class="topbar-search-text">Search</span><kbd>${esc(mod().trim())}${state.platform==='darwin'?'':'+'}K</kbd></button><div class="topbar-actions"></div>`;
+    const a=selected(),chatty=a&&a.protocol!=='terminal'&&a.surface!=='terminal';
+    const destinations=a&&screen?`<div class="agent-context"><strong>${esc(title(a))}</strong><button type="button" class="text-button" data-action="agent-machine" title="Open machine">${esc(location(a))}</button><span>${dot(a)} ${esc(status(a))}</span>${screen==='chat'&&(crumb||page)?`<div class="agent-chat-context">${crumb}${page}</div>`:''}</div><nav class="agent-destinations" aria-label="Agent destinations">${(chatty?[['chat','Chat'],['console','Terminal'],['manage','Manage']]:[['console','Terminal'],['manage','Manage']]).map(([mode,label])=>`<button type="button" class="secondary ${screen===mode?'selected':''}" data-action="agent-mode" data-mode="${mode}" data-id="${esc(a.id)}" ${screen===mode?'aria-current="page"':''}>${label}</button>`).join('')}</nav>`:'';
+    $('#topbar').innerHTML=`<button type="button" class="topbar-back" data-action="nav-back" ${navBack.length?'':'disabled'} title="${navBack.length?esc(`Back to ${navLabel(navBack.at(-1))} (Alt+Left)`):'Back'}" aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>${destinations||`<div class="breadcrumb">${crumb}</div>${page?`<div class="topbar-page">${page}</div>`:''}<div class="topbar-spacer"></div>`}<button type="button" class="topbar-search" data-action="find" title="Find anything: agents, settings, actions, machines, chats and keys"><span class="topbar-search-ico" aria-hidden="true">${dkIcon('inspect')}</span><span class="topbar-search-text">Search</span><kbd>${esc(mod().trim())}${state.platform==='darwin'?'':'+'}K</kbd></button><div class="topbar-actions"></div>`;
   }
-  async function openManage(id,section='overview'){
+  async function openManage(id,section=manageSections.get(id)||'overview'){
     const a=state.agents.find(x=>x.id===id);if(!a)return;
-    mgSection=AN_SECTIONS.some(s=>s.key===section)?section:'overview';
+    savedWorkspaces();
+    mgSection=AN_SECTIONS.some(s=>s.key===section)?section:'overview';manageSections.set(id,mgSection);
     overview=false;opayaView=false;playgroundView=false;closeModal();closeMenu();agentModes.set(id,'manage');
     // The selection must be in state before rendering, or render() would show another agent.
     if(state.activeAgentId!==id){await api.select({id});state=await api.snapshot();}
+    $('#terminal-panel').hidden=!workspace(a.id).visible;
     render();saveView();
     loadInstallInfo(a);loadBackups(a);loadKeys(a);if(a.install?.kind!=='remote-api')loadDocker(dockerKeyOf(a));for(const p of agentProjects(a))if(!projectGit.get(p.id)?.info)loadProjectGit(p);
   }
-  // Selecting an agent opens its chat (agents without a chat open their console).
-  async function openChat(id){const a=state.agents.find(x=>x.id===id);if(a)await setAgentMode(a,'chat');}
+  async function openChat(id){const a=state.agents.find(x=>x.id===id);if(a)await setAgentMode(a,modeOf(a));}
   async function setAgentMode(a,mode){
+    savedWorkspaces();
     if(mode==='manage'){await openManage(a.id);return;}
-    // An agent whose vendor stopped accepting chats from other apps (the service marks it) works in its console.
-    if(mode==='chat'&&a.surface==='terminal'){toast(`${title(a)} does not accept chats from other apps: its own CLI opens instead.`);mode='console';}
-    if(mode==='chat')mode=a.protocol==='terminal'?'console':'full';
-    // Console opens the terminal next to or below the chat; full screen only when that is the preference (or the
-    // agent has no chat at all).
-    if(mode==='console'&&state.settings?.consoleOpens!=='full'&&a.protocol!=='terminal'&&a.surface!=='terminal'){
-      agentModes.set(a.id,'chat');overview=false;opayaView=false;playgroundView=false;closeModal();
-      if(state.activeAgentId!==a.id){await api.select({id:a.id});state=await api.snapshot();}
-      stageAgent='';render();saveView();
-      const mine=[...terminalViews.values()].find(v=>v.agentId===a.id&&!v.exited&&v.mode==='agent')||[...terminalViews.values()].find(v=>v.agentId===a.id&&!v.exited);
-      if(mine){$('#terminal-panel').hidden=false;activateTerminal(mine.id);}else await openTerminal(hasCli(a)?{agentId:a.id,mode:'agent'}:{agentId:a.id});
-      render();saveView();return;
-    }
-    agentModes.set(a.id,mode==='full'?'chat':'console');overview=false;opayaView=false;playgroundView=false;closeModal();
+    if(mode==='full')mode='chat';
+    if(mode==='chat'&&(a.protocol==='terminal'||a.surface==='terminal'))mode='console';
+    agentModes.set(a.id,mode);overview=false;opayaView=false;playgroundView=false;closeModal();
     if(state.activeAgentId!==a.id){await api.select({id:a.id});state=await api.snapshot();}
+    const w=workspace(a.id);layout.terminal=w.dock;$('#terminal-panel').hidden=mode!=='console'&&!w.visible;
     stageAgent='';render();saveView();
+  }
+  async function showTerminalWithChat(position){
+    const a=selected();if(!a||a.protocol==='terminal'||a.surface==='terminal')return;
+    await setAgentMode(a,'chat');
+    const w=workspace(a.id);w.visible=true;w.dock=position;layout.terminal=position;$('#terminal-panel').hidden=false;placePanes();
+    const own=ctxWindows(a.id).find(v=>v.id===w.active)||ctxWindows(a.id).find(v=>!v.hiddenPane);
+    if(own){$('#terminal-panel').hidden=false;activateTerminal(own.id);}else await agentTerminal();
+    saveView();
   }
   async function loadKeys(a,force=false){
     if(!force&&keyLists.has(a.id))return keyLists.get(a.id);
@@ -1529,10 +1574,10 @@
     const item=(cls,attrs,icon,label,extra='')=>`<button type="button" class="an-item ${cls}" ${attrs}><span class="an-ico" aria-hidden="true">${icon}</span><span class="an-label">${esc(label)}</span>${extra}</button>`;
     const acts=manageActions(a),sw={itrust:!!a.itrust,browser:!!a.browser,pin:!!a.pinned},hasExport=screen==='chat'&&!!currentConversation();
     // The open view's or section's actions, indented under it; each opens its section, marks its row and runs.
-    const sub=(section,open)=>{if(!open)return '';const list=(AN_SUB[section]||[]).filter(([k])=>k==='export'?hasExport:acts[k]&&!acts[k].disabled);if(!list.length)return '';
-      // Console also lists its terminal windows: a hidden one comes back with a click.
+    const sub=(section,open)=>{if(!open)return '';const list=(AN_SUB[section]||[]).filter(([k])=>k==='export'?hasExport:acts[k]);if(!list.length)return '';
+      // Terminal also lists its terminal windows: a hidden one comes back with a click.
       const wins=section==='console'?ctxWindows(a.id).map(v=>`<button type="button" class="an-sub-item an-win ${v.hiddenPane?'hidden':''} ${v.exited?'ended':''}" data-action="an-term" data-id="${esc(v.id)}" title="${v.hiddenPane?'Hidden: click to show it':'Its window'}"><span>${esc(tabTitle(v))}</span><small>${v.exited?'ended':v.hiddenPane?'hidden':'open'}</small></button>`).join(''):'';
-      return `<div class="an-sub" role="group">${wins}${list.map(([k,label])=>`<button type="button" class="an-sub-item ${acts[k]?.danger?'danger':''}" data-action="an-sub" data-section="${section}" data-key="${k}" ${k in sw?`role="switch" aria-checked="${sw[k]}"`:''}><span>${esc(k==='terminal'&&!hasCli(a)?'Shell':label)}</span>${k in sw?`<span class="an-switch ${sw[k]?'on':''}" aria-hidden="true"></span>`:''}</button>`).join('')}</div>`;};
+      return `<div class="an-sub" role="group">${wins}${list.map(([k,label])=>`<button type="button" class="an-sub-item ${acts[k]?.danger?'danger':''}" data-action="an-sub" data-section="${section}" data-key="${k}" ${acts[k]?.disabled?`disabled title="${esc(acts[k].hint||'Unavailable for this agent')}"`:''} ${k in sw?`role="switch" aria-checked="${sw[k]}"`:''}><span>${esc(label)}${acts[k]?.disabled?`<small>${esc(acts[k].hint||'Unavailable for this agent')}</small>`:''}</span>${k in sw?`<span class="an-switch ${sw[k]?'on':''}" aria-hidden="true"></span>`:''}</button>`).join('')}</div>`;};
     const caret=open=>`<span class="an-caret ${open?'open':''}" aria-hidden="true">&#8250;</span>`;
     const keys=keyLists.get(a.id),backAt=backupLists.get(a.id)?.backups?.[0]?.createdAt,running=agentJobs(a).length;
     const flag={access:keys&&!keys.keys.length?'warn':'',care:running?'busy':a.install?.backup&&backupLists.has(a.id)&&(!backAt||Date.now()-new Date(backAt)>7*864e5)?'warn':'',profile:a.error?'bad':''};
@@ -1542,8 +1587,8 @@
       </div>
       <nav class="an-views" aria-label="${esc(title(a))}">
         ${chatty?item(screen==='chat'?'active':'',`data-action="agent-mode" data-mode="chat" data-id="${esc(a.id)}" title="Chat"`,AN_ICON.chat,'Chat',(winOpen&&screen!=='chat'?'<span class="an-live" title="Its chat window is open"></span>':'')+caret(screen==='chat'))+sub('chat',screen==='chat'):''}
-        ${item(`${screen==='console'?'active':''} ${termOpen&&screen!=='console'?'open':''}`,`data-action="agent-mode" data-mode="console" data-id="${esc(a.id)}" title="Console: its terminal"`,AN_ICON.console,'Console',(termOpen&&screen!=='console'?'<span class="an-live" title="Open next to the chat"></span>':'')+caret(screen==='console'||termOpen))+sub('console',screen==='console'||termOpen)}
-        ${item(screen==='manage'&&mgSection==='overview'?'active':'','data-action="agent-section" data-key="overview" title="Overview: everything at a glance"',AN_ICON.overview,'Overview')}
+        ${item(`${screen==='console'?'active':''} ${termOpen&&screen!=='console'?'open':''}`,`data-action="agent-mode" data-mode="console" data-id="${esc(a.id)}" title="Terminal: its terminal"`,AN_ICON.console,'Terminal',(termOpen&&screen!=='console'?'<span class="an-live" title="Open next to the chat"></span>':'')+caret(screen==='console'||termOpen))+sub('console',screen==='console'||termOpen)}
+        ${item(screen==='manage'?'active':'',`data-action="agent-mode" data-mode="manage" data-id="${esc(a.id)}" title="Manage this agent"`,AN_ICON.overview,'Manage')}
       </nav>
       <div class="an-scroll">
         ${chatty?`<section class="an-group"><header><span>Chats</span><button type="button" class="an-add" data-action="an-new-chat" data-id="${esc(a.id)}" title="New chat (${mod()}N)" aria-label="New chat">${AN_ICON.plus}</button></header>
@@ -1564,11 +1609,11 @@
     if(Array.isArray(a.efforts)&&a.efforts.length)keyed.effort={key:'effort',icon:'&#9889;',label:`Reasoning effort: ${a.effort?EFFORT_LABELS[a.effort]||a.effort:'auto'}`,run:()=>openDefaultEffort(a)};
     if(['hermes','openclaw'].includes(a.provider))keyed.gateway={key:'gateway',icon:'&#9889;',label:'Gateway status',run:()=>openGateway()};
     // The CLI when the agent has one; an API agent has only the shell (its own "shell" action), not a second copy of it.
-    keyed.terminal={key:'terminal',icon:'&gt;_',label:hasCli(a)?`Open ${title(a)} CLI`:'Open shell',run:()=>openTerminal(hasCli(a)?{agentId:a.id,mode:'agent'}:{agentId:a.id})};
+    keyed.terminal={key:'terminal',icon:'&gt;_',label:`Open ${title(a)} CLI`,disabled:!hasCli(a),hint:hasCli(a)?'':'This connection has no native CLI.',run:()=>openTerminal({agentId:a.id,mode:'agent'})};
     keyed.fix={key:'fix',icon:'&#10038;',label:'Check & fix with Opaya Agent',run:()=>askOpayaToFix(a)};
     keyed.keys={key:'keys',icon:'&#9919;',label:'Keys',run:()=>openAgentKeys(a)};
     keyed.fullChat={key:'fullChat',icon:'&#9634;',label:'Full chat view',run:()=>setAgentMode(a,'full')};
-    keyed.console={key:'console',icon:'&gt;_',label:'Console',run:()=>setAgentMode(a,'console')};
+    keyed.console={key:'console',icon:'&gt;_',label:'Terminal',run:()=>setAgentMode(a,'console')};
     keyed.restart={key:'restart',icon:'&#8635;',label:'Reconnect',hint:'Disconnect and connect again',disabled:a.busy||a.status==='connecting',run:async()=>{if(a.status==='connected')await api.disconnect({id:a.id});await api.connect({id:a.id});toast(`${title(a)} reconnected.`);}};
     keyed.copyId={key:'copyId',icon:'#',label:'Copy agent ID',run:async()=>{await api.clipboardWrite({text:a.id});toast('Agent ID copied.');}};
     if(a.command)keyed.copyCommand={key:'copyCommand',icon:'&#10095;',label:'Copy launch command',run:async()=>{await api.clipboardWrite({text:[a.command,...(a.args||[])].join(' ')});toast('Launch command copied.');}};
@@ -1615,13 +1660,13 @@
     // A row: icon, label with help, value, then a chevron (one action), a switch, or nothing (read-only).
     const row=(k,label,help,value='',o={})=>{const can=o.act||ok(k),sw=o.sw!==undefined,tone=o.tone?` ${o.tone}`:'';
       const inner=`<span class="set-ico" aria-hidden="true">${o.icon||ICON[k]||AN_ICON[k]||''}</span><span class="set-text"><strong>${esc(label)}</strong>${help?`<small>${esc(help)}</small>`:''}</span>${value!==''?`<span class="set-val${tone}" title="${esc(value)}">${esc(value)}</span>`:''}${sw?`<span class="set-switch ${o.sw?'on':''}" aria-hidden="true"></span>`:can?`<span class="set-go" aria-hidden="true">${o.go||'&#8250;'}</span>`:''}`;
-      if(!can)return o.always?`<div class="set-row">${inner}</div>`:'';
+      if(!can)return keyed[k]?.disabled?`<div class="set-row unavailable" aria-disabled="true">${inner}<small class="unavailable-reason">${esc(keyed[k].hint||'Unavailable for this agent')}</small></div>`:o.always?`<div class="set-row">${inner}</div>`:'';
       const attrs=o.act?`data-action="${o.act}"${o.id?` data-id="${esc(o.id)}"`:''}`:`data-action="manage-run" data-key="${k}"`;
       return `<button type="button" class="set-row${o.danger?' danger':''}" ${attrs} ${sw?`role="switch" aria-checked="${!!o.sw}"`:''}>${inner}</button>`;};
     const card=(name,rows,note='')=>{const r=rows.filter(Boolean).join('');return r?`<section class="set-group">${name?`<h2>${esc(name)}</h2>`:''}<div class="set-card">${r}</div>${note?`<p class="set-note">${note}</p>`:''}</section>`:'';};
     const S=AN_SECTIONS.find(s=>s.key===mgSection)||AN_SECTIONS[0];
     const head=(s,actions='')=>`<header class="pg-head"><span class="pg-ico" aria-hidden="true">${s.icon}</span><div class="pg-title"><h1>${esc(s.name)}</h1><p>${esc(s.desc)}</p></div>${actions?`<div class="pg-actions">${actions}</div>`:''}</header>`;
-    const pbtn=(k,label,cls='secondary')=>ok(k)?`<button type="button" class="${cls}" data-action="manage-run" data-key="${k}">${esc(label)}</button>`:'';
+    const pbtn=(k,label,cls='secondary')=>keyed[k]?`<span class="manage-quick"><button type="button" class="${cls}" data-action="manage-run" data-key="${k}" ${keyed[k].disabled?'disabled':''}>${esc(label)}</button>${keyed[k].disabled?`<small>${esc(keyed[k].hint||'Unavailable for this agent')}</small>`:''}</span>`:'';
     const keysVal=keyList?keyList.keys.length?keyList.keys.map(k=>k.name).join(', '):'None':'Reading...';
     const dockerVal=dv?dv.running?`${dv.containers.filter(c=>c.state==='running').length} of ${dv.containers.length} running / v${dv.version}`:'Not running':'Checking...';
     const statusTone=a.error?'bad':a.status==='connected'?'ok':'';
@@ -1630,13 +1675,14 @@
           <div class="mg-card glass ov-card" data-drag="agent" data-drag-id="${esc(a.id)}" title="Drag onto a machine in Deploy & clone to copy ${esc(title(a))} there">
             <div class="mg-id">${badge(a,true)}<div class="mg-id-text"><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p></div></div>
             <div class="ov-facts"><span class="ov-status ${esc(a.busy?'working':a.error?'error':a.status||'disconnected')}"><i></i>${esc(status(a))}</span>${facts.map(([f,t])=>`<span class="ov-chip ${t}">${esc(f)}</span>`).join('')}</div>
-            <div class="ov-actions">${ok('connect')?`<button type="button" class="${a.status==='connected'?'secondary':'primary'}" data-action="manage-run" data-key="connect">${esc(keyed.connect.label.replace(/\.\.\.$/,''))}</button>`:''}<button type="button" class="secondary" data-action="agent-mode" data-mode="chat" data-id="${esc(a.id)}">Chat</button><button type="button" class="secondary" data-action="agent-mode" data-mode="console" data-id="${esc(a.id)}">Console</button>${pbtn('update','Update')}${pbtn('backup','Back up')}</div>
+            <div class="ov-actions">${ok('connect')?`<button type="button" class="${a.status==='connected'?'secondary':'primary'}" data-action="manage-run" data-key="connect">${esc(keyed.connect.label.replace(/\.\.\.$/,''))}</button>`:''}${a.protocol!=='terminal'&&a.surface!=='terminal'?`<button type="button" class="secondary" data-action="agent-mode" data-mode="chat" data-id="${esc(a.id)}">Chat</button>`:''}<button type="button" class="secondary" data-action="agent-mode" data-mode="console" data-id="${esc(a.id)}">Terminal</button></div>
           </div></section>`;
     const pages={
       overview:()=>{
         const glance=(key,lines)=>{const s=AN_SECTIONS.find(x=>x.key===key);return `<button type="button" class="glance" data-action="agent-section" data-key="${key}"><header><span class="glance-ico" aria-hidden="true">${s.icon}</span><strong>${esc(s.name)}</strong><span class="set-go" aria-hidden="true">&#8250;</span></header><dl>${lines.filter(l=>l&&l[1]!=='').map(([t,v,tone])=>`<div><dt>${esc(t)}</dt><dd class="${tone||''}" title="${esc(v)}">${esc(v)}</dd></div>`).join('')}</dl></button>`;};
         return `${a.error?`<div class="inline-notice error-notice"><span>!</span><div><strong>Connection needs attention</strong><p>${esc(a.error)}</p><button type="button" class="text-button" data-action="manage-run" data-key="fix">Let the Opaya Agent fix it &#8594;</button></div></div>`:''}
           ${running.length?`<div class="ov-jobs">${running.map(j=>`<button type="button" class="ov-job" data-action="job-restore" title="${esc(j.title)}"><span>${esc(j.title)}</span><i style="--p:${jobPercent(j)}%"></i><small>${jobPercent(j)}%</small></button>`).join('')}</div>`:''}
+          <div class="ov-actions ov-manage-actions" aria-label="Management actions">${pbtn('update','Update')}${pbtn('clone','Clone')}${pbtn('backup','Back up')}${pbtn('settings','Connection settings')}${pbtn('machines','Open machine')}</div>
           <div class="glance-grid">
             ${glance('model',[['Model',modelText(a.activeModel||a.model)||'Its own setting'],keyed.effort?['Reasoning',a.effort?EFFORT_LABELS[a.effort]||a.effort:'Auto']:null,['Skills',skillList?String(skillList.skills?.length||0):'...']])}
             ${glance('access',[['API keys',keysVal,keyList&&!keyList.keys.length?'warn':''],['MCP servers',mcps.length?mcps.map(s=>s.name).join(', '):'None'],['Permissions',[a.itrust&&'iTrust',a.browser&&'Browser'].filter(Boolean).join(', ')||'Asks first']])}
@@ -2087,12 +2133,11 @@
       action(async()=>{if(await api.removeAgent({id:src.id})){closeModal();await refresh();toast(`${title(src)}'s old connection is removed; the copy stays.`);}});});
   }
   // ---- Arranging terminal windows -----------------------------------------------------------------------------------
-  // Side by side, stacked or a grid, in the panel next to or below the chat and in Console full screen alike.
+  // Side by side, stacked or a grid, in the panel next to or below the chat and in Terminal full screen alike.
   const ARRANGE_ICON={cols:'<span class="arr-ico cols" aria-hidden="true"><i></i><i></i></span>',rows:'<span class="arr-ico rows" aria-hidden="true"><i></i><i></i></span>',grid:'<span class="arr-ico grid" aria-hidden="true"><i></i><i></i><i></i><i></i></span>'};
-  const arrangePicker=()=>`<div class="grid-picker arrange-picker" role="radiogroup" aria-label="Arrange terminal windows">${Object.keys(ARRANGE).map(k=>`<button type="button" role="radio" class="grid-pick ${(layout.arrange||'cols')===k?'selected':''}" data-action="terminal-arrange" data-arrange="${k}" aria-checked="${(layout.arrange||'cols')===k}" title="${esc(ARRANGE[k][0])}: ${esc(ARRANGE[k][1])}">${ARRANGE_ICON[k]}</button>`).join('')}</div>`;
+  const arrangePicker=()=>`<div class="grid-picker arrange-picker" role="group" aria-label="Terminal layout presets">${Object.keys(ARRANGE).map(k=>`<button type="button" class="grid-pick" data-action="terminal-arrange" data-arrange="${k}" title="${esc(ARRANGE[k][0])}: ${esc(ARRANGE[k][1])}">${ARRANGE_ICON[k]}</button>`).join('')}</div>`;
   function setArrange(k){
-    if(!ARRANGE[k])return;layout.arrange=k;renderPanes();saveView();
-    for(const b of document.querySelectorAll('[data-action="terminal-arrange"]')){const on=b.dataset.arrange===k;b.classList.toggle('selected',on);b.setAttribute('aria-checked',String(on));}
+    if(!ARRANGE[k])return;layout.arrange=k;const w=workspace();w.tree=TL.preset(panes.filter(Boolean),k);w.maximized='';renderPanes();saveView();
   }
   window.addEventListener('resize',()=>{if(!$('#terminal-panel').hidden)requestAnimationFrame(renderPanes);});
   // A window's own menu (right-click its title bar).
@@ -2232,7 +2277,7 @@
   let guide=null;const guideDismissed=()=>tipsSeen.has('guide-closed');
   const guideOn=()=>!!guide;
   function startGuide(){guide={step:'hello',way:'',goals:new Set(),agents:new Set(),trust:true,facts:null,plan:null,jobId:'',keyPreset:'google',keyError:'',answers:{}};opayaView=true;overview=false;playgroundView=false;render();saveView();
-    api.guideScan().then(f=>{if(guide){guide.facts=f;renderOpaya();}}).catch(e=>{if(guide){guide.facts={error:e.message,tools:{},signedIn:{}};renderOpaya();}});}
+    api.guideScan().then(f=>{if(guide){guide.facts=f;if(opayaView)renderOpaya();}}).catch(e=>{if(guide){guide.facts={error:e.message,tools:{},signedIn:{}};if(opayaView)renderOpaya();}});}
   function closeGuide(){guide=null;if(!tipsSeen.has('guide-closed')){tipsSeen.add('guide-closed');saveView();}opayaCount=-1;renderOpaya();}
   const gBubble=(html,{you=false,cls=''}={})=>`<article class="message ${you?'user-message':'assistant-message'} guide-msg ${cls}"><div class="message-avatar ${you?'you-avatar':'opaya-avatar'}">${you?'S':'<span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""></span>'}</div><div class="message-body"><div class="message-meta"><strong>${you?'You':'Opaya'}</strong>${you?'':'<span class="guide-tag">setup guide</span>'}</div><div class="message-text">${html}</div></div></article>`;
   const gAnswer=(text,back)=>gBubble(`${esc(text)} <button type="button" class="text-button guide-change" data-guide="back" data-to="${back}">Change</button>`,{you:true});
@@ -3974,7 +4019,7 @@
     dialog.addEventListener('click',e=>{const choice=e.target.closest('[data-choice]');if(choice)finish(choice.dataset.choice);});dialog.addEventListener('cancel',e=>{e.preventDefault();finish('deny');});document.body.append(dialog);dialog.showModal();dialog.querySelector('button').focus();
   }
   api.onApproval?.(request=>{approvalQueue.push(request);showApproval();});
-  api.onTerminalDocked?.(({id})=>{const view=terminalViews.get(id);if(view){view.poppedOut=false;view.term.options.disableStdin=view.exited;$('#terminal-panel').hidden=false;activateTerminal(id,{bring:true});}});
+  api.onTerminalDocked?.(({id})=>{const view=terminalViews.get(id);if(view){view.poppedOut=false;view.term.options.disableStdin=view.exited;view.hiddenPane=false;if((view.ctx||'')===termCtx()){$('#terminal-panel').hidden=false;activateTerminal(id);}render();saveView();}});
   api.onState(applyState);api.onTerminal(terminalEvent);api.onServiceError?.(message=>toast(message,true));
   action(async()=>{
     const initial=await api.snapshot();applyState(initial);
@@ -3982,8 +4027,15 @@
     $('#terminal-panel').hidden=!initial.view?.terminalVisible;
     // Each window back on its screen, hidden or not, with its size; then the panel for the screen in use.
     for(const [id,ctx,hidden] of initial.view?.windows||[]){const v=terminalViews.get(id);if(v){v.ctx=state.agents.some(a=>a.id===ctx)?ctx:'';v.hiddenPane=!!hidden;}}
-    (initial.view?.panes||[]).forEach((id,i)=>{if(terminalViews.has(id))paneSize.set(id,initial.view?.paneSizes?.[i]||1);});
-    if(initial.view?.terminalId&&terminalViews.has(initial.view.terminalId))currentTerminal=initial.view.terminalId;
-    termCtxShown=termCtx();activateTerminal(currentTerminal,{focus:false});if(!panes.filter(Boolean).length)$('#terminal-panel').hidden=true;
+    terminalWorkspaces.clear();
+    for(const w of TL.workspaces(initial.view?.terminalWorkspaces))if(!w.ctx||state.agents.some(a=>a.id===w.ctx))terminalWorkspaces.set(w.ctx,w);
+    for(const ctx of new Set([...terminalViews.values()].map(v=>v.ctx||''))){
+      if(terminalWorkspaces.has(ctx))continue;
+      const ids=ctxWindows(ctx).filter(v=>!v.hiddenPane).map(v=>v.id),old=(initial.view?.panes||[]).filter(id=>ids.includes(id));
+      const ordered=[...old,...ids.filter(id=>!old.includes(id))],weights=ordered.map(id=>initial.view?.paneSizes?.[(initial.view?.panes||[]).indexOf(id)]||1);
+      terminalWorkspaces.set(ctx,{ctx,tree:TL.preset(ordered,layout.arrange,weights),active:ids.includes(initial.view?.terminalId)?initial.view.terminalId:ordered[0]||'',visible:!!initial.view?.terminalVisible,dock:layout.terminal});
+    }
+    restoringWorkspace=false;termCtxShown=null;currentTerminal='';render();saveView();
+
   });
 })();

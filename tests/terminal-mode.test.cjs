@@ -78,3 +78,21 @@ test('the dsh Opaya starts on this computer gets no stale variable its credentia
   const script=path.join(dir,'dsh');await fs.writeFile(script,'#!/bin/sh\nprintf "[%s]" "$DEEPSEEK_API_KEY"\n',{mode:0o755});
   assert.equal(await collect(launch({transport:'local',command:script,args:[]},[],null),{timeout:5000}),'[]');
 });
+test('navigation and per-agent terminal layouts are validated and persist',async t=>{
+  const {b}=await fixture(t,'');const a=await b.saveAgent({agent:acpAgent});
+  await b.saveView({agentNavigation:[{id:a.id,mode:'manage',section:'care'},{id:'missing',mode:'chat'},{id:a.id,mode:'bad'}],terminalWorkspaces:[{ctx:a.id,tree:{axis:'x',ratio:.7,first:{id:'one'},second:{id:'two'}},active:'two',visible:true,dock:'right'},{ctx:'missing'}]});
+  const again=new Broker({store:b.store,vault:b.vault,emit:()=>{},approve:async()=>true});await again.init();
+  assert.deepEqual(again.data.view.agentNavigation,[{id:a.id,mode:'manage',section:'care'}]);
+  assert.equal(again.data.view.terminalWorkspaces.length,1);assert.equal(again.data.view.terminalWorkspaces[0].tree.ratio,.7);
+  assert.equal(again.data.view.terminalWorkspaces[0].active,'two');assert.equal(again.data.view.terminalWorkspaces[0].dock,'right');
+});
+test('independent terminals keep separate processes, configured folders, and the live session limit',async t=>{
+  const root=await temp(t),spawned=[],terminals=new Terminals(()=>{},{ptyFactory:{spawn:(command,args,options)=>{const p={options,onData(){},onExit(fn){p.exit=fn;},write(){},resize(){},kill(){}};spawned.push(p);return p;}}});
+  const a={id:'local-test',name:'Test',transport:'local',command:'',args:[],cwd:root};
+  const first=terminals.open(a,null),second=terminals.open(a,null,'shell',undefined,{newSession:true});
+  assert.notEqual(first.id,second.id);assert.equal(first.cwd,root);assert.equal(spawned[1].options.cwd,root);
+  assert.equal(terminals.open(a,null).id,first.id);assert.equal(terminals.attach(second.id).id,second.id);assert.equal(spawned.length,2);
+  spawned[0].exit({exitCode:0});assert.equal(terminals.restart(first.id,a,null,{cols:100,rows:28}).id,first.id);assert.equal(spawned.length,3);
+  for(let i=2;i<12;i++)terminals.open(a,null,'shell',undefined,{newSession:true});
+  assert.throws(()=>terminals.open(a,null,'shell',undefined,{newSession:true}),/12 live terminal sessions/);assert.equal(terminals.sessions.size,12);
+});

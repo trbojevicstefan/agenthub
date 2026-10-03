@@ -80,6 +80,7 @@ if(hostMode){
         ['/vendor/three.core.js',['text/javascript',path.join(__dirname,'../node_modules/three/build/three.core.js')]],
         ['/stage3d.js',['text/javascript',path.join(__dirname,'../ui/stage3d.js')]],
         ['/markdown.js',['text/javascript',path.join(__dirname,'../ui/markdown.js')]],
+        ['/terminal-layout.js',['text/javascript',path.join(__dirname,'../ui/terminal-layout.js')]],
         ['/terminal-core.js',['text/javascript',path.join(__dirname,'../ui/terminal-core.js')]]
       ]);
       // Icon library: any bundled SVG in ui/assets/icons, by strict file name only.

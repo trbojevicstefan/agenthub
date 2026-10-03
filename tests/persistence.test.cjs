@@ -108,9 +108,9 @@ test('an ended terminal starts again in its tab: same id, output kept, the old p
   spawned[0].data('late');spawned[0].exit({exitCode:1});assert.equal(terminals.attach(item.id).exited,false);assert(!terminals.attach(item.id).buffer.includes('late'));
   terminals.write(item.id,'ls\r');assert.deepEqual(spawned[1].writes,['ls\r']);assert.deepEqual(spawned[0].writes,[]);
   assert.equal(terminals.restart(item.id,shell,null,{cols:90,rows:20}).id,item.id);assert.equal(spawned.length,2,'a live session is not started twice');
-  // One live session per agent, mode and folder: an ended tab whose twin is already running points to it.
+  // Restart keeps this session even when another session has the same agent, mode and folder.
   spawned[1].exit({exitCode:0});const twin=terminals.open(shell,null,'shell',{cols:100,rows:24});assert.notEqual(twin.id,item.id);
-  assert.equal(terminals.restart(item.id,shell,null,{cols:90,rows:20}).id,twin.id);assert.equal(spawned.length,3);
+  assert.notEqual(item.id,twin.id);assert.equal(terminals.restart(item.id,shell,null,{cols:90,rows:20}).id,item.id);assert.equal(spawned.length,4);
   assert.throws(()=>terminals.restart('missing',shell,null,{cols:90,rows:20}),/not found/);
   await terminals.shutdown();
 });
@@ -136,4 +136,20 @@ test('a remote terminal whose SSH connection dropped reattaches to the same tmux
   terminals.detach(item.id);assert.equal(terminals.attach(item.id).detached,true);
   const back=terminals.restart(item.id,agent,host,{cols:100,rows:28});assert.equal(back.detached,false);assert.equal(back.exited,false);assert.equal(spawned.length,3);
   spawned[1].exit({exitCode:0});assert.equal(terminals.attach(item.id).exited,false,'the process killed by detach does not end the reattached session');
+});
+test('independent remote sessions keep distinct tmux identities through reconnect and service restart',async t=>{
+  const root=await temp(t),bin=await temp(t);await fs.writeFile(path.join(bin,'ssh'),'#!/bin/sh\nexit 0\n',{mode:0o755});
+  const old=process.env.PATH;process.env.PATH=bin+path.delimiter+old;t.after(()=>{process.env.PATH=old;});
+  const {spawned,ptyFactory}=fakePty(),terminals=new Terminals(()=>{},{root,ptyFactory});
+  const agent={id:'remote-agent',name:'Remote',transport:'ssh',hostId:'h1',command:'',args:[],cwd:'/workspace'},host={id:'h1',alias:'vps'};
+  const first=terminals.open(agent,host,'shell',undefined,{newSession:true}),second=terminals.open(agent,host,'shell',undefined,{newSession:true});
+  assert.notEqual(first.tmuxSession,second.tmuxSession);assert.notEqual(first.id,second.id);
+  spawned[0].exit({exitCode:255});const restarted=terminals.restart(first.id,agent,host,{cols:100,rows:28});
+  assert.equal(restarted.id,first.id);assert.equal(restarted.tmuxSession,first.tmuxSession);assert.equal(spawned.at(-1).args.at(-1),spawned[0].args.at(-1));
+  const discovered=terminals.open({...agent,id:'discovered',tmuxSession:'existing-session'},host);
+  assert.equal(discovered.tmuxSession,'existing-session');assert.match(spawned.at(-1).args.at(-1),/attach-session/);
+  const independent=terminals.open({...agent,id:'discovered',tmuxSession:'existing-session'},host,'shell',undefined,{newSession:true});
+  assert.notEqual(independent.tmuxSession,'existing-session');assert.match(spawned.at(-1).args.at(-1),/new-session/);
+  await terminals.shutdown();const next=new Terminals(()=>{},{root,ptyFactory});await next.init();
+  assert.equal(next.restart(second.id,agent,host,{cols:100,rows:28}).tmuxSession,second.tmuxSession);await next.shutdown();
 });

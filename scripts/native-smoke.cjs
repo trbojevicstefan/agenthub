@@ -17,8 +17,8 @@ async function pasteChecks({app,win,client}){
   // The first-launch question (How do you like to work?) would cover the terminal: it is put away, unanswered.
   const focus=()=>bounded(win.webContents.executeJavaScript(`(()=>{if(!window.__smokeKey){window.__smokeKey='none';document.addEventListener('keydown',e=>{window.__smokeKey=[e.key,e.code,e.metaKey?'meta':'',e.ctrlKey?'ctrl':''].filter(Boolean).join(' ');},true);}
     const ask=document.querySelector('#interface-chooser')?.closest('dialog');if(ask)ask.dispatchEvent(new Event('cancel'));
-    if(document.querySelector('dialog[open]')||!document.querySelector('#terminal-tabs .terminal-tab.selected [data-id=${JSON.stringify(JSON.stringify(id)).slice(1,-1)}]'))return false;
-    const pane=document.querySelector('#terminal-panes .terminal-pane.focused')||document.querySelector('#terminal-panes .terminal-pane'),input=pane&&pane.querySelector('.xterm-helper-textarea');
+    if(document.querySelector('dialog[open]')||!document.querySelector('#terminal-panes .terminal-pane[data-id=${JSON.stringify(JSON.stringify(id)).slice(1,-1)}]'))return false;
+    const pane=document.querySelector('#terminal-panes .terminal-pane[data-id=${JSON.stringify(JSON.stringify(id)).slice(1,-1)}]'),input=pane&&pane.querySelector('.xterm-helper-textarea');
     if(!input)return false;input.focus();return document.activeElement===input;})()`));
   const press=()=>{const modifiers=[process.platform==='darwin'?'meta':'control'];for(const type of ['keyDown','keyUp'])win.webContents.sendInputEvent({type,keyCode:'V',modifiers});};
   const step=async(name,run)=>{if(!left()){out[name]='Skipped: out of time.';return;}try{out[name]=await run();}catch(error){out[name]=String(error?.message||error).slice(0,300);}};
@@ -48,9 +48,9 @@ async function run({app,win,client}){
   await fs.mkdir(output,{recursive:true});
   const phase=process.env.AGENTHUB_SMOKE_PHASE||'write';
   await new Promise(resolve=>setTimeout(resolve,1000));
-  const checks=await win.webContents.executeJavaScript(`({title:document.title,nodeUnavailable:typeof window.require==='undefined',bridge:typeof window.agenthub?.snapshot==='function',genericIpcAbsent:window.agenthub?.invoke===undefined,overflow:document.documentElement.scrollWidth>innerWidth,sidebar:!!document.querySelector('.sidebar'),terminalUi:typeof window.Terminal==='function'&&typeof window.FitAddon?.FitAddon==='function'})`);
+  const checks=await win.webContents.executeJavaScript(`({title:document.title,nodeUnavailable:typeof window.require==='undefined',bridge:typeof window.agenthub?.snapshot==='function',genericIpcAbsent:window.agenthub?.invoke===undefined,overflow:document.documentElement.scrollWidth>innerWidth,sidebar:!!document.querySelector('.sidebar'),terminalLayout:typeof window.OpayaTerminalLayout?.split==='function',terminalUi:typeof window.Terminal==='function'&&typeof window.FitAddon?.FitAddon==='function'})`);
   const prefs=win.webContents.getLastWebPreferences();Object.assign(checks,{sandbox:prefs.sandbox,contextIsolation:prefs.contextIsolation,nodeIntegration:prefs.nodeIntegration});
-  assert(checks.nodeUnavailable&&checks.bridge&&checks.genericIpcAbsent&&!checks.overflow&&checks.sidebar&&checks.terminalUi&&checks.sandbox&&checks.contextIsolation&&!checks.nodeIntegration,'Native UI/security smoke failed: '+JSON.stringify(checks));
+  assert(checks.nodeUnavailable&&checks.bridge&&checks.genericIpcAbsent&&!checks.overflow&&checks.sidebar&&checks.terminalUi&&checks.terminalLayout&&checks.sandbox&&checks.contextIsolation&&!checks.nodeIntegration,'Native UI/security smoke failed: '+JSON.stringify(checks));
   if(phase==='features'){await require('./native-features.cjs').run({win,client,output});console.log('Native terminal feature checks passed.');return;}
   if(phase==='write'){
     const agent=await client.call('saveAgent',{agent:{id:'smoke-agent',name:'Restart verification',provider:'custom',protocol:'openai',transport:'http',endpoint:'http://127.0.0.1:8642/v1',model:'test-only'}});
@@ -61,11 +61,18 @@ async function run({app,win,client}){
     let nativeOutput=false;
     for(let i=0;i<100;i++){const current=await client.call('terminalAttach',{id:terminal.id});if(current.buffer.includes('AGENTHUB_NATIVE_PTY_OK')){nativeOutput=true;break;}await new Promise(resolve=>setTimeout(resolve,100));}
     assert(nativeOutput,'The real native terminal did not produce the marker.');
-    const state=await client.call('snapshot');
-    await fs.writeFile(path.join(output,'restart-state.json'),JSON.stringify({pid:state.service.pid,conversationId:conversation.id,terminalId:terminal.id}));
-    checks.nativePtyOutput=true;checks.servicePid=state.service.pid;
+    checks.nativePtyOutput=true;
     // Soft: pasting on the real clipboard, recorded here, never failing the run.
     try{Object.assign(checks,await pasteChecks({app,win,client}));}catch(error){checks.pasteError=String(error?.message||error).slice(0,300);}
+    const second=await client.call('terminalOpen',{sourceId:terminal.id,newSession:true}),hidden=await client.call('terminalOpen',{sourceId:terminal.id,newSession:true});
+    const tree={axis:'y',ratio:.65,first:{id:terminal.id},second:{id:second.id}},before=await client.call('snapshot');
+    await client.call('saveView',{...before.view,overview:false,opaya:false,terminalVisible:true,terminalId:second.id,
+      agentNavigation:[{id:agent.id,mode:'console',section:'care'}],terminalWorkspaces:[{ctx:agent.id,tree,active:second.id,visible:false,dock:'right'}],
+      windows:[[terminal.id,agent.id,0],[second.id,agent.id,0],[hidden.id,agent.id,1]]});
+    await new Promise(resolve=>{win.webContents.once('did-finish-load',resolve);win.webContents.reload();});
+    await new Promise(resolve=>setTimeout(resolve,1000));await win.webContents.executeJavaScript('window.agenthubFlush()');
+    const state=await client.call('snapshot');checks.servicePid=state.service.pid;
+    await fs.writeFile(path.join(output,'restart-state.json'),JSON.stringify({pid:state.service.pid,conversationId:conversation.id,terminalId:terminal.id,secondId:second.id,hiddenId:hidden.id,tree,count:state.terminals.length}));
   }else{
     const previous=JSON.parse(await fs.readFile(path.join(output,'restart-state.json'),'utf8'));
     const state=await client.call('snapshot');
@@ -75,6 +82,14 @@ async function run({app,win,client}){
     const terminal=await client.call('terminalAttach',{id:previous.terminalId});
     assert.equal(terminal.exited,false,'Native terminal did not survive UI process exit.');
     assert(terminal.buffer.includes('AGENTHUB_NATIVE_PTY_OK'),'Terminal output was lost.');
+    await win.webContents.executeJavaScript('window.agenthubFlush()');
+    const restored=await client.call('snapshot'),workspace=restored.view.terminalWorkspaces.find(w=>w.ctx==='smoke-agent');
+    assert.deepEqual(workspace.tree,previous.tree);assert.equal(workspace.active,previous.secondId);assert.equal(workspace.dock,'right');
+    assert.equal(restored.terminals.length,previous.count,'Restoration created a duplicate session.');
+    assert.deepEqual(restored.view.agentNavigation,[{id:'smoke-agent',mode:'console',section:'care'}]);
+    const visible=await win.webContents.executeJavaScript(`[...document.querySelectorAll('#terminal-panes .terminal-pane')].map(p=>p.dataset.id)`);
+    assert.deepEqual(visible,[previous.terminalId,previous.secondId]);assert(!visible.includes(previous.hiddenId));
+    checks.savedLayout=true;checks.savedNavigation=true;checks.hiddenSession=true;checks.noDuplicates=true;
     checks.sameService=true;checks.sameTerminal=true;checks.draftRestored=true;checks.sameConversation=true;
     await client.call('shutdown');
   }
