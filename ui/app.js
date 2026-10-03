@@ -22,8 +22,10 @@
   let manageId = '', manageHtml = '', manageKeyed = {}, lastFullChat = '';
   // How each agent's screen shows: manage (the default a left click opens), chat (the full chat view) or console.
   const agentModes = new Map(), modeOf = a => agentModes.get(a.id) || 'chat';
+  // Back: the screens you came through (Home, Machines, an agent's chat, console or Manage section...), newest last.
+  let navBack=[],navCur='',navRestoring=false;
   // Sidebar items the user turned off in Settings > Sidebar.
-  const SIDE_ITEMS = [['home','Home','Agents at a glance and quick actions'],['playground','Playground','Ask two agents the same question'],['machines','Machines','The fleet board'],['vault','Vault','API keys and tokens'],['help','Help','Connection help and shortcuts']];
+  const SIDE_ITEMS = [['home','Home','Agents at a glance and quick actions'],['playground','Playground','Ask two agents the same question'],['machines','Machines','The fleet board'],['vault','Vault','API keys and tokens'],['skills','Skills & tools','Skills library and MCP servers'],['help','Help','Where is what, connection help and shortcuts']];
   let sidebarHide = new Set();
   const applySidebar = () => { for (const [key] of SIDE_ITEMS) { const el = document.querySelector(`[data-side="${key}"]`); if (el) el.hidden = sidebarHide.has(key); } };
   let stageAgent = ''; // the agent whose CLI the terminal stage last opened
@@ -94,7 +96,19 @@
     return [['pinned','PINNED',state.agents.filter(a=>a.pinned)],...customGroups.map(g=>[`group:${g}`,g,state.agents.filter(a=>!a.pinned&&a.group===g)]),['local','ON THIS COMPUTER',state.agents.filter(a=>!a.pinned&&!a.group&&a.transport!=='ssh')],['remote','REMOTE AGENTS',state.agents.filter(a=>!a.pinned&&!a.group&&a.transport==='ssh')]];
   }
   const navOrder=()=>navGroups().flatMap(g=>g[2]);
+  // One string per screen; each change pushes the previous one, unless Back itself is moving.
+  function navSig(){if(playgroundView)return 'pg';if(opayaView)return 'opaya';if(overview)return fleetView?'fleet':'home';const a=selected();if(!a)return 'home';const m=modeOf(a);return `a|${a.id}|${m}|${m==='manage'?mgSection:''}`;}
+  function trackNav(){const sig=navSig();if(sig===navCur)return;if(navCur&&!navRestoring){navBack=navBack.filter(x=>x!==sig);navBack.push(navCur);if(navBack.length>40)navBack.shift();}navCur=sig;queueMicrotask(()=>{const b=$('.topbar-back');if(b){b.disabled=!navBack.length;b.title=navBack.length?`Back to ${navLabel(navBack.at(-1))} (Alt+Left)`:'Back';}});}
+  function navLabel(sig){if(sig==='pg')return 'Playground';if(sig==='opaya')return 'Opaya Agent';if(sig==='home')return 'Home';if(sig==='fleet')return 'Machines';const [,id,m,sec]=sig.split('|'),a=state.agents.find(x=>x.id===id);if(!a)return 'the previous screen';return `${title(a)}: ${m==='manage'?(AN_SECTIONS.find(x=>x.key===sec)?.name||'Manage'):m==='console'?'Console':'Chat'}`;}
+  async function navGoBack(){
+    while(navBack.length){const sig=navBack.pop(),parts=sig.split('|');if(parts[0]==='a'&&!state.agents.some(x=>x.id===parts[1]))continue;
+      navRestoring=true;
+      try{if(sig==='home')fire('overview');else if(sig==='fleet')openFleet();else if(sig==='opaya')fire('opaya');else if(sig==='pg')fire('playground');else{const a=state.agents.find(x=>x.id===parts[1]);if(parts[2]==='manage')await openManage(a.id,parts[3]||'overview');else{if(parts[2]==='console')agentModes.set(a.id,'console');await setAgentMode(a,parts[2]==='console'?'console':'chat');}}}
+      finally{navCur=navSig();navRestoring=false;const b=$('.topbar-back');if(b){b.disabled=!navBack.length;b.title=navBack.length?`Back to ${navLabel(navBack.at(-1))} (Alt+Left)`:'Back';}}
+      return;}
+  }
   function render() {
+    trackNav();
     queueMicrotask(()=>{ensureProjectsToggle();renderProjects();renderDock();const sel=selected()?.id||'';if(historyOpen&&sel!==historyFollow&&historyAgent&&sel)historyAgent=sel;historyFollow=sel;renderHistory();});
     $('#agent-count').textContent=state.agents.length;applySidebar();
     $('#host-count').textContent=state.hosts.length;const vc=$('#vault-count');if(vc)vc.textContent=(state.opayaAgent?.secrets||[]).filter(k=>k.kept||k.global||k.stored?.length).length||'';
@@ -497,7 +511,7 @@
   }
   function openHelp(){
     const k=mod().trim(),tile=(icon,t,where,how,act='',attrs='')=>`<div class="help-tile"><span class="help-tile-ico" aria-hidden="true">${icon}</span><div><strong>${t}</strong><small class="help-where">${where}</small><p>${how}</p>${act?`<button type="button" class="text-button" data-action="${act}" ${attrs}>Open &#8594;</button>`:''}</div></div>`;
-    const map=`<section class="help-map"><h3>Where is what</h3><div class="help-tiles">
+    const map=`<section class="help-map"><h3>Where is what</h3><p class="help-find">Looking for something? Press <kbd>${esc(k)}${state.platform==='darwin'?'':'+'}K</kbd> or <strong>Search</strong> at the top of every screen: it finds agents, their settings and actions, machines, chats and keys, and shows where each one lives. <button type="button" class="text-button" data-action="find">Search now &#8594;</button></p><div class="help-tiles">
       ${tile(AN_ICON.chat,'Your agents','Left sidebar',`Click an agent to open its chat; ${k}+1 to 9 open them in sidebar order. Its own sidebar holds Chat, Console, Overview and Manage.`)}
       ${tile(AN_ICON.overview,'Manage an agent','Agent sidebar > Manage',`Model &amp; skills (Q), Keys &amp; tools (W), Machine &amp; Docker (E), Deploy &amp; clone (R), Projects (A), Updates &amp; backups (S), Profile (D), Danger zone (F).`)}
       ${tile(AN_ICON.access,'API keys','Vault (key icon in the sidebar)','Add keys, import them from a .env or your tools, and give each to the agents that need it. Values never show or go into a chat.','vault')}
@@ -529,7 +543,9 @@
     const run=async operation=>{restart.disabled=true;output.textContent=operation==='restart'?'Restarting gateway...':'Checking gateway status...';try{const result=await api.gateway({id:a.id,operation});output.textContent=result.output;}catch(e){output.textContent=e.message;}finally{restart.disabled=false;}};
     restart.onclick=()=>run('restart');await run('status');
   }
-  function openSettings(){
+  function openSettings(focus=''){
+    // Choosing an option redraws Settings: it stays where you were instead of jumping back to the top.
+    const keepAt=$('#app-dialog .settings-grid')?$('#app-dialog .modal-body')?.scrollTop:null;
     const st=state.settings||{},on=(key,dflt=true)=>st[key]===undefined?dflt:!!st[key],cmd=state.platform==='darwin'?'\u2318':'Ctrl+',version=update.current?`Opaya ${esc(update.current)}`:'Opaya';
     const toggle=(key,label,hint='',dflt=true)=>`<label class="switch-row"><input type="checkbox" data-setting="${key}" ${on(key,dflt)?'checked':''}><span class="switch" aria-hidden="true"></span><span>${label}${hint?` <small>(${hint})</small>`:''}</span></label>`;
     const choice=(act,value,current,label,small,extra='')=>`<button type="button" class="theme-option compact ${current?'selected':''}" data-action="${act}" data-value="${value}" ${extra}><strong>${label}</strong><small>${small}</small></button>`;
@@ -549,17 +565,97 @@
       <section><h3>Machines</h3><p class="settings-copy">This computer is <strong>${esc(localName())}</strong>${state.hosts.length?`, with ${state.hosts.length} server${state.hosts.length===1?'':'s'}`:''}. Backups go to <code>${esc(st.backupDir||'Opaya Backups in your home folder')}</code>.</p><div class="settings-buttons"><button class="secondary" data-action="hosts">Open Machines</button><button class="secondary" data-action="local-machine">Name and backup folder</button></div></section>
       <section><h3>Skills and MCP servers</h3><p class="settings-copy">Global skills kept by Opaya, and ${(state.mcpServers||[]).length} saved MCP server${(state.mcpServers||[]).length===1?'':'s'} (GitHub, a browser, a database) that Opaya passes to your agents.</p><div class="settings-buttons"><button class="secondary" data-action="library">Skills library</button><button class="secondary" data-action="mcp-manage">MCP servers</button></div></section>
       <section><h3>Data and privacy</h3><p class="settings-copy">No account and no telemetry. Chats, transcripts and settings stay in Opaya's folder on this computer; API keys and tokens are encrypted with the OS keychain${state.secureStorage===false?' <strong>(not available here)</strong>':''}.</p><button class="secondary" data-action="open-data-folder">Open Opaya's folder</button></section>
-      <section class="settings-wide"><h3>Keyboard shortcuts</h3><div class="shortcut-grid">${[[`${cmd}K`,'Switch agent'],[`${cmd}1 to 9`,'Open agent 1 to 9'],[`${cmd}N`,'New chat'],[`${cmd}\``,'Show or hide the terminal'],[`${cmd}B`,'Show or hide the sidebar'],[`${cmd}Shift+M`,'Manage the agent'],[`${cmd}Shift+H`,'Chat history'],[`${cmd}Shift+P`,'Projects'],[`${cmd}+ / ${cmd}-`,'Terminal text size'],['Right-click','Menus for agents, tabs and chats']].map(([k,t])=>`<span><kbd>${esc(k)}</kbd>${esc(t)}</span>`).join('')}</div></section>
+      <section class="settings-wide"><h3>Keyboard shortcuts</h3><div class="shortcut-grid">${[[`${cmd}K`,'Find anything'],[`${cmd}1 to 9`,'Open agent 1 to 9'],[`${cmd}N`,'New chat'],[`${cmd}\``,'Show or hide the terminal'],[`${cmd}B`,'Show or hide the sidebar'],[`${cmd}Shift+M`,'Manage the agent'],[`${cmd}Shift+H`,'Chat history'],[`${cmd}Shift+P`,'Projects'],[`${cmd}+ / ${cmd}-`,'Terminal text size'],['Right-click','Menus for agents, tabs and chats']].map(([k,t])=>`<span><kbd>${esc(k)}</kbd>${esc(t)}</span>`).join('')}</div></section>
       <section class="settings-wide about"><h3>About</h3><p class="settings-copy">${version}. One place. All your agents.</p><div class="settings-buttons"><button class="text-button" data-action="open-link" data-external="1" data-url="https://github.com/trbojevicstefan/agenthub/blob/main/docs/RELEASE_NOTES.md">What's new &#8599;</button><button class="text-button" data-action="open-link" data-external="1" data-url="https://github.com/trbojevicstefan/agenthub">GitHub &#8599;</button><button class="text-button" data-action="open-link" data-external="1" data-url="https://opaya.dev">opaya.dev &#8599;</button></div></section>
     </div>`,true);
     // The OS keeps "start at sign-in"; ask it, then let the switch change it.
     const box=$('#login-item');if(box&&api.loginItem)api.loginItem({}).then(r=>{if(!r?.supported){$('#login-item-row').innerHTML='';return;}box.checked=!!r.on;box.disabled=false;box.onchange=()=>action(async()=>{const next=await api.loginItem({on:box.checked});box.checked=!!next.on;toast(next.on?'Opaya starts when you sign in.':'Opaya no longer starts at sign-in.');});}).catch(()=>{$('#login-item-row').innerHTML='';});
+    settingsIndex(focus);if(!focus&&keepAt!=null){const body=$('#app-dialog .modal-body');if(body)body.scrollTop=keepAt;}
+  }  // Settings opens with an index of its sections and a filter, so a setting is a click away instead of a scroll.
+  function settingsIndex(focus=''){
+    const grid=$('#app-dialog .settings-grid');if(!grid)return;const secs=[...grid.children].filter(x=>x.matches('section')&&x.querySelector('h3'));
+    secs.forEach((x,i)=>{x.id=`set-sec-${i}`;x.dataset.words=`${x.querySelector('h3').textContent} ${(SETTINGS_INDEX.find(([t])=>t===x.querySelector('h3').textContent)||[])[1]||''} ${x.textContent}`.toLowerCase();});
+    grid.insertAdjacentHTML('beforebegin',`<div class="set-index"><input type="search" class="set-filter" placeholder="Filter settings" aria-label="Filter settings"><nav aria-label="Settings sections">${secs.map(x=>`<button type="button" class="set-chip" data-set-sec="${x.id}">${esc(x.querySelector('h3').textContent)}</button>`).join('')}</nav></div>`);
+    const show=x=>{x.scrollIntoView({block:'start',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});x.classList.remove('flash');void x.offsetWidth;x.classList.add('flash');};
+    const idx=$('#app-dialog .set-index');
+    idx.addEventListener('click',e=>{const b=e.target.closest('[data-set-sec]');if(b){const x=document.getElementById(b.dataset.setSec);if(x){x.hidden=false;show(x);}}});
+    idx.querySelector('.set-filter').addEventListener('input',e=>{const q=e.target.value.trim().toLowerCase();for(const x of secs){const hit=!q||q.split(/\s+/).every(t=>x.dataset.words.includes(t));x.hidden=!hit;idx.querySelector(`[data-set-sec="${x.id}"]`).classList.toggle('dim',!hit);}});
+    if(focus){const x=secs.find(s=>s.querySelector('h3').textContent===focus);if(x)requestAnimationFrame(()=>show(x));}
   }
 
-  function switcher(){
-    modal('Jump to an agent.','Search by name, provider or machine.',`<input id="switcher-search" class="switcher-search" placeholder="Search agents..." aria-label="Search agents"><div id="switcher-list"></div>`);
-    const update=()=>{const q=$('#switcher-search').value.toLowerCase();$('#switcher-list').innerHTML=state.agents.filter(a=>`${title(a)} ${description(a)} ${labels[a.provider]} ${location(a)} ${placeText(a)} ${a.group||''} ${(a.tags||[]).join(' ')}`.toLowerCase().includes(q)).map(a=>`<button class="switcher-row" data-action="switch-select" data-id="${esc(a.id)}">${badge(a)}<span><strong>${esc(title(a))}</strong><small>${esc(description(a))}</small></span>${dot(a)}</button>`).join('')||'<p class="field-help">No matching agents. Add a connection to get started.</p>';};
-    $('#switcher-search').addEventListener('input',update);update();$('#switcher-search').focus();
+
+  // ---- Find anything (Ctrl/Cmd+K): agents, their sections and actions, places, settings, machines, chats and keys -----
+  // Every result says where it lives (Hermes > Keys & tools, Settings > Theme), so finding something also shows where to
+  // find it next time. Enter runs the highlighted result; arrows move; Esc closes.
+  const FIND_WORDS={keys:'api key token secret env password',vault:'api key token secret',backup:'save copy restore',backups:'restore folder',uninstall:'delete remove',remove:'delete',clone:'copy duplicate deploy',dockerize:'docker container',update:'upgrade version',restart:'reconnect',itrust:'trust approve automatically permissions',browser:'web pages',transfer:'share copy skills keys',shareSkills:'share copy transfer',mcp:'tools github',models:'model llm',effort:'reasoning thinking',terminal:'cli command line',shell:'terminal command line',files:'folder browse',rename:'name title',groupTags:'group tag',containerLogs:'docker logs',containerRestart:'docker restart',settings:'connection endpoint command',newVps:'server ssh machine'};
+  const SETTINGS_INDEX=[['Chat and console','console terminal opens full screen chat window'],['Sidebar','icons names strip rail hide items'],['Theme','dark light white look'],['Notifications','notify sound replies approvals'],['Chat','enter send ctrl enter tips'],['Terminal','text size font bottom side'],['Startup','start sign in login connect at start'],['iTrust mode','trust approve automatically'],['Opaya Agent','model setup guide'],['Updates','check for updates fix errors automatically version'],['Opaya Vault','keys import'],['Machines','computer name backup folder'],['Skills and MCP servers','skills library tools'],['Data and privacy','folder telemetry privacy'],['Keyboard shortcuts','keys hotkeys shortcuts']];
+  // Places: the shared screens and windows, run through the same handlers as their buttons.
+  const FIND_PLACES=[['overview','Home','Sidebar','Your agents at a glance'],['fleet','Machines','Sidebar','Every machine and its agents'],['vault','Opaya Vault','Sidebar','API keys: add, import, give to agents'],['vault-import','Import keys','Opaya Vault','From a .env, any text file or your tools'],['library','Skills library','Library','Global skills for any agent'],['mcp-manage','MCP servers','Library','Tools such as GitHub or a browser'],['docker-manager','Docker manager','Machines','Containers and images',{id:'local'}],['playground','Playground','Sidebar','Ask two agents the same question'],['opaya','Opaya Agent','Sidebar','Install, connect or repair by asking'],['install-catalog','Install agents','Home','Hermes, Claude Code, Codex, OpenClaw and more'],['discover','Discover agents','Sidebar','Find agents on this computer'],['add','Add connection','Home','An agent or an API by hand'],['new-vps','New VPS','Machines','A new server with its own SSH key'],['connect-all','Connect all','Home','Connect every agent'],['tool-updates','Check for updates','Home','Agents and tools with newer versions'],['update-all','Update all agents','Home','Every installation on every machine'],['local-terminal','Local terminal','Home','A shell on this computer'],['files-local','Files','Home','Browse files on this computer'],['settings','Settings','Sidebar','Theme, chat, terminal, notifications'],['help','Help','Sidebar','Where is what, and connection help']];
+  const fire=(name,data={})=>{const b=document.createElement('button');b.type='button';b.hidden=true;b.dataset.action=name;Object.assign(b.dataset,data);document.body.append(b);b.click();b.remove();};
+  function findIndex(){
+    const out=[],sel=selected(),secName=k=>AN_SECTIONS.find(s=>s.key===k)?.name||({chat:'Chat',console:'Console'})[k]||k;
+    const agents=[...state.agents].sort((x,y)=>(y.id===sel?.id)-(x.id===sel?.id));
+    for(const a of agents){const mine=a.id===sel?.id,who=title(a);
+      out.push({group:'Agents',icon:badge(a),label:who,path:[`${description(a)}`,location(a)],words:`${labels[a.provider]||''} ${placeText(a)} ${a.group||''} ${(a.tags||[]).join(' ')}`,run:()=>openChat(a.id),boost:mine?20:0,status:a});
+      for(const s of AN_SECTIONS)out.push({group:'Agent sections',icon:s.icon,label:s.name,path:[who,'Manage'],words:`${who} ${s.desc}`,hint:s.hk,run:()=>openManage(a.id,s.key),boost:mine?15:0,agentOnly:true,agentId:a.id});
+      let acts={};try{acts=manageActions(a);}catch{}
+      const seen=new Set();
+      for(const [sec,list] of Object.entries(AN_SUB))for(const [k,label] of list){const it=acts[k];if(!it||it.disabled||k==='export'||seen.has(k))continue;seen.add(k);
+        out.push({group:'Actions',icon:AN_ICON[k]||AN_ICON[sec]||'',label:it.label&&!/\.\.\.$/.test(label)&&it.label.length<40?it.label.replace(/\.\.\.$/,''):label,path:[who,secName(sec)],words:`${who} ${label} ${secName(sec)} ${FIND_WORDS[k]||''}`,boost:mine?15:0,agentOnly:true,agentId:a.id,
+          run:async()=>{if(sec==='chat'||sec==='console'){if(state.activeAgentId!==a.id)await openChat(a.id);}else await openManage(a.id,sec);const row=sec!=='chat'&&sec!=='console'&&document.querySelector(`#content .set-row[data-key="${CSS.escape(k)}"]`);if(row){row.scrollIntoView({block:'center'});row.classList.remove('flash');void row.offsetWidth;row.classList.add('flash');}const now=manageActions(state.agents.find(x=>x.id===a.id)||a)[k];if(now&&!now.disabled)await now.run();}});}
+    }
+    for(const [act,label,where,help,data] of FIND_PLACES)out.push({group:'Places',icon:'',label,path:[where],words:help,run:()=>fire(act,data)});
+    for(const [t,words] of SETTINGS_INDEX)out.push({group:'Settings',icon:'',label:t,path:['Settings'],words,run:()=>openSettings(t)});
+    for(const [k,n] of [['local',localName()],...state.hosts.map(h=>[h.id,h.name])])out.push({group:'Machines',icon:AN_ICON.machine,label:n,path:['Machines'],words:`${k==='local'?'this computer local':`${state.hosts.find(h=>h.id===k)?.hostname||''} vps server remote`}`,run:()=>openFleet(k)});
+    for(const c of state.conversations.slice().sort((x,y)=>String(y.createdAt).localeCompare(String(x.createdAt))).slice(0,200)){const a=state.agents.find(x=>x.id===c.agentId);if(!a)continue;out.push({group:'Chats',icon:AN_ICON.chat,label:chatLabel(c),path:[title(a),'Chats'],words:'',run:()=>fire('an-chat',{id:c.id})});}
+    for(const k of vaultKeys())out.push({group:'Keys',icon:KEY_SVG,label:k.name,path:['Opaya Vault'],words:`${k.mask} key`,run:()=>{openVault();vault.filter=k.name;vault.open=k.id;drawVault();}});
+    return out;
+  }
+  const FIND_GROUPS=['Agents','Actions','Agent sections','Places','Settings','Machines','Chats','Keys'];
+  // Without an agent's name in the query, an agent's sections and actions are the selected agent's (or every agent's
+  // when none is selected); a name ("hermes backup") picks that agent. Spaces do not matter ("backup" finds Back up), and a
+  // match only in where something lives counts less than one in its name.
+  function findResults(all,q){
+    q=q.trim().toLowerCase();
+    if(!q){const sel=selected();return [...all.filter(x=>x.group==='Agents').slice(0,6),...(sel?all.filter(x=>x.group==='Agent sections'&&x.agentId===sel.id):[]),...all.filter(x=>x.group==='Places').slice(0,8)];}
+    // A plural finds its singular too (logs finds Connection log).
+    const tokens=q.split(/\s+/).filter(Boolean).map(t=>t.length>3&&t.endsWith('s')?t.slice(0,-1):t),flat=q.replace(/\s+/g,''),sel=selected();
+    const named=new Set(state.agents.filter(a=>{const n=title(a).toLowerCase();return tokens.some(t=>t.length>=3&&n.includes(t));}).map(a=>a.id));
+    const scored=[];
+    for(const x of all){
+      if(x.agentOnly&&(named.size?!named.has(x.agentId):sel&&x.agentId!==sel.id))continue;
+      // The words that named the agent pick it; the rest must match the section or action itself.
+      const owner=x.agentOnly?title(state.agents.find(a=>a.id===x.agentId)||{name:''}).toLowerCase():'',rest=owner?tokens.filter(t=>!owner.includes(t)):tokens;
+      if(x.agentOnly&&!rest.length&&x.group==='Actions')continue;
+      const label=x.label.toLowerCase(),flatLabel=label.replace(/[^a-z0-9]+/g,''),hay=`${label} ${flatLabel} ${x.path.join(' ')} ${x.words}`.toLowerCase();
+      if(!tokens.every(t=>hay.includes(t)||flatLabel.includes(t)))continue;
+      if(owner&&rest.length&&!rest.every(t=>`${label} ${flatLabel} ${x.words} ${x.path.slice(1).join(' ')}`.toLowerCase().replace(owner,'').includes(t)))continue;
+      let s=x.boost||0;
+      if(label===q)s+=120;else if(label.startsWith(q)||flatLabel.startsWith(flat))s+=90;else if(label.includes(q)||flatLabel.includes(flat))s+=60;
+      let inName=0;for(const t of tokens){if(new RegExp(`(^|[^a-z0-9])${t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}`).test(label)){s+=12;inName++;}else if(label.includes(t)||flatLabel.includes(t)){s+=6;inName++;}}
+      if(!inName)s-=30;
+      scored.push([s,x]);}
+    scored.sort((p,r)=>r[0]-p[0]);const per=new Map(),out=[];
+    for(const [,x] of scored){const n=per.get(x.group)||0;if(n>=8)continue;per.set(x.group,n+1);out.push(x);if(out.length>=40)break;}
+    // Groups in the order of their best match, so the likeliest answer is on top.
+    const best=new Map();scored.forEach(([sc,x])=>{if(!best.has(x.group))best.set(x.group,sc);});
+    return out.sort((p,r)=>(best.get(r.group)-best.get(p.group))||FIND_GROUPS.indexOf(p.group)-FIND_GROUPS.indexOf(r.group));
+  }
+  function switcher(){openFind();}
+  function openFind(initial=''){
+    modal('Find anything','Agents, their settings and actions, places, machines, chats and keys. Each result shows where it lives.',`<div class="find"><div class="find-box"><span class="find-ico" aria-hidden="true">${dkIcon('inspect')}</span><input id="find-input" class="find-input" placeholder="Search: an agent, backup, theme, docker, OPENAI..." aria-label="Find anything" autocomplete="off" spellcheck="false" value="${esc(initial)}" role="combobox" aria-expanded="true" aria-controls="find-list"></div><div id="find-list" class="find-list" role="listbox"></div><div class="find-foot"><span><kbd>&#8593;</kbd><kbd>&#8595;</kbd> move</span><span><kbd>Enter</kbd> open</span><span><kbd>Esc</kbd> close</span></div></div>`);
+    $('#app-dialog').classList.add('find-dialog');
+    const all=findIndex(),input=$('#find-input'),list=$('#find-list');let shown=[],at=0;
+    const draw=()=>{shown=findResults(all,input.value);at=Math.min(at,Math.max(0,shown.length-1));let last='';
+      list.innerHTML=shown.map((x,i)=>{const head=x.group!==last?`<div class="find-group" role="presentation">${esc(input.value.trim()?x.group:x.group==='Agent sections'?`${x.path[0]}`:x.group==='Agents'?'Your agents':x.group)}</div>`:'';last=x.group;
+        return `${head}<button type="button" class="find-row ${i===at?'active':''}" role="option" aria-selected="${i===at}" data-find="${i}"><span class="find-row-ico" aria-hidden="true">${x.icon||dkIcon('link')}</span><span class="find-row-text"><strong>${esc(x.label)}</strong><small>${x.path.filter(Boolean).map(esc).join(' <i>&#8250;</i> ')}</small></span>${x.status?dot(x.status):''}${x.hint?`<kbd>${esc(x.hint)}</kbd>`:''}</button>`;}).join('')||`<p class="find-empty">Nothing found for "${esc(input.value)}". Try a word like keys, backup, docker or theme, or ask the Opaya Agent.</p>`;
+      list.querySelector('.find-row.active')?.scrollIntoView({block:'nearest'});};
+    const go=i=>{const x=shown[i];if(!x)return;closeModal();action(async()=>{await x.run();});};
+    input.addEventListener('input',()=>{at=0;draw();});
+    input.addEventListener('keydown',e=>{if(e.key==='ArrowDown'){e.preventDefault();at=Math.min(shown.length-1,at+1);draw();}else if(e.key==='ArrowUp'){e.preventDefault();at=Math.max(0,at-1);draw();}else if(e.key==='Enter'){e.preventDefault();go(at);}});
+    list.addEventListener('click',e=>{const b=e.target.closest('[data-find]');if(b)go(Number(b.dataset.find));});
+    list.addEventListener('mousemove',e=>{const b=e.target.closest('[data-find]');if(b&&Number(b.dataset.find)!==at){at=Number(b.dataset.find);for(const r of list.querySelectorAll('.find-row'))r.classList.toggle('active',r===b);}});
+    draw();input.focus();input.select();
   }
   // ---- Terminal windows: every session is a window; there are no tabs -------------------------------------------------
   // A window belongs to the screen it was opened from: an agent (its id) or '' (Home, Machines, the Opaya Agent...). The
@@ -982,6 +1078,8 @@
     if(name==='host-copy'){const h=state.hosts.find(x=>x.id===id);if(h)action(async()=>{await api.clipboardWrite({text:sshText(h)});toast('SSH command copied.');});return;}
     if(name==='machine-versions'){action(async()=>{button.disabled=true;button.textContent='Checking...';try{await api.toolVersions({hostId:button.dataset.host||undefined,force:true});await refresh();}finally{if(document.contains(button))refreshMachine(button.dataset.host||'local');}toast('Versions checked.');});return;}
     if(name==='settings'){openSettings();return;}
+    if(name==='find'){openFind();return;}
+    if(name==='nav-back'){action(navGoBack);return;}
     if(name==='vault'){openVault();return;}
     if(name==='vault-import'){openVault({panel:'import'});return;}
     if(name==='models'){action(openModels);return;}
@@ -1034,6 +1132,9 @@
   });
   document.addEventListener('input',event=>{if(event.target.id==='ws-search'){wsQuery=event.target.value;render();}});
   document.addEventListener('change',event=>{const key=event.target.dataset?.sideToggle;if(!key)return;if(event.target.checked)sidebarHide.delete(key);else sidebarHide.add(key);applySidebar();saveView();});
+  // Alt+Left and the mouse's back button go to the previous screen (a terminal keeps Alt+Left for its shell).
+  document.addEventListener('keydown',event=>{if(event.altKey&&!event.ctrlKey&&!event.metaKey&&!event.shiftKey&&event.key==='ArrowLeft'&&!viewOf(document.activeElement)&&!event.target.closest?.('input,textarea,select,[contenteditable]')&&!$('#app-dialog')){event.preventDefault();action(navGoBack);}});
+  document.addEventListener('mouseup',event=>{if(event.button===3&&!$('#app-dialog')){event.preventDefault();action(navGoBack);}});
   document.addEventListener('keydown',event=>{
     // AltGr is Ctrl+Alt on Windows and types characters (@ \ { } `): no shortcut here uses Alt, so a terminal gets them.
     if(!(event.ctrlKey||event.metaKey)||event.altKey)return;
@@ -1219,7 +1320,7 @@
   const agentChats=a=>state.conversations.filter(c=>c.agentId===a.id).slice().sort((x,y)=>String(y.createdAt).localeCompare(String(x.createdAt)));
   function topbar(crumb,page='',screen=''){
     const a=selected();
-    $('#topbar').innerHTML=`<div class="breadcrumb">${a&&screen?`<button type="button" class="crumb-agent" data-action="agent-section" data-key="overview" title="${esc(title(a))}: overview">${esc(title(a))}</button> <span>/</span> `:''}${crumb}</div>${page?`<div class="topbar-page">${page}</div>`:''}<div class="topbar-spacer"></div><div class="topbar-actions"></div>`;
+    $('#topbar').innerHTML=`<button type="button" class="topbar-back" data-action="nav-back" ${navBack.length?'':'disabled'} title="${navBack.length?esc(`Back to ${navLabel(navBack.at(-1))} (Alt+Left)`):'Back'}" aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button><div class="breadcrumb">${a&&screen?`<button type="button" class="crumb-agent" data-action="agent-section" data-key="overview" title="${esc(title(a))}: overview">${esc(title(a))}</button> <span>/</span> `:''}${crumb}</div>${page?`<div class="topbar-page">${page}</div>`:''}<div class="topbar-spacer"></div><button type="button" class="topbar-search" data-action="find" title="Find anything: agents, settings, actions, machines, chats and keys"><span class="topbar-search-ico" aria-hidden="true">${dkIcon('inspect')}</span><span class="topbar-search-text">Search</span><kbd>${esc(mod().trim())}${state.platform==='darwin'?'':'+'}K</kbd></button><div class="topbar-actions"></div>`;
   }
   async function openManage(id,section='overview'){
     const a=state.agents.find(x=>x.id===id);if(!a)return;
@@ -2315,6 +2416,9 @@
   // Import (a .env or any text file, pasted text, or the tools on this computer) open above the list. From the Opaya
   // Agent's key button (chat) each key also has Insert, and a new key is inserted as a reference.
   // Keys pasted as text into an Opaya chat are temporary and not listed; everything given here stays until forgotten.
+  // Keys, skills and MCP servers are shared by every agent: their windows carry the same tabs, so they read as one place
+  // (the Library), opened from the sidebar's Vault or Skills & tools.
+  const libTabs=active=>`<nav class="lib-tabs" aria-label="Library">${[['keys','vault','Keys',AN_ICON.access],['skills','library','Skills',AN_ICON.library],['mcp','mcp-manage','MCP servers',AN_ICON.mcp]].map(([k,act,label,icon])=>`<button type="button" class="lib-tab ${k===active?'active':''}" data-action="${act}" ${k===active?'aria-current="page"':''}>${icon}<span>${label}</span></button>`).join('')}<span class="lib-tabs-note">Shared by all your agents</span></nav>`;
   const vault={chat:false,panel:'',open:'',scan:null,paste:false,filter:'',fresh:new Set(),giveTo:'keep'};
   const vaultKeys=()=>(opaya().secrets||[]).filter(k=>k.kept||k.global||k.stored?.length);
   // The agents a key was saved for, by id (older records by name); agents removed since are left out.
@@ -2322,7 +2426,7 @@
   const KEY_SVG='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3M19 4l2 2"/></svg>';
   function openVault({chat=false,panel=''}={}){
     Object.assign(vault,{chat,panel,open:'',scan:null,paste:false,filter:'',fresh:new Set()});
-    modal('Opaya Vault','Your API keys, tokens and passwords, kept by Opaya and given to the agents you choose. Values are never shown here or sent into a chat.','<div id="vault" class="vault"></div>',true);
+    modal('Opaya Vault','Your API keys, tokens and passwords, kept by Opaya and given to the agents you choose. Values are never shown here or sent into a chat.',`${libTabs('keys')}<div id="vault" class="vault"></div>`,true);
     const box=$('#vault');drawVault();
     box.addEventListener('click',vaultClick);box.addEventListener('input',vaultInput);box.addEventListener('change',vaultInput);
     box.addEventListener('submit',vaultSubmit);
@@ -2972,7 +3076,7 @@
       <div class="modal-footer"><div></div><div><button type="button" class="secondary" id="mcp-cancel">Back</button><button class="primary" type="submit">Save server</button></div></div></form>`:'';
     const added=new Set(list.map(x=>x.name)),cat=mcpCatalogCache||[];
     const oneClick=cat.length?`<h3 class="mcp-head">Add with one click</h3><div class="mcp-catalog">${cat.map(c=>{const on=c.own?state.agents.filter(x=>x.browser).length:added.has(c.name);return `<div class="mcp-card${c.own?' own':''}"><div><strong>${esc(c.title)}</strong>${c.own?'<em>Opaya</em>':c.secret&&!c.secret.optional?'<em>needs a key</em>':''}<p>${esc(c.description)}</p>${c.needs?`<small>Needs ${esc(c.needs)} where the agent runs.</small>`:''}</div><button class="secondary small ${on?'is-on':''}" data-mcp-install="${esc(c.id)}">${c.own?(on?`On for ${on}`:'Turn on'):on?'Added':'Add'}</button></div>`;}).join('')}</div><h3 class="mcp-head">Your MCP servers</h3>`:'';
-    modal('MCP servers','Tools your agents can call. Add one with a click: Opaya passes it to Hermes and other ACP agents and writes it into Claude Code, Codex and OpenClaw configs.',`${adding||s?form:`${oneClick}<div class="skill-list">${list.map(x=>`<div class="skill-row"><div><strong>${esc(x.name)}</strong><em>${esc(x.type)}${x.enabled?'':' / off'}</em><p>${esc(x.type==='stdio'?`${x.command} ${x.args.join(' ')}`:x.url)}</p><p>${x.agents==='all'?'All agents':`${x.agents.length} agent${x.agents.length===1?'':'s'}`}${x.envNames.length||x.headerNames.length?` / secrets: ${esc([...x.envNames,...x.headerNames].join(', '))}`:''}</p></div><div class="row-actions"><button class="secondary small" data-mcp-edit="${esc(x.id)}">Edit</button><button class="text-button danger-text" data-mcp-remove="${esc(x.id)}">Remove</button></div></div>`).join('')||'<p class="field-help">No MCP servers yet.</p>'}</div>
+    modal('MCP servers','Tools your agents can call. Add one with a click: Opaya passes it to Hermes and other ACP agents and writes it into Claude Code, Codex and OpenClaw configs.',`${adding||s?form:`${libTabs('mcp')}${oneClick}<div class="skill-list">${list.map(x=>`<div class="skill-row"><div><strong>${esc(x.name)}</strong><em>${esc(x.type)}${x.enabled?'':' / off'}</em><p>${esc(x.type==='stdio'?`${x.command} ${x.args.join(' ')}`:x.url)}</p><p>${x.agents==='all'?'All agents':`${x.agents.length} agent${x.agents.length===1?'':'s'}`}${x.envNames.length||x.headerNames.length?` / secrets: ${esc([...x.envNames,...x.headerNames].join(', '))}`:''}</p></div><div class="row-actions"><button class="secondary small" data-mcp-edit="${esc(x.id)}">Edit</button><button class="text-button danger-text" data-mcp-remove="${esc(x.id)}">Remove</button></div></div>`).join('')||'<p class="field-help">No MCP servers yet.</p>'}</div>
       <div class="mcp-examples"><p class="field-help">Another server: <code>npx -y some-mcp-server</code>, <code>uvx mcp-server-fetch</code>, or an HTTPS server such as <code>https://mcp.example.com/mcp</code>.</p></div>
       <div class="modal-footer"><div></div><div><button class="secondary" id="mcp-add">Add another server by hand</button></div></div>`}`,true);
     $('#mcp-add')&&($('#mcp-add').onclick=()=>openMcpManager('new'));
@@ -3604,7 +3708,7 @@
   }
   let drawLibrary=null;
   function openLibrary(){
-    modal('Skills library','Global skills kept by Opaya. Install them to any agent on this computer or a VPS.',`<div id="library-body"><p class="field-help">Loading...</p></div>`,true);
+    modal('Skills library','Global skills kept by Opaya. Install them to any agent on this computer or a VPS.',`${libTabs('skills')}<div id="library-body"><p class="field-help">Loading...</p></div>`,true);
     drawLibrary=async()=>{
       const body=$('#library-body');if(!body)return;let list=[];try{list=await api.libraryList();}catch(error){body.innerHTML=`<div class="message-error">${esc(error.message)}</div>`;return;}
       const q=($('#library-search')?.value||'').toLowerCase(),shown=list.filter(s=>`${s.name} ${s.description} ${s.category}`.toLowerCase().includes(q));

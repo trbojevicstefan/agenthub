@@ -2644,3 +2644,68 @@ body[data-theme="light"] .mg-h-icon.git-h{color:#a4561a;background:#fbefe3;borde
 .mcp-card .secondary.small.is-on{color:#8ff0bb;border-color:#2f5a42;background:#152a22}
 body[data-theme="light"] .mcp-card .secondary.small.is-on{color:#1f7a45;border-color:#a9d8bb;background:#e9f8ef}
 .mcp-vault-pick{display:grid;gap:4px;font-size:12px}
+/* 0.27: Find anything. The search button sits in the top bar of every screen; the palette shows where each result lives. */
+.topbar-search{display:inline-flex;align-items:center;gap:8px;height:30px;min-width:190px;padding:0 8px 0 10px;margin-right:10px;border-radius:9px;border:1px solid #2c3437;background:#171c1e;color:#8b989e;font-size:12px;justify-content:flex-start;-webkit-app-region:no-drag}
+.topbar-search:hover{border-color:#4f6a5c;color:var(--text);background:#1c2322}
+.topbar-search-ico svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.topbar-search-text{flex:1;text-align:left}
+.topbar-search kbd{font-size:10px}
+@media (max-width:900px){.topbar-search{min-width:0}.topbar-search-text,.topbar-search kbd{display:none}}
+.modal.find-dialog{width:min(640px,calc(100vw - 40px));margin:10vh auto auto}
+.modal.find-dialog .modal-header{padding-bottom:6px}
+.modal.find-dialog .modal-header p{font-size:11.5px}
+.find{display:flex;flex-direction:column;gap:8px}
+.find-box{display:flex;align-items:center;gap:10px;padding:0 12px;border:1px solid #3a4a44;border-radius:11px;background:#141819}
+.find-box:focus-within{border-color:#6ee7a8;box-shadow:0 0 0 3px #6ee7a81f}
+.find-ico svg{width:17px;height:17px;fill:none;stroke:#8b989e;stroke-width:2;stroke-linecap:round}
+.find-input{flex:1;border:0!important;outline:0!important;background:transparent!important;padding:12px 0;font-size:14px}
+.find-list{max-height:min(460px,55vh);overflow:auto;display:flex;flex-direction:column;gap:1px;padding-right:2px}
+.find-group{font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#6f7d83;padding:10px 10px 4px}
+.find-row{display:flex;align-items:center;gap:11px;justify-content:flex-start;text-align:left;padding:7px 10px;border-radius:9px;border:1px solid transparent;width:100%}
+.find-row.active{background:#1f2a26;border-color:#35503f}
+.find-row-ico{width:28px;height:28px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;background:#1d2427;color:#9fe0b9;flex-shrink:0}
+.find-row-ico svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.find-row-ico .agent-avatar{width:28px;height:28px;margin:0;border-radius:8px;font-size:11px}
+.find-row-text{flex:1;min-width:0;display:flex;flex-direction:column}
+.find-row-text strong{font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.find-row-text small{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.find-row-text small i{font-style:normal;color:#56636a;margin:0 2px}
+.find-row kbd{font-size:10px}
+.find-empty{padding:18px 10px;color:var(--muted);font-size:12px}
+.find-foot{display:flex;gap:14px;font-size:10.5px;color:#6f7d83;padding:6px 4px 2px;border-top:1px solid #262e30}
+.find-foot kbd{margin-right:3px}
+.set-index{position:sticky;top:-20px;z-index:3;display:flex;flex-direction:column;gap:8px;margin:-6px 0 14px;padding:8px 0 10px;background:#1a1f21;border-bottom:1px solid #2a3234}
+.set-filter{width:100%;max-width:320px;padding:7px 10px;font-size:12px}
+.set-index nav{display:flex;flex-wrap:wrap;gap:5px}
+.set-chip{height:26px;padding:0 10px;border-radius:20px;border:1px solid #2f383b;background:#1b2124;font-size:11.5px;color:#b8c4c9}
+.set-chip:hover{border-color:#4f6a5c;color:var(--text)}
+.set-chip.dim{opacity:.35}
+.settings-grid>section.flash{animation:set-flash 1.6s ease-out}
+@keyframes set-flash{0%,35%{box-shadow:0 0 0 2px #6ee7a8}100%{box-shadow:0 0 0 0 transparent}}
+body[data-theme="light"] .topbar-search{background:#f4f7f5;border-color:#dbe3de;color:#5b6b63}
+body[data-theme="light"] .find-box{background:#fff;border-color:#cfd9d3}
+body[data-theme="light"] .find-row.active{background:#eef8f2;border-color:#bfdccb}
+body[data-theme="light"] .find-row-ico{background:#f1f6f3;color:#1f7a45}
+body[data-theme="light"] .set-index{background:#fff;border-color:#e0e6e2}
+body[data-theme="light"] .set-chip{background:#f6f8f7;border-color:#dfe5e2;color:#38544a}
+.settings-grid>section{scroll-margin-top:128px}
+.help-find{font-size:12px;color:var(--muted);margin:-2px 0 12px}
+/* 0.27: the Library. Keys, Skills and MCP servers share a tab bar; Skills & tools sits in the sidebar next to Vault. */
+.side-svg{display:inline-flex;width:14px;height:14px;flex-shrink:0;color:inherit}
+.side-svg svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round}
+.lib-tabs{display:flex;align-items:center;gap:4px;margin:-6px 0 16px;padding-bottom:12px;border-bottom:1px solid #2a3234}
+.lib-tab{display:inline-flex;align-items:center;gap:7px;height:32px;padding:0 12px;border-radius:9px;border:1px solid transparent;color:#a0afb6;font-size:12.5px}
+.lib-tab svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.lib-tab:hover{background:#1f2628;color:var(--text)}
+.lib-tab.active{background:#1f2a26;border-color:#35503f;color:#e6f5ec}
+.lib-tabs-note{margin-left:auto;font-size:11px;color:#6f7d83}
+body[data-theme="light"] .lib-tabs{border-color:#e0e6e2}
+body[data-theme="light"] .lib-tab{color:#4d5f57}
+body[data-theme="light"] .lib-tab.active{background:#eef8f2;border-color:#bfdccb;color:#12301f}
+@media (max-width:720px){.lib-tabs-note{display:none}}
+.topbar-back{width:28px;height:28px;padding:0;margin-right:8px;border-radius:8px;color:#a0afb6;flex-shrink:0;-webkit-app-region:no-drag}
+.topbar-back svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
+.topbar-back:hover:not(:disabled){background:var(--hover);color:var(--text)}
+.topbar-back:disabled{opacity:.3}
+.side-caption{font-size:9.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#5f6d73;padding:4px 7px 2px}
+body.sidebar-rail .sidebar .side-caption{display:none}

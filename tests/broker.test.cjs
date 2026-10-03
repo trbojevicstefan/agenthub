@@ -68,4 +68,5 @@ test('terminal window arrangement and windows are validated and kept',async t=>{
 test('the agents sidebar is a strip of icons unless names were chosen',async t=>{const {b}=await fixture(t);
   await b.saveView({});assert.equal(b.data.view.sidebarRail,true);
   await b.saveView({sidebarRail:false});assert.equal(b.data.view.sidebarRail,false);
-  await b.saveView({sidebarRail:1});assert.equal(b.data.view.sidebarRail,true);});
+  await b.saveView({sidebarRail:1});assert.equal(b.data.view.sidebarRail,true);
+  await b.saveView({sidebarHide:['skills','vault','nope']});assert.deepEqual(b.data.view.sidebarHide,['skills','vault'],'Skills & tools can be hidden; unknown items are dropped');});
