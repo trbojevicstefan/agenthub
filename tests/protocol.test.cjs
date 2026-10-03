@@ -77,3 +77,14 @@ test('ACP passes MCP servers, records Hermes version and slash commands, and war
   assert(events.some(e=>e.type==='activity'&&/hermes update/.test(e.text)));
   assert.equal(a.diagnostics().agentVersion,'0.21.5');a.close();
 });
+test('ACP opens a chat again with the new MCP servers when Opaya gives the browser, without a reconnect',async()=>{
+  const child=acpServer({loadSession:true});let servers=[{name:'opaya-vault',command:'x',args:['v'],env:[]}];
+  const a=new AcpAdapter({agent:{provider:'hermes',args:[],cwd:path.resolve('.')},approve:async()=>false,spawnAgent:()=>child,mcpServers:()=>servers});await a.connect();
+  let saved='';const conv={id:'c1',externalSessionId:''};const ctx=()=>context({conversation:conv,onSession:id=>{saved=id;conv.externalSessionId=id;}});
+  await a.run(ctx());assert.equal(saved,'acp-1');
+  await a.run(ctx());assert.equal(child.frames.filter(f=>f.method==='session/load').length,0,'same servers: the session stays as it is');
+  servers=[...servers,{name:'opaya-browser',command:'x',args:['b'],env:[]}];
+  await a.run(ctx());const load=child.frames.filter(f=>f.method==='session/load');
+  assert.equal(load.length,1);assert.equal(load[0].params.sessionId,'acp-1');assert.deepEqual(load[0].params.mcpServers.map(s=>s.name),['opaya-vault','opaya-browser']);
+  a.close();
+});

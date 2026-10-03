@@ -70,3 +70,26 @@ test('a .env saved as UTF-16 (Windows Notepad) and a PowerShell profile are read
   const sources=await vaultImport.scanTools({home,platform:'win32',env:{}});
   assert.deepEqual(sources.map(s=>[s.label,s.items.map(x=>x.name)]),[['PowerShell profile',['OPENROUTER_API_KEY']]]);
 });
+const vaultBackup=require('../desktop/vault-backup.cjs');
+test('Vault backup: a password-encrypted file with no key in plain text; restore puts the keys back once',async t=>{
+  const {agent,root}=await fixture(t),file=path.join(root,'keys.opaya-vault');
+  await agent.holdFromUser({name:'OPENAI_API_KEY',value:OPENAI_KEY});await agent.holdFromUser({name:'ROUTER',value:ROUTER_KEY,endpoint:'https://openrouter.ai/api/v1'});
+  await assert.rejects(()=>agent.vaultBackupSave({file,password:'short'}),/at least 8/);
+  const saved=await agent.vaultBackupSave({file,password:'correct horse battery'});assert.equal(saved.count,2);
+  const text=await fs.readFile(file,'utf8');assert(!text.includes(OPENAI_KEY.slice(8))&&!text.includes(ROUTER_KEY.slice(10)),'values are encrypted');
+  if(process.platform!=='win32')assert.equal((await fs.stat(file)).mode&0o777,0o600);
+  assert.equal(agent.describe().vaultBackup.count,2);
+  await assert.rejects(()=>agent.vaultBackupRestore({file,password:'wrong password'}),/Wrong password/);
+  // Restored into a fresh Opaya (another computer): both come back, with the endpoint.
+  const other=await fixture(t),r=await other.agent.vaultBackupRestore({file,password:'correct horse battery'});
+  assert.deepEqual(r.restored.map(x=>x.name).sort(),['OPENAI_API_KEY','ROUTER']);
+  assert.equal(other.agent.describe().secrets.find(s=>s.name==='ROUTER').endpoint,'https://openrouter.ai/api/v1');
+  assert.equal(other.agent.secretValue(other.agent.secrets.find(s=>s.name==='OPENAI_API_KEY')),OPENAI_KEY);
+  const again=await other.agent.vaultBackupRestore({file,password:'correct horse battery'});assert.equal(again.restored.length,0);assert.equal(again.skipped.length,2);
+  await fs.writeFile(path.join(root,'x.json'),'{"a":1}');await assert.rejects(()=>agent.vaultBackupRestore({file:path.join(root,'x.json'),password:'correct horse battery'}),/not an Opaya Vault backup/);
+  await assert.rejects(()=>vaultBackup.seal([],'long enough'),/no keys/);
+});
+test('only the user can back up or restore the Vault, never an agent tool',()=>{
+  const src=require('node:fs').readFileSync(path.join(__dirname,'../desktop/service.cjs'),'utf8');
+  for(const name of ['vaultBackupSave','vaultBackupRestore','vaultImportScan','vaultImportCommit'])assert.match(src,new RegExp(`USER_ONLY=new Set\\([^)]*'${name}'`),name);
+});

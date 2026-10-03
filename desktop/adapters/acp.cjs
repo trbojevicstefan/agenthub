@@ -85,8 +85,14 @@ class AcpAdapter {
     const info=init.agentInfo||{};this.agentInfo={name:String(info.title||info.name||'').slice(0,80),version:String(info.version||'').slice(0,40)};
     return {description:`ACP connected${this.agentInfo.version?` to ${this.agentInfo.name||this.agent.name} ${this.agentInfo.version}`:''}; tool approvals stay explicit`,agentVersion:this.agentInfo.version};
   }
+  // What Opaya passes as MCP servers, without secrets: when it changes (the browser given, a server turned on), a session
+  // opened before is opened again so the agent has them in this chat right away instead of after a reconnect.
+  mcpSignature(){return JSON.stringify(this.sessionMcp().map(s=>[s.name,s.command||s.url||'',...(s.args||[])]));}
   async run(ctx){
-    let sessionId=this.sessions.get(ctx.conversation.id);
+    let sessionId=this.sessions.get(ctx.conversation.id);const sig=this.mcpSignature();
+    if(!this.mcpSigs)this.mcpSigs=new Map();
+    if(sessionId&&(this.mcpSigs.get(sessionId)??sig)!==sig&&this.capabilities.loadSession&&ctx.conversation.externalSessionId===sessionId){this.sessions.delete(ctx.conversation.id);sessionId=null;}
+    if(this.preparedSession&&this.preparedSig!==sig)this.preparedSession=null;
     if(!sessionId){
       const cwd=ctx.cwd||sessionCwd(this.agent);
       if(!cwd)throw new Error('ACP requires an absolute working directory. Edit this agent first.');
@@ -99,7 +105,7 @@ class AcpAdapter {
         this.readModels(session,sessionId,true);
       }
       if(typeof sessionId!=='string')throw new Error('ACP did not return a session ID.');
-      this.sessions.set(ctx.conversation.id,sessionId);await ctx.onSession(sessionId);
+      this.sessions.set(ctx.conversation.id,sessionId);this.mcpSigs.set(sessionId,sig);await ctx.onSession(sessionId);
     }
     this.active={...ctx,sessionId};
     const cancel=()=>{try{this.rpc.notify('session/cancel',{sessionId});}catch{}};
@@ -170,7 +176,7 @@ class AcpAdapter {
     if(shown.join()!==this.lastLevels.join()){this.lastLevels=shown;this.onChange();}
   }
   async listModels(){
-    if(!this.preparedSession)this.preparedSession=await this.rpc.request('session/new',{cwd:sessionCwd(this.agent),mcpServers:this.sessionMcp()},60000);
+    if(!this.preparedSession){this.preparedSig=this.mcpSignature();this.preparedSession=await this.rpc.request('session/new',{cwd:sessionCwd(this.agent),mcpServers:this.sessionMcp()},60000);}
     this.readModels(this.preparedSession,this.preparedSession?.sessionId,true);
     return this.modelIds||[];
   }

@@ -45,8 +45,9 @@ process.stdin.on('data',chunk=>{
   while((i=buffer.indexOf('\n'))>=0){
     const line=buffer.slice(0,i).trim();buffer=buffer.slice(i+1);if(!line)continue;
     let m;try{m=JSON.parse(line);}catch{continue;}
-    if(m.method==='initialize')reply(m.id,{protocolVersion:m.params?.protocolVersion||'2025-06-18',capabilities:{tools:{}},serverInfo:{name:'opaya-browser',version:VERSION},instructions:'Opaya browser: a real browser pane the user watches. Open pages, read them, click and type. Ask before submitting forms that buy, send or delete things.'});
-    else if(m.method==='tools/list')reply(m.id,{tools:TOOLS});
+    if(m.method==='initialize')reply(m.id,{protocolVersion:m.params?.protocolVersion||'2025-06-18',capabilities:{tools:{}},serverInfo:{name:'opaya-browser',version:VERSION},instructions:'Opaya browser: a real browser pane the user watches. browser_open returns the page as text with its links and form fields; browser_click takes a CSS selector or the visible text of a link or button; browser_type fills a field (submit:true presses Enter); browser_read reads the page again after it changed. Ask before submitting forms that buy, send or delete things.'});
+    // A model that reads text only gets every tool but the screenshot; pages always come back as text.
+    else if(m.method==='tools/list')reply(m.id,{tools:process.env.OPAYA_BROWSER_TEXT_ONLY==='1'?TOOLS.filter(t=>t.name!=='browser_screenshot'):TOOLS});
     else if(m.method==='tools/call')call(m.params?.name,m.params?.arguments).then(r=>reply(m.id,r),e=>reply(m.id,{content:[{type:'text',text:`Browser error: ${e.message}`}],isError:true}));
     else if(m.method==='ping')reply(m.id,{});
     else if(m.id!==undefined&&m.method)fail(m.id,`Method not found: ${m.method}`);

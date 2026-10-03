@@ -36,7 +36,7 @@ test('iTrust is per agent or for all agents, and only local ACP/Claude agents ge
   await broker.saveSettings({itrustAll:true});assert.equal(broker.isTrusted(api.id),true);
   await broker.connect(acp.id);assert.equal(factory.at(-1).trusted(),true);
   assert.equal(broker.mcpFor(acp.id).some(s=>s.name==='opaya-browser'),false);
-  await broker.updateAgentDisplay({id:acp.id,browser:true});await broker.updateAgentDisplay({id:api.id,browser:true});
+  await broker.updateAgentDisplay({id:acp.id,browser:true});await assert.rejects(()=>broker.updateAgentDisplay({id:api.id,browser:true}),/only agents here/);
   const server=broker.mcpFor(acp.id).find(s=>s.name==='opaya-browser');assert.equal(server.command,'/opt/Opaya');assert.deepEqual(server.env[0],{name:'ELECTRON_RUN_AS_NODE',value:'1'});
   assert.equal(broker.mcpFor(api.id).some(s=>s.name==='opaya-browser'),false,'gateway agents cannot start a local MCP bridge');
   assert.equal(broker.snapshot().settings.itrustAll,true);
@@ -56,6 +56,11 @@ test('the browser MCP bridge speaks MCP and its token can only call browserTool'
   const open=await rpc(3,'tools/call',{name:'browser_open',arguments:{url:'example.com'}});assert.match(open.result.content[0].text,/Hello page[\s\S]*More: https:\/\/example.com\/more/);
   const shot=await rpc(4,'tools/call',{name:'browser_screenshot',arguments:{}});assert.equal(shot.result.content[1].type,'image');
   assert.deepEqual(calls,['browserTool','browserTool']);
+  // For a model that reads text only: every tool but the screenshot.
+  const textChild=spawn(process.execPath,[path.join(__dirname,'../desktop/browser-mcp.cjs')],{env:{...process.env,OPAYA_BROWSER_ENDPOINT:endpoint,OPAYA_BROWSER_TOKEN:scoped,OPAYA_BROWSER_TEXT_ONLY:'1'},stdio:['pipe','pipe','inherit']});
+  t.after(()=>textChild.kill());
+  const tools=await new Promise(r=>{let b='';textChild.stdout.on('data',d=>{b+=d;const i=b.indexOf('\n');if(i>=0)r(JSON.parse(b.slice(0,i)).result.tools.map(x=>x.name));});textChild.stdin.write(JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}})+'\n');});
+  assert(tools.includes('browser_open')&&tools.includes('browser_click')&&!tools.includes('browser_screenshot'));
 });
 test('rich messages render Markdown safely',()=>{
   global.window={};require('../ui/markdown.js');const r=window.OpayaMarkdown.render;

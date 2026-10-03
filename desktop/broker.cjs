@@ -19,7 +19,9 @@ const projects=require('./projects.cjs');
 const files=require('./files.cjs');
 const cloner=require('./clone.cjs');
 // The browser bridge runs next to Opaya, so only agents on this computer (not SSH or containers) can use it.
-const browserCapable=a=>a.transport!=='ssh'&&a.command!=='docker'&&['acp','claude'].includes(a.protocol);
+// The browser pane is on this computer, so agents that run here get it: ACP agents (Hermes, OpenCode...), Claude Code
+// and Codex.
+const browserCapable=a=>a.transport!=='ssh'&&a.command!=='docker'&&['acp','claude','codex'].includes(a.protocol);
 function safeError(error,token=''){
   let value=String(error?.message||error||'Operation failed.');
   if(token)value=value.split(token).join('[redacted]');
@@ -186,6 +188,8 @@ class Broker{
     // Hourly update checks, and fixing "too old" connection errors by updating automatically. Both on by default.
     if(input.updateChecks!==undefined)next.updateChecks=!!input.updateChecks;
     if(input.autoFix!==undefined)next.autoFix=!!input.autoFix;
+    // Agents on this computer may ask the Opaya Vault for a key (opaya-vault MCP); the user approves each one. On by default.
+    if(input.vaultMcp!==undefined)next.vaultMcp=!!input.vaultMcp;
     // System notifications when Opaya is not in front (all on by default), Opaya's tips, connecting at start, the send key.
     for(const key of ['notifyReplies','notifyApprovals','notifyJobs','notifySound','tips','autoConnect'])if(input[key]!==undefined)next[key]=!!input[key];
     if(input.sendKey!==undefined){if(!['enter','mod-enter'].includes(input.sendKey))throw new Error('Choose Enter or Ctrl+Enter to send.');next.sendKey=input.sendKey;}
@@ -209,10 +213,18 @@ class Broker{
     if(group!==undefined)a.group=schema.group(group);
     if(tags!==undefined)a.tags=schema.tags(tags);
     if(itrust!==undefined)a.itrust=Boolean(itrust);
-    if(browser){const v=visionOf({...a,activeModel:this.runtimeFor(a.id).adapter?.currentModel});if(v.vision===false)throw new Error(`${a.displayName||a.name} cannot use the Opaya browser: ${v.reason} Choose a model that can see images (Models button), then try again.`);}
+    if(browser&&!browserCapable(a))throw new Error(`${a.displayName||a.name} runs on another machine or in a container: the Opaya browser is on this computer, so only agents here can use it.`);
+    const browserChanged=browser!==undefined&&Boolean(browser)!==!!a.browser;
     if(browser!==undefined)a.browser=Boolean(browser);
     if(surface!==undefined)a.surface=['chat','terminal'].includes(surface)?surface:'';
-    this.data.agents[index]=a;await this.persist();return a;
+    this.data.agents[index]=a;await this.persist();if(browserChanged)this.refreshMcp(a.id);return a;
+  }
+  // ACP agents and Claude Code get Opaya's MCP servers with each session or message, so a change reaches them in the
+  // open chat. Codex reads them when its app-server starts: it reconnects, after an answer it is giving.
+  async refreshMcp(id){
+    const a=this.data.agents.find(x=>x.id===id);if(!a||a.protocol!=='codex'||this.runtimeFor(id).status!=='connected')return;
+    await this.turns.get(id)?.done;if(this.runtimeFor(id).status!=='connected')return;
+    this.disconnect(id);await this.connect(id).catch(()=>{});
   }
   // Drag and drop: place an agent before or after another one and optionally move it into a section (group or pinned).
   async moveAgent({id,targetId,position='before',group,pinned}){
@@ -307,11 +319,12 @@ class Broker{
     const list=mcp.acpServers(this.data.mcpServers||[],agentId,id=>this.mcpSecrets(id));
     // Built-in: Opaya's browser pane, for agents on this computer that were given it (right-click > Opaya browser).
     const a=this.data.agents.find(x=>x.id===agentId),b=this.browserBridge;
-    // A text-only model cannot use a browser: it would read pages but miss everything shown as pictures.
     // Built-in: the Opaya Vault, so an agent on this computer can take a key it needs (the user approves each one).
     const v=this.vaultBridge;
     if(a&&v&&a.transport!=='ssh'&&a.command!=='docker'&&a.protocol!=='openai'&&a.protocol!=='terminal'&&this.data.settings?.vaultMcp!==false)list.push({name:'opaya-vault',command:v.command,args:v.args,env:[...Object.entries(v.env).map(([name,value])=>({name,value})),{name:'OPAYA_VAULT_AGENT',value:a.id}]});
-    if(a?.browser&&b&&browserCapable(a)&&visionOf({...a,activeModel:this.runtimeFor(a.id).adapter?.currentModel}).vision!==false)list.push({name:'opaya-browser',command:b.command,args:b.args,env:Object.entries(b.env).map(([name,value])=>({name,value}))});
+    // Every model can use it: pages come back as text, links and form fields. A model that reads text only does not get
+    // the screenshot tool, which would return a picture it cannot see.
+    if(a?.browser&&b&&browserCapable(a)){const textOnly=visionOf({...a,activeModel:this.runtimeFor(a.id).adapter?.currentModel}).vision===false;list.push({name:'opaya-browser',command:b.command,args:b.args,env:[...Object.entries(b.env).map(([name,value])=>({name,value})),...(textOnly?[{name:'OPAYA_BROWSER_TEXT_ONLY',value:'1'}]:[])]});}
     return list;
   }
   async saveMcpServer({server:input,env,headers}){

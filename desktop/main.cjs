@@ -164,6 +164,10 @@ if(hostMode){
       // files shown, since .env files are hidden) or a file dropped on the Vault.
       handlers.vaultImportScan=input=>client.call('vaultImportScan',input,2*60*1000);
       handlers.vaultImportCommit=input=>client.call('vaultImportCommit',input);
+      // Vault backup: a password-encrypted file where the user chooses (Opaya's save dialog), and restoring one.
+      handlers.vaultBackupSave=async input=>{const result=await dialog.showSaveDialog(win,{title:'Back up the Opaya Vault',defaultPath:`opaya-vault-${new Date().toISOString().slice(0,10)}.opaya-vault`,filters:[{name:'Opaya Vault backup',extensions:['opaya-vault']}]});if(result.canceled||!result.filePath)return null;return client.call('vaultBackupSave',{file:result.filePath,password:input?.password},60000);};
+      handlers.pickVaultBackup=async()=>{const result=await dialog.showOpenDialog(win,{title:'Restore an Opaya Vault backup',buttonLabel:'Choose',properties:['openFile','showHiddenFiles'],filters:[{name:'Opaya Vault backup',extensions:['opaya-vault','json']},{name:'All files',extensions:['*']}]});return result.canceled?'':result.filePaths[0]||'';};
+      handlers.vaultBackupRestore=input=>client.call('vaultBackupRestore',input,60000);
       handlers.pickSecretFile=async()=>{const result=await dialog.showOpenDialog(win,{title:'Import keys from a file',buttonLabel:'Scan',properties:['openFile','showHiddenFiles']});return result.canceled?'':result.filePaths[0]||'';};
       // Copying an agent to a VPS can take minutes.
       for(const method of ['cloneAgent','redeployAgent'])handlers[method]=input=>client.call(method,input,20*60*1000);

@@ -922,3 +922,9 @@
 :where(body[data-theme="light"]) .fleet-panel-block{border-top:1px solid #d6dde0}
 :where(body[data-theme="light"]) .fleet-panel-block>h3{color:#6f7c82}
 :where(body[data-theme="light"]) .fleet-col:not(.focused):hover{border-color:#c3d0ca}
+:where(body[data-theme="light"]) .vault-backup-state{border:1px solid #aed5c1;background:#6ee7a814;color:#123e26}
+:where(body[data-theme="light"]) .vault-backup-state.warn{border-color:#d8cbaf;background:#f5c26b14;color:#58411a}
+:where(body[data-theme="light"]) .vault-steps li{border:1px solid #d0d8dc;background:#ffffff05}
+:where(body[data-theme="light"]) .vault-steps b{background:#cfdfd9;color:#164529}
+:where(body[data-theme="light"]) .vb-last{background:#e4e8ea;border:1px solid #d4dadd}
+:where(body[data-theme="light"]) .vb-last.none{color:#58411a}

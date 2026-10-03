@@ -2597,3 +2597,25 @@ body[data-theme="light"] .mg-card:hover{box-shadow:0 14px 32px -18px #1d3a2a52,0
 @media (max-width:760px){.ov-hero{padding:14px}.ov-hero .mg-card.ov-card{width:100%}}
 .clone-note{display:block;margin-top:6px;font-size:11.5px;line-height:1.5;color:var(--muted)}
 #mg-p-alerts .ov-manage-actions{grid-template-columns:repeat(auto-fit,minmax(165px,1fr))}
+/* 0.30 Vault: backup state, how it works, back up & restore */
+.vault-backup-state{margin-left:10px;height:22px;padding:0 9px;border-radius:11px;font-size:11px;border:1px solid #2f5a44;background:#6ee7a814;color:#9ff0c4}
+.vault-backup-state.warn{border-color:#5a4a2a;background:#f5c26b14;color:#f5c26b}
+.vault-steps{display:flex;gap:8px;flex-wrap:wrap;list-style:none;margin:2px 0 12px;padding:0}
+.vault-steps li{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);padding:5px 10px 5px 5px;border-radius:16px;border:1px solid #273034;background:#ffffff05}
+.vault-steps b{width:18px;height:18px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:10.5px;background:#20302a;color:#9fe0b9}
+.vault-mcp{margin:14px 2px 4px}
+.vb-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px}
+.vb-col{display:flex;flex-direction:column;gap:8px;min-width:0}
+.vb-col h3{margin:0}
+.vb-last{margin:0;padding:8px 10px;border-radius:9px;background:#15191b;border:1px solid #262d30;font-size:12px}
+.vb-last small{color:var(--faint);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vb-last.none{color:#f5c26b}
+.vb-file{display:flex;align-items:center;gap:10px;min-width:0}
+.vb-file small{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vb-col .vault-add-foot{margin-top:auto}
+body[data-theme="light"] .vault-backup-state{background:#e9f6ee;border-color:#bfdccb;color:#1f7a45}
+body[data-theme="light"] .vault-backup-state.warn{background:#fdf3e1;border-color:#efd3a0;color:#8a5a00}
+body[data-theme="light"] .vault-steps li{background:#fafbfa;border-color:#e0e6e2}
+body[data-theme="light"] .vault-steps b{background:#e3f3ea;color:#1f7a45}
+body[data-theme="light"] .vb-last{background:#fafbfa;border-color:#e0e6e2}
+.model-other{margin-top:8px;width:100%}

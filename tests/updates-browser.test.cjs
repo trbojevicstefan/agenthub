@@ -46,19 +46,26 @@ test('the Opaya browser is only for models that can see images',()=>{
   for(const m of ['qwen3:4b','openai/gpt-oss-120b','codestral-latest','llama3.2:3b'])assert.equal(visionOf({provider:'ollama',model:m}).vision,false,m);
   for(const m of ['qwen2.5vl:7b','llama3.2-vision','gpt-5.6-sol','grok-4.7','gemini-3.8-flash','z-ai/glm-4.5v'])assert.equal(visionOf({provider:'openrouter',model:m}).vision,true,m);
   assert.equal(visionOf({provider:'hermes'}).vision,null,'an unknown model is unknown, not denied');
+  // DeepSeek V4.1 Flash reads images: deepseek-flash on DeepSeek's API, deepseek/deepseek-v4.1-flash on OpenRouter.
+  for(const m of ['deepseek-flash','deepseek:deepseek-flash','deepseek/deepseek-v4.1-flash','deepseek/deepseek-flash-latest','deepseek-v4-flash-vision-exp'])assert.equal(visionOf({provider:'hermes',model:m}).vision,true,m);
+  for(const m of ['deepseek-v4-flash','deepseek-v4-pro','deepseek-chat'])assert.equal(visionOf({provider:'hermes',model:m}).vision,false,m);
 });
-test('broker refuses the browser for a text-only model and leaves it out of the MCP list',async t=>{
+test('every model gets the browser; a text-only model gets it without screenshots, Codex here too',async t=>{
   const {Broker}=require('../desktop/broker.cjs');const {Store,Vault}=require('../desktop/store.cjs');const {secure}=require('./helpers.cjs');
   const root=await temp(t),b=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true});await b.init();
   b.browserBridge={command:'node',args:['bridge.cjs'],env:{}};
+  const textOnly=s=>s.env.some(e=>e.name==='OPAYA_BROWSER_TEXT_ONLY'&&e.value==='1');
   const text=await b.saveAgent({agent:{name:'Deep',provider:'custom',protocol:'acp',transport:'local',command:'hermes',args:[],model:'deepseek-v4-pro'}});
-  await assert.rejects(()=>b.updateAgentDisplay({id:text.id,browser:true}),/cannot use the Opaya browser/);
+  await b.updateAgentDisplay({id:text.id,browser:true});
+  assert(textOnly(b.mcpFor(text.id).find(s=>s.name==='opaya-browser')),'a DeepSeek Hermes reads pages as text');
   const seeing=await b.saveAgent({agent:{name:'Claude',provider:'claude',protocol:'claude',transport:'local',command:'claude',args:[]}});
   await b.updateAgentDisplay({id:seeing.id,browser:true});
-  assert(b.mcpFor(seeing.id).some(s=>s.name==='opaya-browser'));
-  // The model changed to a text-only one after the browser was given: it is left out.
+  assert(!textOnly(b.mcpFor(seeing.id).find(s=>s.name==='opaya-browser')));
+  // The model changed to a text-only one after the browser was given: it keeps the browser, without screenshots.
   const i=b.data.agents.findIndex(a=>a.id===seeing.id);b.data.agents[i]={...b.data.agents[i],model:'qwen3:4b'};
-  assert(!b.mcpFor(seeing.id).some(s=>s.name==='opaya-browser'));
+  assert(textOnly(b.mcpFor(seeing.id).find(s=>s.name==='opaya-browser')));
+  const codex=await b.saveAgent({agent:{name:'Codex',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[]}});
+  await b.updateAgentDisplay({id:codex.id,browser:true});assert(b.mcpFor(codex.id).some(s=>s.name==='opaya-browser'));
   await b.close();
 });
 test('other agent errors get a first diagnosis for the Opaya Agent',()=>{

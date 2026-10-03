@@ -8,7 +8,7 @@ const PROVIDERS={
   codex:{label:'Codex',protocol:'codex',transport:'local',command:'codex',models:[]},
   claude:{label:'Claude Code',protocol:'claude',transport:'local',command:'claude',models:[]},
   openclaw:{label:'OpenClaw',endpoint:'http://127.0.0.1:18789/v1',models:['openclaw/default']},
-  deepseek:{label:'DeepSeek',endpoint:'https://api.deepseek.com/v1',models:['deepseek-v4-pro','deepseek-v4-flash']},
+  deepseek:{label:'DeepSeek',endpoint:'https://api.deepseek.com/v1',models:['deepseek-flash','deepseek-v4-pro']},// deepseek-flash: V4.1 Flash, reads images; deepseek-v4-flash is retired
   openai:{label:'OpenAI',endpoint:'https://api.openai.com/v1',models:[]},
   google:{label:'Google Gemini',endpoint:'https://generativelanguage.googleapis.com/v1beta/openai',models:['gemini-3.8-flash']},
   openrouter:{label:'OpenRouter',endpoint:'https://openrouter.ai/api/v1',models:['~openai/gpt-latest']},

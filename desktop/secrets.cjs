@@ -251,7 +251,10 @@ async function writeAt(where,file,content){
     try{await fs.writeFile(tmp,content,{mode:0o600,flag:'wx'});await fs.chmod(tmp,0o600).catch(()=>{});await fs.rename(tmp,real);}finally{await fs.rm(tmp,{force:true}).catch(()=>{});}
     return;
   }
-  const script=`umask 077; f=${quote(file)}; [ -L "$f" ] && f=$(readlink -f -- "$f" 2>/dev/null || printf %s "$f"); mkdir -p -- "$(dirname -- "$f")" && cat > "$f.opaya-tmp" && chmod 600 "$f.opaya-tmp" && mv -f -- "$f.opaya-tmp" "$f"`;
+  // In a container Opaya writes as root (docker exec), while the agent may run as its own user (Hermes as "hermes"): the
+  // file keeps its owner unless that is root, else it gets its folder's owner, so the agent can still read it. A file a
+  // root write left unreadable before is repaired the same way.
+  const script=`umask 077; f=${quote(file)}; [ -L "$f" ] && f=$(readlink -f -- "$f" 2>/dev/null || printf %s "$f"); d=$(dirname -- "$f"); o="$d"; while [ ! -e "$o" ]; do o=$(dirname -- "$o"); done; own=$(stat -c %u:%g -- "$o" 2>/dev/null || stat -f %u:%g -- "$o" 2>/dev/null); if [ -e "$f" ]; then fo=$(stat -c %u:%g -- "$f" 2>/dev/null || stat -f %u:%g -- "$f" 2>/dev/null); case "$fo" in 0:*|'') ;; *) own="$fo";; esac; fi; new=; [ -d "$d" ] || new=1; mkdir -p -- "$d" && cat > "$f.opaya-tmp" && chmod 600 "$f.opaya-tmp" && { [ "$(id -u)" != 0 ] || [ -z "$own" ] || { chown "$own" "$f.opaya-tmp" && { [ -z "$new" ] || chown "$own" "$d"; }; }; } && mv -f -- "$f.opaya-tmp" "$f"`;
   await collect(shell(where,script),{timeout:30000,input:content});
 }
 module.exports={PATTERNS,REF,detect,replaceSpans,guessName,patternName,contextName,envName,secretName,plausible,keyLike,mask,reference,secretId,conceal,shieldOutput,deep,envValue,setEnv,setJsonEnv,setYamlRef,yamlRefs,dshEnvRefused,parseEnv,dirAt,readAt,writeAt};

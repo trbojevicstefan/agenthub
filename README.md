@@ -4,7 +4,7 @@
 
 Opaya is a local-first desktop app for your own AI agents: **Hermes, Claude Code, Codex, OpenClaw**, and any other CLI or OpenAI-compatible API. It works with agents on this computer, on your VPS machines over SSH, and in Docker containers. Chat with them, watch their terminals, give them a browser, and share skills and tools between them, all from one window. Opaya needs no hosted account, collects no telemetry and sends nothing through a third-party relay.
 
-**Current version: 0.29.1.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
+**Current version: 0.30.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
 
 ## Download
 
@@ -24,6 +24,12 @@ All builds are on this repository's [Releases](https://github.com/trbojevicstefa
 The installed app does not need Node.js. Agent CLIs, OpenSSH and their own logins are separate. Opaya finds them on your computer, and **Install agents** can set them up for you.
 
 ## What you can do
+
+### Keys agents can read, DeepSeek V4.1 Flash, the browser for every agent, Vault backups (0.30)
+- **Keys given to agents in Docker stay readable** by the agent's own user (Hermes runs as `hermes`).
+- **DeepSeek V4.1 Flash** (`deepseek-flash`) is known to see images and is in the model lists; the Model dialog takes any model name.
+- **Every model can use the Opaya browser**: pages come back as text with links and form fields; models that see images also get screenshots. Hermes and other ACP agents, Claude Code and Codex on this computer, in the chat that is open.
+- **Back up & restore the Vault**: one file encrypted with your password, to restore here or on a new computer.
 
 ### Manage on one page, Settings by topic (0.29)
 - **Manage is one page.** Everything about an agent, from its model to its Danger zone, is on one page. The agent's sidebar is the table of contents: a click (or the section's letter) scrolls there, and the section you are reading is marked in the sidebar and the top bar. The facts at the top (version, keys, last backup) open their section too.
