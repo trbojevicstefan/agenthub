@@ -617,9 +617,11 @@
       const label=x.label.toLowerCase(),flatLabel=label.replace(/[^a-z0-9]+/g,''),hay=`${label} ${flatLabel} ${x.path.join(' ')} ${x.words}`.toLowerCase();
       if(!tokens.every(t=>hay.includes(t)||flatLabel.includes(t)))continue;
       if(owner&&rest.length&&!rest.every(t=>`${label} ${flatLabel} ${x.words} ${x.path.slice(1).join(' ')}`.toLowerCase().replace(owner,'').includes(t)))continue;
+      // An agent's sections and actions are scored on the words left after its name.
+      const mine=owner&&rest.length?rest:tokens,mq=mine.join(' '),mflat=mq.replace(/\s+/g,'');
       let s=x.boost||0;
-      if(label===q)s+=120;else if(label.startsWith(q)||flatLabel.startsWith(flat))s+=90;else if(label.includes(q)||flatLabel.includes(flat))s+=60;
-      let inName=0;for(const t of tokens){if(new RegExp(`(^|[^a-z0-9])${t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}`).test(label)){s+=12;inName++;}else if(label.includes(t)||flatLabel.includes(t)){s+=6;inName++;}}
+      if(label===mq)s+=120;else if(label.startsWith(mq)||flatLabel.startsWith(mflat))s+=90;else if(label.includes(mq)||flatLabel.includes(mflat))s+=60;
+      let inName=0;for(const t of mine){if(new RegExp(`(^|[^a-z0-9])${t.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}`).test(label)){s+=12;inName++;}else if(label.includes(t)||flatLabel.includes(t)){s+=6;inName++;}}
       if(!inName)s-=30;
       scored.push([s,x]);}
     scored.sort((p,r)=>r[0]-p[0]);const per=new Map(),out=[];

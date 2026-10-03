@@ -1,3 +1,14 @@
+# Opaya 0.27.0 - everything in its place
+
+- **Find anything.** **Search** at the top of every screen, or **Ctrl/Cmd+K**, finds your agents, every agent's sections and actions, places (Vault, Docker manager, Install agents...), settings, machines, chats and vault keys. Each result shows where it lives (*Hermes › Keys & tools*, *Settings › Theme*), so you also learn the way. Without an agent's name, actions are the selected agent's; "codex keys" picks Codex. "backup" finds Back up, "logs" finds Connection log.
+- **Back.** An arrow at the top left, **Alt+Left** or the mouse's back button returns to the previous screen: Home, Machines, the Opaya Agent, Playground, or an agent's chat, console or Manage section.
+- **Three areas in the sidebar.** The Opaya Agent at the top, your agents in the middle, and under **Workspace** what all agents share: Playground, Machines, Vault, the new **Skills & tools**, Settings and Help.
+- **The Library.** Keys, Skills and MCP servers share one tab bar, so the things shared by all your agents read as one place.
+- **The right-click menu mirrors the agent's sidebar:** its quick actions, then one submenu per Manage section with the same items in the same order. One name for each thing everywhere.
+- **One Machines screen.** Every Machines entry opens the Machines board. **Add existing** adds a server by its SSH address or imports `~/.ssh/config`; a machine's menu can copy its SSH command.
+- **Settings** has chips for every section and a filter, and keeps its place when an option redraws it.
+- **Help** starts with how to search, and Opaya's tips introduce Search, Back and importing keys.
+
 # Opaya 0.26.0 - keys, clones and Docker, clearer
 
 - **Import keys into the Opaya Vault.** Find keys in a **.env, JSON, YAML or any text file** (choose it, or drop it on the Vault), in **pasted text**, or **in your tools**: every agent's own key file, your shell profiles, the environment Opaya started with, the GitHub CLI, npm, AWS and Hugging Face. You see names and masked previews only, tick what to keep and rename what you like; keys already in the Vault and the same key found twice are marked. Values stay with Opaya's session service, and only you can import (never the Opaya Agent).

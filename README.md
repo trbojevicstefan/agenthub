@@ -25,6 +25,15 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 
 ## What you can do
 
+### Everything in its place (0.27)
+- **Find anything:** **Search** at the top of every screen, or **Ctrl/Cmd+K**, finds your agents, every agent's Manage sections and actions (Back up, Update, Clone, API keys...), places (Vault, Docker manager, Install agents...), settings, machines, chats and vault keys. Each result shows **where it lives**, for example *Hermes › Keys & tools* or *Settings › Theme*, so you also learn where to find it next time. Without an agent's name, actions are the selected agent's; type a name ("codex keys") to pick another.
+- **Back:** the arrow at the top left, **Alt+Left** or your mouse's back button returns to the previous screen.
+- **Three areas in the sidebar:** the Opaya Agent at the top, your agents in the middle, and under **Workspace** the shared things: Playground, Machines, Vault, **Skills & tools**, Settings and Help.
+- **The Library:** Keys (the Vault), Skills (the skills library) and MCP servers share one tab bar: everything shared by all your agents.
+- **Right-click mirrors the sidebar:** an agent's menu has its quick actions, then one submenu per Manage section with the same items in the same order.
+- **One Machines screen:** every Machines entry opens the Machines board; **Add existing** adds a server by its address or from `~/.ssh/config`.
+- **Settings** opens with chips for every section and a filter, and stays where you are when you change an option.
+
 ### The Opaya Vault: your keys in one place (0.26)
 **Vault** in the sidebar (key icon) keeps your API keys, tokens and passwords, encrypted by your OS, and gives each one to the agents that need it. Values are never shown or sent into a chat.
 - **Import keys** you already have: from a **.env, JSON, YAML or any text file** (choose it, or drop it on the Vault), from **pasted text**, or **from your tools**: every agent's own key file, your shell profiles, the environment Opaya started with, the GitHub CLI, npm, AWS and Hugging Face. Opaya lists what it found by name and a masked preview; you tick what to keep and can rename each key. Keys already in the Vault, and the same key found in two places, are marked.
@@ -132,13 +141,13 @@ The open view or section unfolds its actions under it in the sidebar, so every a
 - **Redeploy** copies the same parts again with one click. Chat history and OAuth logins are never copied.
 
 ### Machines and VPS
-- **Machines** lists this computer and your SSH machines, local and remote kept apart.
+- **Machines** (the board) shows this computer and your SSH machines, each with its agents, status and Docker. It is the one place for machines.
 - **Add a new VPS:**
   1. Opaya creates an SSH key in `~/.ssh`.
   2. You add the public key in your provider's panel. If you only have a password, Opaya can install the key for you.
   3. Opaya checks the connection and shows the system, uptime, free disk and memory, and the tools installed there (Docker, Hermes, OpenClaw, Claude Code, Codex, Node.js, Python, Git, tmux).
-- Each machine can be tested (or all of them at once) and has its agents, a terminal, Discover, Install agents, Files, Check versions, Copy SSH command, Edit and Remove.
-- You can also import `~/.ssh/config` aliases, or add a machine by hand with **+ Add manually**.
+- Each machine's ⋯ menu tests it, opens its terminal, files, Discover, Install agents and its Docker manager, connects or updates its agents, copies its SSH command, and edits or removes it. **Test all** checks every server; click a machine for its installed tools and versions.
+- **Add existing** adds a server you already use by its SSH address, or imports your `~/.ssh/config` aliases (nothing is contacted).
 
 ### Discover and install agents
 - **Discover** separates installed agents from ones you can still add, and local from remote. Agents you have already added are hidden.
