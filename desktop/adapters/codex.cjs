@@ -26,6 +26,16 @@ function codexMcpArgs(agent,servers){
   const toml=v=>Array.isArray(v)?`[${v.map(toml).join(',')}]`:JSON.stringify(String(v));
   return servers.filter(s=>(!s.type||s.type==='stdio')&&/^opaya-[a-z]+$/.test(s.name)).flatMap(s=>['-c',`mcp_servers.${s.name}.command=${toml(s.command)}`,'-c',`mcp_servers.${s.name}.args=${toml(s.args||[])}`,...(s.env?.length?['-c',`mcp_servers.${s.name}.env={${s.env.map(e=>`${/^[A-Za-z_][A-Za-z0-9_]*$/.test(e.name)?e.name:JSON.stringify(e.name)}=${toml(e.value)}`).join(',')}}`]:[])]);
 }
+// The answer to an MCP form: each field's default, a yes for a yes/no field, the allowing choice of a list.
+function elicitationContent(schema){
+  const out={},props=schema&&typeof schema==='object'&&schema.properties||{};
+  for(const [k,p] of Object.entries(props)){
+    if(p?.default!==undefined)out[k]=p.default;
+    else if(p?.type==='boolean')out[k]=true;
+    else if(Array.isArray(p?.enum))out[k]=p.enum.find(v=>/^(allow|approve|accept|yes|always|once|true)/i.test(String(v)))??p.enum[0];
+  }
+  return out;
+}
 class CodexAdapter{
   constructor({agent,host,approve,spawnAgent=launch,trusted=()=>false,mcpServers=()=>[],onChange=()=>{}}){this.trusted=trusted;this.mcpServers=mcpServers;this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.onChange=onChange;this.threads=new Map();this.threadModels=new Map();this.modelInfo=new Map();this.defaultModel='';this.active=null;}
   // Reasoning effort levels of the agent's model as model/list reports them (read in the background on connect).
@@ -38,6 +48,23 @@ class CodexAdapter{
         if(this.trusted()){pending.onEvent?.({type:'activity',text:`iTrust approved: ${method.includes('fileChange')?'file changes':'command'}`});return {decision:'accept'};}
         const accepted=await this.approve(this.agent,method.includes('fileChange')?'Approve file changes?':'Approve command?',JSON.stringify(params,null,2).slice(0,5000));
         return {decision:accepted&&this.active===pending&&!pending.signal.aborted?'accept':'decline'};
+      }
+      // An MCP tool call Codex wants confirmed (or a form an MCP server asks for). Opaya's own servers (opaya-browser,
+      // opaya-vault, which asks the user itself) are accepted; others with iTrust or the user's approval. Denying it
+      // as unsupported reached Codex as "user rejected MCP tool call".
+      if(method==='mcpServer/elicitation/request'){
+        const pending=this.active,server=String(params?.serverName||''),own=/^opaya-[a-z]+$/.test(server);
+        if(params?.mode==='url')return {action:'decline',content:null};
+        const content=elicitationContent(params?.requestedSchema);
+        if(own||this.trusted()){pending?.onEvent?.({type:'activity',text:`${own?'Opaya':'iTrust'} approved: ${server||'MCP'} tool`});return {action:'accept',content};}
+        const ok=await this.approve(this.agent,`Allow ${server||'an MCP server'}?`,String(params?.message||JSON.stringify(params,null,2)).slice(0,5000));
+        return ok&&(!pending||!pending.signal.aborted)?{action:'accept',content}:{action:'decline',content:null};
+      }
+      if(/requestApproval$/.test(method)){
+        const pending=this.active;if(pending?.signal.aborted)return {decision:'decline'};
+        if(this.trusted())return {decision:'accept'};
+        const ok=await this.approve(this.agent,'Approve this request?',JSON.stringify(params,null,2).slice(0,5000));
+        return {decision:ok?'accept':'decline'};
       }
       throw new Error('This server request is unsupported and was denied.');
     }});
@@ -119,4 +146,4 @@ class CodexAdapter{
     return [...new Set(out)];
   }
 }
-module.exports={CodexAdapter,codexMcpArgs,codexEnv,codexLaunch,SHELL_ENV};
+module.exports={elicitationContent,CodexAdapter,codexMcpArgs,codexEnv,codexLaunch,SHELL_ENV};

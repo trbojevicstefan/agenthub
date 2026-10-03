@@ -928,3 +928,12 @@
 :where(body[data-theme="light"]) .vault-steps b{background:#cfdfd9;color:#164529}
 :where(body[data-theme="light"]) .vb-last{background:#e4e8ea;border:1px solid #d4dadd}
 :where(body[data-theme="light"]) .vb-last.none{color:#58411a}
+:where(body[data-theme="light"]) .agent-file{border:1px solid #ced6d9;background:#e2e7e9}
+:where(body[data-theme="light"]) .af-ico{background:#cfdfd9;color:#164529}
+:where(body[data-theme="light"]) .af-preview{border:1px solid #ced6d9;background:#eceff0}
+:where(body[data-theme="light"]) .opaya-ask{border:1px solid #b5c1bd;background:#dee3e5}
+:where(body[data-theme="light"]) .sched{border:1px solid #ced6d9;background:#e2e7e9}
+:where(body[data-theme="light"]) .sched-main p{color:#212825}
+:where(body[data-theme="light"]) .sched-native{border-top:1px solid #d6dde0}
+:where(body[data-theme="light"]) .sched-agent{border-bottom:1px solid #dbe1e3}
+:where(body[data-theme="light"]) .sched-out{background:#eceff0;border:1px solid #d6dde0}

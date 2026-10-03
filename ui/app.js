@@ -26,7 +26,7 @@
   // Back: the screens you came through (Home, Machines, an agent's chat, console or Manage section...), newest last.
   let navBack=[],navCur='',navRestoring=false;
   // Sidebar items the user turned off in Settings > Sidebar.
-  const SIDE_ITEMS = [['home','Home','Agents at a glance and quick actions'],['playground','Playground','Ask two agents the same question'],['machines','Machines','The fleet board'],['vault','Vault','API keys and tokens'],['skills','Skills & tools','Skills library and MCP servers'],['help','Help','Where is what, connection help and shortcuts']];
+  const SIDE_ITEMS = [['home','Home','Agents at a glance and quick actions'],['playground','Playground','Ask two agents the same question'],['machines','Machines','The fleet board'],['vault','Vault','API keys and tokens'],['skills','Skills & tools','Skills library and MCP servers'],['schedules','Schedules','Messages sent to agents on a schedule; their own cron jobs'],['help','Help','Where is what, connection help and shortcuts']];
   let sidebarHide = new Set();
   const applySidebar = () => { for (const [key] of SIDE_ITEMS) { const el = document.querySelector(`[data-side="${key}"]`); if (el) el.hidden = sidebarHide.has(key); } };
   let stageAgent = ''; // the agent whose CLI the terminal stage last opened
@@ -75,8 +75,50 @@
   }
   // Yes/no questions go through a native dialog in the desktop app. window.confirm() in Electron can leave the page
   // unable to take keyboard input afterwards (the chat box stops accepting typing until the window is refocused).
-  const ask=text=>api?.ask?api.ask({text}).catch(()=>false):Promise.resolve(confirm(text));
+  // Opaya's own question dialog, styled like the app (never the system box): a title, what will happen, and a button
+  // named for the action, red when it removes something. With `input` it asks for text and returns it (or null).
+  const ACTION_WORD=/^(Remove|Delete|Uninstall|Forget|Stop|End|Close|Discard|Replace|Overwrite|Install|Restart|Reconnect|Turn|Give|Migrate|Clone|Update|Import|Reset|Clear|Disconnect|Run|Send|Apply|Merge|Push|Pull|Leave)\b/i;
+  function opayaAsk({title:t='',text='',ok='',cancel='Cancel',danger,input=null,placeholder=''}={}){
+    return new Promise(resolve=>{
+      const word=ACTION_WORD.exec(t)?.[1],label=ok||(word?word[0].toUpperCase()+word.slice(1).toLowerCase():'OK'),red=danger??/^(remove|delete|uninstall|forget|stop|end|discard|overwrite|clear|reset)/i.test(word||'');
+      const d=document.createElement('dialog');d.className='opaya-ask';
+      d.innerHTML=`<form method="dialog"><h2>${esc(t)}</h2>${text?`<p>${esc(text).replace(/\n/g,'<br>')}</p>`:''}${input!==null?`<input name="value" value="${esc(input)}" placeholder="${esc(placeholder)}" autocomplete="off" spellcheck="false">`:''}<footer><button type="button" class="secondary" value="cancel">${esc(cancel)}</button><button type="submit" class="primary ${red?'danger-button':''}" value="ok">${esc(label)}</button></footer></form>`;
+      document.body.append(d);let done=false;const finish=v=>{if(done)return;done=true;d.close();d.remove();resolve(v);};
+      d.querySelector('[value="cancel"]').addEventListener('click',()=>finish(input!==null?null:false));
+      d.addEventListener('cancel',e=>{e.preventDefault();finish(input!==null?null:false);});
+      d.querySelector('form').addEventListener('submit',e=>{e.preventDefault();finish(input!==null?d.querySelector('[name=value]').value.trim()||null:true);});
+      d.addEventListener('pointerdown',e=>{if(e.target!==d)return;const r=d.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)finish(input!==null?null:false);});
+      d.showModal();(d.querySelector('[name=value]')||d.querySelector(red?'[value="cancel"]':'[value="ok"]')).focus();
+    });
+  }
+  window.opayaAsk=opayaAsk;
+  // The questions written as one text: the first paragraph is the title, the rest the explanation.
+  const ask=text=>{const t=String(text||''),at=t.indexOf('\n\n');return opayaAsk({title:at<0?t:t.slice(0,at),text:at<0?'':t.slice(at+2)});};
   async function action(fn) { try { return await fn(); } catch(error) {toast(error.message,true); return undefined;} }
+  // Files an agent mentions in a reply (an absolute path with a name and extension) show under it as attachments:
+  // checked where the agent runs, images previewed, Open, Save and (here) Show in folder. Paths in URLs are not files.
+  const FILE_PATH=/(?<![\w:/.\]@-])((?:~\/|\/)(?:[\w.@+-]+\/)*[\w.@+-]*[\w@+-]\.[A-Za-z0-9]{1,8}|[A-Za-z]:\\(?:[^\\\s'"`<>|*?]+\\)*[^\\\s'"`<>|*?]+\.[A-Za-z0-9]{1,8})(?![\w/\\])/g;
+  const IMAGE_EXT=/\.(png|jpe?g|gif|webp|bmp|svg)$/i,fileChecks=new Map();
+  function agentFiles(text,a){
+    if(!a||!text)return '';const found=[...new Set([...String(text).matchAll(FILE_PATH)].map(m=>m[1].replace(/[.,;:]+$/,'')))].slice(0,8);if(!found.length)return '';
+    const local=a.transport!=='ssh'&&a.command!=='docker';
+    return `<div class="agent-files">${found.map(p=>{const c=fileChecks.get(`${a.id}|${p}`),name=p.split(/[\\/]/).pop();return `<div class="agent-file ${IMAGE_EXT.test(p)?'image':''}" data-agent-file="${esc(p)}" data-agent="${esc(a.id)}" ${c?.exists?'':'hidden'}><span class="af-ico" aria-hidden="true">${fileIcon({name,kind:IMAGE_EXT.test(p)?'image':'file'})}</span><span class="af-text"><strong title="${esc(p)}">${esc(name)}</strong><small>${esc(c?.size!=null?fmtSize(c.size):'')}</small></span><span class="af-actions"><button type="button" class="secondary small" data-action="af-open">Open</button><button type="button" class="secondary small" data-action="af-save">Save&#8230;</button>${local?'<button type="button" class="text-button" data-action="af-reveal">Show in folder</button>':''}</span>${c?.preview?`<img class="af-preview" alt="${esc(name)}" src="${c.preview}">`:''}</div>`;}).join('')}</div>`;
+  }
+  // Each path is checked once per agent; a found image is fetched once for its preview (up to 8 MB).
+  function checkAgentFiles(root=document){
+    for(const el of root.querySelectorAll('.agent-file[hidden]')){
+      const key=`${el.dataset.agent}|${el.dataset.agentFile}`;if(fileChecks.has(key))continue;fileChecks.set(key,{pending:true});
+      api.agentFile?.({agentId:el.dataset.agent,path:el.dataset.agentFile,op:'stat'}).then(async r=>{
+        const c={exists:!!r?.exists,size:r?.size};fileChecks.set(key,c);
+        if(c.exists&&IMAGE_EXT.test(el.dataset.agentFile)&&c.size<=8*1024*1024){try{const d=await api.agentFile({agentId:el.dataset.agent,path:el.dataset.agentFile});const ext=el.dataset.agentFile.split('.').pop().toLowerCase();c.preview=`data:image/${ext==='svg'?'svg+xml':ext==='jpg'?'jpeg':ext};base64,${d.data}`;}catch{}}
+        for(const x of document.querySelectorAll('.agent-file')){if(`${x.dataset.agent}|${x.dataset.agentFile}`!==key)continue;x.hidden=!c.exists;const sm=x.querySelector('.af-text small');if(sm&&c.size!=null)sm.textContent=fmtSize(c.size);if(c.preview&&!x.querySelector('.af-preview'))x.insertAdjacentHTML('beforeend',`<img class="af-preview" alt="" src="${c.preview}">`);}
+      }).catch(()=>fileChecks.set(key,{exists:false}));
+    }
+  }
+  new MutationObserver(()=>{clearTimeout(checkAgentFiles.t);checkAgentFiles.t=setTimeout(()=>checkAgentFiles(),120);}).observe(document.body,{childList:true,subtree:true});
+  document.addEventListener('click',event=>{const b=event.target.closest('[data-action="af-open"],[data-action="af-save"],[data-action="af-reveal"]');if(!b)return;const card=b.closest('.agent-file');if(!card)return;event.stopPropagation();
+    const input={agentId:card.dataset.agent,path:card.dataset.agentFile},act=b.dataset.action;b.disabled=true;
+    action(async()=>{try{if(act==='af-open')await api.agentFileOpen(input);else if(act==='af-save'){const to=await api.agentFileSave(input);if(to)toast(`Saved to ${to}.`);}else await api.agentFileReveal(input);}finally{b.disabled=false;}});},true);
   function format(text) { return window.OpayaMarkdown?window.OpayaMarkdown.render(text):esc(text); }
   // agentId adds a live line (running time, time since the last update) that updateTurnWatch() refreshes every second.
   function activityMarkup(message,limit=20,agentId=''){
@@ -225,7 +267,7 @@
     // Existing history appears at once; only messages that arrive while this conversation is open animate in.
     if(messageConversation!==conversationKey){const continuing=messageConversation===`${a.id}/`;messageSeen.clear();messageConversation=conversationKey;if(!continuing)messages.forEach((m,i)=>messageSeen.set(m.id||i,-1e9));}
     const list=$('#message-list'),changed=list.dataset.conversation!==conversationKey,previous=chatScroll.get(conversationKey),atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<110;list.dataset.conversation=conversationKey;
-    list.innerHTML=messages.length?messages.map((m,i)=>`<article class="message ${m.role==='user'?'user-message':'assistant-message'} ${fresh(messageSeen,m.id||i,now,450)?'message-enter':''}"><div class="message-avatar ${m.role==='user'?'you-avatar':esc(a.provider)}">${m.role==='user'?'S':agentIcon(a)}</div><div class="message-body"><div class="message-meta"><strong>${m.role==='user'?'You':esc(title(a))}</strong><time>${esc(new Date(m.createdAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}</time>${m.status==='streaming'?'<span class="stream-label"><span class="status-dot working"></span> Working</span>':''}</div>${activityMarkup(m,20,a.id)}<div class="message-text">${format(m.content)}${m.status==='streaming'&&!m.content?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}</div>${m.attachments?.length?`<div class="message-files">${m.attachments.map(f=>`<span class="file-chip ${esc(f.kind||'file')}" title="${esc(f.name)}"><span class="file-chip-icon" aria-hidden="true">${fileIcon(f)}</span><span class="file-chip-name">${esc(f.name)}</span><small>${esc(fmtSize(f.size||0))}</small></span>`).join('')}</div>`:''}${m.error?`<div class="message-error">${esc(m.error)}${KEY_ERROR.test(m.error)?' <button type="button" class="text-button" data-action="compose-secret">Give it a key</button>':''}</div>`:''}</div></article>`).join(''):`<div class="chat-empty">${badge(a,true)}<h2>A direct line to ${esc(title(a))}.</h2><p>${a.transport==='ssh'?'The agent runs on your remote machine. Opaya is the window into it.':'Your agent stays on your computer. Opaya brings the conversation together.'}</p><div class="starter-prompts"><button data-action="starter" data-text="What can you help me with, and which tools do you have?">What can you help me with? <span>&#8599;</span></button><button data-action="starter" data-text="Tell me about your current workspace. Please only inspect it; do not change anything.">Get to know this workspace <span>&#8599;</span></button></div><span class="chat-empty-note">${a.status==='connected'?'Connected and ready for your first message.':'Connect above when you are ready.'}</span></div>`;
+    list.innerHTML=messages.length?messages.map((m,i)=>`<article class="message ${m.role==='user'?'user-message':'assistant-message'} ${fresh(messageSeen,m.id||i,now,450)?'message-enter':''}"><div class="message-avatar ${m.role==='user'?'you-avatar':esc(a.provider)}">${m.role==='user'?'S':agentIcon(a)}</div><div class="message-body"><div class="message-meta"><strong>${m.role==='user'?'You':esc(title(a))}</strong><time>${esc(new Date(m.createdAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}</time>${m.status==='streaming'?'<span class="stream-label"><span class="status-dot working"></span> Working</span>':''}</div>${activityMarkup(m,20,a.id)}<div class="message-text">${format(m.content)}${m.status==='streaming'&&!m.content?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}</div>${m.role!=='user'&&m.status!=='streaming'?agentFiles(m.content,a):''}${m.attachments?.length?`<div class="message-files">${m.attachments.map(f=>`<span class="file-chip ${esc(f.kind||'file')}" title="${esc(f.name)}"><span class="file-chip-icon" aria-hidden="true">${fileIcon(f)}</span><span class="file-chip-name">${esc(f.name)}</span><small>${esc(fmtSize(f.size||0))}</small></span>`).join('')}</div>`:''}${m.error?`<div class="message-error">${esc(m.error)}${KEY_ERROR.test(m.error)?' <button type="button" class="text-button" data-action="compose-secret">Give it a key</button>':''}</div>`:''}</div></article>`).join(''):`<div class="chat-empty">${badge(a,true)}<h2>A direct line to ${esc(title(a))}.</h2><p>${a.transport==='ssh'?'The agent runs on your remote machine. Opaya is the window into it.':'Your agent stays on your computer. Opaya brings the conversation together.'}</p><div class="starter-prompts"><button data-action="starter" data-text="What can you help me with, and which tools do you have?">What can you help me with? <span>&#8599;</span></button><button data-action="starter" data-text="Tell me about your current workspace. Please only inspect it; do not change anything.">Get to know this workspace <span>&#8599;</span></button></div><span class="chat-empty-note">${a.status==='connected'?'Connected and ready for your first message.':'Connect above when you are ready.'}</span></div>`;
     if(changed&&previous&&!previous.bottom)list.scrollTop=previous.top;else if(atBottom||changed||!messages.length)list.scrollTop=list.scrollHeight;
     $('#send-button').disabled=a.status!=='connected'||a.busy||a.protocol==='terminal'||pendingSends.has(a.id);$('#send-button').hidden=!!a.busy;$('#stop-button').hidden=!a.busy;
     $('#compose-hint').textContent=a.busy?'Agent is working':a.status==='connected'?'':'Connect to start chatting';
@@ -623,7 +665,7 @@
   const FIND_WORDS={keys:'api key token secret env password',vault:'api key token secret',backup:'save copy restore',backups:'restore folder',uninstall:'delete remove',remove:'delete',clone:'copy duplicate deploy',dockerize:'docker container',update:'upgrade version',restart:'reconnect',itrust:'trust approve automatically permissions',browser:'web pages',transfer:'share copy skills keys',shareSkills:'share copy transfer',mcp:'tools github',models:'model llm',effort:'reasoning thinking',terminal:'cli command line',shell:'terminal command line',files:'folder browse',rename:'name title',groupTags:'group tag',containerLogs:'docker logs',containerRestart:'docker restart',settings:'connection endpoint command',newVps:'server ssh machine'};
   const SETTINGS_INDEX=[['Sidebar','icons names strip rail hide items'],['Theme','dark light white look'],['Notifications','notify sound replies approvals'],['Chat','enter send ctrl enter tips'],['Terminal','text size font bottom side'],['Startup','start sign in login connect at start'],['iTrust mode','trust approve automatically'],['Opaya Agent','model setup guide'],['Updates','check for updates fix errors automatically version'],['Opaya Vault','keys import'],['Machines','computer name backup folder'],['Skills and MCP servers','skills library tools'],['Data and privacy','folder telemetry privacy'],['Keyboard shortcuts','keys hotkeys shortcuts']];
   // Places: the shared screens and windows, run through the same handlers as their buttons.
-  const FIND_PLACES=[['overview','Home','Sidebar','Your agents at a glance'],['fleet','Machines','Sidebar','Every machine and its agents'],['vault','Opaya Vault','Sidebar','API keys: add, import, give to agents'],['vault-import','Import keys','Opaya Vault','From a .env, any text file or your tools'],['vault-backup','Back up the Vault','Opaya Vault','An encrypted file with your keys; restore it anywhere'],['library','Skills library','Library','Global skills for any agent'],['mcp-manage','MCP servers','Library','Tools such as GitHub or a browser'],['docker-manager','Docker manager','Machines','Containers and images',{id:'local'}],['playground','Playground','Sidebar','Ask two agents the same question'],['opaya','Opaya Agent','Sidebar','Install, connect or repair by asking'],['install-catalog','Install agents','Home','Hermes, Claude Code, Codex, OpenClaw and more'],['discover','Discover agents','Sidebar','Find agents on this computer'],['add','Add connection','Home','An agent or an API by hand'],['new-vps','New VPS','Machines','A new server with its own SSH key'],['connect-all','Connect all','Home','Connect every agent'],['tool-updates','Check for updates','Home','Agents and tools with newer versions'],['update-all','Update all agents','Home','Every installation on every machine'],['local-terminal','Local terminal','Home','A shell on this computer'],['files-local','Files','Home','Browse files on this computer'],['settings','Settings','Sidebar','Theme, chat, terminal, notifications'],['help','Help','Sidebar','Where is what, and connection help'],['whats-new',"What's new",'Help','What changed in this version']];
+  const FIND_PLACES=[['overview','Home','Sidebar','Your agents at a glance'],['fleet','Machines','Sidebar','Every machine and its agents'],['vault','Opaya Vault','Sidebar','API keys: add, import, give to agents'],['vault-import','Import keys','Opaya Vault','From a .env, any text file or your tools'],['vault-backup','Back up the Vault','Opaya Vault','An encrypted file with your keys; restore it anywhere'],['schedules','Schedules','Sidebar','Messages to agents on a schedule; their cron jobs'],['library','Skills library','Library','Global skills for any agent'],['mcp-manage','MCP servers','Library','Tools such as GitHub or a browser'],['docker-manager','Docker manager','Machines','Containers and images',{id:'local'}],['playground','Playground','Sidebar','Ask two agents the same question'],['opaya','Opaya Agent','Sidebar','Install, connect or repair by asking'],['install-catalog','Install agents','Home','Hermes, Claude Code, Codex, OpenClaw and more'],['discover','Discover agents','Sidebar','Find agents on this computer'],['add','Add connection','Home','An agent or an API by hand'],['new-vps','New VPS','Machines','A new server with its own SSH key'],['connect-all','Connect all','Home','Connect every agent'],['tool-updates','Check for updates','Home','Agents and tools with newer versions'],['update-all','Update all agents','Home','Every installation on every machine'],['local-terminal','Local terminal','Home','A shell on this computer'],['files-local','Files','Home','Browse files on this computer'],['settings','Settings','Sidebar','Theme, chat, terminal, notifications'],['help','Help','Sidebar','Where is what, and connection help'],['whats-new',"What's new",'Help','What changed in this version']];
   const fire=(name,data={})=>{const b=document.createElement('button');b.type='button';b.hidden=true;b.dataset.action=name;Object.assign(b.dataset,data);document.body.append(b);b.click();b.remove();};
   function findIndex(){
     const out=[],sel=selected(),secName=k=>AN_SECTIONS.find(s=>s.key===k)?.name||({chat:'Chat',console:'Terminal'})[k]||k;
@@ -697,7 +739,8 @@
   // Terminal layouts belong to an agent context; the session service owns the processes.
   const TL=window.OpayaTerminalLayout,terminalWorkspaces=new Map();
   let panes=[''],paneFocus=0,termOrder=0,restoringWorkspace=true;
-  const termCtx=()=>inAgentView()?selected().id:'';
+  // Whose terminals the panel shows: the agent on screen, the Opaya Agent on its own screen, else the shared screens'.
+  const termCtx=()=>inAgentView()?selected().id:opayaView&&!overview?'opaya':'';
   const ctxWindows=(ctx=termCtx())=>[...terminalViews.values()].filter(v=>(v.ctx||'')===ctx&&!v.poppedOut).sort((x,y)=>x.order-y.order);
   const ARRANGE={cols:['Side by side','Replace this layout with columns'],rows:['Stacked','Replace this layout with rows'],grid:['Grid','Replace this layout with a grid']};
   function workspace(ctx=termCtx()){
@@ -958,8 +1001,8 @@
   });
   // background: only add a tab (a terminal the service opened while someone types in another one). focus: false leaves the
   // keyboard, and an open dialog, where they are (someone typing in the chat box or a form).
-  async function openTerminal({agentId=selected()?.id,hostId,mode='shell',local=false,terminalId,restoring=false,split=null,sourceId,newSession=false,projectId,background=false,focus=true}={}){
-    const source=sourceId&&terminalViews.get(sourceId),context=source?.ctx??termCtx(),target=sourceId||currentTerminal;
+  async function openTerminal({agentId=selected()?.id,hostId,mode='shell',local=false,terminalId,restoring=false,split=null,sourceId,newSession=false,projectId,background=false,focus=true,ctx}={}){
+    const source=sourceId&&terminalViews.get(sourceId),context=ctx??source?.ctx??termCtx(),target=sourceId||currentTerminal;
     if(!agentId&&!hostId&&!local&&!terminalId&&!sourceId){toast('Select an agent, or open a machine from Machines.');return;}
     if(typeof window.Terminal!=='function'||!window.FitAddon||!window.OpayaTerminal){toast('The terminal UI did not load. Reinstall the complete Opaya build rather than moving the executable out of its installation folder.',true);return;}
     if(!restoring&&!background){if(focus)closeModal();$('#terminal-panel').hidden=false;}
@@ -984,6 +1027,7 @@
     if(split){const w=workspace(context);w.tree=TL.split(w.tree,target,result.id,split);w.maximized='';}
     if(context!==termCtx()&&!restoring){render();saveView();return result.id;}
     // Opened in the background (someone types in another terminal): its window appears, marked, and takes no keyboard.
+    if(background&&(terminalViews.get(result.id)?.ctx||'')!==termCtx()){terminalViews.get(result.id).attention=true;render();saveView();return result.id;}
     if(background){const view=terminalViews.get(result.id),keep=currentTerminal;view.attention=true;activateTerminal(result.id,{focus:false,bring:true});activateTerminal(keep,{focus:false});render();saveView();return result.id;}
     activateTerminal(result.id,{focus,bring:!restoring});if(!restoring){render();saveView();}
     return result.id;
@@ -1003,6 +1047,10 @@
     // pane and the keyboard from someone typing in another terminal: it waits in a tab. Typing in the chat box or a form
     // keeps the keyboard there.
     if(event.type==='opened'){
+      // A terminal opened for another screen (the Opaya Agent's command while you look at Hermes) stays on that screen.
+      if(event.owner!==undefined&&event.owner!==termCtx()){const view=terminalViews.get(event.id),who=event.owner==='opaya'?'The Opaya Agent':title(state.agents.find(x=>x.id===event.owner)||{name:'An agent'});
+        if(!view)action(()=>openTerminal({terminalId:event.id,background:true,focus:false,ctx:event.owner}));else{view.ctx=event.owner;view.attention=true;}
+        toast(`${who} opened a terminal on its screen.`);return;}
       const typing=typingInTerminal()?viewOf(document.activeElement):null,busy=!!typing&&typing.id!==event.id,focus=!busy&&!typingElsewhere(),view=terminalViews.get(event.id);
       if(!view){action(()=>openTerminal({terminalId:event.id,background:busy,focus}));return;}
       if(busy){const keep=currentTerminal;view.attention=true;activateTerminal(event.id,{focus:false,bring:true});activateTerminal(keep,{focus:false});return;}
@@ -1165,6 +1213,8 @@
     if(name==='dismiss-note'){tipsSeen.add(id);saveView();button.closest('.terminal-chat-note')?.remove();return;}
     if(name==='nav-back'){action(navGoBack);return;}
     if(name==='vault'){openVault();return;}
+    if(name==='schedules'){openSchedules();return;}
+    if(name==='agent-schedules'){openSchedules(id);return;}
     if(name==='vault-import'){openVault({panel:'import'});return;}
     if(name==='vault-backup'){openVault({panel:'backup'});return;}
     if(name==='models'){action(openModels);return;}
@@ -1298,9 +1348,9 @@
       itrust:{icon:'&#9888;',label:a.itrust?'Turn off iTrust':'Turn on iTrust...',run:()=>toggleAgentTrust(a)},
       // The browser needs a model that can see images; text-only models (DeepSeek, Qwen3, gpt-oss...) do not get it.
       // Every model can browse: pages come back as text, links and form fields; a model that sees images also gets screenshots.
-      browser:{icon:'&#9711;',label:a.browser?'Take away Opaya browser':'Give Opaya browser',disabled:!a.browser&&!browserCapable(a),hint:browserCapable(a)?'':'Only agents on this computer: the browser is here',run:async()=>{
-        await api.updateAgentDisplay({id,browser:!a.browser});await refresh();
-        if(a.browser)toast(`${title(a)} no longer has the Opaya browser.`);
+      browser:{icon:'&#9711;',label:hasBrowser(a)?'Take away Opaya browser':'Give Opaya browser',disabled:!browserCapable(a),hint:browserCapable(a)?'':'Only agents on this computer: the browser is here',run:async()=>{
+        const had=hasBrowser(a);await api.updateAgentDisplay({id,browser:!had});await refresh();
+        if(had)toast(`${title(a)} no longer has the Opaya browser.`);
         else toast(`${title(a)} has the Opaya browser now${a.protocol==='codex'?' (it reconnects after its current answer)':', in this chat too'}. ${a.vision?.vision===false?'Its model reads text, so it gets pages as text without screenshots.':'It reads pages and can take screenshots.'}`);}},
       pin:{icon:a.pinned?'&#9734;':'&#9733;',label:a.pinned?'Unpin':'Pin to top',run:async()=>{await api.updateAgentDisplay({id,pinned:!a.pinned});toast(a.pinned?`${title(a)} unpinned.`:`${title(a)} pinned to the top.`);}},
       rename:{icon:'&#9998;',label:'Rename...',run:()=>renameAgent(a)},
@@ -1408,6 +1458,7 @@
     const a=selected(),chatty=a&&a.protocol!=='terminal'&&a.surface!=='terminal';
     const destinations=a&&screen?`<div class="agent-context"><strong>${esc(title(a))}</strong><button type="button" class="text-button" data-action="agent-machine" title="Open machine">${esc(location(a))}</button><span>${dot(a)} ${esc(status(a))}</span>${screen==='manage'?`<span class="ac-section" aria-label="Section in view" ${mgSection==='overview'?'hidden':''}>&#8250; ${esc((AN_SECTIONS.find(x=>x.key===mgSection)||{}).name||'')}</span>`:''}${screen==='chat'&&(crumb||page)?`<div class="agent-chat-context">${crumb}${page}</div>`:''}</div><nav class="agent-destinations" aria-label="Agent destinations">${(chatty?[['chat','Chat'],['console','Terminal'],['manage','Manage']]:[['console','Terminal'],['manage','Manage']]).map(([mode,label])=>`<button type="button" class="secondary dest-tab ${screen===mode?'selected':''}" data-action="agent-mode" data-mode="${mode}" data-id="${esc(a.id)}" ${screen===mode?'aria-current="page"':''} title="${esc({chat:'Chat with it in Opaya',console:'Its CLI and shells in terminals',manage:'Settings and actions: model, keys, machine, clone, updates...'}[mode])}">${{chat:AN_ICON.chat,console:AN_ICON.console,manage:AN_ICON.overview}[mode]}<span>${label}</span></button>`).join('')}</nav>`:'';
     $('#topbar').innerHTML=`<button type="button" class="topbar-back" data-action="nav-back" ${navBack.length?'':'disabled'} title="${navBack.length?esc(`Back to ${navLabel(navBack.at(-1))} (Alt+Left)`):'Back'}" aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>${destinations||`<div class="breadcrumb">${crumb}</div>${page?`<div class="topbar-page">${page}</div>`:''}<div class="topbar-spacer"></div>`}<button type="button" class="topbar-search" data-action="find" title="Find anything: agents, settings, actions, machines, chats and keys"><span class="topbar-search-ico" aria-hidden="true">${dkIcon('inspect')}</span><span class="topbar-search-text">Search</span><kbd>${esc(mod().trim())}${state.platform==='darwin'?'':'+'}K</kbd></button><div class="topbar-actions"></div>`;
+    placeBrowser();
   }
   async function openManage(id,section=manageSections.get(id)||'overview'){
     const a=state.agents.find(x=>x.id===id);if(!a)return;
@@ -1614,6 +1665,7 @@
           ${item('','data-action="install-catalog" title="Install agents and their dependencies"',I2('<path d="M12 4v11M7 10l5 5 5-5M4 19h16"/>'),'Install agents')}
           ${item('','data-action="opaya-check-all" title="Check every agent with a connection error"',AN_ICON.care,'Check & fix all')}
           ${item('','data-action="fleet" title="Every machine and its agents"',AN_ICON.machine,'Machines')}
+          ${item('','data-action="schedules" title="Messages Opaya sends on a schedule"',I2('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>'),'Schedules')}
         </section>
       </div>`;
   }
@@ -1623,7 +1675,7 @@
     if(!a||!screen){if(!nav.hidden){nav.hidden=true;anHtml='';document.body.classList.remove('agent-open');requestAnimationFrame(()=>placePanes());}return;}
     const chatty=a.protocol!=='terminal'&&a.surface!=='terminal',chats=chatty?agentChats(a):[],winOpen=chatDock.some(d=>dockConv(d.id)?.agentId===a.id),on=a.status==='connected',termOpen=!$('#terminal-panel')?.hidden&&ctxWindows(a.id).some(v=>!v.hiddenPane);
     const item=(cls,attrs,icon,label,extra='')=>`<button type="button" class="an-item ${cls}" ${attrs}><span class="an-ico" aria-hidden="true">${icon}</span><span class="an-label">${esc(label)}</span>${extra}</button>`;
-    const acts=manageActions(a),sw={itrust:!!a.itrust,browser:!!a.browser,pin:!!a.pinned},hasExport=screen==='chat'&&!!currentConversation();
+    const acts=manageActions(a),sw={itrust:!!a.itrust,browser:hasBrowser(a),pin:!!a.pinned},hasExport=screen==='chat'&&!!currentConversation();
     // The open view's or section's actions, indented under it; each opens its section, marks its row and runs.
     const sub=(section,open)=>{if(!open)return '';const list=(AN_SUB[section]||[]).filter(([k])=>k==='export'?hasExport:acts[k]);if(!list.length)return '';
       // Terminal also lists its terminal windows: a hidden one comes back with a click.
@@ -1752,7 +1804,7 @@
           row('vault','Opaya Vault','Every key you keep in Opaya; import them from a .env or your tools',(()=>{const all=vaultKeys(),mine=all.filter(k=>keyHolders(k).has(a.id)).length;return all.length?`${plural(all.length,'key')}${mine?` / ${mine} given to ${title(a)}`:''}`:'Empty';})())]),
         card('Permissions',[
           row('itrust','iTrust','Approves its tool requests without asking','',{sw:!!a.itrust}),
-          row('browser','Opaya browser',keyed.browser?.disabled?keyed.browser.hint||'Only agents on this computer':a.vision?.vision===false?'Opens, reads and uses web pages; pages come as text':'Lets it open, read and use web pages','',{sw:!!a.browser,always:true})]),
+          row('browser','Opaya browser',keyed.browser?.disabled?keyed.browser.hint||'Only agents on this computer':a.vision?.vision===false?'Opens, reads and uses web pages; pages come as text':'Lets it open, read and use web pages','',{sw:hasBrowser(a),always:true})]),
         card('Tools',[
           row('mcp','MCP servers','Tools such as GitHub, a browser or files',mcps.length?mcps.map(s=>s.name).join(', '):'None'),
           row('transfer','Share with another agent','Copy its skills, keys and MCP servers'),
@@ -1786,7 +1838,8 @@
           row('backups','Backups folder','Open the folder on this computer')]),
         card('Health',[
           row('fix','Check & fix','The Opaya Agent finds and repairs problems'),
-          row('log','Connection log','What Opaya exchanged with it')]),
+          row('log','Connection log','What Opaya exchanged with it'),
+          row('','Schedules','Messages Opaya sends it on a schedule, and its own cron jobs',String((state.schedules||[]).filter(x=>x.agentId===a.id).length||''),{act:'agent-schedules',id:a.id,icon:ICON.history})]),
         backupRows?`<section class="set-group"><h2>Saved backups</h2><div class="set-card set-list">${backupRows}</div></section>`:'']),
       profile:()=>sec('profile','',[card('Look',[
           row('rename','Name','How it shows in Opaya',title(a)),
@@ -1996,6 +2049,8 @@
     const root=dockRoot();chatDock=chatDock.filter(d=>dockConv(d.id));
     const talkers=state.agents.filter(a=>a.protocol!=='terminal');
     const fullId=!overview&&!opayaView&&!playgroundView&&selected()&&modeOf(selected())==='chat'?state.activeConversationId:'';
+    // Opening the agent's chat is reading it: its new-reply counts clear (on the agent in the sidebar and in the tray).
+    if(fullId){const ag=selected()?.id;for(const [id] of [...dockUnread])if(id===fullId||dockConv(id)?.agentId===ag)dockUnread.delete(id);}
     const visible=chatDock.filter(d=>d.id!==fullId),open=visible.find(d=>!d.min);
     // One window is open, as a column beside the page; the others wait in the status bar's tray.
     for(const d of visible)if(d!==open)d.min=true;
@@ -2507,7 +2562,7 @@
     if(opayaCount<0)o.messages.forEach(m=>opayaSeen.set(m.id,-1e9));opayaCount=o.messages.length;
     const live=o.live||{content:'',activity:[],status:'streaming'};live.status='streaming';
     const busyRow=o.busy?`<article class="message assistant-message"><div class="message-avatar opaya-avatar"><span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""><i></i></span></div><div class="message-body"><div class="message-meta"><strong>Opaya Agent</strong><span class="stream-label"><span class="status-dot working"></span> ${esc(o.status||'Working')}</span></div>${activityMarkup(live)}<div class="message-text">${format(live.content)}${!live.content?'<div class="thinking-dots"><i></i><i></i><i></i></div>':''}</div></div></article>`:'';
-    list.innerHTML=o.messages.length||o.busy?o.messages.map(m=>`<article class="message ${m.role==='user'?'user-message':'assistant-message'} ${fresh(opayaSeen,m.id,now,450)?'message-enter':''}"><div class="message-avatar ${m.role==='user'?'you-avatar':'opaya-avatar'}">${m.role==='user'?'S':'<span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""></span>'}</div><div class="message-body"><div class="message-meta"><strong>${m.role==='user'?'You':'Opaya Agent'}</strong><time>${esc(new Date(m.createdAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}</time></div>${activityMarkup(m)}<div class="message-text">${format(m.content)}</div>${m.error?`<div class="message-error">${esc(m.error)}</div>`:''}</div></article>`).join('')+busyRow:o.configured?`<div class="chat-empty"><span class="agent-avatar large opaya-avatar"><span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""><i></i></span></span><h2>How can I help with your agents?</h2><p>I can install frameworks, connect agents, manage machines and SSH keys, and find out why an agent is not working.</p><div class="starter-prompts">${OPAYA_STARTERS.map(([label,text])=>`<button data-action="opaya-starter" data-text="${esc(text)}">${esc(label)} <span>&#8599;</span></button>`).join('')}</div></div>`:'';
+    list.innerHTML=o.messages.length||o.busy?o.messages.map(m=>`<article class="message ${m.role==='user'?'user-message':'assistant-message'} ${fresh(opayaSeen,m.id,now,450)?'message-enter':''}"><div class="message-avatar ${m.role==='user'?'you-avatar':'opaya-avatar'}">${m.role==='user'?'S':'<span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""></span>'}</div><div class="message-body"><div class="message-meta"><strong>${m.role==='user'?'You':'Opaya Agent'}</strong><time>${esc(new Date(m.createdAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}))}</time></div>${activityMarkup(m)}<div class="message-text">${format(m.content)}</div>${m.role!=='user'?agentFiles(m.content,{id:'opaya',transport:'local',command:''}):''}${m.error?`<div class="message-error">${esc(m.error)}</div>`:''}</div></article>`).join('')+busyRow:o.configured?`<div class="chat-empty"><span class="agent-avatar large opaya-avatar"><span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""><i></i></span></span><h2>How can I help with your agents?</h2><p>I can install frameworks, connect agents, manage machines and SSH keys, and find out why an agent is not working.</p><div class="starter-prompts">${OPAYA_STARTERS.map(([label,text])=>`<button data-action="opaya-starter" data-text="${esc(text)}">${esc(label)} <span>&#8599;</span></button>`).join('')}</div></div>`:'';
     if(atBottom||o.busy)list.scrollTop=list.scrollHeight;
     const send=$('#opaya-send');send.disabled=!o.configured||o.busy;send.hidden=!!o.busy;$('#opaya-stop').hidden=!o.busy;$('#message-input').disabled=!o.configured;
     $('#compose-hint').textContent=o.busy?(o.status||'Working'):o.configured?`${o.presets?.[o.config.preset]?.label||'Model'}${o.config.model?' / '+o.config.model:''}`:'Connect a model to start';
@@ -2568,7 +2623,7 @@
       ${!vault.panel&&held.length?`<ol class="vault-steps" aria-label="How the Vault works"><li><b>1</b>Add or import your keys</li><li><b>2</b>Give each one to the agents that need it</li><li><b>3</b>Back up the Vault to a file</li></ol>`:''}
       ${empty}${held.length?`<section class="vault-keys" aria-label="Keys">${shown.map(row).join('')||'<p class="field-help">No key matches.</p>'}</section>`:''}
       ${held.length&&!vault.panel?`<label class="switch-row vault-mcp"><input type="checkbox" data-setting="vaultMcp" ${state.settings?.vaultMcp===false?'':'checked'}><span class="switch" aria-hidden="true"></span><span>Agents on this computer can ask for a key from their chat <small>(you approve each one; they get the key, never the other keys)</small></span></label>`:''}
-      ${tokens.length?`<section class="vault-tokens"><h3>Connection tokens <small>${tokens.length}</small></h3><p class="field-help">The token Opaya sends to each API connection. Change it in the agent's connection settings.</p>${tokens.map(a=>`<div class="vk token">${badge(a)}<div class="vk-main"><strong>${esc(title(a))}</strong><small>${esc(a.endpoint||'its API')}</small></div><div class="vk-actions"><button type="button" class="secondary small" data-action="edit" data-id="${esc(a.id)}">Change</button></div></div>`).join('')}</section>`:''}
+      ${tokens.length?`<section class="vault-tokens"><h3>Connection tokens <small>${tokens.length}</small></h3><p class="field-help">Some agents are an <strong>API connection</strong> (a Hermes or OpenClaw gateway, OpenAI, OpenRouter...): Opaya talks to them over HTTP and sends this token (the API key or gateway password) with each message. It belongs to that one connection, it is not one of your Vault keys, and agents never see it. Change it in the connection's settings; Remove forgets it (the connection then works only if its API needs no token).</p>${tokens.map(a=>`<div class="vk token">${badge(a)}<div class="vk-main"><strong>${esc(title(a))}</strong><small>${esc(a.endpoint||'its API')}</small></div><div class="vk-actions"><button type="button" class="secondary small" data-action="edit" data-id="${esc(a.id)}">Change</button><button type="button" class="icon-button vk-forget" data-vault="token-remove" data-agent="${esc(a.id)}" title="Remove the token of ${esc(title(a))}" aria-label="Remove the token of ${esc(title(a))}">&#10005;</button></div></div>`).join('')}</section>`:''}
       <p class="vault-drop-hint" aria-hidden="true">Drop a file to find keys in it</p>`;
     if(vault.panel==='add'){const f=$('#vault-form');bindEndpoint(f);}
     // New keys glow once, not on every redraw.
@@ -2581,6 +2636,52 @@
       ${pick==='some'?`<div class="vk-agents pick">${targets.map(a=>`<label class="vk-agent"><input type="checkbox" name="agent" value="${esc(a.id)}">${badge(a)}<span><strong>${esc(title(a))}</strong><small>${esc(placeText(a))}</small></span></label>`).join('')}</div>`:''}
       ${pick==='all'?'<p class="field-help">Opaya writes it into each agent that reads keys (Hermes, OpenClaw, DeepSeek Harness, Claude Code, Codex) and tells the connected ones.</p>':''}
       <div class="vault-add-foot"><button type="button" class="secondary" data-vault="panel" data-panel="">Cancel</button><button type="submit" class="primary">${vault.chat?'Save and insert':'Save key'}</button></div></form>`;
+  }
+  // ---- Schedules: messages Opaya sends to an agent (or the Opaya Agent) on a schedule, and agents' own cron jobs ------
+  const SCH_WEEK=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  function cronOf(f){const [h,m]=(f.time||'09:00').split(':').map(Number),hm=`${m||0} ${h||0}`;
+    return f.when==='hour'?`${m||0} * * * *`:f.when==='minutes'?`*/${Math.max(1,Math.min(59,Number(f.every)||15))} * * * *`:f.when==='weekdays'?`${hm} * * 1-5`:f.when==='week'?`${hm} * * ${Number(f.day)||1}`:f.when==='custom'?String(f.cron||'').trim():`${hm} * * *`;}
+  function cronText(c){const p=String(c||'').trim().split(/\s+/);if(p.length!==5)return c;const [m,h,dom,mon,dow]=p,t=/^\d+$/.test(m)&&/^\d+$/.test(h)?`${h.padStart(2,'0')}:${m.padStart(2,'0')}`:'';
+    if(/^\*\/\d+$/.test(m)&&h==='*'&&dom==='*'&&dow==='*')return `Every ${m.slice(2)} minutes`;if(/^\d+$/.test(m)&&h==='*'&&dom==='*'&&dow==='*')return m==='0'?'Every hour':`Every hour at :${m.padStart(2,'0')}`;
+    if(t&&dom==='*'&&mon==='*'&&dow==='*')return `Every day at ${t}`;if(t&&dom==='*'&&mon==='*'&&dow==='1-5')return `Weekdays at ${t}`;if(t&&dom==='*'&&mon==='*'&&/^[0-7]$/.test(dow))return `Every ${SCH_WEEK[Number(dow)%7]} at ${t}`;return c;}
+  let schedEdit=null;
+  function openSchedules(focusAgent=''){
+    schedEdit=null;const who=id=>id==='opaya'?'Opaya Agent':title(state.agents.find(a=>a.id===id)||{name:'Removed agent'});
+    const draw=()=>{const box=$('#schedules');if(!box)return;const list=(state.schedules||[]).filter(x=>!focusAgent||x.agentId===focusAgent),talkers=state.agents.filter(a=>a.protocol!=='terminal'),e=schedEdit;
+      const form=e?`<form id="sched-form" class="vault-panel sched-form"><h3>${e.id?'Edit schedule':'New schedule'}</h3>
+        <div class="form-grid"><label class="field"><span>Who</span><select name="agentId"><option value="opaya" ${e.agentId==='opaya'?'selected':''}>Opaya Agent</option>${talkers.map(a=>`<option value="${esc(a.id)}" ${e.agentId===a.id?'selected':''}>${esc(title(a))}</option>`).join('')}</select></label>
+        <label class="field"><span>Name <em>optional</em></span><input name="name" value="${esc(e.name||'')}" maxlength="80" placeholder="Morning lead report"></label></div>
+        <label class="field"><span>What it should do</span><textarea name="prompt" rows="3" maxlength="8000" placeholder="Find 10 new SaaS leads and add them to leads.csv" required>${esc(e.prompt||'')}</textarea></label>
+        <div class="sched-when"><label class="field"><span>When</span><select name="when">${[['day','Every day'],['weekdays','Weekdays'],['week','Every week on'],['hour','Every hour'],['minutes','Every few minutes'],['custom','Custom (cron)']].map(([v,l])=>`<option value="${v}" ${e.when===v?'selected':''}>${l}</option>`).join('')}</select></label>
+          <label class="field sched-day" ${e.when==='week'?'':'hidden'}><span>Day</span><select name="day">${SCH_WEEK.map((d,i)=>`<option value="${i}" ${Number(e.day)===i?'selected':''}>${d}</option>`).join('')}</select></label>
+          <label class="field sched-time" ${['day','weekdays','week','hour'].includes(e.when)?'':'hidden'}><span>${e.when==='hour'?'Minute':'Time'}</span><input name="time" type="time" value="${esc(e.time||'09:00')}"></label>
+          <label class="field sched-every" ${e.when==='minutes'?'':'hidden'}><span>Every</span><input name="every" type="number" min="1" max="59" value="${esc(e.every||15)}"></label>
+          <label class="field sched-cron" ${e.when==='custom'?'':'hidden'}><span>Cron <em>minute hour day month weekday</em></span><input name="cron" value="${esc(e.cron||'0 9 * * 1-5')}" spellcheck="false"></label></div>
+        <p class="field-help">Opaya sends it while it runs (the window can be closed; the session service keeps running). Each schedule has its own chat with that agent, so you can read what it did.</p>
+        <div class="vault-add-foot"><button type="button" class="secondary" data-sched="cancel">Cancel</button><button type="submit" class="primary">${e.id?'Save':'Add schedule'}</button></div></form>`:'';
+      box.innerHTML=`<div class="vault-bar"><div class="vault-sum"><strong>${list.length}</strong> schedule${list.length===1?'':'s'} <span>run by Opaya</span></div><button type="button" class="primary small" data-sched="new">+ New schedule</button></div>${form}
+        ${list.length?`<section class="sched-list">${list.map(x=>`<article class="sched ${x.enabled?'':'off'}" data-id="${esc(x.id)}"><div class="sched-main"><strong>${esc(x.name)}</strong><small>${esc(who(x.agentId))} &#183; ${esc(cronText(x.cron))}${x.lastRun?` &#183; last ${esc(ago(x.lastRun))} ago: ${esc(x.lastStatus)}${x.lastError?` (${esc(x.lastError)})`:''}`:''}</small><p>${esc(x.prompt.slice(0,160))}${x.prompt.length>160?'&#8230;':''}</p></div>
+          <div class="sched-actions"><label class="mg-toggle" title="${x.enabled?'On':'Off'}"><input type="checkbox" data-sched-toggle ${x.enabled?'checked':''}><span class="switch" aria-hidden="true"></span></label><button type="button" class="secondary small" data-sched="run">Run now</button>${x.conversationId?'<button type="button" class="secondary small" data-sched="chat">Its chat</button>':''}<button type="button" class="secondary small" data-sched="edit">Edit</button><button type="button" class="icon-button" data-sched="remove" title="Delete" aria-label="Delete">&#10005;</button></div></article>`).join('')}</section>`:e?'':'<p class="field-help sched-empty">No schedules yet. Add one: who, what, and when.</p>'}
+        <section class="sched-native"><h3>Agents' own schedules</h3><p class="field-help">What agents schedule themselves: Hermes cron jobs, OpenClaw cron and the crontab where they run.</p>
+          ${state.agents.filter(a=>!focusAgent||a.id===focusAgent).filter(a=>a.protocol!=='openai').map(a=>`<div class="sched-agent" data-agent="${esc(a.id)}"><div class="sched-agent-head">${badge(a)}<strong>${esc(title(a))}</strong><small>${esc(location(a))}</small><button type="button" class="secondary small" data-sched="native">Show</button></div><pre class="sched-out" hidden></pre></div>`).join('')}</section>`;
+    };
+    modal('Schedules','Tasks that run on their own: Opaya sends a message to an agent on a schedule, and agents keep their own cron jobs.','<div id="schedules" class="vault schedules"></div>',true);
+    const box=$('#schedules');draw();
+    const formState=()=>{const f=$('#sched-form');if(!f)return;const el=f.elements;Object.assign(schedEdit,{agentId:el.agentId.value,name:el.name.value,prompt:el.prompt.value,when:el.when.value,day:el.day.value,time:el.time.value,every:el.every.value,cron:el.cron.value});};
+    box.addEventListener('change',event=>{const t=event.target;
+      if(t.name==='when'){formState();draw();return;}
+      if(t.matches('[data-sched-toggle]')){const id=t.closest('[data-id]').dataset.id,x=state.schedules.find(y=>y.id===id);action(async()=>{await api.scheduleSave({...x,enabled:t.checked});await refresh();draw();});}});
+    box.addEventListener('click',event=>{const b=event.target.closest('[data-sched]');if(!b)return;const act=b.dataset.sched,id=b.closest('[data-id]')?.dataset.id,x=id&&state.schedules.find(y=>y.id===id);
+      if(act==='new'){schedEdit={agentId:focusAgent||selected()?.id||'opaya',when:'day',time:'09:00',day:1,every:15};draw();$('#sched-form [name=prompt]')?.focus();return;}
+      if(act==='cancel'){schedEdit=null;draw();return;}
+      if(act==='edit'&&x){const p=x.cron.split(/\s+/),simple=/^\d+$/.test(p[0])&&/^\d+$/.test(p[1])&&p[2]==='*'&&p[3]==='*';schedEdit={...x,when:simple&&p[4]==='*'?'day':simple&&p[4]==='1-5'?'weekdays':simple&&/^[0-6]$/.test(p[4])?'week':'custom',day:p[4],time:simple?`${p[1].padStart(2,'0')}:${p[0].padStart(2,'0')}`:'09:00'};draw();return;}
+      if(act==='run'&&x){b.disabled=true;action(async()=>{try{await api.scheduleRun({id});await refresh();draw();toast(`Sent: ${x.name}.`);}finally{b.disabled=false;}});return;}
+      if(act==='chat'&&x){closeModal();action(async()=>{if(x.agentId==='opaya'){fire('opaya');return;}await api.selectConversation?.({id:x.conversationId});await refresh();await openChat(x.agentId);});return;}
+      if(act==='remove'&&x){action(async()=>{if(!await ask(`Delete the schedule ${x.name}?\n\nIts chat stays.`))return;await api.scheduleRemove({id});await refresh();draw();});return;}
+      if(act==='native'){const row=b.closest('[data-agent]'),out=row.querySelector('.sched-out');b.disabled=true;b.textContent='Reading...';
+        action(async()=>{try{const r=await api.agentSchedules({id:row.dataset.agent});out.hidden=false;out.textContent=r.error?`Could not read: ${r.error}`:(r.text||'').trim()||'(none)';}finally{b.disabled=false;b.textContent='Show';}});}});
+    box.addEventListener('submit',event=>{event.preventDefault();formState();const e=schedEdit,cron=cronOf(e);
+      action(async()=>{await api.scheduleSave({id:e.id,agentId:e.agentId,name:e.name,prompt:e.prompt,cron,enabled:e.enabled??true});schedEdit=null;await refresh();draw();toast(`Scheduled: ${cronText(cron)}.`);});});
   }
   // Back up the Vault to a file encrypted with a password the user chooses, or restore one (on this or a new computer).
   function vaultBackupPanel(count,bk){
@@ -2654,6 +2755,7 @@
     const b=event.target.closest('[data-vault]');if(!b)return;const what=b.dataset.vault,rowEl=b.closest('[data-secret]'),k=rowEl&&vaultKeys().find(x=>x.id===rowEl.dataset.secret);
     if(what==='panel'){const p=b.dataset.panel;vault.panel=vault.panel===p?'':p;if(vault.panel!=='import'){vault.scan=null;vault.paste=false;}drawVault();if(vault.panel==='add')$('#vault-form')?.elements.value.focus();return;}
     if(what==='import-file'){api.pickSecretFile?.().then(file=>{if(file)vaultScan({file},`Reading ${file.split(/[\\/]/).pop()}...`);},error=>toast(error.message,true));return;}
+    if(what==='token-remove'){const ag=state.agents.find(x=>x.id===b.dataset.agent);if(ag)action(async()=>{if(!await ask(`Remove the token of ${title(ag)}?\n\nOpaya forgets the key it sends to ${ag.endpoint||'this API'}. ${title(ag)} disconnects and works again only with a new token (Change) or if its API needs none.`))return;await api.tokenRemove({id:ag.id});await refresh();drawVault();toast(`The token of ${title(ag)} is removed.`);});return;}
     if(what==='restore-pick'){api.pickVaultBackup?.().then(file=>{if(file){vault.restoreFile=file;drawVault();$('[data-vault-form="restore"] [name=password]')?.focus();}},error=>toast(error.message,true));return;}
     if(what==='import-tools'){vaultScan({tools:true},'Looking at your agents and tools...');return;}
     if(what==='import-paste'){vault.paste=!vault.paste;drawVault();$('.vi-paste textarea')?.focus();return;}
@@ -3153,7 +3255,10 @@
     agentModes.set(a.id,'chat');const put=()=>{const input=$('#message-input');if(!input)return;input.value=`/${name} `;drafts.set(draftKey(),input.value);input.focus();input.setSelectionRange(input.value.length,input.value.length);};
     if(state.activeAgentId!==a.id||overview||opayaView||playgroundView){overview=false;opayaView=false;playgroundView=false;action(async()=>{await api.select({id:a.id});await refresh();put();});}else put();
   }
-  const browserCapable=a=>a.transport!=='ssh'&&a.command!=='docker'&&['acp','claude','codex'].includes(a.protocol);
+  // Hermes and other ACP agents anywhere (a relay brings the browser to a machine or container); Claude Code and Codex here.
+  const browserCapable=a=>a.protocol==='acp'||a.transport!=='ssh'&&a.command!=='docker'&&['claude','codex'].includes(a.protocol);
+  // On for every agent unless taken away (browserOff).
+  const hasBrowser=a=>!!a&&browserCapable(a)&&!a.browserOff;
   async function toggleAgentTrust(a){
     if(state.settings?.itrustAll&&a.itrust===false){toast('iTrust is on for all agents in Settings.');return;}
     const on=!a.itrust;
@@ -3214,7 +3319,7 @@
       <label class="check-row inline"><input type="checkbox" name="enabled" ${!s||s.enabled?'checked':''}> Enabled</label>
       <div class="modal-footer"><div></div><div><button type="button" class="secondary" id="mcp-cancel">Back</button><button class="primary" type="submit">Save server</button></div></div></form>`:'';
     const added=new Set(list.map(x=>x.name)),cat=mcpCatalogCache||[];
-    const oneClick=cat.length?`<h3 class="mcp-head">Add with one click</h3><div class="mcp-catalog">${cat.map(c=>{const on=c.own?state.agents.filter(x=>x.browser).length:added.has(c.name);return `<div class="mcp-card${c.own?' own':''}"><div><strong>${esc(c.title)}</strong>${c.own?'<em>Opaya</em>':c.secret&&!c.secret.optional?'<em>needs a key</em>':''}<p>${esc(c.description)}</p>${c.needs?`<small>Needs ${esc(c.needs)} where the agent runs.</small>`:''}</div><button class="secondary small ${on?'is-on':''}" data-mcp-install="${esc(c.id)}">${c.own?(on?`On for ${on}`:'Turn on'):on?'Added':'Add'}</button></div>`;}).join('')}</div><h3 class="mcp-head">Your MCP servers</h3>`:'';
+    const oneClick=cat.length?`<h3 class="mcp-head">Add with one click</h3><div class="mcp-catalog">${cat.map(c=>{const on=c.own?state.agents.filter(x=>hasBrowser(x)).length:added.has(c.name);return `<div class="mcp-card${c.own?' own':''}"><div><strong>${esc(c.title)}</strong>${c.own?'<em>Opaya</em>':c.secret&&!c.secret.optional?'<em>needs a key</em>':''}<p>${esc(c.description)}</p>${c.needs?`<small>Needs ${esc(c.needs)} where the agent runs.</small>`:''}</div><button class="secondary small ${on?'is-on':''}" data-mcp-install="${esc(c.id)}">${c.own?(on?`On for ${on}`:'Turn on'):on?'Added':'Add'}</button></div>`;}).join('')}</div><h3 class="mcp-head">Your MCP servers</h3>`:'';
     modal('MCP servers','Tools your agents can call. Add one with a click: Opaya passes it to Hermes and other ACP agents and writes it into Claude Code, Codex and OpenClaw configs.',`${adding||s?form:`${libTabs('mcp')}${oneClick}<div class="skill-list">${list.map(x=>`<div class="skill-row"><div><strong>${esc(x.name)}</strong><em>${esc(x.type)}${x.enabled?'':' / off'}</em><p>${esc(x.type==='stdio'?`${x.command} ${x.args.join(' ')}`:x.url)}</p><p>${x.agents==='all'?'All agents':`${x.agents.length} agent${x.agents.length===1?'':'s'}`}${x.envNames.length||x.headerNames.length?` / secrets: ${esc([...x.envNames,...x.headerNames].join(', '))}`:''}</p></div><div class="row-actions"><button class="secondary small" data-mcp-edit="${esc(x.id)}">Edit</button><button class="text-button danger-text" data-mcp-remove="${esc(x.id)}">Remove</button></div></div>`).join('')||'<p class="field-help">No MCP servers yet.</p>'}</div>
       <div class="mcp-examples"><p class="field-help">Another server: <code>npx -y some-mcp-server</code>, <code>uvx mcp-server-fetch</code>, or an HTTPS server such as <code>https://mcp.example.com/mcp</code>.</p></div>
       <div class="modal-footer"><div></div><div><button class="secondary" id="mcp-add">Add another server by hand</button></div></div>`}`,true);
@@ -3249,8 +3354,8 @@
       ${c.secret?`<label>${esc(c.secret.label)}<input name="secret" type="password" autocomplete="off" spellcheck="false" ${c.secret.optional||existing?.envNames?.length||existing?.headerNames?.length?'':'required'} placeholder="${existing&&(existing.envNames.length||existing.headerNames.length)?'Saved. Leave empty to keep it.':'Paste it here'}"><small class="field-help">Stored encrypted in Opaya's vault; it is never shown again.</small></label>${mcpVaultPick(c)}`:''}
       ${c.folder?`<label>${esc(c.folder.label)}<span class="input-row"><input name="folder" required placeholder="/home/you/projects" value="${esc(existing?.args?.at(-1)||'')}"><button type="button" class="secondary small" id="mcp-folder">Browse...</button></span></label>`:''}
       ${own?'':`<fieldset class="mcp-agents"><legend>Use with</legend><label class="check-row inline"><input type="radio" name="scope" value="some" checked> Chosen agents</label><label class="check-row inline"><input type="radio" name="scope" value="all"> All agents</label></fieldset>`}
-      <div class="pick-list">${agents.map(x=>`<label class="pick-item"><input type="checkbox" name="agent" value="${esc(x.id)}" ${own?(x.browser?'checked':''):(existing?usesMcp(existing,x):x.id===selected()?.id)?'checked':''} ${!own&&!mcpPassed(x)?'disabled':''}><span><strong>${esc(title(x))}</strong><small>${esc(own?(x.vision?.vision===false?'Pages as text (its model reads text only)':'Pages as text and screenshots'):mcpSupport(x))}</small></span></label>`).join('')||'<p class="field-help">No agent on this computer can use the Opaya browser.</p>'}</div>
-      ${own?'<p class="field-help">The Opaya browser runs in this window, so it works for agents on this computer (ACP agents and Claude Code). It starts with their next conversation.</p>':`<p class="field-help">${c.type==='stdio'?`Runs <code>${esc(c.command)}</code> on the machine where each agent runs. `:`Connects to ${esc(c.url||'')}. `}Opaya asks before it writes anything into an agent's config.</p>`}
+      <div class="pick-list">${agents.map(x=>`<label class="pick-item"><input type="checkbox" name="agent" value="${esc(x.id)}" ${own?(hasBrowser(x)?'checked':''):(existing?usesMcp(existing,x):x.id===selected()?.id)?'checked':''} ${!own&&!mcpPassed(x)?'disabled':''}><span><strong>${esc(title(x))}</strong><small>${esc(own?(x.vision?.vision===false?'Pages as text (its model reads text only)':'Pages as text and screenshots'):mcpSupport(x))}</small></span></label>`).join('')||'<p class="field-help">No agent on this computer can use the Opaya browser.</p>'}</div>
+      ${own?'<p class="field-help">Every agent on this computer (Hermes and other ACP agents, Claude Code, Codex) has its own Opaya browser, on by default. Untick one to take it away.</p>':`<p class="field-help">${c.type==='stdio'?`Runs <code>${esc(c.command)}</code> on the machine where each agent runs. `:`Connects to ${esc(c.url||'')}. `}Opaya asks before it writes anything into an agent's config.</p>`}
       <div class="modal-footer"><div><button type="button" class="text-button" id="mcp-back">Back</button></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">${own?'Save':existing?'Update':'Add'}</button></div></div></form>`,true);
     const f=$('#mcp-install');$('#mcp-back').onclick=()=>openMcpManager();
     const vk=f.elements.vaultKey,sec=f.elements.secret;if(vk&&sec){const need=sec.required,syncKey=()=>{sec.required=need&&!vk.value;sec.disabled=!!vk.value;sec.placeholder=vk.value?'Using the key from the Vault':'Paste it here';};vk.addEventListener('change',syncKey);syncKey();}
@@ -3259,7 +3364,7 @@
     for(const r of f.querySelectorAll('[name="scope"]'))r.onchange=sync;sync();
     f.onsubmit=event=>{event.preventDefault();const picked=[...f.querySelectorAll('[name="agent"]:checked')].map(i=>i.value);
       action(async()=>{
-        if(own){for(const x of agents)if(!!x.browser!==picked.includes(x.id))await api.updateAgentDisplay({id:x.id,browser:picked.includes(x.id)});await refresh();toast(picked.length?`The Opaya browser is on for ${plural(picked.length,'agent')} from their next conversation.`:'The Opaya browser is off.');openMcpManager();return;}
+        if(own){for(const x of agents)if(hasBrowser(x)!==picked.includes(x.id))await api.updateAgentDisplay({id:x.id,browser:picked.includes(x.id)});await refresh();toast(picked.length?`The Opaya browser is on for ${plural(picked.length,'agent')} from their next conversation.`:'The Opaya browser is off.');openMcpManager();return;}
         const scope=f.querySelector('[name="scope"]:checked')?.value==='all'?'all':picked;
         if(Array.isArray(scope)&&!scope.length){toast('Choose at least one agent.',true);return;}
         modalBusy=true;let r;try{r=await api.mcpInstall({id:c.id,secret:f.elements.secret?.value||'',vaultKey:f.elements.vaultKey?.value||'',folder:f.elements.folder?.value||'',agents:scope});}finally{modalBusy=false;}
@@ -3577,8 +3682,8 @@
       <section><h3>Files</h3><div class="bring-files">${r.files.map(f=>{const [k,...rest]=f.split('\t');return `<div title="${esc(kind[k[0]]||k)}"><b class="bring-${esc(k[0])}">${esc(k[0])}</b> ${esc(rest.join(' > '))}</div>`;}).join('')}</div></section></div>
       <p class="field-help"><strong>Apply to my folder</strong> puts these changes into ${esc(local?.name||'your project')} as uncommitted edits, next to your own work, so you can look at them in your editor and commit what you like.${r.canMerge?` <strong>Merge</strong> adds the agent's commits to ${esc(r.branch||'your branch')} as they are.`:''}</p>
       <div class="modal-footer"><div><button type="button" class="subtle" data-bring="diff">Full diff</button><button type="button" class="subtle" data-bring="branch">New branch...</button></div><div>${r.canMerge?'<button type="button" class="secondary" data-bring="merge">Merge commits</button>':''}<button type="button" class="primary" data-bring="apply">Apply to my folder</button></div></div>`,true);
-    $('#app-dialog').addEventListener('click',event=>{const b=event.target.closest('[data-bring]');if(!b)return;const act=b.dataset.bring;
-      let branch='';if(act==='branch'){branch=prompt('Name for the new branch:',`review/${(r.ref.split('/').pop()||'agent')}`)||'';if(!branch)return;}
+    $('#app-dialog').addEventListener('click',async event=>{const b=event.target.closest('[data-bring]');if(!b)return;const act=b.dataset.bring;
+      let branch='';if(act==='branch'){branch=await opayaAsk({title:'Name for the new branch',input:`review/${(r.ref.split('/').pop()||'agent')}`,ok:'Create branch'})||'';if(!branch)return;}
       action(async()=>{await api.projectRemoteApply({id:r.projectId,agentId:r.agentId,action:act,branch});closeModal();toast(act==='apply'?'Applying the changes to your folder in the terminal below.':act==='merge'?'Merging in the terminal below.':act==='branch'?`Creating ${branch} in the terminal below.`:'Showing the diff in the terminal below.');});});
   }
   function agentChecks(p,hostId){
@@ -3683,7 +3788,7 @@
     if(state.agents.length)out.push({id:'tip:find',text:`Looking for a setting or an action? Press ${mod().trim()}${state.platform==='darwin'?'':'+'}K or Search at the top: it finds anything and shows where it lives. Back (Alt+Left) returns to the previous screen.`,actions:[['Search',()=>openFind()]]});
     if(state.agents.length&&!vaultKeys().length)out.push({id:'tip:vault-import',text:'Already have API keys in .env files or your tools? Import them into the Opaya Vault and give each to the agents that need it.',actions:[['Import keys',()=>openVault({panel:'import'})]]});
     if(!state.hosts.length&&state.agents.length>=2)out.push({id:'tip:vps',text:'Want an agent running around the clock? Add a new VPS: I create the SSH key and check the connection.',actions:[['New VPS',()=>openNewVps()]]});
-    const browserable=state.agents.find(a=>browserCapable(a)&&!a.browser);if(browserable)out.push({id:'tip:browser',text:`${title(browserable)} can browse the web with you watching. Its Keys & tools > Give Opaya browser.`,actions:[]});
+    
     if(!(state.projects||[]).length&&state.agents.some(a=>a.cwd))out.push({id:'tip:projects',text:'Keep folders, their agents, chats and git together in Projects. Press Ctrl+Shift+P.',actions:[['Open Projects',()=>toggleProjects(true)]]});
     // Updates: each outdated tool is announced once per new version. Closing the note (or letting it fade) dismisses
     // those versions; the note comes back only when something newer appears. Hermes counts commits behind, which grow
@@ -4003,8 +4108,8 @@
     $('#update-body').addEventListener('click',event=>{const b=event.target.closest('[data-update]');if(!b)return;const act=b.dataset.update;
       if(act==='check')action(()=>api.updateCheck());
       else if(act==='download')action(()=>api.updateDownload());
-      else if(act==='install')action(async()=>{modalBusy=false;await api.updateInstall();});
-      else if(act==='installer')action(()=>api.updateRunInstaller());
+      else if(act==='install')action(async()=>{modalBusy=false;if(!await opayaAsk({title:`Install Opaya ${update.latest?.version||''} now?`,text:'Opaya closes, installs the update and opens again. Local agent processes and local shells end; remote tmux sessions keep running. Saved chats and settings stay.',ok:'Restart and update'}))return;await api.updateInstall({confirmed:true});});
+      else if(act==='installer')action(async()=>{if(!await opayaAsk({title:`Install Opaya ${update.latest?.version||''} with the installer?`,text:'Opaya closes so the installer can replace its files. Follow the installer, then open Opaya again.',ok:'Open installer'}))return;await api.updateRunInstaller({confirmed:true});});
       else if(act==='page'&&update.latest?.url)action(()=>api.openLink({url:update.latest.url}));});
     if(['idle','error','current'].includes(update.status)&&(!update.checkedAt||Date.now()-update.checkedAt>60000))action(()=>api.updateCheck());
   }
@@ -4044,19 +4149,44 @@
   expand.onclick=()=>{const right=layout.terminal==='right';if(savedSize){if(right)layout.rightWidth=savedSize;else layout.bottomHeight=savedSize;savedSize=0;}else{savedSize=right?layout.rightWidth:layout.bottomHeight;if(right)layout.rightWidth=window.innerWidth;else layout.bottomHeight=window.innerHeight;}syncDocks();saveLayout();};
   $('.terminal-actions [data-action="dock-move"]').before(expand);
   // ---- Opaya browser pane -------------------------------------------------------------------------------------------
-  let browserState={url:''},browserFrame=0,agentBrowsingTimer=0;
+  let browserState={url:''},browserFrame=0,agentBrowsingTimer=0,browserShown='user';
+  // Each agent has its own browser tab; the pane shows the tab of the agent on screen, else the user's own.
+  function browserOwner(){const a=selected();return !overview&&!opayaView&&!playgroundView&&a&&hasBrowser(a)?a.id:'user';}
   function placeBrowser(){
     cancelAnimationFrame(browserFrame);
     browserFrame=requestAnimationFrame(()=>{
-      if(!api.browserPlace)return;const panel=$('#browser-panel'),view=$('#browser-view');
+      if(!api.browserPlace)return;const panel=$('#browser-panel'),view=$('#browser-view'),owner=browserOwner();
+      if(owner!==browserShown){browserShown=owner;browserState={url:''};api.browserState?.({owner}).then(st=>{if(browserShown===owner){browserState=st||{url:''};renderBrowser();}}).catch(()=>{});}
+      $('#browser-panel').dataset.owner=owner;const who=$('#browser-owner');if(who){const a=owner==='user'?null:state.agents.find(x=>x.id===owner);who.textContent=a?`${title(a)}'s browser`:'Your browser';}
       const covered=!!document.querySelector('dialog[open],.context-menu')||document.body.classList.contains('dock-resizing');
       const shown=!panel.hidden&&!covered&&!!browserState.url;const r=view.getBoundingClientRect();
       $('.browser-empty').hidden=!!browserState.url;
-      api.browserPlace({x:r.left,y:r.top,width:r.width,height:r.height,visible:shown}).catch(()=>{});
+      api.browserPlace({x:r.left,y:r.top,width:r.width,height:r.height,visible:shown,owner}).catch(()=>{});
     });
   }
+  // Cookies from Chrome or Edge (or a file exported from a browser) into the browsers the user picks.
+  async function openCookieImport(){
+    const owner=browserOwner(),agents=state.agents.filter(a=>hasBrowser(a));let sources=[];
+    try{sources=await api.cookieSources?.()||[];}catch(error){toast(error.message,true);}
+    const tick=(v,label,small,checked)=>`<label class="pick-item"><input type="checkbox" name="owner" value="${esc(v)}" ${checked?'checked':''}><span><strong>${esc(label)}</strong><small>${esc(small)}</small></span></label>`;
+    modal('Import cookies','So the Opaya browser is signed in where you are. Cookies stay on this computer; each browser keeps its own.',`<form id="cookie-form" class="cookie-form">
+      <h3>From</h3><div class="pick-list">${sources.map((x,i)=>`<label class="pick-item"><input type="radio" name="source" value="${i}" ${i?'':'checked'}><span><strong>${esc(x.label)}</strong><small>${esc(x.name===x.profile?x.profile:`${x.name} (${x.profile})`)}</small></span></label>`).join('')}<label class="pick-item"><input type="radio" name="source" value="file" ${sources.length?'':'checked'}><span><strong>A cookies.txt or JSON file</strong><small>Exported from any browser, for example with the Get cookies.txt or Cookie-Editor extension</small></span></label></div>
+      ${sources.length?'':'<p class="field-help">No Chrome or Edge profile was found on this computer.</p>'}
+      <label class="field"><span>Only these sites <em>optional, separated by commas</em></span><input name="domains" placeholder="youtube.com, google.com, github.com" autocomplete="off" spellcheck="false"></label>
+      <h3>Into</h3><div class="pick-list">${tick('user','Your browser','On Home and the other shared screens',owner==='user')}${agents.map(a=>tick(a.id,`${title(a)}'s browser`,placeText(a),owner===a.id)).join('')}</div>
+      <p class="field-help">Close Chrome or Edge first if it says the cookie file is in use. Chrome and Edge 127 and later on Windows lock some cookies so only they can read them; for those sites, export a cookies.txt from the browser and import the file.</p>
+      <div class="modal-footer"><span></span><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="submit" class="primary">Import cookies</button></div></div></form>`,true);
+    $('#cookie-form').addEventListener('submit',event=>{event.preventDefault();const f=event.target,src=f.elements.source.value,owners=[...f.querySelectorAll('[name="owner"]:checked')].map(i=>i.value),domains=f.elements.domains.value.split(/[\s,;]+/).map(x=>x.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,'')).filter(Boolean);
+      if(!owners.length){toast('Choose at least one browser to import into.',true);return;}
+      action(async()=>{let input;if(src==='file'){const file=await api.pickCookieFile?.();if(!file)return;input={file};}else{const x=sources[Number(src)];input={browser:x.browser,profile:x.profile};}
+        const b=f.querySelector('[type=submit]');b.disabled=true;b.textContent='Importing...';
+        try{const r=await api.cookieImport({...input,domains,owners});closeModal();
+          toast(`${r.set?`Imported ${plural(r.found,'cookie')} from ${r.label} into ${plural(r.owners.length,'browser')}.`:`No cookies imported from ${r.label}.`}${r.unreadable?` ${r.unreadable} could not be read (locked by the browser${r.locked.length?`: ${r.locked.slice(0,4).join(', ')}${r.locked.length>4?'...':''}`:''}); export those sites as cookies.txt and import the file.`:''}`,!r.set);
+          if(owners.includes(browserOwner())&&browserState.url)api.browserNav({action:'reload',owner:browserOwner()}).catch(()=>{});}
+        finally{b.disabled=false;b.textContent='Import cookies';}});});
+  }
   function showBrowser(){$('#browser-panel').hidden=false;syncDocks();}
-  async function openInBrowser(url){showBrowser();try{browserState=await api.browserOpen({url});}catch(error){toast(error.message,true);}renderBrowser();}
+  async function openInBrowser(url){showBrowser();try{browserState=await api.browserOpen({url,owner:browserOwner()});}catch(error){toast(error.message,true);}renderBrowser();}
   function renderBrowser(){
     const input=$('#browser-url');if(document.activeElement!==input)input.value=browserState.url?.startsWith('data:')?'Preview':browserState.url||'';
     $('[data-browser="back"]').disabled=!browserState.canGoBack;$('[data-browser="forward"]').disabled=!browserState.canGoForward;
@@ -4067,16 +4197,21 @@
   new MutationObserver(placeBrowser).observe(document.body,{childList:true,subtree:false});
   new MutationObserver(placeBrowser).observe($('#modal-root'),{childList:true,subtree:true,attributes:true,attributeFilter:['open']});
   api.onBrowser?.(value=>{
+    // Another agent's tab (it works while you are elsewhere) does not take over this screen's browser.
+    if(value?.owner&&value.owner!==browserOwner())return;
     browserState=value||browserState;
+    if(value?.request==='hide'){browserState={url:''};$('#browser-panel').hidden=true;renderBrowser();return;}
     if(value?.request==='show'){showBrowser();if(value.agent){const badge=$('#browser-agent');badge.hidden=false;clearTimeout(agentBrowsingTimer);agentBrowsingTimer=setTimeout(()=>{badge.hidden=true;},8000);}}
     renderBrowser();
   });
   $('#browser-form').addEventListener('submit',event=>{event.preventDefault();const v=$('#browser-url').value.trim();if(v)openInBrowser(v);});
   $('#browser-panel').addEventListener('click',event=>{
     const b=event.target.closest('[data-browser]');if(!b)return;const act=b.dataset.browser;
-    if(act==='close'){$('#browser-panel').hidden=true;return;}
+    // Close forgets the page (logins stay): the next open starts empty, for you and for the agent.
+    if(act==='close'){$('#browser-panel').hidden=true;const owner=browserOwner();browserState={url:''};api.browserClose?.({owner}).catch(()=>{});return;}
+    if(act==='cookies'){openCookieImport();return;}
     if(act==='external'){if(browserState.url&&!browserState.url.startsWith('data:'))action(()=>api.openLink({url:browserState.url}));return;}
-    action(async()=>{browserState=await api.browserNav({action:act});renderBrowser();});
+    action(async()=>{browserState=await api.browserNav({action:act,owner:browserOwner()});renderBrowser();});
   });
   // ---- Rich message actions: links, copy and preview -----------------------------------------------------------------
   document.addEventListener('click',event=>{
@@ -4085,7 +4220,7 @@
     if(act==='open-link'){const url=el.dataset.url;if(!url)return;if(url.startsWith('mailto:')||el.dataset.external||event.ctrlKey||event.metaKey||event.shiftKey)action(()=>api.openLink({url}));else openInBrowser(url);return;}
     const code=el.closest('.code-block')?.querySelector('pre')?.textContent||'';
     if(act==='md-copy'){action(async()=>{await api.clipboardWrite({text:code});el.textContent='Copied';setTimeout(()=>{el.textContent='Copy';},1400);});return;}
-    if(act==='md-preview'){showBrowser();action(async()=>{browserState=await api.browserPreview({html:code});renderBrowser();});}
+    if(act==='md-preview'){showBrowser();action(async()=>{browserState=await api.browserPreview({html:code,owner:browserOwner()});renderBrowser();});}
     if(act==='md-run'){const win=el.closest('.chat-win'),c=win&&dockConv(win.dataset.conv),a=c?state.agents.find(x=>x.id===c.agentId):selected();if(a)action(()=>runInShell(a,code));}
   },true);
   // Run in console: the command goes into the agent's shell window as a paste (lines wait for Enter where the shell
@@ -4130,7 +4265,7 @@
     for(const t of initial.terminals||[]){if(t.exited)savedSessions.set(t.id,t);else await openTerminal({terminalId:t.id,restoring:true});}
     $('#terminal-panel').hidden=!initial.view?.terminalVisible;
     // Each window back on its screen, hidden or not, with its size; then the panel for the screen in use.
-    for(const [id,ctx,hidden] of initial.view?.windows||[]){const v=terminalViews.get(id);if(v){v.ctx=state.agents.some(a=>a.id===ctx)?ctx:'';v.hiddenPane=!!hidden;}}
+    for(const [id,ctx,hidden] of initial.view?.windows||[]){const v=terminalViews.get(id);if(v){v.ctx=ctx==='opaya'||state.agents.some(a=>a.id===ctx)?ctx:'';v.hiddenPane=!!hidden;}}
     terminalWorkspaces.clear();
     for(const w of TL.workspaces(initial.view?.terminalWorkspaces))if(!w.ctx||state.agents.some(a=>a.id===w.ctx))terminalWorkspaces.set(w.ctx,w);
     for(const ctx of new Set([...terminalViews.values()].map(v=>v.ctx||''))){

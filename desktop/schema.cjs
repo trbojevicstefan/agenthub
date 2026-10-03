@@ -117,7 +117,7 @@ function agent(input) {
     clone: cloneRecipe(input.clone),
     // How the agent opens: '' follows Settings, 'chat' or 'terminal' (its native CLI) for this agent only.
     surface: ['chat', 'terminal'].includes(input.surface) ? input.surface : '',
-    pinned: Boolean(input.pinned), itrust: Boolean(input.itrust), browser: Boolean(input.browser), createdAt: input.createdAt || new Date().toISOString()
+    pinned: Boolean(input.pinned), itrust: Boolean(input.itrust), browser: Boolean(input.browser), ...(input.browserOff === true ? {browserOff: true} : {}), createdAt: input.createdAt || new Date().toISOString()
   };
 }
 // `empty`: a message with attachments may have no text.

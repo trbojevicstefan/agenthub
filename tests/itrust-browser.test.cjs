@@ -24,7 +24,7 @@ test('iTrust approves ACP and Codex tool requests without asking, and says so',a
   const x=new CodexAdapter({agent:{provider:'codex',args:[],cwd:path.resolve('.')},approve:async()=>{asked++;return false;},spawnAgent:()=>codex,trusted:()=>true});
   await x.connect();await x.run(context());assert.equal(codex.decision,'accept');assert.equal(asked,0);x.close();
 });
-test('iTrust is per agent or for all agents, and only local ACP/Claude agents get the Opaya browser',async t=>{
+test('iTrust is per agent or for all agents, and the Opaya browser is on by default and off only when taken away',async t=>{
   const root=await temp(t),factory=[];
   const broker=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory:o=>{factory.push(o);return {connect:async()=>({}),close(){},run:async()=>({})};}});
   await broker.init();t.after(()=>broker.close());
@@ -35,8 +35,9 @@ test('iTrust is per agent or for all agents, and only local ACP/Claude agents ge
   await broker.updateAgentDisplay({id:acp.id,itrust:true});assert.equal(broker.isTrusted(acp.id),true);assert.equal(broker.isTrusted(api.id),false);
   await broker.saveSettings({itrustAll:true});assert.equal(broker.isTrusted(api.id),true);
   await broker.connect(acp.id);assert.equal(factory.at(-1).trusted(),true);
-  assert.equal(broker.mcpFor(acp.id).some(s=>s.name==='opaya-browser'),false);
-  await broker.updateAgentDisplay({id:acp.id,browser:true});await assert.rejects(()=>broker.updateAgentDisplay({id:api.id,browser:true}),/only agents here/);
+  assert.equal(broker.mcpFor(acp.id).some(s=>s.name==='opaya-browser'),true,'on by default');
+  await broker.updateAgentDisplay({id:acp.id,browser:false});assert.equal(broker.mcpFor(acp.id).some(s=>s.name==='opaya-browser'),false,'off only when taken away');
+  await broker.updateAgentDisplay({id:acp.id,browser:true});await assert.rejects(()=>broker.updateAgentDisplay({id:api.id,browser:true}),/cannot use the Opaya browser/);
   const server=broker.mcpFor(acp.id).find(s=>s.name==='opaya-browser');assert.equal(server.command,'/opt/Opaya');assert.deepEqual(server.env[0],{name:'ELECTRON_RUN_AS_NODE',value:'1'});
   assert.equal(broker.mcpFor(api.id).some(s=>s.name==='opaya-browser'),false,'gateway agents cannot start a local MCP bridge');
   assert.equal(broker.snapshot().settings.itrustAll,true);
@@ -60,7 +61,7 @@ test('the browser MCP bridge speaks MCP and its token can only call browserTool'
   const textChild=spawn(process.execPath,[path.join(__dirname,'../desktop/browser-mcp.cjs')],{env:{...process.env,OPAYA_BROWSER_ENDPOINT:endpoint,OPAYA_BROWSER_TOKEN:scoped,OPAYA_BROWSER_TEXT_ONLY:'1'},stdio:['pipe','pipe','inherit']});
   t.after(()=>textChild.kill());
   const tools=await new Promise(r=>{let b='';textChild.stdout.on('data',d=>{b+=d;const i=b.indexOf('\n');if(i>=0)r(JSON.parse(b.slice(0,i)).result.tools.map(x=>x.name));});textChild.stdin.write(JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/list',params:{}})+'\n');});
-  assert(tools.includes('browser_open')&&tools.includes('browser_click')&&!tools.includes('browser_screenshot'));
+  assert(tools.includes('browser_open')&&tools.includes('browser_close')&&!tools.includes('browser_screenshot'));
 });
 test('rich messages render Markdown safely',()=>{
   global.window={};require('../ui/markdown.js');const r=window.OpayaMarkdown.render;

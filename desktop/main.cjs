@@ -50,8 +50,11 @@ if(hostMode){
   async function detach(){if(quitting)return;quitting=true;try{await win?.webContents.executeJavaScript('window.agenthubFlush?.()');}catch{}client?.close();tray?.destroy();app.quit();}
   async function quitForUpdate(){await client?.call('shutdown').catch(()=>{});quitting=true;client?.close();tray?.destroy();app.quit();}
   async function stopService(){
-    const result=await dialog.showMessageBox(win,{type:'warning',message:'Stop all sessions and exit?',detail:'This ends local agent processes and local shells. Remote tmux sessions remain on their hosts. Saved conversations and drafts stay on disk. Use Exit window to leave the session service running instead.',buttons:['Keep running','Stop all and exit'],defaultId:0,cancelId:0,noLink:true});
-    if(result.response===1){await client.call('shutdown');await detach();}
+    const detail='This ends local agent processes and local shells. Remote tmux sessions remain on their hosts. Saved conversations and drafts stay on disk. Use Exit window to leave the session service running instead.';
+    // Asked in Opaya's own dialog when the window is there; the native box only without it.
+    let ok=null;if(win&&!win.isDestroyed()){try{win.show();win.focus();ok=await win.webContents.executeJavaScript(`window.opayaAsk?window.opayaAsk(${JSON.stringify({title:'Stop all sessions and exit?',text:detail,ok:'Stop all and exit',cancel:'Keep running',danger:true})}):null`,true);}catch{ok=null;}}
+    if(ok===null){const result=await dialog.showMessageBox(win,{type:'warning',message:'Stop all sessions and exit?',detail,buttons:['Keep running','Stop all and exit'],defaultId:0,cancelId:0,noLink:true});ok=result.response===1;}
+    if(ok){await client.call('shutdown');await detach();}
   }
   if(!app.requestSingleInstanceLock())app.quit();else{
     app.on('second-instance',show);
@@ -104,7 +107,7 @@ if(hostMode){
       // Opaya browser pane (a separate sandboxed view); agents with browser access drive it through the session service.
       const browser=new (require('./browser.cjs').BrowserPane)({win,emit:state=>{if(!win.isDestroyed())win.webContents.send('hub:browser',state);}});
       client.on('browser-request',async request=>{
-        try{const value=await browser.tool(request.op,request.args);await client.call('browserResult',{id:request.id,ok:true,value});}
+        try{const value=await browser.tool(request.op,request.args,request.owner);await client.call('browserResult',{id:request.id,ok:true,value});}
         catch(error){await client.call('browserResult',{id:request.id,ok:false,error:String(error?.message||error).slice(0,500)}).catch(()=>{});}
       });
 
@@ -159,6 +162,8 @@ if(hostMode){
       handlers.pickFiles=async()=>{const result=await dialog.showOpenDialog(win,{title:'Attach files',properties:['openFile','multiSelections']});return result.canceled||!result.filePaths.length?[]:client.call('fileInfo',{paths:result.filePaths});};
       handlers.send=async input=>{const attachments=require('./attachments.cjs'),staged=await attachments.stage(input,app.getPath('userData'));try{return await client.call('send',staged.input);}catch(error){await attachments.unstage(staged.files);throw error;}};
       for(const method of ['agentModels','selectModel','gateway'])handlers[method]=input=>client.call(method,input);
+      for(const method of ['scheduleSave','scheduleRemove','scheduleRun','tokenRemove'])handlers[method]=input=>client.call(method,input,60000);
+      handlers.agentSchedules=input=>client.call('agentSchedules',input,40000);
       for(const method of ['opayaHoldSecret','opayaForgetSecret','agentGiveSecret','opayaGiveAll','vaultGiveAgent','agentKeys','agentWeb'])handlers[method]=input=>client.call(method,input);
       // Vault import: reading agents on other machines can take a while. The file comes from Opaya's own picker (hidden
       // files shown, since .env files are hidden) or a file dropped on the Vault.
@@ -168,6 +173,12 @@ if(hostMode){
       handlers.vaultBackupSave=async input=>{const result=await dialog.showSaveDialog(win,{title:'Back up the Opaya Vault',defaultPath:`opaya-vault-${new Date().toISOString().slice(0,10)}.opaya-vault`,filters:[{name:'Opaya Vault backup',extensions:['opaya-vault']}]});if(result.canceled||!result.filePath)return null;return client.call('vaultBackupSave',{file:result.filePath,password:input?.password},60000);};
       handlers.pickVaultBackup=async()=>{const result=await dialog.showOpenDialog(win,{title:'Restore an Opaya Vault backup',buttonLabel:'Choose',properties:['openFile','showHiddenFiles'],filters:[{name:'Opaya Vault backup',extensions:['opaya-vault','json']},{name:'All files',extensions:['*']}]});return result.canceled?'':result.filePaths[0]||'';};
       handlers.vaultBackupRestore=input=>client.call('vaultBackupRestore',input,60000);
+      // Files an agent made, shown in its chat: preview (the bytes), open with the default app, save where the user chooses.
+      handlers.agentFile=input=>client.call('agentFile',{agentId:input?.agentId,path:input?.path,op:input?.op==='stat'?'stat':'read'},130000);
+      const fetchFile=async input=>{const r=await client.call('agentFile',{agentId:input?.agentId,path:input?.path,op:'read'},130000);if(!r?.exists)throw new Error('That file is not there any more.');return {bytes:Buffer.from(r.data||'','base64'),name:path.basename(String(r.path||input.path)).replace(/[\\/:*?"<>|]/g,'_')||'file'};};
+      handlers.agentFileOpen=async input=>{const {bytes,name}=await fetchFile(input),dir=path.join(app.getPath('temp'),'opaya-files',require('node:crypto').randomUUID().slice(0,8));await fs.mkdir(dir,{recursive:true});const file=path.join(dir,name);await fs.writeFile(file,bytes);const error=await shell.openPath(file);if(error)throw new Error(error);return true;};
+      handlers.agentFileSave=async input=>{const result=await dialog.showSaveDialog(win,{title:'Save file',defaultPath:path.join(app.getPath('downloads'),path.basename(String(input?.path||'file')))});if(result.canceled||!result.filePath)return null;const {bytes}=await fetchFile(input);await fs.writeFile(result.filePath,bytes);return result.filePath;};
+      handlers.agentFileReveal=async input=>{const local=await client.call('agentFile',{agentId:input?.agentId,path:input?.path,op:'stat'});if(!local?.exists)throw new Error('That file is not there any more.');shell.showItemInFolder(local.path);return true;};
       handlers.pickSecretFile=async()=>{const result=await dialog.showOpenDialog(win,{title:'Import keys from a file',buttonLabel:'Scan',properties:['openFile','showHiddenFiles']});return result.canceled?'':result.filePaths[0]||'';};
       // Copying an agent to a VPS can take minutes.
       for(const method of ['cloneAgent','redeployAgent'])handlers[method]=input=>client.call(method,input,20*60*1000);
@@ -182,20 +193,28 @@ if(hostMode){
       // In-app updates. The state goes to every Opaya window; install stops the session service first.
       const updater=new (require('./updater.cjs').Updater)({app,markerFile:path.join(app.getPath('userData'),'pending-update.json'),emit:state=>{for(const w of [win,...terminalWindows.values()])if(w&&!w.isDestroyed())w.webContents.send('hub:update',state);}});
       Object.assign(handlers,{
-        browserPlace:async x=>browser.place(x),browserOpen:async x=>browser.open(x.url),browserNav:async x=>browser.navigate(String(x.action||'')),
-        browserPreview:async x=>browser.preview(x.html),browserState:async()=>browser.state(),
+        browserPlace:async x=>browser.place(x),browserOpen:async x=>browser.open(x.url,x.owner),browserNav:async x=>browser.navigate(String(x.action||''),x.owner),
+        browserPreview:async x=>browser.preview(x.html,x.owner),browserState:async x=>browser.state(x?.owner),browserClose:async x=>browser.close(x?.owner),
+        // Cookies from Chrome or Edge (or a cookies.txt / JSON export) into one or more Opaya browser tabs.
+        cookieSources:async()=>require('./cookie-import.cjs').profiles().map(({browser,label,profile,name})=>({browser,label,profile,name})),
+        cookieImport:async x=>{const ci=require('./cookie-import.cjs'),domains=(Array.isArray(x?.domains)?x.domains:[]).map(String).filter(Boolean).slice(0,200),owners=(Array.isArray(x?.owners)?x.owners:['user']).slice(0,200);
+          let r;if(x?.file){const f=String(x.file);if(fsSync.statSync(f).size>20*1024*1024)throw new Error('This file is too large for a cookie export.');r={cookies:ci.parseFile(fsSync.readFileSync(f,'utf8'),{domains}),unreadable:0,locked:[],label:path.basename(f)};}
+          else r=ci.readBrowser({browser:String(x?.browser||''),profile:String(x?.profile||''),domains});
+          const done=await browser.importCookies(r.cookies,owners);return {found:r.cookies.length,set:done.set,failed:done.failed,unreadable:r.unreadable,locked:r.locked,label:r.label,owners:done.owners};},
+        pickCookieFile:async()=>{const result=await dialog.showOpenDialog(win,{title:'Import cookies from a file',buttonLabel:'Choose',properties:['openFile','showHiddenFiles'],filters:[{name:'cookies.txt or JSON',extensions:['txt','json']},{name:'All files',extensions:['*']}]});return result.canceled?'':result.filePaths[0]||'';},
         updateState:async()=>updater.state,
         updateCheck:()=>updater.check(),
         updateDownload:()=>updater.download(),
-        updateInstall:async()=>{
-          const result=await dialog.showMessageBox(win,{type:'question',buttons:['Cancel','Restart and update'],defaultId:1,cancelId:0,message:`Install Opaya ${updater.state.latest?.version||''} now?`,detail:'Opaya closes, installs the update and opens again. Local agent processes and local shells end; remote tmux sessions keep running. Saved chats and settings stay.'});
-          if(result.response!==1)return false;
+        // confirmed: the page asked in its own dialog; the native box is only a fallback.
+        updateInstall:async x=>{
+          if(!x?.confirmed){const result=await dialog.showMessageBox(win,{type:'question',buttons:['Cancel','Restart and update'],defaultId:1,cancelId:0,message:`Install Opaya ${updater.state.latest?.version||''} now?`,detail:'Opaya closes, installs the update and opens again. Local agent processes and local shells end; remote tmux sessions keep running. Saved chats and settings stay.'});
+          if(result.response!==1)return false;}
           await updater.install();await quitForUpdate();return true;
         },
         // The visible installer, after an automatic update did not finish.
-        updateRunInstaller:async()=>{
-          const result=await dialog.showMessageBox(win,{type:'question',buttons:['Cancel','Open installer'],defaultId:1,cancelId:0,message:`Install Opaya ${updater.state.latest?.version||''} with the installer?`,detail:'Opaya closes so the installer can replace its files. Follow the installer, then open Opaya again.'});
-          if(result.response!==1)return false;
+        updateRunInstaller:async x=>{
+          if(!x?.confirmed){const result=await dialog.showMessageBox(win,{type:'question',buttons:['Cancel','Open installer'],defaultId:1,cancelId:0,message:`Install Opaya ${updater.state.latest?.version||''} with the installer?`,detail:'Opaya closes so the installer can replace its files. Follow the installer, then open Opaya again.'});
+          if(result.response!==1)return false;}
           await updater.runInstaller();await quitForUpdate();return true;
         },
         // Yes/no questions from the page. A native box instead of window.confirm(), which on Electron can leave the page

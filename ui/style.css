@@ -2619,3 +2619,51 @@ body[data-theme="light"] .vault-steps li{background:#fafbfa;border-color:#e0e6e2
 body[data-theme="light"] .vault-steps b{background:#e3f3ea;color:#1f7a45}
 body[data-theme="light"] .vb-last{background:#fafbfa;border-color:#e0e6e2}
 .model-other{margin-top:8px;width:100%}
+.browser-owner{font-size:11px;color:var(--muted);white-space:nowrap;padding:0 6px;max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.browser-cookies{font-size:13px}
+.cookie-form h3{margin:4px 0 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.cookie-form .pick-list{margin-bottom:12px}
+/* Files an agent mentions in a reply, as attachments */
+.agent-files{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.agent-file{display:grid;grid-template-columns:32px minmax(0,1fr) auto;align-items:center;gap:10px;padding:8px 10px;border-radius:12px;border:1px solid #2a3236;background:#161b1d;max-width:560px}
+.agent-file[hidden]{display:none}
+.af-ico{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;background:#20302a;color:#9fe0b9;font-size:15px}
+.af-text{display:flex;flex-direction:column;min-width:0}
+.af-text strong{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.af-text small{font-size:11px;color:var(--muted)}
+.af-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.af-preview{grid-column:1/-1;max-width:100%;max-height:360px;border-radius:9px;border:1px solid #2a3236;object-fit:contain;background:#0f1213}
+body[data-theme="light"] .agent-file{background:#fafbfa;border-color:#e0e6e2}
+body[data-theme="light"] .af-ico{background:#e9f6ee;color:#1f7a45}
+body[data-theme="light"] .af-preview{background:#fff;border-color:#e0e6e2}
+/* Opaya's own question dialog (instead of the system box) */
+.opaya-ask{width:min(440px,calc(100vw - 40px));padding:0;border:1px solid #45524e;border-radius:15px;background:#1a1f21;color:var(--text);box-shadow:0 30px 100px #0009;overflow:clip}
+.opaya-ask[open]{animation:op-pop .22s cubic-bezier(.2,.9,.25,1.1) both}
+.opaya-ask::backdrop{background:#0008}
+.opaya-ask form{display:flex;flex-direction:column;gap:12px;padding:22px 24px 18px}
+.opaya-ask h2{margin:0;font-size:16px;font-weight:650;line-height:1.35}
+.opaya-ask p{margin:0;font-size:12.5px;line-height:1.6;color:var(--muted);max-height:50vh;overflow:auto}
+.opaya-ask input{width:100%;padding:8px 10px}
+.opaya-ask footer{display:flex;justify-content:flex-end;gap:8px;margin-top:6px}
+body[data-theme="light"] .opaya-ask{background:#fff;border-color:#d6e1db;box-shadow:0 24px 60px -20px #1d3a2a55}
+body[data-theme="light"] .opaya-ask::backdrop{background:#1d2a2340}
+/* Schedules */
+.sched-form .form-grid{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.sched-when{display:flex;gap:10px;flex-wrap:wrap}.sched-when .field{flex:1;min-width:140px}
+.sched-when [hidden]{display:none}
+.sched-list{display:flex;flex-direction:column;gap:8px;margin:12px 0}
+.sched{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border-radius:12px;border:1px solid #2a3236;background:#161b1d}
+.sched.off{opacity:.6}
+.sched-main{flex:1;min-width:0}.sched-main strong{font-size:13px}.sched-main small{display:block;color:var(--muted);font-size:11.5px;margin-top:2px}
+.sched-main p{margin:6px 0 0;font-size:12px;color:#c7d1cd;white-space:pre-wrap}
+.sched-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.sched-empty{margin:14px 2px}
+.sched-native{margin-top:18px;padding-top:14px;border-top:1px solid #232b2e}.sched-native h3{margin:0 0 4px;font-size:13px}
+.sched-agent{padding:8px 0;border-bottom:1px solid #1f2628}.sched-agent-head{display:flex;align-items:center;gap:10px}
+.sched-agent-head .agent-avatar{width:26px;height:26px}.sched-agent-head strong{font-size:12.5px}.sched-agent-head small{flex:1;color:var(--muted);font-size:11px}
+.sched-out{margin:8px 0 0;max-height:220px;overflow:auto;font-size:11.5px;padding:10px;border-radius:9px;background:#0f1213;border:1px solid #232b2e;white-space:pre-wrap}
+body[data-theme="light"] .sched{background:#fafbfa;border-color:#e0e6e2}
+body[data-theme="light"] .sched-main p{color:#3c4a44}
+body[data-theme="light"] .sched-native{border-color:#e3e9e5}
+body[data-theme="light"] .sched-agent{border-color:#eef2ef}
+body[data-theme="light"] .sched-out{background:#f6f8f7;border-color:#e0e6e2}

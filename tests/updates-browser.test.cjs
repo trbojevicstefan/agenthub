@@ -76,3 +76,25 @@ test('other agent errors get a first diagnosis for the Opaya Agent',()=>{
   assert.equal(kind('spawn hermes ENOENT'),'not-installed');assert.equal(kind('The gateway is rate limited or busy (HTTP 429).'),'rate-limit');
   assert.equal(kind('Host key verification failed'),'ssh');assert.equal(kind('something new'),'other');
 });
+test('an ACP agent on a machine or in a container gets the browser through a relay where it runs',async t=>{
+  const {Broker}=require('../desktop/broker.cjs');const {Store,Vault}=require('../desktop/store.cjs');const {secure}=require('./helpers.cjs');
+  const root=await temp(t),b=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory:()=>({connect:async()=>({}),close(){}})});await b.init();
+  const started=[];b.remoteBrowser=async a=>{started.push(a.id);return {command:'python3',args:['-u','-c','client','4242'],env:[{name:'OPAYA_BRIDGE_TOKEN',value:'t'}]};};b.closeRemoteBrowser=()=>{};
+  const box=await b.saveAgent({agent:{name:'Hermes Docker',provider:'hermes',protocol:'acp',transport:'local',command:'docker',args:['exec','-i','hermes','hermes','acp'],cwd:'/opt/data'}});
+  await b.connect(box.id);assert.deepEqual(started,[box.id]);
+  const s=b.mcpFor(box.id).find(x=>x.name==='opaya-browser');assert.equal(s.command,'python3');assert.equal(s.args.at(-1),'4242');
+  await b.updateAgentDisplay({id:box.id,browser:false});assert(!b.mcpFor(box.id).some(x=>x.name==='opaya-browser'),'turned off: gone');
+  // A relay that cannot start (no python3 or node there): the agent still connects.
+  b.remoteBrowser=async()=>{throw new Error('Neither python3 nor node');};const other=await b.saveAgent({agent:{name:'H2',provider:'hermes',protocol:'acp',transport:'local',command:'docker',args:['exec','-i','h2','hermes','acp'],cwd:'/opt/data'}});
+  await b.connect(other.id);assert.equal(b.runtimeFor(other.id).status,'connected');
+  await b.close();
+});
+test('the relay works with node where there is no python3',async()=>{
+  const {RemoteBridge,NODE_SERVER}=require('../desktop/remote-bridge.cjs');const {spawn}=require('node:child_process');
+  const shell=()=>{const c=spawn(process.execPath,['-e',NODE_SERVER],{stdio:['pipe','pipe','pipe']});setImmediate(()=>c.stdout.unshift?.(Buffer.from('')));return c;};
+  const relay=new RemoteBridge({where:{},shell:(w,_s)=>{const c=spawn(process.execPath,['-e',NODE_SERVER]);return c;},onConnection:conn=>conn.lines(line=>conn.send(JSON.stringify({echo:JSON.parse(line).n})))});
+  relay.rt='node';const srv=await relay.start();assert.equal(srv.command,'node');
+  const client=spawn(process.execPath,['-e',srv.args[1],srv.args[2]],{env:{...process.env,OPAYA_BRIDGE_TOKEN:srv.env[0].value}});let out='';client.stdout.on('data',d=>out+=d);
+  client.stdin.write(JSON.stringify({n:7})+'\n');for(let i=0;i<50&&!out.includes('\n');i++)await new Promise(r=>setTimeout(r,50));
+  assert.deepEqual(JSON.parse(out.trim()),{echo:7});client.kill();relay.close();
+});

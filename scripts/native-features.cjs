@@ -117,9 +117,10 @@ async function run({win,client,output}){
     }
     checks.smallWindowThemes=true;assert((await client.call('terminalAttach',{id:first})).buffer.includes('UI_PROCESS_OK'));checks.processPreserved=true;
     // Verify both cancellation and confirmation without an unattended native dialog.
-    let asked='';dialog.showMessageBox=async(_win,options)=>{asked=options.message;return {response:0};};
-    await click(`${pane(first)} [data-pane-action="close"]`);await until(()=>Promise.resolve(!!asked),'end confirmation');assert.equal((await client.call('terminalAttach',{id:first})).exited,false);
-    dialog.showMessageBox=async()=>({response:1});await click(`${pane(first)} [data-pane-action="close"]`);await until(async()=>!(await ids()).includes(first),'end session');
+    // Opaya asks in its own dialog (.opaya-ask): Cancel keeps the session, the action button ends it.
+    await click(`${pane(first)} [data-pane-action="close"]`);await until(()=>js(`!!document.querySelector('.opaya-ask[open] h2')?.textContent`),'end confirmation');
+    await js(`document.querySelector('.opaya-ask[open] [value="cancel"]').click()`);assert.equal((await client.call('terminalAttach',{id:first})).exited,false);
+    await click(`${pane(first)} [data-pane-action="close"]`);await until(()=>js(`!!document.querySelector('.opaya-ask[open]')`),'end confirmation again');await js(`document.querySelector('.opaya-ask[open] [value="ok"]').click()`);await until(async()=>!(await ids()).includes(first),'end session');
     await assert.rejects(()=>client.call('terminalAttach',{id:first}),/not found/);checks.endConfirmation=true;
     await client.call('updateAgentDisplay',{id:other.id,surface:'terminal'});
     await select(other.id);await until(()=>js(`document.body.classList.contains('terminal-stage')`));

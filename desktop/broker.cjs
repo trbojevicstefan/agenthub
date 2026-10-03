@@ -22,6 +22,9 @@ const cloner=require('./clone.cjs');
 // The browser pane is on this computer, so agents that run here get it: ACP agents (Hermes, OpenCode...), Claude Code
 // and Codex.
 const browserCapable=a=>a.transport!=='ssh'&&a.command!=='docker'&&['acp','claude','codex'].includes(a.protocol);
+// ACP agents elsewhere (a machine over SSH, a container) take MCP servers per session: the browser reaches them through a
+// relay where they run (remote-bridge.cjs).
+const remoteBrowsable=a=>a.protocol==='acp'&&(a.transport==='ssh'||a.command==='docker');
 function safeError(error,token=''){
   let value=String(error?.message||error||'Operation failed.');
   if(token)value=value.split(token).join('[redacted]');
@@ -50,6 +53,7 @@ class Broker{
     {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:s.opayaDefaults===2?!!s.itrustOpaya:true,opayaDefaults:2,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false,interface:['chat','terminal'].includes(s.interface)?s.interface:'',chatOpens:s.chatOpens==='window'?'window':'full',consoleOpens:s.consoleOpens==='full'?'full':'panel',
       notifyReplies:s.notifyReplies!==false,notifyApprovals:s.notifyApprovals!==false,notifyJobs:s.notifyJobs!==false,notifySound:s.notifySound!==false,tips:s.tips!==false,autoConnect:s.autoConnect===true,sendKey:s.sendKey==='mod-enter'?'mod-enter':'enter'};}
     this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
+    this.data.schedules=(Array.isArray(this.data.schedules)?this.data.schedules:[]).flatMap(x=>{try{return [require('./schedules.cjs').schedule(x,x)];}catch{return [];}});
     this.migrateLinkedCopies();
     this.data.mcpServers=(Array.isArray(this.data.mcpServers)?this.data.mcpServers:[]).flatMap(s=>{try{return [mcp.server(s)];}catch{return [];}});this.data.hosts=this.data.hosts.map(h=>schema.host(h));
     this.data.activeAgentId=this.data.agents.some(a=>a.id===this.data.activeAgentId)?this.data.activeAgentId:this.data.agents[0]?.id||'';
@@ -70,10 +74,22 @@ class Broker{
   runtimeFor(id){if(!this.runtime.has(id))this.runtime.set(id,{status:'disconnected',error:'',models:[]});return this.runtime.get(id);}
   snapshot(){
     const {agents,hosts,conversations,activeAgentId,activeConversationId}=this.data;
-    return {version:'0.2.1',drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',activeModel:r.adapter?.currentModel||'',commands:r.adapter?.commands||[],models:r.models||[],efforts:effortLevels(a,r.adapter),hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,settings:this.data.settings,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations:conversations.map(({essence,...c})=>essence?{...c,essence:{by:essence.by,at:essence.at}}:c),activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||(this.data.view?.chatDock||[]).some(d=>d.id===id)||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
+    return {version:'0.2.1',schedules:this.data.schedules||[],drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',activeModel:r.adapter?.currentModel||'',commands:r.adapter?.commands||[],models:r.models||[],efforts:effortLevels(a,r.adapter),hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,settings:this.data.settings,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations:conversations.map(({essence,...c})=>essence?{...c,essence:{by:essence.by,at:essence.at}}:c),activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||(this.data.view?.chatDock||[]).some(d=>d.id===id)||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
   }
   changed(){if(!this.closing)this.emit(this.snapshot());}
   async persist(){await this.store.write(this.data);this.changed();}
+  // Opaya's schedules (schedules.cjs): saved here, run by the session service each minute.
+  async saveSchedule(input){
+    const sch=require('./schedules.cjs'),existing=input?.id?this.data.schedules.find(x=>x.id===input.id):null;
+    if(input?.agentId&&input.agentId!=='opaya')this.agent(input.agentId);
+    const next=sch.schedule(input||{},existing||{});if(!existing&&this.data.schedules.length>=100)throw new Error('Schedule limit reached (100).');
+    this.data.schedules=existing?this.data.schedules.map(x=>x.id===next.id?next:x):[...this.data.schedules,next];await this.persist();return next;
+  }
+  // A connection's token (the key Opaya sends to an API connection) forgotten: the agent keeps working only if its API
+  // does not need one; set a new one in its connection settings.
+  async removeToken(id){const a=this.agent(id);await this.vault.remove(a.id);if(this.runtimeFor(a.id).status==='connected')this.disconnect(a.id);this.changed();return true;}
+  async removeSchedule(id){this.data.schedules=this.data.schedules.filter(x=>x.id!==String(id));await this.persist();return true;}
+  async scheduleRan(id,patch){const i=this.data.schedules.findIndex(x=>x.id===id);if(i<0)return;this.data.schedules[i]={...this.data.schedules[i],...patch};await this.persist();}
   async saveHost(input){
     const host=schema.host(input),i=this.data.hosts.findIndex(h=>h.id===host.id||host.alias&&h.alias===host.alias);
     if(i>=0){
@@ -172,7 +188,7 @@ class Broker{
   async saveView(input){
     const agents=new Set(this.data.agents.map(a=>a.id));
     const agentNavigation=Array.isArray(input.agentNavigation)?input.agentNavigation.filter(n=>n&&agents.has(n.id)&&['chat','console','manage'].includes(n.mode)).slice(0,100).map(n=>({id:n.id,mode:n.mode,section:['overview','model','access','machine','deploy','projects','care','profile','danger'].includes(n.section)?n.section:'overview'})):[];
-    this.data.view={agentNavigation,terminalWorkspaces:terminalLayout.workspaces(input.terminalWorkspaces).filter(w=>!w.ctx||agents.has(w.ctx)),overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',panes:Array.isArray(input.panes)?input.panes.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)).slice(0,8):[],paneSizes:Array.isArray(input.paneSizes)?input.paneSizes.map(Number).filter(x=>Number.isFinite(x)&&x>0&&x<100).slice(0,8):[],theme:input.theme==='light'?'light':'dark',projects:!!input.projects,sidebarHidden:!!input.sidebarHidden,sidebarRail:input.sidebarRail===undefined?true:!!input.sidebarRail,tips:Array.isArray(input.tips)?[...new Set(input.tips.filter(x=>typeof x==='string'&&x.length<=200))].slice(-300):[],lastVersion:typeof input.lastVersion==='string'&&/^\d+\.\d+\.\d+$/.test(input.lastVersion)?input.lastVersion:'',greeted:typeof input.greeted==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(input.greeted)?input.greeted:'',layout:(l=>({terminal:l?.terminal==='right'?'right':'bottom',browser:l?.browser==='bottom'?'bottom':'right',bottomHeight:Math.max(120,Math.min(3000,Number(l?.bottomHeight)||280)),rightWidth:Math.max(240,Math.min(4000,Number(l?.rightWidth)||520)),arrange:arrangeOf(l)}))(input.layout),windows:termWindows(input.windows),chatDock:chatDock(input.chatDock,this.data.conversations),sidebarHide:Array.isArray(input.sidebarHide)?[...new Set(input.sidebarHide.filter(x=>['home','playground','machines','vault','skills','help'].includes(x)))]:[],terminalFont:(n=>Number.isInteger(n)&&n>=8&&n<=28?n:13)(Number(input.terminalFont)),projectsOpen:Array.isArray(input.projectsOpen)?[...new Set(input.projectsOpen.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)))].slice(0,50):[]};const docked=this.data.view.chatDock.map(d=>d.id),missing=docked.filter(id=>!this.histories.has(id));
+    this.data.view={agentNavigation,terminalWorkspaces:terminalLayout.workspaces(input.terminalWorkspaces).filter(w=>!w.ctx||agents.has(w.ctx)),overview:!!input.overview,opaya:!!input.opaya,playground:!!input.playground,collapsed:Array.isArray(input.collapsed)?[...new Set(input.collapsed.filter(x=>typeof x==='string'&&x.length<=60))].slice(0,100):[],terminalVisible:!!input.terminalVisible,terminalId:input.terminalId?schema.id(input.terminalId):'',panes:Array.isArray(input.panes)?input.panes.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)).slice(0,8):[],paneSizes:Array.isArray(input.paneSizes)?input.paneSizes.map(Number).filter(x=>Number.isFinite(x)&&x>0&&x<100).slice(0,8):[],theme:input.theme==='light'?'light':'dark',projects:!!input.projects,sidebarHidden:!!input.sidebarHidden,sidebarRail:input.sidebarRail===undefined?true:!!input.sidebarRail,tips:Array.isArray(input.tips)?[...new Set(input.tips.filter(x=>typeof x==='string'&&x.length<=200))].slice(-300):[],lastVersion:typeof input.lastVersion==='string'&&/^\d+\.\d+\.\d+$/.test(input.lastVersion)?input.lastVersion:'',greeted:typeof input.greeted==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(input.greeted)?input.greeted:'',layout:(l=>({terminal:l?.terminal==='right'?'right':'bottom',browser:l?.browser==='bottom'?'bottom':'right',bottomHeight:Math.max(120,Math.min(3000,Number(l?.bottomHeight)||280)),rightWidth:Math.max(240,Math.min(4000,Number(l?.rightWidth)||520)),arrange:arrangeOf(l)}))(input.layout),windows:termWindows(input.windows),chatDock:chatDock(input.chatDock,this.data.conversations),sidebarHide:Array.isArray(input.sidebarHide)?[...new Set(input.sidebarHide.filter(x=>['home','playground','machines','vault','skills','schedules','help'].includes(x)))]:[],terminalFont:(n=>Number.isInteger(n)&&n>=8&&n<=28?n:13)(Number(input.terminalFont)),projectsOpen:Array.isArray(input.projectsOpen)?[...new Set(input.projectsOpen.filter(x=>typeof x==='string'&&/^[\w-]{1,80}$/.test(x)))].slice(0,50):[]};const docked=this.data.view.chatDock.map(d=>d.id),missing=docked.filter(id=>!this.histories.has(id));
     for(const id of missing)this.histories.set(id,await this.store.transcript(id));
     await this.store.write(this.data);
     // A newly docked chat's messages reach the window with the next snapshot.
@@ -213,16 +229,20 @@ class Broker{
     if(group!==undefined)a.group=schema.group(group);
     if(tags!==undefined)a.tags=schema.tags(tags);
     if(itrust!==undefined)a.itrust=Boolean(itrust);
-    if(browser&&!browserCapable(a))throw new Error(`${a.displayName||a.name} runs on another machine or in a container: the Opaya browser is on this computer, so only agents here can use it.`);
-    const browserChanged=browser!==undefined&&Boolean(browser)!==!!a.browser;
-    if(browser!==undefined)a.browser=Boolean(browser);
+    if(browser&&!browserCapable(a)&&!remoteBrowsable(a))throw new Error(`${a.displayName||a.name} cannot use the Opaya browser: it reaches Hermes and other ACP agents anywhere, and Claude Code and Codex on this computer.`);
+    const browserChanged=browser!==undefined&&Boolean(browser)===!!a.browserOff;
+    // The browser is on for every agent; only the user's explicit off is kept (browserOff).
+    if(browser!==undefined){a.browser=Boolean(browser);if(browser)delete a.browserOff;else a.browserOff=true;}
     if(surface!==undefined)a.surface=['chat','terminal'].includes(surface)?surface:'';
     this.data.agents[index]=a;await this.persist();if(browserChanged)this.refreshMcp(a.id);return a;
   }
   // ACP agents and Claude Code get Opaya's MCP servers with each session or message, so a change reaches them in the
   // open chat. Codex reads them when its app-server starts: it reconnects, after an answer it is giving.
   async refreshMcp(id){
-    const a=this.data.agents.find(x=>x.id===id);if(!a||a.protocol!=='codex'||this.runtimeFor(id).status!=='connected')return;
+    const a=this.data.agents.find(x=>x.id===id),r=this.runtimeFor(id);if(!a||r.status!=='connected')return;
+    // An agent elsewhere: start or stop its relay; its open chat gets the change with its next message (ACP reopens it).
+    if(remoteBrowsable(a)&&this.remoteBrowser){if(!a.browserOff&&!r.remoteMcp){try{r.remoteMcp=await this.remoteBrowser(a);}catch(error){r.remoteMcpError=safeError(error);}}else if(a.browser===false&&r.remoteMcp){r.remoteMcp=null;this.closeRemoteBrowser?.(id);}return;}
+    if(a.protocol!=='codex')return;
     await this.turns.get(id)?.done;if(this.runtimeFor(id).status!=='connected')return;
     this.disconnect(id);await this.connect(id).catch(()=>{});
   }
@@ -324,7 +344,9 @@ class Broker{
     if(a&&v&&a.transport!=='ssh'&&a.command!=='docker'&&a.protocol!=='openai'&&a.protocol!=='terminal'&&this.data.settings?.vaultMcp!==false)list.push({name:'opaya-vault',command:v.command,args:v.args,env:[...Object.entries(v.env).map(([name,value])=>({name,value})),{name:'OPAYA_VAULT_AGENT',value:a.id}]});
     // Every model can use it: pages come back as text, links and form fields. A model that reads text only does not get
     // the screenshot tool, which would return a picture it cannot see.
-    if(a?.browser&&b&&browserCapable(a)){const textOnly=visionOf({...a,activeModel:this.runtimeFor(a.id).adapter?.currentModel}).vision===false;list.push({name:'opaya-browser',command:b.command,args:b.args,env:[...Object.entries(b.env).map(([name,value])=>({name,value})),...(textOnly?[{name:'OPAYA_BROWSER_TEXT_ONLY',value:'1'}]:[])]});}
+    // On by default: every agent here has it unless the user took it away (browserOff).
+    const relay=a&&this.runtimeFor(a.id).remoteMcp;if(a&&!a.browserOff&&relay&&remoteBrowsable(a))list.push({name:'opaya-browser',...relay});
+    if(a&&!a.browserOff&&b&&browserCapable(a)){const textOnly=visionOf({...a,activeModel:this.runtimeFor(a.id).adapter?.currentModel}).vision===false;list.push({name:'opaya-browser',command:b.command,args:b.args,env:[...Object.entries(b.env).map(([name,value])=>({name,value})),{name:'OPAYA_BROWSER_AGENT',value:a.id},...(textOnly?[{name:'OPAYA_BROWSER_TEXT_ONLY',value:'1'}]:[])]});}
     return list;
   }
   async saveMcpServer({server:input,env,headers}){
@@ -410,6 +432,9 @@ class Broker{
       const generation=(r.generation||0)+1;r.generation=generation;
       if(a.transport!=='ssh')await primeShellPath(); // local CLIs installed with nvm, Volta or Homebrew
       let adapter,token='';
+      // An ACP agent on another machine or in a container gets the Opaya browser through a relay where it runs. It is
+      // ready before the agent's first session; when it cannot start (no python3 or node there) the agent works without.
+      if(remoteBrowsable(a)&&!a.browserOff&&this.remoteBrowser){try{r.remoteMcp=await this.remoteBrowser(a);}catch(error){r.remoteMcp=null;r.remoteMcpError=safeError(error);}}
       try{
         token=this.vault.get(id);adapter=this.adapterFactory({agent:a,host:a.transport==='ssh'?this.host(a.hostId):null,token,approve:this.approve,trusted:()=>this.isTrusted(a.id),mcpServers:()=>this.mcpFor(a.id),onChange:()=>this.changed()});r.adapter=adapter;
         const info=await adapter.connect();
@@ -423,7 +448,7 @@ class Broker{
     this.connecting.set(id,job);try{return await job;}finally{this.connecting.delete(id);}
   }
   disconnect(id){
-    this.stop(id);const r=this.runtimeFor(id);r.generation=(r.generation||0)+1;const adapter=r.adapter;r.adapter=null;r.status='disconnected';r.error='';adapter?.close();this.changed();
+    this.stop(id);const r=this.runtimeFor(id);r.generation=(r.generation||0)+1;const adapter=r.adapter;r.adapter=null;r.status='disconnected';r.error='';adapter?.close();if(r.remoteMcp){r.remoteMcp=null;this.closeRemoteBrowser?.(id);}this.changed();
   }
   clearError(id){
     this.agent(id);const r=this.runtimeFor(id);r.error='';if(r.status==='error')r.status='disconnected';this.changed();return true;
@@ -548,4 +573,4 @@ class Broker{
   }
   async close(){this.closing=true;for(const a of this.data.agents)this.disconnect(a.id);await Promise.allSettled([...this.turns.values()].map(t=>t.done));await this.store.queue;}
 }
-module.exports={Broker,safeError,browserCapable,CLIENT_REFUSED};
+module.exports={Broker,safeError,browserCapable,remoteBrowsable,CLIENT_REFUSED};

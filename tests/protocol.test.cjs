@@ -88,3 +88,13 @@ test('ACP opens a chat again with the new MCP servers when Opaya gives the brows
   assert.equal(load.length,1);assert.equal(load[0].params.sessionId,'acp-1');assert.deepEqual(load[0].params.mcpServers.map(s=>s.name),['opaya-vault','opaya-browser']);
   a.close();
 });
+test('Codex: an Opaya MCP tool call is accepted, another asks first, a form gets allowing answers (no "user rejected")',async()=>{
+  const {elicitationContent}=require('../desktop/adapters/codex.cjs');
+  let asked=0;const child=childMock((m,c)=>{if(m.method==='initialize')c.reply(m,{});if(m.method==='model/list')c.reply(m,{data:[]});});
+  const a=new CodexAdapter({agent:{args:[],cwd:path.resolve('.')},approve:async()=>{asked++;return false;},spawnAgent:()=>child});await a.connect();
+  const ask=async(id,serverName)=>{child.send({id,method:'mcpServer/elicitation/request',params:{threadId:'t',serverName,mode:'form',message:'Allow the tool?',requestedSchema:{type:'object',properties:{}}}});for(let i=0;i<20&&!child.frames.some(f=>f.id===id&&!f.method);i++)await tick();return child.frames.find(f=>f.id===id&&!f.method);};
+  assert.equal((await ask(771,'opaya-browser')).result.action,'accept');assert.equal(asked,0);
+  assert.equal((await ask(772,'github')).result.action,'decline');assert.equal(asked,1,'another server asks the user');
+  assert.deepEqual(elicitationContent({properties:{ok:{type:'boolean'},choice:{enum:['deny','allow_once']},n:{type:'number',default:3}}}),{ok:true,choice:'allow_once',n:3});
+  a.close();
+});

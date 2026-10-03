@@ -4,7 +4,7 @@
 
 Opaya is a local-first desktop app for your own AI agents: **Hermes, Claude Code, Codex, OpenClaw**, and any other CLI or OpenAI-compatible API. It works with agents on this computer, on your VPS machines over SSH, and in Docker containers. Chat with them, watch their terminals, give them a browser, and share skills and tools between them, all from one window. Opaya needs no hosted account, collects no telemetry and sends nothing through a third-party relay.
 
-**Current version: 0.30.1.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
+**Current version: 0.31.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
 
 ## Download
 
@@ -24,6 +24,13 @@ All builds are on this repository's [Releases](https://github.com/trbojevicstefa
 The installed app does not need Node.js. Agent CLIs, OpenSSH and their own logins are separate. Opaya finds them on your computer, and **Install agents** can set them up for you.
 
 ## What you can do
+
+### The Opaya browser for every agent, cookies, files in chat, schedules (0.31)
+- **The Opaya browser is on by default** for every agent that can use it, now including **Codex** and **Hermes on your machines or in Docker** (through a relay over Opaya's own SSH or docker exec channel). Each agent has its own tab and cookies; close one with ✕ or `browser_close`.
+- **Import cookies from Chrome and Edge** (or a cookies.txt / JSON export) into your tab or agents' tabs.
+- **Files agents mention by full path** show in chat with Open, Save and Show in folder.
+- **Schedules**: send a message to any agent on a schedule, and see the agents' own cron jobs.
+- Terminals stay on the screen they belong to; every question is an Opaya dialog; unread counts clear when you open the agent.
 
 ### Keys agents can read, DeepSeek V4.1 Flash, the browser for every agent, Vault backups (0.30)
 - **Keys given to agents in Docker stay readable** by the agent's own user (Hermes runs as `hermes`).

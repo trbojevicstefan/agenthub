@@ -82,6 +82,18 @@ async function start({app, safeStorage}, root) {
   // Opaya Vault for agents on this computer: the MCP bridge gets a token that can only call vaultTool.
   const vaultToken = randomBytes(32).toString('hex');
   broker.vaultBridge = {command:process.execPath, args:[path.join(__dirname,'vault-mcp.cjs')], env:{ELECTRON_RUN_AS_NODE:'1',OPAYA_VAULT_ENDPOINT:endpoint(root),OPAYA_VAULT_TOKEN:vaultToken}};
+  // Agents on other machines and in containers: a relay where they run (remote-bridge.cjs) brings their browser_* calls
+  // here, answered like the local bridge, in their own browser tab.
+  const relays=new Map(),{RemoteBridge}=require('./remote-bridge.cjs'),browserMcp=require('./browser-mcp.cjs'),{visionOf:seesImages}=require('./vision.cjs');
+  broker.remoteBrowser=async agent=>{
+    relays.get(agent.id)?.close();
+    const where=require('./clone.cjs').place({agent,host:agent.transport==='ssh'?broker.host(agent.hostId):null});
+    const textOnly=seesImages({...agent,activeModel:broker.runtimeFor(agent.id).adapter?.currentModel}).vision===false;
+    const relay=new RemoteBridge({where,shell:require('./clone.cjs').shell,onConnection:conn=>{const on=browserMcp.serve({send:t=>conn.send(t),browserTool:input=>browserTool(input),agent:agent.id,textOnly});conn.lines(on);}});
+    relay.onClose=()=>{if(relays.get(agent.id)===relay){relays.delete(agent.id);const r=broker.runtimeFor(agent.id);if(r.remoteMcp)r.remoteMcp=null;}};
+    relays.set(agent.id,relay);return relay.start();
+  };
+  broker.closeRemoteBrowser=id=>{relays.get(id)?.close();relays.delete(id);};
   broker.browserBridge = {command:process.execPath, args:[path.join(__dirname,'browser-mcp.cjs')], env:{ELECTRON_RUN_AS_NODE:'1',OPAYA_BROWSER_ENDPOINT:endpoint(root),OPAYA_BROWSER_TOKEN:browserToken}};
   function browserTool(input){
     const socket=[...(listener?.clients||[])].at(-1);
@@ -90,7 +102,7 @@ async function start({app, safeStorage}, root) {
     return new Promise((resolve,reject)=>{
       const timer=setTimeout(()=>{browserCalls.delete(id);reject(new Error('The browser did not answer in time.'));},110000);
       browserCalls.set(id,{resolve,reject,timer});
-      listener.notify(socket,'browser-request',{id,op:String(input.op||''),args:input.args&&typeof input.args==='object'?input.args:{}});
+      listener.notify(socket,'browser-request',{id,op:String(input.op||''),args:input.args&&typeof input.args==='object'?input.args:{},owner:/^[A-Za-z0-9_-]{1,80}$/.test(String(input.agent||''))?String(input.agent):'user'});
     });
   }
   terminals = new Terminals(event => { listener?.broadcast('terminal',event); if (event.type !== 'data') emit(); },{root});
@@ -126,11 +138,12 @@ async function start({app, safeStorage}, root) {
   const hostShell=hostId=>shells.hostShell(broker,hostId);
   // The agent (or pseudo agent) a terminal session was opened for: to start it again, or to take pasted files there.
   const sessionAgent=s=>shells.sessionAgent(s,{broker,home:app.getPath('home')});
-  async function runInTerminal({label,key,host,command}){
+  // owner: whose screen the terminal belongs to (an agent's id, 'opaya' for the Opaya Agent); none: the screen in front.
+  async function runInTerminal({label,key,host,command,owner}){
     const pseudo={id:`svc_${key}_${host?host.id:'local'}`.slice(0,80),name:label,provider:'custom',transport:host?'ssh':'local',hostId:host?.id||'',command:'',args:[],cwd:host?'':app.getPath('home'),ephemeral:true,run:host?command:''};
     const reused=terminals.hasLive(pseudo.id,'shell'),view=terminals.open(pseudo,host,'shell',{cols:110,rows:30});
     if(!host||reused)terminals.write(view.id,command+'\r');
-    listener?.broadcast('terminal',{type:'opened',id:view.id});emit();return view;
+    listener?.broadcast('terminal',{type:'opened',id:view.id,...(owner?{owner}:{})});emit();return view;
   }
   // Update, uninstall and local backups. Update and uninstall show the exact command for approval and run in a visible
   // terminal; an uninstall prints an end marker so the job knows when it finished and can then remove the connection.
@@ -198,7 +211,7 @@ async function start({app, safeStorage}, root) {
       const work=async progress=>{
         progress({step:'stop',state:'active',message:`Disconnecting ${a.name}`});await Promise.resolve(broker.disconnect(a.id)).catch(()=>{});progress({step:'stop',state:'done',message:'Disconnected'});
         progress({step:'uninstall',state:'active',message:'The uninstaller runs in the terminal below. Answer its questions there.'});
-        const view=await runInTerminal({label:c.title,key:`uninstall_${a.id}`.slice(0,60),host,command:marked(a,c.command)});
+        const view=await runInTerminal({label:c.title,key:`uninstall_${a.id}`.slice(0,60),host,command:marked(a,c.command),owner:a.id});
         const code=await waitForMark(view.id,markCount(view.id));
         if(code!==0)throw new Error(`The uninstaller ended with exit code ${code}. Check its terminal; the connection was kept.`);
         progress({step:'uninstall',state:'done',message:'Uninstalled'});
@@ -234,13 +247,31 @@ async function start({app, safeStorage}, root) {
     }
     emit();return toolState;
   }
+  // Opaya's schedules: each minute, the ones due send their message (schedules.cjs). An agent is connected first if it is
+  // not; a busy one is skipped this time. Each schedule keeps its own chat with that agent.
+  const schedules=require('./schedules.cjs');
+  async function runSchedule(x,{manual=false}={}){
+    const at=new Date().toISOString(),done=(status,error='')=>broker.scheduleRan(x.id,{lastRun:at,lastStatus:status,lastError:String(error).slice(0,300)}).then(emit);
+    try{
+      if(x.agentId==='opaya'){if(!opaya?.configured())throw new Error('Connect the Opaya Agent to a model first.');if(opaya.busy){await done('skipped','The Opaya Agent was busy.');return;}opaya.begin(`[Schedule: ${x.name}] ${x.prompt}`);await done('sent');return;}
+      const a=broker.agent(x.agentId);if(broker.turns.has(a.id)){await done('skipped',`${a.name} was busy.`);return;}
+      if(broker.runtimeFor(a.id).status!=='connected')await broker.connect(a.id);
+      let conv=x.conversationId&&broker.data.conversations.find(c=>c.id===x.conversationId);
+      if(!conv){conv=await broker.createConversation(a.id,{activate:false,title:`Schedule: ${x.name}`.slice(0,80)});await broker.scheduleRan(x.id,{conversationId:conv.id});}
+      broker.send({agentId:a.id,conversationId:conv.id,text:x.prompt}).catch(error=>done('failed',error?.message||error));
+      await done('sent');if(!manual)notice({level:'info',title:`Schedule: ${x.name}`,text:`Sent to ${a.displayName||a.name}.`});
+    }catch(error){await done('failed',error?.message||error);notice({level:'error',title:`Schedule failed: ${x.name}`,text:String(error?.message||error).slice(0,200)});}
+  }
+  let lastTick='';
+  setInterval(()=>{const now=new Date(),key=now.toISOString().slice(0,16);if(key===lastTick)return;lastTick=key;
+    for(const x of broker.data.schedules||[])if(x.enabled){try{if(schedules.matches(x.cron,now))runSchedule(x);}catch{}}},15*1000).unref?.();
   const hourly=()=>{if(broker.data.settings?.updateChecks!==false)checkAll().catch(()=>{});};
   setTimeout(hourly,2*60*1000);setInterval(hourly,60*60*1000);
   function notice(n){listener?.broadcast('notice',{id:randomUUID(),at:Date.now(),...n});}
   // Runs a marked update in a visible terminal and waits for its end line: {code, output (what it printed), terminal}.
-  async function runUpdate({host,label,key,command,timeout=20*60*1000}){
+  async function runUpdate({host,label,key,command,timeout=20*60*1000,owner}){
     const end=!host&&process.platform==='win32'?'; Write-Host "[opaya] finished with exit code $(if ($?) { 0 } else { 1 })"':'; echo "[opaya] finished with exit code $?"';
-    const view=await runInTerminal({label,key,host,command:command+end}),before=markCount(view.id);
+    const view=await runInTerminal({label,key,host,command:command+end,owner}),before=markCount(view.id);
     const code=await waitForMark(view.id,before,timeout,'update');
     return {code,output:markedOutput(view.id,before),terminal:view.id};
   }
@@ -308,7 +339,7 @@ async function start({app, safeStorage}, root) {
     notice({level:'info',kind:'fixing',title:`Updating ${dep?(dep==='node'?'Node.js':'Python'):a.name} automatically`,text:`${a.name} did not connect: ${error}. ${c.title||'The update'} runs in the terminal; Opaya reconnects when it finishes.`,agentId:a.id});
     // Agents that share an installation (Hermes profiles) fail together; they share one update run.
     const runKey=`${host?.id||'local'}|${c.command}`;
-    if(!inFlight.has(runKey))inFlight.set(runKey,onMachine(host,()=>runUpdate({host,label:`${c.title||'Update'} (auto-fix)`,key:`autofix_${a.id}`.slice(0,60),command:c.command})).finally(()=>setTimeout(()=>inFlight.delete(runKey),60000)));
+    if(!inFlight.has(runKey))inFlight.set(runKey,onMachine(host,()=>runUpdate({host,label:`${c.title||'Update'} (auto-fix)`,key:`autofix_${a.id}`.slice(0,60),command:c.command,owner:a.id})).finally(()=>setTimeout(()=>inFlight.delete(runKey),60000)));
     let code;
     try{code=(await inFlight.get(runKey)).code;}
     catch(e){return escalate(a,error,`The automatic update did not finish: ${safeError(e)}`);}
@@ -517,7 +548,7 @@ async function start({app, safeStorage}, root) {
   // Run one marked command in the setup terminal and wait for its end line. Password and question prompts are passed
   // on to the guide so it can tell the person what to do.
   async function setupRun(step,command,progress,{timeout=45*60*1000}={}){
-    const view=await runInTerminal({label:'Opaya setup',key:'setup',host:null,command:guide.marked(step.id,guide.withPath(command,{windows:windowsHere}),{windows:windowsHere})});
+    const view=await runInTerminal({owner:'opaya',label:'Opaya setup',key:'setup',host:null,command:guide.marked(step.id,guide.withPath(command,{windows:windowsHere}),{windows:windowsHere})});
     const end=Date.now()+timeout;let hinted='';
     for(;;){
       await new Promise(r=>setTimeout(r,1200));
@@ -550,7 +581,7 @@ async function start({app, safeStorage}, root) {
   async function guideSignIn(step,progress){
     const a=guide.AGENTS[step.tool];progress({step:step.id,state:'active',message:a.signInNote});
     // Its own terminal: an interactive sign-in (Claude Code opens its app) must not catch the next setup commands.
-    const view=await runInTerminal({label:`Sign in to ${guide.TOOL_NAMES[step.tool]}`,key:`signin_${step.tool}`,host:null,command:guide.withPath(windowsHere?a.signIn.windows:a.signIn.posix,{windows:windowsHere})});
+    const view=await runInTerminal({owner:'opaya',label:`Sign in to ${guide.TOOL_NAMES[step.tool]}`,key:`signin_${step.tool}`,host:null,command:guide.withPath(windowsHere?a.signIn.windows:a.signIn.posix,{windows:windowsHere})});
     const end=Date.now()+30*60*1000;
     while(!guide.signedIn(step.tool)){if(Date.now()>end)throw new Error(`Sign-in to ${guide.TOOL_NAMES[step.tool]} did not finish within 30 minutes. Start the guide again when you are ready.`);await new Promise(r=>setTimeout(r,2500));}
     progress({step:step.id,state:'done',message:'Signed in'});
@@ -628,7 +659,7 @@ async function start({app, safeStorage}, root) {
       return jobs.length;
     }
   };
-  opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal,trusted:()=>!!broker.data.settings?.itrustOpaya||setupTrust});
+  opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal:x=>runInTerminal({...x,owner:'opaya'}),trusted:()=>!!broker.data.settings?.itrustOpaya||setupTrust});
   opaya.askSecret = askSecret;
   // Claude Code as the Opaya Agent's model reaches the Opaya tools through this bridge; its token can only list and call them.
   opaya.builtinInstall = async (id,{update=false}={})=>{const ids=builtinIds(id);if(!ids.length)return null;const {job,done}=builtinJob(ids,{update});const r=await done;return {job_id:job.id,...r};};
@@ -719,6 +750,25 @@ async function start({app, safeStorage}, root) {
       // An agent folder inside a container may not exist on the host; fall back to the home folder.
       catch(error){if(fallback&&x.op!=='read')return files.browse({op:x.op,path:'',host});throw error;}
     },
+    // A file an agent made or mentioned, read where the agent runs (this computer, a machine, a container), so its
+    // chat can show it as an attachment: size first (stat), the bytes when shown, opened or saved (up to 25 MB).
+    agentFile:async x=>{
+      const a=x.agentId==='opaya'?{transport:'local',command:'',args:[]}:broker.agent(x.agentId),p=String(x.path||'').trim();if(!p||p.length>2048||/[\0\n]/.test(p))throw new Error('Invalid path.');
+      const clone=require('./clone.cjs'),where=clone.place({agent:a,host:a.transport==='ssh'?broker.host(a.hostId):null}),stat=x.op==='stat';
+      if(clone.isLocal(where)){const fsx=require('node:fs/promises'),file=path.resolve(p.replace(/^~(?=$|[\\/])/,require('node:os').homedir()));const st=await fsx.stat(file).catch(()=>null);if(!st?.isFile())return {exists:false};
+        if(stat)return {exists:true,size:st.size,path:file};if(st.size>25*1024*1024)throw new Error('The file is larger than 25 MB.');return {exists:true,size:st.size,path:file,data:(await fsx.readFile(file)).toString('base64')};}
+      const q=require('./process.cjs').quote,f=p.startsWith('~/')?`"$HOME"/${q(p.slice(2))}`:q(p);
+      const out=await require('./process.cjs').collect(clone.shell(where,`f=${f}; if [ -f "$f" ]; then s=$(wc -c < "$f" | tr -d ' '); echo "SIZE $s"; ${stat?'':'if [ "$s" -le 26214400 ]; then base64 < "$f" | tr -d "\\n"; fi;'} else echo MISSING; fi`),{timeout:stat?15000:120000,maxBytes:36*1024*1024});
+      const text=String(out||'');if(/^MISSING/.test(text))return {exists:false};const m=/^SIZE (\d+)\n?([\s\S]*)$/.exec(text);if(!m)return {exists:false};
+      if(stat)return {exists:true,size:Number(m[1]),path:p};if(Number(m[1])>25*1024*1024)throw new Error('The file is larger than 25 MB.');return {exists:true,size:Number(m[1]),path:p,data:m[2].trim()};
+    },
+    tokenRemove:async x=>{await broker.removeToken(schema.id(x.id));emit();return true;},
+    scheduleSave:async x=>{const r=await broker.saveSchedule(x);emit();return r;},scheduleRemove:async x=>{await broker.removeSchedule(x.id);emit();return true;},
+    scheduleRun:async x=>{const s=(broker.data.schedules||[]).find(y=>y.id===x.id);if(!s)throw new Error('Schedule not found.');await runSchedule(s,{manual:true});return true;},
+    // What an agent schedules itself (Hermes cron jobs, OpenClaw cron, the crontab where it runs), as text.
+    agentSchedules:async x=>{const a=broker.agent(x.id),clone=require('./clone.cjs'),where=clone.place({agent:a,host:a.transport==='ssh'?broker.host(a.hostId):null});
+      if(clone.isLocal(where)&&process.platform==='win32')return {text:'Windows keeps scheduled tasks in Task Scheduler. Agents on this computer have no crontab.'};
+      try{return {text:String(await require('./process.cjs').collect(clone.shell(where,schedules.nativeListScript(a)),{timeout:30000,maxBytes:256*1024})).slice(0,60000)};}catch(error){return {text:'',error:String(error?.message||error).slice(0,300)};}},
     agentDiagnostics:x=>broker.diagnostics(x.id),
     projectSave:x=>broker.saveProject(x), projectRemove:x=>broker.removeProject(x.id), projectInfo:x=>broker.projectInfo(x.id), projectBranches:x=>broker.projectBranches(x.id),
     // Git and GitHub CLI actions run as fixed commands in the project's own visible terminal.
@@ -750,7 +800,7 @@ async function start({app, safeStorage}, root) {
         if(!host)port=hostPort;
       }
       const trusted=host?[`127.0.0.1:${port}`,`localhost:${port}`]:exec?[`127.0.0.1:${port}`]:[];
-      const view=await runInTerminal({label:`${a.name} Web UI`.slice(0,60),key:`dshweb_${a.id}`.slice(0,60),host,command:dshWeb.command(a,{port:host&&!exec?0:port,trusted,windows:!host&&process.platform==='win32',unset:host||exec?[]:require('./process.cjs').dshStoreNames(require('./process.cjs').environment()).filter(n=>process.env[n]!==undefined)})});
+      const view=await runInTerminal({owner:a.id,label:`${a.name} Web UI`.slice(0,60),key:`dshweb_${a.id}`.slice(0,60),host,command:dshWeb.command(a,{port:host&&!exec?0:port,trusted,windows:!host&&process.platform==='win32',unset:host||exec?[]:require('./process.cjs').dshStoreNames(require('./process.cjs').environment()).filter(n=>process.env[n]!==undefined)})});
       let printed='';const end=Date.now()+120000;
       while(!printed&&Date.now()<end){await new Promise(r=>setTimeout(r,500));let v;try{v=terminals.attach(view.id);}catch{break;}printed=dshWeb.printedUrl(v.buffer);if(!printed&&v.exited)break;}
       if(!printed)throw new Error(`The DeepSeek Harness Web UI did not start. Its terminal "${a.name} Web UI" shows why.`);
@@ -827,7 +877,7 @@ async function start({app, safeStorage}, root) {
       const a=broker.agent(x.agentId),host=a.transport==='ssh'?broker.host(a.hostId):null;
       const command=skills.hermesSkillCommand(a,{action:x.action,skill:x.skill,remote:!!host,windows:process.platform==='win32'});
       if(x.action==='install'&&!await approve(a,`Install skill ${x.skill}?`,`Runs in a visible terminal ${host?'on '+host.name:'on this computer'}:\n\n${command}\n\n${a.provider==='openclaw'?'OpenClaw checks ClawHub skills before installing.':'Hermes scans hub skills before installing.'} Start a new conversation to use it.`))throw new Error('Skill install cancelled.');
-      return runInTerminal({label:x.action==='install'?`Skill ${x.skill}`:a.provider==='openclaw'?'OpenClaw skills':'Hermes skills',key:`skills_${a.id}`.slice(0,60),host,command});
+      return runInTerminal({owner:a.id,label:x.action==='install'?`Skill ${x.skill}`:a.provider==='openclaw'?'OpenClaw skills':'Hermes skills',key:`skills_${a.id}`.slice(0,60),host,command});
     },
     playground:x=>broker.playground(x), moveAgent:x=>broker.moveAgent(x), connectAll:x=>broker.connectAll(x),
     // Free local model: install Ollama if needed, start it, download the model and connect the Opaya Agent.
