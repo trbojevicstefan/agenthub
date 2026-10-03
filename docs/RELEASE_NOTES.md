@@ -1,3 +1,15 @@
+# Opaya 0.29.0 - Manage on one page
+
+- **Manage is one page.** Everything about an agent is on one page, section after section: Model & skills, Keys & tools, Machine & Docker, Deploy & clone, Projects, Updates & backups, Profile & connection and Danger zone. The agent's sidebar is its table of contents: click a section, or press its letter (Q W E R A S D F), to scroll there; the section you are reading is marked in the sidebar and the top bar as you scroll, and Esc goes back to the top. The sidebar no longer repeats each section's rows, and the overview cards that repeated the sections are gone.
+- **The top of Manage** keeps the agent with its 3D stage and Connect, Chat and Terminal; its facts (version, API keys, last backup, iTrust) open the section about them. An error shows **Let the Opaya Agent fix it**, **Try again** and **Edit connection**.
+- **Cards side by side.** A section's cards sit next to each other when there is room, so most sections fit on one screen.
+- **A clearer Machines screen.** Click a machine card (anywhere on it) and its panel opens right under it, with a pointer to the card: system, memory, disk and address; Terminal, Files, Install agents and Edit; the tools installed there; and its Docker with every container side by side. The header has + New VPS, Add existing, Install agents and a ⋯ menu with Test all machines and Update all agents, so its buttons never wrap.
+- **Settings, a page at a time.** Pages on the left (Appearance, Chat & Terminal, Notifications & startup, Agents, Keys & skills, Machines & data, Shortcuts, Updates & about), one at a time on the right, and a filter that searches every page. Choosing an option keeps your page and place.
+- **Fixed: a switch in Settings scrolled the dialog** so that half of it went blank until Esc. Switches stay put now, in Settings and everywhere else.
+- **Dialogs close when you click beside them**, like Esc. If you typed something in one, it stays open and nudges instead, so a stray click never loses a key or a form.
+- Opaya's tips show at the bottom right on Manage, clear of the section buttons. The right-click menu says Manage and Go to <section>.
+- Under the hood: 400 style rules and a panel that nothing used any more were removed.
+
 # Opaya 0.28.0 - Chat, Terminal and Manage, easy to use
 
 - **Three places for every agent.** The top of an agent's screen has **Chat** (talk to it), **Terminal** (its own CLI and a shell) and **Manage** (settings and maintenance), with an icon each. The one you use is highlighted; in Manage the section you are in shows next to it. Opaya remembers where you were for each agent. "Console" is now called **Terminal** everywhere.

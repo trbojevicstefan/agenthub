@@ -4,7 +4,7 @@
 
 Opaya is a local-first desktop app for your own AI agents: **Hermes, Claude Code, Codex, OpenClaw**, and any other CLI or OpenAI-compatible API. It works with agents on this computer, on your VPS machines over SSH, and in Docker containers. Chat with them, watch their terminals, give them a browser, and share skills and tools between them, all from one window. Opaya needs no hosted account, collects no telemetry and sends nothing through a third-party relay.
 
-**Current version: 0.28.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
+**Current version: 0.29.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
 
 ## Download
 
@@ -24,6 +24,13 @@ All builds are on this repository's [Releases](https://github.com/trbojevicstefa
 The installed app does not need Node.js. Agent CLIs, OpenSSH and their own logins are separate. Opaya finds them on your computer, and **Install agents** can set them up for you.
 
 ## What you can do
+
+### Manage on one page, Settings by topic (0.29)
+- **Manage is one page.** Everything about an agent, from its model to its Danger zone, is on one page. The agent's sidebar is the table of contents: a click (or the section's letter) scrolls there, and the section you are reading is marked in the sidebar and the top bar. The facts at the top (version, keys, last backup) open their section too.
+- **Machines, clearer.** Pick a machine and its panel opens right under it: system, memory, disk and address, Terminal, Files and Install agents, its tools, and its Docker with every container side by side. Test all and Update all are in the ⋯ menu.
+- **Settings by topic.** A page per topic on the left (Appearance, Chat & Terminal, Notifications & startup, Agents, Keys & skills, Machines & data, Shortcuts, Updates & about) and a filter that searches all of them.
+- **Dialogs close when you click beside them**, like Esc. If you typed something in one, it stays open so nothing is lost.
+- Switches in Settings no longer scroll the dialog away.
 
 ### Chat, Terminal and Manage, easy to find (0.28)
 - **Three places for every agent** at the top of its screen: **Chat** (talk to it), **Terminal** (its own CLI and a shell) and **Manage** (settings and maintenance). The one you use is highlighted, and in Manage the section you are in is shown next to it. Opaya remembers where you were for each agent.
@@ -66,7 +73,7 @@ Selecting an agent opens its **chat** and, next to your agents, **the agent's ow
 
 The **Opaya Agent** has its own sidebar too (chat, setup guide, its chats, model, iTrust, vault and tools). **Ctrl/Cmd+1 to 9** open agents in sidebar order; hold Ctrl/Cmd to see their numbers. Your agents' sidebar shows names or only icons as a slim strip: switch it with the « / » button at its bottom or in Settings > Sidebar. Either way the selected agent flows into its own sidebar.
 
-The open view or section unfolds its actions under it in the sidebar, so every action is one click away. Each section is a list of settings: what it is, its value and one action. **Overview** shows one card per section with the main facts. On the Manage screens Q W E R A S D F open the sections and Esc goes back to the Overview. Terminal opens the agent's terminal windows next to or below the chat unless Settings > Chat and Terminal says full screen.
+**Manage is one page** with every section of the agent, one after another. The agent's sidebar is its table of contents: click a section, or press Q W E R A S D F on Manage, to scroll there, and the section you are reading is marked as you scroll; Esc goes back to the top. Each section is a set of cards: a setting, its value and one action. Terminal opens the agent's terminal windows next to or below the chat unless Settings > Chat and Terminal says full screen.
 - **The stage:** a live 3D view of the agent and what it is connected to (its machine, container, keys, projects, skills and chats). It glows when the agent is connected and pulses while it works.
 - **Deploy & clone:** one card per machine with **Install** and **Docker**: drag the agent onto either, or click it. Progress shows there. **Clones** lists the agent it was cloned from and its own copies, each with **Redeploy**.
 - **Docker:** the containers on the agent's machine, its own container first, as Docker manager cards: live CPU and memory, **Logs** inside the card, **Shell**, **Restart**, **Pause / Resume**, **Stop / Start**, **Details** (image, mounts, ports, restart policy and health; environment variables by name only) and **Remove**. Pull a newer image and prune unused ones. **Dockerize** runs a copy of an agent in its own container.
