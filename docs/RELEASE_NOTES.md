@@ -1,3 +1,14 @@
+# Opaya 0.29.1 - a tidier Manage header, shared installs explained
+
+- **The top of Manage grows with what it says.** Its card no longer has a fixed height, so facts that wrap onto more lines never push Disconnect, Chat and Terminal out of it. Softer shadows in the white theme, and no tilt on hover.
+- **The version reads v0.21.5**, not "vHermes Agent v0.21.5 (2026.9.24) · upstream ...": the full text shows when you point at it. The agent's kind is no longer repeated as a chip under its name.
+- **Shared installations, explained where they matter.** Agents on one installation (Hermes profiles on one Hermes) get a fact at the top, such as *Shared Hermes · 3 agents*, which leads to Updates & backups. There a row says who shares it and what that means:
+  - an update updates all of them;
+  - deleting a profile removes only that profile;
+  - uninstalling the Hermes they run on stops them all.
+  The Danger zone says the same for its own case: *Deletes this profile... Hermes and Tuco stay*, or *Uninstalls Hermes... blondie and coder are profiles on it and stop working too*. Remove connection says the others keep working. The line that sat under the quick actions is gone.
+- **Cloning as a Hermes profile says what that means.** The clone has its own config, memory and chats, but runs on the Hermes installed on that machine. Deleting either profile later leaves the other, and uninstalling Hermes there stops them all. A Docker container is fully on its own.
+
 # Opaya 0.29.0 - Manage on one page
 
 - **Manage is one page.** Everything about an agent is on one page, section after section: Model & skills, Keys & tools, Machine & Docker, Deploy & clone, Projects, Updates & backups, Profile & connection and Danger zone. The agent's sidebar is its table of contents: click a section, or press its letter (Q W E R A S D F), to scroll there; the section you are reading is marked in the sidebar and the top bar as you scroll, and Esc goes back to the top. The sidebar no longer repeats each section's rows, and the overview cards that repeated the sections are gone.

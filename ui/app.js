@@ -1331,6 +1331,7 @@
   const fmtSize=n=>!n?'0 B':n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
   const whenText=iso=>{const d=new Date(iso);return isNaN(d)?'':d.toLocaleString([],{year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});};
   // Other agents that use the same installation on the same machine (Hermes profiles share one Hermes).
+  const andList=list=>list.length<2?list.join(''):`${list.slice(0,-1).join(', ')} and ${list.at(-1)}`;
   const sharedWith=a=>['docker','container-profile','remote-api'].includes(a.install?.kind)?[]:state.agents.filter(b=>b.id!==a.id&&b.transport===a.transport&&(b.hostId||'')===(a.hostId||'')&&!['docker','container-profile'].includes(b.install?.kind)&&b.install?.framework===a.install?.framework);
   async function loadInstallInfo(a,force=false){
     if(!force&&installInfo.has(a.id)&&installInfo.get(a.id)!=='loading')return installInfo.get(a.id);
@@ -1698,12 +1699,13 @@
     const OS={win32:'Windows',darwin:'macOS',linux:'Linux'};
     const sys=cap.kind==='remote-api'?'Provider server':hostKey==='local'?[OS[state.platform]||state.platform,state.machine?.hostname].filter(Boolean).join(' / '):check?[check.os||check.system,check.memory&&`memory ${check.memory}`,check.disk&&`disk ${check.disk}`].filter(Boolean).join(' / '):'Not checked yet';
     const proto=a.protocol==='openai'?'Gateway API':String(a.protocol||'').toUpperCase();
-    const version=infoReady&&info.version?`v${String(info.version).replace(/^v/,'')}`:'';
+    // Tools print their version their own way ("Hermes Agent v0.21.5 (2026.9.24) · upstream 645da656"): show the number.
+    const fullVersion=infoReady&&info.version?String(info.version).trim():'',vNum=/\bv?(\d+\.\d+(?:\.\d+)?(?:-[\w.]+)?)/.exec(fullVersion),version=fullVersion?vNum?`v${vNum[1]}`:fullVersion.slice(0,24):'';
     const ok=k=>keyed[k]&&!keyed[k].disabled;
     // A row: icon, label with help, value, then a chevron (one action), a switch, or nothing (read-only).
     const row=(k,label,help,value='',o={})=>{const can=o.act||ok(k),sw=o.sw!==undefined,tone=o.tone?` ${o.tone}`:'';
       const inner=`<span class="set-ico" aria-hidden="true">${o.icon||ICON[k]||AN_ICON[k]||''}</span><span class="set-text"><strong>${esc(label)}</strong>${help?`<small>${esc(help)}</small>`:''}</span>${value!==''?`<span class="set-val${tone}" title="${esc(value)}">${esc(value)}</span>`:''}${sw?`<span class="set-switch ${o.sw?'on':''}" aria-hidden="true"></span>`:can?`<span class="set-go" aria-hidden="true">${o.go||'&#8250;'}</span>`:''}`;
-      if(!can)return keyed[k]?.disabled?`<div class="set-row unavailable" aria-disabled="true">${inner}<small class="unavailable-reason">${esc(keyed[k].hint||'Unavailable for this agent')}</small></div>`:o.always?`<div class="set-row">${inner}</div>`:'';
+      if(!can)return keyed[k]?.disabled?`<div class="set-row unavailable" aria-disabled="true">${inner}<small class="unavailable-reason">${esc(keyed[k].hint||'Unavailable for this agent')}</small></div>`:o.always?`<div class="set-row${o.wrap?' wrap':''}">${inner}</div>`:'';
       const attrs=o.act?`data-action="${o.act}"${o.id?` data-id="${esc(o.id)}"`:''}`:`data-action="manage-run" data-key="${k}"`;
       return `<button type="button" class="set-row${o.danger?' danger':''}" ${attrs} ${sw?`role="switch" aria-checked="${!!o.sw}"`:''}>${inner}</button>`;};
     const card=(name,rows,note='')=>{const r=rows.filter(Boolean).join('');return r?`<section class="set-group">${name?`<h2>${esc(name)}</h2>`:''}<div class="set-card">${r}</div>${note?`<p class="set-note">${note}</p>`:''}</section>`:'';};
@@ -1714,9 +1716,13 @@
     const pbtn=(k,label,cls='secondary small')=>keyed[k]?`<span class="manage-quick"><button type="button" class="${cls}" data-action="manage-run" data-key="${k}" ${keyed[k].disabled?'disabled':''}>${esc(label)}</button>${keyed[k].disabled?`<small>${esc(keyed[k].hint||'Unavailable for this agent')}</small>`:''}</span>`:'';
     const keysVal=keyList?keyList.keys.length?keyList.keys.map(k=>k.name).join(', '):'None':'Reading...';
     const statusTone=a.error?'bad':a.status==='connected'?'ok':'';
+    // Agents on the same installation (Hermes profiles on one Hermes, two connections to one CLI): an update updates all
+    // of them. Deleting a profile removes only that profile; uninstalling the program they run on stops all of them.
+    const isProfile=cap.kind==='hermes-profile',dependents=shared.filter(b=>b.install?.kind==='hermes-profile'),names=andList(shared.map(title));
+    const sharedHelp=!shared.length?'':isProfile?`A profile on the same ${cap.label?.replace(/ profile.*$/,'')||'Hermes'} as ${names}. Updating Hermes updates all of them; deleting this profile leaves them as they are.`:dependents.length?`${andList(dependents.map(title))} ${dependents.length===1?'is a profile':'are profiles'} on this ${labels[cap.framework]||cap.label||'installation'}. Updating it updates them too; uninstalling it stops them.`:`${names} ${shared.length===1?'uses':'use'} the same ${cap.label||'installation'}. Updating or uninstalling it affects them too.`;
     // The top: who it is and how it is, with the three ways to use it. Each fact opens the section about it.
     const fact=(text,key,tone='',hint='')=>text?`<button type="button" class="ov-chip ${tone}" data-action="agent-section" data-key="${key}" title="${esc(hint||AN_SECTIONS.find(x=>x.key===key)?.name||'')}">${esc(text)}</button>`:'';
-    const facts=[fact(labels[a.provider]||a.provider,'profile','','Profile & connection'),fact(location(a),'machine','','Machine & Docker'),fact(version,'care','','Updates & backups'),
+    const facts=[fact(location(a),'machine','','Machine & Docker'),fact(version,'care','',fullVersion?`${fullVersion} / Updates & backups`:''),fact(shared.length?`${isProfile?'Profile on':'Shared'} ${labels[cap.framework]||'install'} \u00b7 ${shared.length+1} agents`:'','care','',sharedHelp),
       fact(keyList?plural(keyList.keys.length,'API key'):'','access',keyList&&!keyList.keys.length?'warn':''),fact(cap.backup&&backs?lastBack?`Backed up ${ago(lastBack.createdAt)} ago`:'Never backed up':'','care',cap.backup&&backs&&(!lastBack||backAge>7)?'warn':''),fact(a.itrust?'iTrust on':'','access','warn')].join('');
     const ovHero=`<section class="mg-hero ov-hero" data-drop="key" data-agent-target="${esc(a.id)}"><div class="mg-stage" id="mg-stage" aria-hidden="true"></div>
           <div class="mg-card glass ov-card" data-drag="agent" data-drag-id="${esc(a.id)}" title="Drag onto a machine in Deploy & clone to copy ${esc(title(a))} there">
@@ -1767,7 +1773,8 @@
       projects:()=>sec('projects',pbtn('projects','+ Add project','primary small'),[],`<div class="mg-section mg-projects-wrap"><p class="mg-lead">Folders ${esc(title(a))} works in, here or on its machine. Pull, commit and push without leaving this screen; Chat here starts a chat in that folder.</p>${gitPanel(a)}</div>`),
       care:()=>sec('care','',[card('Version',[
           row('update','Update','To the latest version, the way it was installed',version||'--'),
-          row('','Installed as','',`${cap.label||'Unknown'}${infoReady&&info.methodLabels?.length?` / ${info.methodLabels.join(' + ')}`:''}`,{always:true,icon:ICON.settings})]),
+          row('','Installed as','',`${cap.label||'Unknown'}${infoReady&&info.methodLabels?.length?` / ${info.methodLabels.join(' + ')}`:''}`,{always:true,icon:ICON.settings}),
+          shared.length?row('',isProfile?'Same Hermes as':'Also uses it',sharedHelp,names,{always:true,icon:ICON.groupTags,wrap:true}):'']),
         card('Backups',[
           row('backup','Back up','To this computer',lastBack?`Last ${ago(lastBack.createdAt)} ago`:'Never',{tone:!lastBack||backAge>7?'warn':''}),
           row('backups','Backups folder','Open the folder on this computer')]),
@@ -1789,13 +1796,12 @@
           row('copyCommand','Launch command','Copy it',[a.command,...(a.args||[])].join(' ')),
           row('copyId','Agent ID','Copy it',a.id)])]),
       danger:()=>sec('danger','',[card('',[
-          row('uninstall',keyed.uninstall?.label.replace(/\.\.\.$/,'')||'Uninstall',`Removes it and its files from ${location(a)}. Opaya offers a backup first.${shared.length?` Shared with ${shared.map(title).join(', ')}.`:''}`,'',{danger:true}),
-          row('remove','Remove connection',`Removes it from Opaya only. Its files stay on ${location(a)}.`,'',{danger:true})])])};
+          row('uninstall',keyed.uninstall?.label.replace(/\.\.\.$/,'')||'Uninstall',isProfile?`Deletes this profile: its config, memory, skills and chats. Hermes and ${shared.length?names:'other profiles'} stay. Opaya offers a backup first.`:dependents.length?`Uninstalls ${labels[cap.framework]||cap.label} from ${location(a)}. ${andList(dependents.map(title))} ${dependents.length===1?'is a profile':'are profiles'} on it and stop working too. Opaya offers a backup first.`:`Removes it and its files from ${location(a)}. Opaya offers a backup first.${shared.length?` ${names} ${shared.length===1?'uses':'use'} the same installation and stop working too.`:''}`,'',{danger:true}),
+          row('remove','Remove connection',`Opaya forgets it. Its files stay on ${location(a)}${shared.length?` and ${names} keep working`:''}.`,'',{danger:true})])])};
     const parts=[
       ['mg-p-picker',0,picker],
       ['mg-p-hero',0,ovHero],
       ['mg-p-alerts',1,alerts],
-      ['mg-p-shared',1,shared.length?`<p class="field-help manage-shared">Shares its ${esc(cap.label)} installation with ${esc(shared.map(title).join(', '))}: updating or uninstalling it affects them too.</p>`:''],
       ...AN_SECTIONS.slice(1).map((x,i)=>[`mg-p-${x.key}`,Math.min(i+2,6),sections[x.key]()])];
     const key=`manage:${a.id}`,entering=renderKey!==key||!$('#mg-p-hero');
     if(entering){manageHtml={};$('#content').innerHTML=parts.map(([id,i,html])=>{manageHtml[id]=html;return `<div id="${id}" style="--i:${i}">${html}</div>`;}).join('');}
@@ -3888,7 +3894,7 @@
     const f=$('#clone-form');let cronTouched=preset.cron!==undefined;
     // One line that says what will happen, kept in step with the choices.
     const summary=()=>{const d=Object.fromEntries(new FormData(f)),h=state.hosts.find(x=>x.id===d.hostId),box=d.runtime==='profile'?boxes.find(t=>t.key===d.container):null,what=(scopes.find(x=>x[0]===d.scope)||[])[1]||'';
-      $('#clone-summary').innerHTML=`${preset.migrate?'Moves':'Copies'} <strong>${esc(what.toLowerCase())}</strong> of ${esc(title(a))} to <strong>${esc(box?`${box.container} (a profile next to ${title(box.agent)})`:h?h.name:'this computer')}</strong>${box?'':d.runtime==='docker'?' in a new <strong>Docker container</strong>':hermes?' as a Hermes profile':''}, named <strong>${esc(d.name||'')}</strong>${d.keys?', with its API keys':', without API keys'}${hermes?d.cron?' and cron jobs':', without cron jobs':''}.`;};
+      $('#clone-summary').innerHTML=`${preset.migrate?'Moves':'Copies'} <strong>${esc(what.toLowerCase())}</strong> of ${esc(title(a))} to <strong>${esc(box?`${box.container} (a profile next to ${title(box.agent)})`:h?h.name:'this computer')}</strong>${box?'':d.runtime==='docker'?' in a new <strong>Docker container</strong>':hermes?' as a Hermes profile':''}, named <strong>${esc(d.name||'')}</strong>${d.keys?', with its API keys':', without API keys'}${hermes?d.cron?' and cron jobs':', without cron jobs':''}.${hermes&&!box&&d.runtime!=='docker'?`<small class="clone-note">A profile has its own config, memory and chats but runs on the Hermes installed on ${esc(h?h.name:'this computer')}: deleting one profile later leaves the others, uninstalling Hermes there stops them all. A Docker container is fully on its own.</small>`:''}`;};
     f.addEventListener('input',summary);f.addEventListener('change',summary);
     const syncRun=()=>{const profile=f.querySelector('[name="runtime"]:checked')?.value==='profile';$('#clone-containers').hidden=!profile;f.querySelector('.clone-where').closest('fieldset').hidden=profile;};
     for(const r of f.querySelectorAll('[name="runtime"]'))r.addEventListener('change',syncRun);syncRun();

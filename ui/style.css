@@ -1041,7 +1041,6 @@ body[data-theme="light"] .agent-nav-text small.agent-nav-host{color:#6d8577}
 body[data-theme="light"] .context-menu button.submenu-open{background:#edf4ee;color:#0f1a14}
 /* Manage screen */
 .content.manage{padding-bottom:40px}
-.manage-shared{margin:-8px 0 16px}
 .manage-actions{display:flex;flex-wrap:wrap;gap:7px}
 .manage-actions button{font-size:11.5px;padding:7px 11px}
 /* 0.20: Manage reads as a control panel: a card icon, equal action tiles, no ragged rows of buttons. */
@@ -2585,3 +2584,16 @@ body[data-theme="light"] .fleet-panel-facts dd{color:#26362c}
 body[data-theme="light"] .fleet-panel-block{border-color:#e3e9e5}
 body[data-theme="light"] .fleet-tip b{color:#33443b}
 .fleet-col:not(.focused){cursor:pointer}.fleet-col:not(.focused):hover{border-color:#34433c}
+/* The top of Manage grows with what it says: the card is in the flow, so its facts and buttons never spill out. */
+.ov-hero{height:auto;min-height:250px;display:flex;align-items:flex-start;padding:22px}
+.ov-hero .mg-card.ov-card{position:relative;left:auto;top:auto;bottom:auto;width:min(540px,100%);min-height:206px}
+.ov-hero .mg-card:hover{transform:none}
+.ov-facts .ov-chip{display:inline-block;line-height:22px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:top}
+.ov-hero .ov-actions{padding-top:4px}
+.set-row.wrap small{white-space:normal}
+body[data-theme="light"] .mg-hero{box-shadow:0 16px 36px -28px #1d3a2a40,inset 0 1px 0 #ffffff}
+body[data-theme="light"] .mg-card{box-shadow:0 10px 28px -18px #1d3a2a40,inset 0 1px 0 #ffffff}
+body[data-theme="light"] .mg-card:hover{box-shadow:0 14px 32px -18px #1d3a2a52,0 0 0 1px #bfdccb}
+@media (max-width:760px){.ov-hero{padding:14px}.ov-hero .mg-card.ov-card{width:100%}}
+.clone-note{display:block;margin-top:6px;font-size:11.5px;line-height:1.5;color:var(--muted)}
+#mg-p-alerts .ov-manage-actions{grid-template-columns:repeat(auto-fit,minmax(165px,1fr))}
