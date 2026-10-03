@@ -1,3 +1,14 @@
+# Opaya 0.28.0 - Chat, Terminal and Manage, easy to use
+
+- **Three places for every agent.** The top of an agent's screen has **Chat** (talk to it), **Terminal** (its own CLI and a shell) and **Manage** (settings and maintenance), with an icon each. The one you use is highlighted; in Manage the section you are in shows next to it. Opaya remembers where you were for each agent. "Console" is now called **Terminal** everywhere.
+- **Split terminals any way.** The split button in a terminal window's title bar opens a new terminal **right, below, left or above** it. Windows can be maximized, hidden or opened in their own window, **Ctrl/Cmd+Shift+Arrow** moves between them, and each agent keeps its layout. The agent's Terminal menu in the sidebar has **New CLI window**, **New shell window** and **Files**.
+- **Manage at a glance.** The Overview starts with big buttons for **Update**, **Clone**, **Back up**, **Settings** and **Machines**, each with a line on what it does; when one cannot be used it says why.
+- **A clear first launch.** With no agents yet, Home shows three ways to start: **Find agents on this computer** (recommended), **Install an agent** or **Chat with the Opaya Agent**, plus adding a connection or a server and importing keys. The empty sidebar has a + to find agents.
+- **Fix it from the chat.** When an agent cannot connect, the message offers **Let the Opaya Agent fix it** and **Try again**, with links to edit the connection, open its terminal or clear the error. A disconnected agent shows one **Connect** button.
+- **Chat and Terminal explained once.** A note says that the chat in Opaya and the agent's own CLI can be separate conversations; **Got it** hides it for good.
+- **What's new** shows after an update (and from Search), with a button to the map of the app in Help.
+- **Small things:** agents without a chat say **Open** on their Home card instead of Chat, with a terminal open Opaya's tips show at the bottom right, clear of the windows' buttons, and the shortcuts list includes Back (Alt+Left, Option+Left on macOS).
+
 # Opaya 0.27.0 - everything in its place
 
 - **Find anything.** **Search** at the top of every screen, or **Ctrl/Cmd+K**, finds your agents, every agent's sections and actions, places (Vault, Docker manager, Install agents...), settings, machines, chats and vault keys. Each result shows where it lives (*Hermes › Keys & tools*, *Settings › Theme*), so you also learn the way. Without an agent's name, actions are the selected agent's; "codex keys" picks Codex. "backup" finds Back up, "logs" finds Connection log.

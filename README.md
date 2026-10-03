@@ -4,7 +4,7 @@
 
 Opaya is a local-first desktop app for your own AI agents: **Hermes, Claude Code, Codex, OpenClaw**, and any other CLI or OpenAI-compatible API. It works with agents on this computer, on your VPS machines over SSH, and in Docker containers. Chat with them, watch their terminals, give them a browser, and share skills and tools between them, all from one window. Opaya needs no hosted account, collects no telemetry and sends nothing through a third-party relay.
 
-**Current version: 0.22.4.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
+**Current version: 0.28.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
 
 ## Download
 
@@ -24,6 +24,14 @@ All builds are on this repository's [Releases](https://github.com/trbojevicstefa
 The installed app does not need Node.js. Agent CLIs, OpenSSH and their own logins are separate. Opaya finds them on your computer, and **Install agents** can set them up for you.
 
 ## What you can do
+
+### Chat, Terminal and Manage, easy to find (0.28)
+- **Three places for every agent** at the top of its screen: **Chat** (talk to it), **Terminal** (its own CLI and a shell) and **Manage** (settings and maintenance). The one you use is highlighted, and in Manage the section you are in is shown next to it. Opaya remembers where you were for each agent.
+- **Split terminals any way:** the split button in a window's title bar opens a new terminal **right, below, left or above** it. Each window can be maximized, hidden or opened in its own window. Ctrl/Cmd+Shift+Arrow moves between windows; the layout is kept per agent.
+- **Manage at a glance:** the Overview starts with big buttons for **Update**, **Clone**, **Back up**, **Settings** and **Machines**. When one cannot be used, it says why.
+- **A clear first launch:** with no agents yet, Home shows three ways to start: **Find agents on this computer** (recommended), **Install an agent** or **Chat with the Opaya Agent**, plus adding a connection or a server and importing keys.
+- **Fix it from the chat:** when an agent cannot connect, the message offers **Let the Opaya Agent fix it** and **Try again**, with links to edit the connection or open its terminal.
+- **What's new** shows after each update (and from Search), with a button to the map of the app in Help.
 
 ### Everything in its place (0.27)
 - **Find anything:** **Search** at the top of every screen, or **Ctrl/Cmd+K**, finds your agents, every agent's Manage sections and actions (Back up, Update, Clone, API keys...), places (Vault, Docker manager, Install agents...), settings, machines, chats and vault keys. Each result shows **where it lives**, for example *Hermes › Keys & tools* or *Settings › Theme*, so you also learn where to find it next time. Without an agent's name, actions are the selected agent's; type a name ("codex keys") to pick another.
@@ -46,7 +54,7 @@ The installed app does not need Node.js. Agent CLIs, OpenSSH and their own login
 **Docker manager** (Home, Machines, or **Open manager** in an agent's Machine & Docker) has a tab per machine, search, **All / Running / Stopped** and **Live** CPU and memory. Each container is a card with its state, ports (a port on this computer opens in your browser), CPU, memory, network and processes, the agents in it, and buttons for **Start / Stop**, **Restart**, **Pause / Resume**, **Logs** (its last 200 lines inside the card, or follow them in a terminal), **Shell**, **Details** and **Remove**. **Images** show their size and which containers use each, with Pull, Remove and Prune.
 
 ### Every agent has its own sidebar (0.24)
-Selecting an agent opens its **chat** and, next to your agents, **the agent's own sidebar**: its status with a power button, **Chat**, **Console** and **Overview**, its recent chats (+ for a new one, **Search chats** for History), and its **Manage** sections, from general to specific:
+Selecting an agent opens its **chat** and, next to your agents, **the agent's own sidebar**: its status with a power button, **Chat**, **Terminal** and **Overview**, its recent chats (+ for a new one, **Search chats** for History), and its **Manage** sections, from general to specific:
 - **Model & skills**: model, reasoning, skills and commands, Share skills with another agent, skills library.
 - **Keys & tools**: API keys by name, the Opaya Vault, MCP servers, Share with another agent, gateway, iTrust and the Opaya browser.
 - **Machine & Docker**: where it runs, files, its CLI and shell, installed tools, its container and Docker.
@@ -58,7 +66,7 @@ Selecting an agent opens its **chat** and, next to your agents, **the agent's ow
 
 The **Opaya Agent** has its own sidebar too (chat, setup guide, its chats, model, iTrust, vault and tools). **Ctrl/Cmd+1 to 9** open agents in sidebar order; hold Ctrl/Cmd to see their numbers. Your agents' sidebar shows names or only icons as a slim strip: switch it with the « / » button at its bottom or in Settings > Sidebar. Either way the selected agent flows into its own sidebar.
 
-The open view or section unfolds its actions under it in the sidebar, so every action is one click away. Each section is a list of settings: what it is, its value and one action. **Overview** shows one card per section with the main facts. On the Manage screens Q W E R A S D F open the sections and Esc goes back to the Overview. Console opens the terminal next to or below the chat unless Settings > Chat and console says full screen.
+The open view or section unfolds its actions under it in the sidebar, so every action is one click away. Each section is a list of settings: what it is, its value and one action. **Overview** shows one card per section with the main facts. On the Manage screens Q W E R A S D F open the sections and Esc goes back to the Overview. Terminal opens the agent's terminal windows next to or below the chat unless Settings > Chat and Terminal says full screen.
 - **The stage:** a live 3D view of the agent and what it is connected to (its machine, container, keys, projects, skills and chats). It glows when the agent is connected and pulses while it works.
 - **Deploy & clone:** one card per machine with **Install** and **Docker**: drag the agent onto either, or click it. Progress shows there. **Clones** lists the agent it was cloned from and its own copies, each with **Redeploy**.
 - **Docker:** the containers on the agent's machine, its own container first, as Docker manager cards: live CPU and memory, **Logs** inside the card, **Shell**, **Restart**, **Pause / Resume**, **Stop / Start**, **Details** (image, mounts, ports, restart policy and health; environment variables by name only) and **Remove**. Pull a newer image and prune unused ones. **Dockerize** runs a copy of an agent in its own container.
@@ -77,7 +85,7 @@ The open view or section unfolds its actions under it in the sidebar, so every a
 ### Chats in the background and terminal windows (0.24)
 - **Chat** always opens the full chat view. **Another agent's chat** can open as a window: a column beside the page that covers nothing (right-click the agent > Open chat window).
 - **The tray** in the status bar holds chats in the background: minimize a chat window, or leave a chat while its agent still works, and it waits there with a spinner while the agent works and a count of new replies (also shown on the agent in the sidebar). Click it to open it beside the page.
-- **Terminal windows, no tabs:** every session is a window with its own title bar (hide, separate window, end). Arrange them **side by side, stacked or in a grid**, below the chat or beside it, and drag the gaps to resize. Windows belong to the agent you opened them from; hidden ones keep running and come back from the agent's Console menu or the toolbar.
+- **Terminal windows, no tabs:** every session is a window with its own title bar (hide, separate window, end). Arrange them **side by side, stacked or in a grid**, below the chat or beside it, and drag the gaps to resize. Windows belong to the agent you opened them from; hidden ones keep running and come back from the agent's Terminal menu or the toolbar.
 - **Chat and terminal together:** shell code in a reply has **Run**, which pastes the command into the agent's shell window (Enter runs it); right-click text in a terminal > **Ask the agent about this** puts it in the chat box as a quote.
 
 ### Chat with every agent
