@@ -1,3 +1,7 @@
+# Opaya 0.30.1 - the macOS build of 0.30
+
+- Copying into a container or onto a machine (clones, projects, skills) no longer fails on a Mac or a BSD machine with "chmod: --: No such file or directory". 0.30.0 used an option the macOS chmod does not take, so its macOS build stopped at the tests. Everything in 0.30.0 is in this version.
+
 # Opaya 0.30.0 - keys that agents can read, DeepSeek V4.1 Flash, the browser for every agent here, Vault backups
 
 - **Fixed: giving a Vault key to a Hermes in Docker could break it** ("Agent exited (1)"). Opaya writes into a container as root, so the new `/opt/data/.env` became `root:root` 600, which Hermes (running as `hermes`) cannot read. A key file now keeps its owner, or gets its folder's owner when that was root, and stays private (600). Giving any key again repairs a `.env` an earlier version left unreadable. Clones and skills copied into a container get the owner of the folder they land in, not the sender's user ids.

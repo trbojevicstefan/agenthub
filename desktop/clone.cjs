@@ -76,7 +76,7 @@ async function consumer(where,dest){
   if(isLocal(where)){await fs.mkdir(dest,{recursive:true,mode:0o700});const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-xf','-','-C',dest],{windowsHide:true,stdio:['pipe','ignore','pipe']});}
   // As root (docker exec into a container) tar would keep the sender's user ids: files get the owner of the folder they go
   // into instead, so an agent running as its own user (Hermes as "hermes") can read its copied home and skills.
-  return shell(where,`d=${quote(dest)}; o="$d"; while [ ! -e "$o" ]; do o=$(dirname -- "$o"); done; own=$(stat -c %u:%g -- "$o" 2>/dev/null || stat -f %u:%g -- "$o" 2>/dev/null); mkdir -p -- "$d" && chmod 700 -- "$d" && if [ "$(id -u)" = 0 ]; then tar -xf - --no-same-owner -C "$d" && { [ -z "$own" ] || [ "$own" = 0:0 ] || chown -R "$own" -- "$d"; }; else tar -xf - -C "$d"; fi`,{compress:true});
+  return shell(where,`d=${quote(dest)}; o="$d"; while [ ! -e "$o" ]; do o=$(dirname -- "$o"); done; own=$(stat -c %u:%g -- "$o" 2>/dev/null || stat -f %u:%g -- "$o" 2>/dev/null); mkdir -p "$d" && chmod 700 "$d" && if [ "$(id -u)" = 0 ]; then tar -xf - --no-same-owner -C "$d" && { [ -z "$own" ] || [ "$own" = 0:0 ] || chown -R "$own" "$d"; }; else tar -xf - -C "$d"; fi`,{compress:true});
 }
 // Total size of the selected paths, for the progress bar (an estimate: tar adds small headers).
 async function measure(where,home,paths){
