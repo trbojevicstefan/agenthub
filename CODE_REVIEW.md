@@ -16,6 +16,13 @@ P3 identifies a defect with limited impact.
 
 ### F01 — P1: ACP command arguments can bypass approval
 
+- [x] Fixed on 2026-10-06 by removing text-based automatic approval.
+
+ACP permission requests now use native approval unless iTrust is enabled.
+This includes requests labelled as Opaya browser or Vault tools.
+The [ACP specification](https://agentclientprotocol.com/protocol/v1/tool-calls#creating) defines tool names as informational metadata, not authorization.
+Regression tests cover rejection and one-time approval for command text, titles, aliases, and metadata.
+
 Location: [desktop/adapters/acp.cjs:60–64](desktop/adapters/acp.cjs#L60-L64).
 
 The automatic approval check searches the tool title and `rawInput` for Opaya tool names.

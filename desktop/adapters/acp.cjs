@@ -58,8 +58,7 @@ class AcpAdapter {
       const allow=options.find(o=>o.kind==='allow_once')||options.find(o=>o.kind==='allow_always');
       if(!allow){this.log.add('info','Permission request had no allow option; cancelled.');return {outcome:{outcome:'cancelled'}};}
       const pending=this.active,title=String(params.toolCall?.title||'Agent tool request');
-      // Opaya's own tools (its browser and Vault, which asks the user itself) are Opaya's to allow: no dialog for each page.
-      if(/\bopaya[_-]?(browser|vault)\b|\bopaya_(open|read|screenshot|click|type|scroll|back)\b|mcp[_-]+opaya/i.test(`${title} ${params.toolCall?.toolName||''} ${params.toolCall?.kind||''} ${JSON.stringify(params.toolCall?.rawInput||{}).slice(0,200)}`)){const pick=options.find(o=>o.kind==='allow_always')||allow;pending.onEvent({type:'activity',text:`Opaya allowed: ${title}`});return {outcome:{outcome:'selected',optionId:pick.optionId}};}
+      // ACP tool names, titles and inputs do not verify tool identity. Opaya-looking requests still need approval.
       // iTrust: approve on the agent's own terms (prefer "always" so it stops asking), without a dialog.
       if(this.trusted()){const pick=options.find(o=>o.kind==='allow_always')||allow;pending.onEvent({type:'activity',text:`iTrust approved: ${title}`});this.log.add('info',`iTrust approved: ${title}`);return {outcome:{outcome:'selected',optionId:pick.optionId}};}
       this.permission={title,since:Date.now()};pending.onEvent({type:'activity',text:`Waiting for your approval: ${title}`});

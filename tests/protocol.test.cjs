@@ -6,7 +6,7 @@ test('RPC assembles fragmented UTF-8 frames and correlates response IDs',async()
 test('RPC rejects malformed JSON and pending requests on exit',async()=>{const child=childMock(),rpc=new Rpc(child);const pending=rpc.request('hello',{});child.stdout.write('not-json\n');await assert.rejects(()=>pending,/valid JSON/);assert.equal(rpc.closed,true);});
 test('RPC request timeout is bounded',async()=>{const rpc=new Rpc(childMock());await assert.rejects(()=>rpc.request('slow',{},10),/timed out/);rpc.close();});
 test('RPC unsupported server requests receive errors, never automatic approval',async()=>{const child=childMock(),rpc=new Rpc(child);child.send({id:91,method:'fs/write_text_file',params:{}});await tick();assert.equal(child.frames[0].id,91);assert.equal(child.frames[0].error.code,-32601);rpc.close();});
-function acpServer({loadSession=false,requestPermission=false,onlyAlways=false,tool=false}={}){
+function acpServer({loadSession=false,requestPermission=false,onlyAlways=false,tool=false,toolCall={title:'Run test?',rawInput:{command:'npm test'}}}={}){
   return childMock((m,c)=>{
     if(m.method==='initialize')c.reply(m,{protocolVersion:1,agentCapabilities:{loadSession}});
     if(m.method==='session/new')c.reply(m,{sessionId:'acp-'+c.frames.filter(f=>f.method==='session/new').length});
@@ -15,7 +15,7 @@ function acpServer({loadSession=false,requestPermission=false,onlyAlways=false,t
       c.send({method:'session/update',params:{sessionId:'wrong',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'DO NOT MIX'}}}});
       c.send({method:'session/update',params:{sessionId:m.params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'ACP reply'}}}});
       if(tool){c.send({method:'session/update',params:{sessionId:m.params.sessionId,update:{sessionUpdate:'tool_call',toolCallId:'t1',title:'search config.yaml',status:'in_progress'}}});c.prompt=m;return;}
-      if(requestPermission){c.prompt=m;c.send({id:991,method:'session/request_permission',params:{sessionId:m.params.sessionId,toolCall:{title:'Run test?',rawInput:{command:'npm test'}},options:onlyAlways?[{kind:'allow_always',optionId:'always'},{kind:'reject_once',optionId:'no'}]:[{kind:'allow_always',optionId:'always'},{kind:'allow_once',optionId:'once'}]}});}else c.reply(m,{stopReason:'end_turn'});
+      if(requestPermission){c.prompt=m;c.send({id:991,method:'session/request_permission',params:{sessionId:m.params.sessionId,toolCall,options:onlyAlways?[{kind:'allow_always',optionId:'always'},{kind:'reject_once',optionId:'no'}]:[{kind:'allow_always',optionId:'always'},{kind:'allow_once',optionId:'once'}]}});}else c.reply(m,{stopReason:'end_turn'});
     }
     if(m.id===991&&!m.method)c.reply(c.prompt,{stopReason:'end_turn'});
   });
@@ -24,6 +24,23 @@ test('ACP session isolation, explicit allow-once approval and capability handsha
 test('ACP exposes Hermes thinking, plan and detailed tool progress to the UI',()=>{assert.equal(activityOf({sessionUpdate:'agent_thought_chunk'}),'Thinking');assert.equal(activityOf({sessionUpdate:'plan',entries:[{content:'Inspect local gateway',status:'in_progress'}]}),'Plan 0/1: Inspect local gateway');assert.equal(activityOf({sessionUpdate:'tool_call',title:'Read config',locations:[{path:'C:\\Users\\me\\.hermes'}]}),'Read config — C:\\Users\\me\\.hermes');assert.equal(activityOf({sessionUpdate:'tool_call_update',title:'Run diagnostic',status:'completed'}),'Run diagnostic — completed');});
 test('ACP uses the Hermes Docker profile as session cwd',async()=>{const child=acpServer();const agent={provider:'hermes',command:'docker',args:['exec','-i','a2a-hermes-leads','hermes'],cwd:'/root',hermesHome:'/opt/data'};const a=new AcpAdapter({agent,approve:async()=>false,spawnAgent:()=>child});assert.equal(sessionCwd(agent),'/opt/data');await a.connect();await a.run(context());assert.equal(child.frames.find(f=>f.method==='session/new').params.cwd,'/opt/data');a.close();});
 test('ACP denies tools when native approval is declined',async()=>{const child=acpServer({requestPermission:true});const a=new AcpAdapter({agent:{provider:'custom',args:[],cwd:path.resolve('.')},approve:async()=>false,spawnAgent:()=>child});await a.connect();await a.run(context());assert.equal(child.frames.find(f=>f.id===991).result.outcome.outcome,'cancelled');a.close();});
+for(const [label,toolCall] of [
+  ['command arguments',{title:'Run a command',kind:'execute',rawInput:{command:'printf opaya-browser'}}],
+  ['display title',{title:'Run printf opaya-vault',kind:'execute',rawInput:{command:'echo test'}}],
+  ['tool alias',{title:'opaya_open',kind:'other',rawInput:{url:'https://example.com/'}}],
+  ['toolName extension',{title:'Run a command',kind:'execute',toolName:'mcp__opaya-browser__browser_open',rawInput:{command:'echo test'}}],
+  ['tool kind extension',{title:'Run a tool',kind:'mcp__opaya',rawInput:{command:'echo test'}}],
+  ['MCP tool metadata',{title:'opaya-browser: browser_open',name:'mcp__opaya-browser__browser_open',kind:'fetch',rawInput:{url:'https://example.com/'}}],
+])for(const accepted of [false,true])test(`ACP requires approval for Opaya text in ${label}: ${accepted?'allow once':'decline'}`,async t=>{
+  const child=acpServer({requestPermission:true,toolCall}),approvals=[],events=[];
+  const a=new AcpAdapter({agent:{provider:'custom',args:[],cwd:path.resolve('.')},approve:async(_agent,title,detail)=>{approvals.push({title,detail});return accepted;},spawnAgent:()=>child});
+  t.after(()=>a.close());await a.connect();await a.run(context({onEvent:e=>events.push(e)}));
+  assert.equal(approvals.length,1);assert.equal(approvals[0].title,toolCall.title);
+  assert.equal(approvals[0].detail,JSON.stringify(toolCall.rawInput,null,2));
+  assert.deepEqual(child.frames.find(f=>f.id===991).result.outcome,accepted?{outcome:'selected',optionId:'once'}:{outcome:'cancelled'});
+  assert(events.some(e=>e.text===`Waiting for your approval: ${toolCall.title}`));
+  assert.equal(events.some(e=>e.text?.startsWith('Opaya allowed:')),false);
+});
 test('ACP refuses to silently replay transcripts when persisted sessions cannot resume',async()=>{const a=new AcpAdapter({agent:{provider:'hermes',args:[],cwd:path.resolve('.')},approve:async()=>false,spawnAgent:()=>acpServer()});await a.connect();await assert.rejects(()=>a.run(context({conversation:{id:'x',externalSessionId:'old-process-session'}})),/cannot resume/);a.close();});
 test('ACP loads the exact saved session when supported',async()=>{const child=acpServer({loadSession:true}),a=new AcpAdapter({agent:{provider:'custom',args:[],cwd:path.resolve('.')},approve:async()=>false,spawnAgent:()=>child});await a.connect();await a.run(context({conversation:{id:'x',externalSessionId:'old-session'}}));assert.equal(child.frames.find(f=>f.method==='session/load').params.sessionId,'old-session');assert.equal(child.frames.some(f=>f.method==='session/new'),false);a.close();});
 function codexServer({approval=false}={}){
