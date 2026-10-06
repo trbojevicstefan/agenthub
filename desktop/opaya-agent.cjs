@@ -401,6 +401,7 @@ class OpayaAgent{
       else if(this.config.preset==='claude')await this.runClaude(text,reply);
       else for(let step=0;step<MAX_STEPS;step++){
         const message=await this.complete(conversation);
+        this.controller.signal.throwIfAborted();
         const calls=message.tool_calls||[];
         conversation.push({role:'assistant',content:message.content||'',...(calls.length?{tool_calls:calls}:{})});
         this.messages.push({role:'assistant',content:message.content||'',internal:true,...(calls.length?{tool_calls:calls}:{})});
@@ -408,11 +409,15 @@ class OpayaAgent{
         if(!calls.length)break;
         for(const call of calls.slice(0,8)){
           const name=call.function?.name||'';let args={};try{args=JSON.parse(call.function?.arguments||'{}');}catch{}
-          this.status=`Using ${name.replace(/_/g,' ')}...`;reply.activity.push(this.status.replace('...',''));this.emit();
-          let result;try{result=await this.tool(name,args);}catch(error){result={error:String(error.message||error).slice(0,1000)};}
+          let result;try{
+            this.controller.signal.throwIfAborted();
+            this.status=`Using ${name.replace(/_/g,' ')}...`;reply.activity.push(this.status.replace('...',''));this.emit();
+            result=await this.tool(name,args);
+          }catch(error){result={error:this.controller.signal.aborted?'Stopped.':String(error.message||error).slice(0,1000)};}
           const content=JSON.stringify(result).slice(0,24000);
           conversation.push({role:'tool',tool_call_id:call.id,content});this.messages.push({role:'tool',tool_call_id:call.id,content,internal:true});
         }
+        this.controller.signal.throwIfAborted();
         if(step===MAX_STEPS-1)reply.content=(reply.content?reply.content+'\n\n':'')+'I stopped after the maximum number of steps. Ask me to continue if needed.';
       }
     }catch(error){reply.error=this.controller.signal.aborted?'Stopped.':secrets.shieldOutput(String(error.message||error),this.heldValues()).slice(0,600);this.error=reply.error;}
@@ -557,7 +562,13 @@ class OpayaAgent{
   host(id){return id?this.broker.host(id):null;}
   spawnProcess(file,args,{verbatim=false}={}){return require('node:child_process').spawn(file,args,{detached:true,stdio:'ignore',windowsHide:true,windowsVerbatimArguments:verbatim}).once('spawn',function(){this.unref();});}
   // iTrust for the Opaya Agent skips the dialog, except for removals, which always ask.
-  async ask(title,detail,{always=false}={}){if(!always&&this.trusted?.()){this.status=`iTrust approved: ${title}`;this.current?.activity?.push(this.status);this.emit();return;}if(!await this.approve({name:'Opaya Agent'},title,detail))throw new Error('The user declined this action.');}
+  async ask(title,detail,{always=false}={}){
+    const signal=this.controller?.signal;signal?.throwIfAborted();
+    if(!always&&this.trusted?.()){this.status=`iTrust approved: ${title}`;this.current?.activity?.push(this.status);this.emit();return;}
+    const accepted=await this.approve({name:'Opaya Agent'},title,detail);
+    signal?.throwIfAborted();
+    if(!accepted)throw new Error('The user declined this action.');
+  }
   // Terminals the Opaya Agent started; answer_prompt works only in these. Marked commands print an end line with the
   // exit code and a run tag, so wait_for_terminal knows when this run (not an earlier one in the same tab) is done.
   // A tab whose last run finished is reused; one still busy gets a sibling, so a command never types into a running one.

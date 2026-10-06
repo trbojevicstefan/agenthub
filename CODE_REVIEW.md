@@ -91,6 +91,11 @@ Apply equivalent checks to remote reads and attachment restrictions.
 
 ### F05 — P1: Stop permits later Opaya Agent tool calls
 
+- [x] Fixed on 2026-10-06 with cancellation checks before tool calls and after approval waits.
+
+Stopped turns record skipped tool results without executing the tools.
+Regression tests cover queued tools, pending approvals, cleared controllers, and the next user request.
+
 Location: [desktop/opaya-agent.cjs:409–414](desktop/opaya-agent.cjs#L409-L414).
 
 The HTTP tool loop does not check cancellation between tool calls.

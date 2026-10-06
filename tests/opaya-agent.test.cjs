@@ -24,6 +24,37 @@ test('Opaya Agent answers through tools and shows one reply per request',async t
   const toolResult=requests[1].body.messages.find(m=>m.role==='tool');assert.match(toolResult.content,/"name":"one"/);
   assert.equal(requests[0].body.tools.some(t=>t.function.name==='save_connection'),true);
 });
+for(const queued of [true,false])test(`Stop during a tool prevents ${queued?'queued tools':'another model request'}`,async t=>{
+  const tools=[...call('read_notes').tool_calls,...(queued?[...call('write_notes',{content:'Changed after Stop'}).tool_calls,...call('run_command',{command:'echo stopped',why:'Test cancellation'}).tool_calls]:[])];
+  const {agent,root,commands,requests}=await fixture(t,[{content:'',tool_calls:tools}],{trusted:true});
+  const notes=path.join(root,'opaya-agent','notes.md');await fs.writeFile(notes,'Keep these notes');
+  let entered,release;const started=new Promise(r=>entered=r),gate=new Promise(r=>release=r),seen=[];
+  const runTool=agent.runTool.bind(agent);
+  agent.runTool=async(name,args)=>{seen.push(name);if(name==='read_notes'){entered();await gate;}return runTool(name,args);};
+  const pending=agent.send('Read my notes');await started;agent.stop();release();
+  assert.deepEqual(await pending,{ok:false});assert.equal(agent.describe().messages.at(-1).error,'Stopped.');
+  assert.deepEqual(seen,['read_notes']);assert.equal(requests.length,1);assert.equal(commands.length,0);
+  assert.equal(await fs.readFile(notes,'utf8'),'Keep these notes');
+  assert.deepEqual(await agent.send('Continue'),{ok:true});
+  const results=requests[1].body.messages.filter(m=>m.role==='tool');
+  assert.deepEqual(results.map(m=>m.tool_call_id),tools.map(c=>c.id));
+  if(queued)assert.deepEqual(results.slice(1).map(m=>JSON.parse(m.content)),[{error:'Stopped.'},{error:'Stopped.'}]);
+});
+test('Stop during approval prevents the approved command from starting',async t=>{
+  let entered,release;const started=new Promise(r=>entered=r),approval=new Promise(r=>release=r);
+  const {agent,commands,requests}=await fixture(t,[call('run_command',{command:'echo stopped',why:'Test cancellation'})],{approve:async()=>{entered();return approval;}});
+  const pending=agent.send('Run the command');await started;agent.stop();release(true);
+  assert.deepEqual(await pending,{ok:false});assert.equal(agent.describe().messages.at(-1).error,'Stopped.');
+  assert.equal(commands.length,0);assert.equal(requests.length,1);
+});
+test('a late approval retains the stopped turn signal after its controller is cleared',async t=>{
+  let release;const approval=new Promise(r=>release=r);
+  const {agent}=await fixture(t,[],{approve:()=>approval});
+  agent.controller=new AbortController();
+  const pending=agent.ask('Run a command?','Test cancellation');
+  agent.stop();agent.controller=null;release(true);
+  await assert.rejects(pending,{name:'AbortError'});
+});
 test('Opaya Agent uses the local Codex app-server and exposes live tool activity',async t=>{
   const root=await temp(t),broker=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory:()=>({connect:async()=>({}),close(){}})});await broker.init();
   const child=childMock((m,c)=>{
