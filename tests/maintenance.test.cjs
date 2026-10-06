@@ -45,6 +45,18 @@ test('uninstall never deletes a home folder or a shallow path',()=>{
   assert.throws(()=>m.uninstallCommand({...profile,hermesHome:'/profiles/writer'},{remote:true}),/will not delete/);
   assert.doesNotThrow(()=>m.uninstallCommand(bad,{remote:true,data:false}),'keeping the data needs no check');
 });
+test('managed CLI clones update their own package without replacing the container',()=>{
+  const containers=require('../desktop/containers.cjs');
+  const packages={codex:'@openai/codex',claude:'@anthropic-ai/claude-code',opencode:'opencode-ai',dsh:'@deepseek-ai/dsh'};
+  for(const [framework,pkg] of Object.entries(packages)){
+    const plan=containers.plan(framework,{name:`${framework}-copy`});
+    const agent={...plan.connection,clone:{from:'source',framework,runtime:'docker',dir:`/home/me/opaya-agents/${framework}-copy`,container:plan.container}};
+    for(const options of [{remote:true,windows:false},{remote:false,windows:false},{remote:false,windows:true}]){
+      const update=m.updateCommand(agent,options);
+      assert.equal(update.preview,`docker exec '${plan.container}' npm install -g ${pkg}@latest`,`${framework}: ${JSON.stringify(options)}`);
+    }
+  }
+});
 async function unpack(file,dir){await fs.mkdir(dir,{recursive:true});execFileSync('tar',['-xzf',file,'-C',dir]);const out=[];const walk=async(d)=>{for(const e of await fs.readdir(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())await walk(p);else out.push(path.relative(dir,p).split(path.sep).join('/'));}};await walk(dir);return out.sort();}
 test('a local backup copies the Hermes home without the installation, and leaves out history and keys on request',{skip},async t=>{
   const root=await temp(t),home=path.join(root,'hermes'),dest=path.join(root,'backups');

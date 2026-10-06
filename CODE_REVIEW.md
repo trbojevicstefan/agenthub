@@ -54,6 +54,11 @@ Apply this correction to the local and remote commands.
 
 ### F03 — P1: Updating a CLI Docker clone replaces it with Hermes
 
+- [x] Fixed on 2026-10-06 by restricting the Hermes recreation path to Hermes clones.
+
+Other CLI clones use their existing package update paths inside the current container.
+The regression test covers Codex, Claude Code, OpenCode, and DeepSeek Harness across local, remote, and Windows command generation.
+
 Location: [desktop/maintenance.cjs:109–114](desktop/maintenance.cjs#L109-L114).
 
 The update code treats every managed Docker clone as a Hermes container.

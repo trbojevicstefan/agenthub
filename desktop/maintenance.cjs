@@ -108,7 +108,7 @@ function updateCommand(agent,{remote,windows=process.platform==='win32'}){
   if(k.kind==='container-profile')throw new Error(`${agent.name} is a profile in container ${k.container}. Update the agent that runs the container; the profile uses the same installation.`);
   if(k.kind==='docker'){
     const c=k.container;
-    if(k.managed&&k.dir){
+    if(k.framework==='hermes'&&k.managed&&k.dir){
       const run=`docker run -d --name ${q(c)} --restart unless-stopped -v ${q(k.dir+':/opt/data')} ${IMAGE} gateway run`;
       return {title:`Update container ${c}`,summary:`Downloads the newest ${IMAGE} image and recreates ${c} with the same data folder.`,after:'Reconnect the agent when the container runs again.',
         command:posix?posixScript([`docker pull ${IMAGE}`,`docker rm -f ${q(c)} >/dev/null`,run,`echo 'Container ${c} runs the new image.'`]):`docker pull ${IMAGE}; docker rm -f ${q(c)}; ${run}`};
