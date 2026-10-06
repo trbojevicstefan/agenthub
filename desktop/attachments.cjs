@@ -40,7 +40,7 @@ async function statFile(file){
   return st;
 }
 const validPath=p=>typeof p==='string'&&p.length>0&&p.length<=4096&&!/[\0\r\n]/.test(p)&&path.isAbsolute(p);
-const inside=(file,dir)=>{const r=path.relative(dir,path.resolve(file));return !!r&&!r.startsWith('..')&&!path.isAbsolute(r);};
+const inside=(file,dir)=>{const r=path.relative(dir,path.resolve(file));return !!r&&r!=='..'&&!r.startsWith('..'+path.sep)&&!path.isAbsolute(r);};
 const pastedDir=root=>path.join(root,'attachments','pasted');
 // Synchronous checks, before the broker reserves the turn: count, shape, and the size of pasted data.
 function check(list){
@@ -79,15 +79,19 @@ function classify(item,sample,declared=''){
 // Reads what each attachment is (image, text or another file) and its text. Writes nothing. Opaya's own data files
 // (settings, the token vault) cannot be attached; its attachments folder can.
 async function load(list,{root}={}){
+  const resolvedRoot=root?await fs.realpath(root):'';
+  const protectedFile=file=>root&&[root,resolvedRoot].some(dir=>inside(file,dir)&&!inside(file,path.join(dir,'attachments')));
   const items=[];let total=0;
   for(const x of list){
     let item;
     if(x.path){
       const name=x.name||safeName(path.basename(x.path));
-      if(root&&inside(x.path,root)&&!inside(x.path,path.join(root,'attachments')))throw new Error(`${name} is one of Opaya's own data files and cannot be attached.`);
+      if(protectedFile(x.path))throw new Error(`${name} is one of Opaya's own data files and cannot be attached.`);
       const st=await statFile(x.path);
+      const resolved=await fs.realpath(x.path);
+      if(protectedFile(resolved))throw new Error(`${name} is one of Opaya's own data files and cannot be attached.`);
       if(st.size>MAX_FILE)throw tooBig(name,st.size);
-      item=classify({name,size:st.size,path:x.path},await head(x.path,MAX_TEXT+4),x.mime);
+      item=classify({name,size:st.size,path:resolved},await head(resolved,MAX_TEXT+4),x.mime);
     }else{
       const buffer=Buffer.from(x.data,'base64');
       item=classify({name:x.name,size:buffer.length,buffer},buffer.subarray(0,MAX_TEXT+4),x.mime);
@@ -101,6 +105,7 @@ async function load(list,{root}={}){
 // data sent to the service is written there, files the window saved in attachments/pasted are moved there.
 const folder=(root,conversationId)=>path.join(root,'attachments',schema.id(conversationId));
 async function save(items,{root,conversationId}){
+  root=await fs.realpath(root);
   const dir=folder(root,conversationId);
   for(const item of items){
     const staged=!item.buffer&&inside(item.path,pastedDir(root));

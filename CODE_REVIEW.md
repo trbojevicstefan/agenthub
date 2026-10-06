@@ -82,6 +82,13 @@ Use the existing framework-specific update paths for other clones.
 
 ### F04 — P1: Symbolic links bypass file disclosure restrictions
 
+- [x] Fixed on 2026-10-06 by checking requested and resolved paths before reading file contents.
+
+The Opaya Agent applies the secret-file checks locally and in the remote Python reader.
+Attachments check the resolved data folder and retain resolved paths for later reads.
+The directory check also treats names beginning with `..` as ordinary names unless they identify a parent directory.
+Regression tests cover chained links, directory links, protected attachment targets, allowed links, and pasted files under a linked data folder.
+
 Locations: [desktop/attachments.cjs:85–90](desktop/attachments.cjs#L85-L90), [desktop/files.cjs:62–64](desktop/files.cjs#L62-L64), and [desktop/opaya-agent.cjs:1109](desktop/opaya-agent.cjs#L1109).
 
 The file checks inspect the requested path, but the reads follow symbolic links.

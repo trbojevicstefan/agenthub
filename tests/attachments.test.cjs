@@ -39,6 +39,29 @@ test('files are read as text, image or other file by their bytes, and Opaya\'s o
   await assert.rejects(()=>attach.load(['one','two','three'].map(n=>({path:p(n)}))),/add up to 45\.0 MB/);
   await fs.truncate(p('one'),21*1024*1024);await assert.rejects(()=>attach.load([{path:p('one')}]),/one is 21\.0 MB/);
 });
+test('attachment restrictions check links and preserve allowed resolved paths',{skip:process.platform==='win32'},async t=>{
+  const dir=await temp(t),root=path.join(dir,'opaya'),p=name=>path.join(dir,name);
+  await fs.mkdir(path.join(root,'attachments'),{recursive:true});
+  await fs.writeFile(path.join(root,'vault.json'),'fixture private content');await fs.writeFile(p('notes.txt'),'public notes');
+  await fs.mkdir(path.join(root,'..private'));await fs.writeFile(path.join(root,'..private','workspace.json'),'fixture private content');
+  await fs.symlink(path.join(root,'..private','workspace.json'),p('hidden.txt'));
+  await fs.symlink(path.join(root,'vault.json'),p('readme.txt'));await fs.symlink(p('readme.txt'),p('chain.txt'));
+  await fs.symlink(root,p('data-link'),'dir');await fs.symlink(path.join(root,'vault.json'),path.join(root,'attachments','innocent.txt'));
+  await fs.symlink(p('notes.txt'),path.join(root,'workspace.json'));await fs.symlink(p('notes.txt'),p('guide.txt'));
+  const opened=[],open=fs.open;t.mock.method(fs,'open',async(...args)=>{opened.push(args[0]);return open(...args);});
+  for(const file of [p('readme.txt'),p('chain.txt'),p('data-link/vault.json'),p('hidden.txt'),path.join(root,'attachments','innocent.txt'),path.join(root,'workspace.json')]){
+    await assert.rejects(()=>attach.load([{path:file}],{root}),/Opaya's own data files/);
+  }
+  await assert.rejects(()=>attach.load([{path:path.join(root,'vault.json')}],{root:p('data-link')}),/Opaya's own data files/);
+  assert.deepEqual(opened,[]);
+  const [item]=await attach.load([{path:p('guide.txt')}],{root});assert.equal(item.name,'guide.txt');assert.equal(item.path,p('notes.txt'));assert.equal(item.text,'public notes');
+  await fs.unlink(p('guide.txt'));await fs.symlink(path.join(root,'vault.json'),p('guide.txt'));
+  assert.equal(Buffer.from(await attach.base64(item),'base64').toString(),'public notes','later reads use the checked target');
+  const staged=await attach.stage({attachments:[{name:'clip.txt',data:Buffer.from('pasted notes').toString('base64')}]},p('data-link'));
+  const items=await attach.load(staged.input.attachments,{root:p('data-link')});await attach.save(items,{root:p('data-link'),conversationId:'linked-root'});
+  assert.deepEqual(await fs.readdir(path.join(root,'attachments','pasted')),[]);
+  assert.equal(await fs.readFile(items[0].path,'utf8'),'pasted notes');
+});
 test('fileInfo describes picked or dropped files',async t=>{
   const {p}=await files(t);
   assert.deepEqual(await attach.inspect([p('photo.txt'),p('notes.md'),p('doc.pdf'),p('data.bin')]),[{path:p('photo.txt'),name:'photo.txt',size:PNG.length,mime:'image/png'},{path:p('notes.md'),name:'notes.md',size:26,mime:'text/markdown'},{path:p('doc.pdf'),name:'doc.pdf',size:PDF.length,mime:'application/pdf'},{path:p('data.bin'),name:'data.bin',size:4,mime:'application/octet-stream'}]);

@@ -1117,7 +1117,7 @@ class OpayaAgent{
         return {terminal_id:view.id,output:await this.terminalOutput(view.id,3000),identity_file:win?path.join(require('node:os').homedir(),'.ssh',name):`~/.ssh/${name}`};
       }
       case 'list_directory':{const r=await files.browse({op:'list',path:String(args.path||''),host:this.host(args.machine_id)});return {...r,entries:r.entries.slice(0,300)};}
-      case 'read_file':{const p=String(args.path||'');if(files.isSecret(p))throw new Error('That file may contain secrets, so the Opaya Agent does not read it. Ask the user to check it in the Files panel.');const r=await files.browse({op:'read',path:p,host:this.host(args.machine_id)});if(files.isSecret(r.path))throw new Error('That file may contain secrets.');return {...r,text:r.text.slice(0,24000)};}
+      case 'read_file':{const r=await files.browse({op:'read',path:String(args.path||''),host:this.host(args.machine_id),allowSecrets:false});return {...r,text:r.text.slice(0,24000)};}
       case 'project_info':return files.browse({op:'project',path:String(args.path||''),host:this.host(args.machine_id)});
       case 'list_skills':{const r=await b.skills(schema.id(args.agent_id));return {...r,skills:r.skills.slice(0,150).map(({name,description,category})=>({name,description,category}))};}
       case 'install_skill':{

@@ -108,6 +108,16 @@ test('the Opaya Agent can read project files but never secret files',async t=>{
   assert.equal(results[0].text,'hello project');assert.match(results[1].error,/secrets/);assert(!JSON.stringify(requests).includes('sk-live-secret'));
   assert.deepEqual(results[2].entries.map(e=>e.name).sort(),['.env','README.md']);
 });
+test('the Opaya Agent refuses secret targets behind ordinary file names',{skip:process.platform==='win32'},async t=>{
+  const dir=await temp(t),p=name=>path.join(dir,name),privateText='machine example.invalid login fixture password fixture-private-value';
+  await fs.writeFile(p('.netrc'),privateText);await fs.writeFile(p('README.md'),'public notes');
+  await fs.symlink(p('.netrc'),p('notes.txt'));await fs.symlink(p('README.md'),p('guide.txt'));
+  const {agent,requests}=await fixture(t,[call('read_file',{path:p('notes.txt')}),call('read_file',{path:p('guide.txt')}),{content:'ok'}]);
+  agent.begin('Read these files');await settle(agent);
+  const results=requests.at(-1).body.messages.filter(m=>m.role==='tool').map(m=>JSON.parse(m.content));
+  assert.match(results[0].error||'',/may contain secrets/);assert.equal(results[1].text,'public notes');assert.equal(results[1].path,p('README.md'));
+  assert.equal(JSON.stringify(requests).includes(privateText),false);
+});
 test('dependencies and the essentials bundle are installable through the same approved catalog path',async t=>{
   const {agent,commands,approvals}=await fixture(t,[call('install_framework',{framework_id:'essentials'}),call('install_framework',{framework_id:'node'}),{content:'done'}]);
   agent.begin('install everything I need');await settle(agent);
