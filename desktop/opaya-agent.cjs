@@ -196,7 +196,7 @@ class OpayaAgent{
   // askSecret({name,why,agent}): Opaya's secure prompt, resolves to the value or null. userHome: where agents on this
   // computer keep their config (tests use a temporary one).
   constructor({root,vault,broker,terminals,approve,emit,runInTerminal,builtinInstall=null,platform=process.platform,fetchImpl=globalThis.fetch,spawnAgent=launch,trusted=()=>false,askSecret=null,userHome=''}){
-    Object.assign(this,{builtinInstall,home:path.join(root,'opaya-agent'),root,vault,broker,terminals,approve,emit,runInTerminal,platform,fetch:fetchImpl,spawnAgent,trusted,askSecret,userHome});this.ownTerminals=new Set();this.runs=new Map();this.screens=new Map();this.secrets=[];this.secretNext=1;this.secretCache=new Map();
+    Object.assign(this,{builtinInstall,home:path.join(root,'opaya-agent'),root,vault,broker,terminals,approve,emit,runInTerminal,platform,fetch:fetchImpl,spawnAgent,trusted,askSecret,userHome});this.ownTerminals=new Set();this.runs=new Map();this.pendingRuns=new Set();this.screens=new Map();this.secrets=[];this.secretNext=1;this.secretCache=new Map();
     this.config={preset:'',baseUrl:'',model:''};this.messages=[];this.busy=false;this.status='';this.error='';this.controller=null;this.liveReply=null;this.codexRpc=null;this.codexThreadId='';this.codexActive=null;this.claudeSessionId='';this.claudeChild=null;this.claudeActive=null;this.toolBridge=null;
   }
   async init(){
@@ -572,14 +572,21 @@ class OpayaAgent{
   // Terminals the Opaya Agent started; answer_prompt works only in these. Marked commands print an end line with the
   // exit code and a run tag, so wait_for_terminal knows when this run (not an earlier one in the same tab) is done.
   // A tab whose last run finished is reused; one still busy gets a sibling, so a command never types into a running one.
-  async runOwn({label,key,host,command,marked=false}){
+  async runOwn({label,key,host,command,marked=false,outputWait=0}){
     const posix=!!host||this.platform!=='win32',tag=randomUUID().replace(/-/g,'').slice(0,8),hostId=host?.id||'';
-    let slot=key;for(let n=2;n<10&&this.tabBusy(slot,hostId);n++)slot=`${key}_${n}`;
+    let slot=key;for(let n=2;this.tabBusy(slot,hostId);n++)slot=`${key}_${n}`;
     const full=marked?(posix?`${command}; echo "[opaya] finished with exit code $? (run ${tag})"`:`${command}; Write-Host "[opaya] finished with exit code $(if ($?) { 0 } else { 1 }) (run ${tag})"`):command;
-    const view=await this.runInTerminal({label,key:slot,host,command:full});this.ownTerminals.add(view.id);
-    this.runs.set(view.id,{key:slot,hostId,tag:marked?tag:''});return view;
+    const pending={key:slot,hostId};this.pendingRuns.add(pending);
+    try{
+      const view=await this.runInTerminal({label,key:slot,host,command:full});this.ownTerminals.add(view.id);
+      this.runs.set(view.id,{key:slot,hostId,tag:marked?tag:''});
+      // Capture requested output before another run can replace this terminal's completion tag.
+      if(outputWait)return {...view,output:await this.runOutput(view.id,outputWait)};
+      return view;
+    }finally{this.pendingRuns.delete(pending);}
   }
   tabBusy(key,hostId){
+    for(const run of this.pendingRuns)if(run.key===key&&run.hostId===hostId)return true;
     for(const [id,run] of this.runs){
       if(run.key!==key||run.hostId!==hostId)continue;
       let view;try{view=this.terminals.attach(id);}catch{this.runs.delete(id);continue;}
@@ -981,8 +988,8 @@ class OpayaAgent{
       case 'run_diagnostic':{
         const check=DIAGNOSTICS[args.check];if(!check)throw new Error('Unknown diagnostic.');const host=this.host(args.machine_id);
         const command=host||this.platform!=='win32'?check.posix:check.windows;
-        const view=await this.runOwn({label:`Check / ${check.label}`,key:`check_${args.check}`,host,command,marked:true});
-        return {terminal_id:view.id,output:await this.runOutput(view.id,host?30000:20000)};
+        const view=await this.runOwn({label:'Opaya diagnostics',key:'check',host,command,marked:true,outputWait:host?30000:20000});
+        return {terminal_id:view.id,output:view.output};
       }
       case 'save_connection':{
         const input=args.connection&&typeof args.connection==='object'?args.connection:{};

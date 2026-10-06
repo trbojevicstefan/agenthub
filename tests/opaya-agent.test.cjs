@@ -220,6 +220,68 @@ test('a command never types into a tab that is still busy: it gets its own',asyn
   await agent.tool('run_command',{command:'npm install -g x',why:'a'});await agent.tool('run_command',{command:'ls',why:'b'});
   assert.deepEqual(commands.map(c=>c.key),['cmd','cmd_2']);
 });
+test('diagnostics share a completed terminal per machine and keep its output',async t=>{
+  const {Terminals}=require('../desktop/terminal.cjs'),{DIAGNOSTICS}=require('../desktop/opaya-agent.cjs');
+  const {agent,root}=await fixture(t,[]),processes=[],opened=[];
+  const terminals=new Terminals(()=>{},{ptyFactory:{spawn:()=>{const p={onData(fn){p.data=fn;},onExit(){},write(command){p.data(command+'\n');const tag=/\(run (\w+)\)/.exec(command)[1];p.data(`check ${opened.length}\n[opaya] finished with exit code 0 (run ${tag})\n`);},resize(){},kill(){}};processes.push(p);return p;}}});
+  t.after(()=>terminals.closeAll());agent.terminals=terminals;
+  // Use the service's key and machine identity with real terminal-session allocation and mocked PTYs.
+  agent.runInTerminal=async({label,key,host,command})=>{
+    const view=terminals.open({id:`svc_${key}_${host?.id||'local'}`,name:label,provider:'custom',transport:'local',command:'',args:[],cwd:root},null,'shell');
+    opened.push({key,hostId:host?.id||'',id:view.id});terminals.write(view.id,command);return view;
+  };
+  for(const check of Object.keys(DIAGNOSTICS)){const result=await agent.tool('run_diagnostic',{check});assert.match(result.output,/finished with exit code 0/);}
+  assert.equal(new Set(opened.map(x=>x.id)).size,1);assert.equal(processes.length,1);
+  const localId=opened[0].id;assert.match(terminals.attach(localId).buffer,/check 1\n/);assert.match(terminals.attach(localId).buffer,/check 6\n/);
+  agent.host=id=>id?{id,name:id}:null;
+  await agent.tool('run_diagnostic',{check:'versions',machine_id:'other-machine'});
+  assert.notEqual(opened.at(-1).id,localId);assert.equal(processes.length,2);
+  await agent.tool('run_diagnostic',{check:'resources'});assert.equal(opened.at(-1).id,localId);assert.equal(processes.length,2);
+});
+test('busy diagnostic terminals get distinct slots beyond the ninth run',async t=>{
+  const {agent}=await fixture(t,[]),calls=[],views=new Map();
+  agent.terminals={attach:id=>{const view=views.get(id);if(!view)throw new Error('Terminal not found.');return view;}};
+  agent.runOutput=async()=> 'still running';
+  agent.runInTerminal=async x=>{calls.push(x);const id=x.key;const view={id,buffer:'still running',exited:false};views.set(id,view);return view;};
+  for(let i=0;i<10;i++)await agent.tool('run_diagnostic',{check:'versions'});
+  assert.equal(new Set(calls.map(x=>x.key)).size,10);
+  const first=calls[0],tag=/\(run (\w+)\)/.exec(first.command)[1];views.get(first.key).buffer=`[opaya] finished with exit code 0 (run ${tag})\n`;
+  await agent.tool('run_diagnostic',{check:'ports'});assert.equal(calls.at(-1).key,first.key);
+});
+test('concurrent diagnostics reserve separate terminal slots before allocation completes',async t=>{
+  const {agent}=await fixture(t,[]),calls=[],views=new Map();
+  agent.terminals={attach:id=>views.get(id)};agent.runOutput=async()=> 'still running';
+  agent.runInTerminal=async x=>{calls.push(x);const view=views.get(x.key)||{id:x.key,buffer:'still running',exited:false};views.set(x.key,view);return view;};
+  await Promise.all(['versions','ports'].map(check=>agent.tool('run_diagnostic',{check})));
+  assert.deepEqual(calls.map(x=>x.key),['check','check_2']);assert.equal(agent.runs.size,2);
+  for(const call of calls)assert.equal(agent.runs.get(call.key).tag,/\(run (\w+)\)/.exec(call.command)[1]);
+});
+test('a failed diagnostic allocation releases its terminal slot',async t=>{
+  const {agent}=await fixture(t,[]),keys=[];agent.runOutput=async()=> 'finished';
+  agent.runInTerminal=async x=>{keys.push(x.key);if(keys.length===1)throw new Error('Terminal could not start.');return {id:x.key};};
+  await assert.rejects(agent.tool('run_diagnostic',{check:'versions'}),/Terminal could not start/);
+  await agent.tool('run_diagnostic',{check:'ports'});assert.deepEqual(keys,['check','check']);
+});
+test('a diagnostic keeps its output when another check starts before its next output poll',async t=>{
+  const {agent}=await fixture(t,[]),calls=[],views=new Map();
+  agent.terminals={attach:id=>views.get(id)};
+  const complete=(call,result)=>{const tag=/\(run (\w+)\)/.exec(call.command)[1];views.get(call.key).buffer+=`${result}\n[opaya] finished with exit code 0 (run ${tag})\n`;};
+  agent.runInTerminal=async x=>{calls.push(x);const view=views.get(x.key)||{id:x.key,buffer:'',exited:false};views.set(x.key,view);if(calls.length>1)complete(x,'PORTS_RESULT');return view;};
+  const first=agent.tool('run_diagnostic',{check:'versions'});
+  await new Promise(resolve=>setImmediate(resolve));complete(calls[0],'VERSIONS_RESULT');
+  const second=agent.tool('run_diagnostic',{check:'ports'}),[versions,ports]=await Promise.all([first,second]);
+  assert.match(versions.output,/VERSIONS_RESULT/);assert.doesNotMatch(versions.output,/PORTS_RESULT/);
+  assert.match(ports.output,/PORTS_RESULT/);assert.doesNotMatch(ports.output,/VERSIONS_RESULT/);
+  assert.notEqual(versions.terminal_id,ports.terminal_id);
+  await agent.tool('run_diagnostic',{check:'ports'});assert.equal(calls.at(-1).key,calls[0].key);
+});
+test('a failed diagnostic output read releases its terminal slot',async t=>{
+  const {agent}=await fixture(t,[]),keys=[];
+  agent.runInTerminal=async x=>{keys.push(x.key);return {id:x.key};};
+  agent.runOutput=async()=>{if(keys.length===1)throw new Error('Terminal was closed.');return 'finished';};
+  await assert.rejects(agent.tool('run_diagnostic',{check:'versions'}),/Terminal was closed/);
+  await agent.tool('run_diagnostic',{check:'ports'});assert.deepEqual(keys,['check','check']);
+});
 test('the logins check shows accounts and key names, never key values',()=>{
   const {DIAGNOSTICS}=require('../desktop/opaya-agent.cjs');const {spawnSync}=require('node:child_process');
   assert.match(DIAGNOSTICS.logins.posix,/codex login status/);assert.match(DIAGNOSTICS.logins.posix,/claude auth status/);assert.match(DIAGNOSTICS.logins.posix,/openclaw models status/);

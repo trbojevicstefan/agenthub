@@ -5,8 +5,9 @@ Source: `main`, commit `048421b469af6cc37eab21c6f9a61f95297ce610`, version `0.31
 
 The review covers all 15 areas in [the checklist](docs/CODE_REVIEW_CHECKLIST.md).
 Four agents, including the lead reviewer, performed the review.
-The review identifies 21 confirmed defects: five P1, fifteen P2, and one P3.
-The application code remains unchanged.
+The original review identifies 21 confirmed defects: five P1, fifteen P2, and one P3.
+The original review does not change application code.
+Follow-up findings and completed corrections appear below.
 
 P1 identifies an urgent security or correctness defect.
 P2 identifies a functional defect that needs correction.
@@ -364,6 +365,33 @@ Its terminal windows remain, but their split layout, ratios, dock position, and 
 Evidence: A `Broker.saveView()` fixture preserved `agent_1` and removed `opaya` from saved terminal workspaces.
 
 Correction: Accept the reserved `opaya` context in both filters.
+
+## Follow-up findings
+
+### F22 — P2: Diagnostics leave a separate terminal open for each check
+
+- [x] Fixed on 2026-10-06 by reusing completed diagnostic terminals for each machine.
+
+Locations: [desktop/opaya-agent.cjs:575](desktop/opaya-agent.cjs#L575) and [desktop/opaya-agent.cjs:988](desktop/opaya-agent.cjs#L988).
+
+The PM reports that troubleshooting opens many terminals and leaves them open.
+Each diagnostic type uses a different terminal identity, so completed checks keep separate shells alive.
+Six diagnostic types can consume six of the twelve available live terminal sessions on one machine.
+
+Evidence: A disposable fixture calls all six diagnostic tools through the real terminal allocator with mocked PTYs.
+Before the correction, it creates six live shells.
+After the correction, it creates one shell and retains the earlier output.
+A check on another machine creates a separate shell.
+
+Correction: Use one diagnostic identity per machine and reuse only completed terminals.
+Keep separate terminals while checks remain busy.
+Remove the slot search limit that previously reused a busy ninth slot.
+Reserve each slot before asynchronous allocation, and release the reservation if allocation fails.
+Keep the reservation until the diagnostic captures its output, so another request cannot replace that output.
+Regression tests cover completed checks, retained output, machine separation, ten busy checks, concurrent requests, and failed allocations.
+They also cover reuse between output polls and cleanup after output collection fails.
+The terminal allocator retains its existing limit of twelve live sessions.
+Native UI behavior and live SSH execution remain unverified.
 
 ## Review coverage
 
