@@ -69,8 +69,10 @@ async function selection(where,home,scope,keys,cron=cronDefault(scope)){
 // `excludes` are paths below the copied ones to leave out (history, logins), as tar patterns.
 function producer(where,home,paths,excludes=[]){
   const ex=excludes.map(e=>`--exclude=${e}`);
-  if(isLocal(where)){const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-cf','-',...ex,'-C',home,...paths],{windowsHide:true,stdio:['ignore','pipe','pipe']});}
-  return shell(where,`cd ${quote(home)} && tar -cf - ${[...ex,...paths].map(quote).join(' ')}`,{compress:true});
+  // bsdtar still interprets a member named -C after --; make leading dashes unambiguous paths.
+  const members=paths.map(p=>p.startsWith('-')?`./${p}`:p);
+  if(isLocal(where)){const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-cf','-',...ex,'-C',home,'--',...members],{windowsHide:true,stdio:['ignore','pipe','pipe']});}
+  return shell(where,`cd ${quote(home)} && tar -cf - ${[...ex,'--',...members].map(quote).join(' ')}`,{compress:true});
 }
 async function consumer(where,dest){
   if(isLocal(where)){await fs.mkdir(dest,{recursive:true,mode:0o700});const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-xf','-','-C',dest],{windowsHide:true,stdio:['pipe','ignore','pipe']});}

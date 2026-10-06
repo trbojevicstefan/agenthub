@@ -294,8 +294,10 @@ async function members(where,spec,{keys,history}){
   return found;
 }
 function producer(where,base,paths){
-  if(isLocal(where)){const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-cf','-','-C',base,...paths],{windowsHide:true,stdio:['ignore','pipe','pipe']});}
-  return shell(where,`cd ${q(base)} && tar -cf - ${paths.map(q).join(' ')}`,{compress:true});
+  // bsdtar still interprets a member named -C after --; make leading dashes unambiguous paths.
+  const members=paths.map(p=>p.startsWith('-')?`./${p}`:p);
+  if(isLocal(where)){const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-cf','-','-C',base,'--',...members],{windowsHide:true,stdio:['ignore','pipe','pipe']});}
+  return shell(where,`cd ${q(base)} && tar -cf - -- ${members.map(q).join(' ')}`,{compress:true});
 }
 const fmt=n=>n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
 // Streams the agent's data (this computer, SSH, or inside a container) into a .tar.gz on this computer, next to a

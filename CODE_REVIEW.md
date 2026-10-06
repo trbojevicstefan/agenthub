@@ -32,6 +32,12 @@ Do not use titles or command arguments to establish tool identity.
 
 ### F02 — P1: Transfer filenames can execute commands through tar
 
+- [x] Fixed on 2026-10-06 in both archive producers, for local and remote commands.
+
+The producers put `--` before member paths and prefix filenames that start with `-` with `./`.
+The prefix also prevents macOS tar from interpreting `-C` after `--`.
+Regression tests verify filenames, contents, and transfer exclusions through real tar operations and a local SSH substitute.
+
 Locations: [desktop/clone.cjs:70–73](desktop/clone.cjs#L70-L73) and [desktop/maintenance.cjs:296–298](desktop/maintenance.cjs#L296-L298).
 
 The archive producers pass filenames to `tar` without an option terminator.
