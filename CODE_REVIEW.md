@@ -139,6 +139,10 @@ Check for duplicate identity before copying files.
 
 ### F08 — P2: The remote bridge corrupts split UTF-8 characters
 
+- [x] Fixed on 2026-10-06 with one `StringDecoder` per relay connection.
+
+Regression tests preserve Unicode paths and text across every byte boundary and interleaved connections.
+
 Location: [desktop/remote-bridge.cjs:98](desktop/remote-bridge.cjs#L98).
 
 The bridge decodes each received buffer separately.

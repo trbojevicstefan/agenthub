@@ -98,3 +98,26 @@ test('the relay works with node where there is no python3',async()=>{
   client.stdin.write(JSON.stringify({n:7})+'\n');for(let i=0;i<50&&!out.includes('\n');i++)await new Promise(r=>setTimeout(r,50));
   assert.deepEqual(JSON.parse(out.trim()),{echo:7});client.kill();relay.close();
 });
+test('the remote relay preserves UTF-8 messages at every byte boundary',()=>{
+  const {RemoteBridge}=require('../desktop/remote-bridge.cjs'),connections=[];
+  const relay=new RemoteBridge({where:{},onConnection:conn=>{const lines=[];connections.push(lines);conn.lines(line=>lines.push(line));}});
+  const messages=[JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'read_file',arguments:{path:'/tmp/č-€-🚀.txt'}}}),JSON.stringify({text:'Next message: 日本語'})];
+  const bytes=Buffer.from(`${relay.token}\n${messages.join('\n')}\n`);
+  for(let split=1;split<bytes.length;split++){
+    relay.frame({c:split,d:bytes.subarray(0,split).toString('base64')});
+    relay.frame({c:split,d:bytes.subarray(split).toString('base64')});
+    assert.equal(connections.length,split);
+    assert.deepEqual(connections.at(-1),messages,`split at byte ${split}`);
+    relay.frame({c:split,x:1});
+  }
+});
+test('the remote relay decodes interleaved connections independently',()=>{
+  const {RemoteBridge}=require('../desktop/remote-bridge.cjs'),connections=[];
+  const relay=new RemoteBridge({where:{},onConnection:conn=>{const lines=[];connections.push(lines);conn.lines(line=>lines.push(line));}});
+  const messages=[JSON.stringify({path:'/tmp/€uro.txt'}),JSON.stringify({path:'/tmp/🚀launch.txt'})];
+  const buffers=messages.map(message=>Buffer.from(`${relay.token}\n${message}\n`));
+  for(let i=0;i<Math.max(...buffers.map(b=>b.length));i++){
+    for(let j=0;j<buffers.length;j++)if(i<buffers[j].length)relay.frame({c:j+1,d:buffers[j].subarray(i,i+1).toString('base64')});
+  }
+  assert.deepEqual(connections,messages.map(message=>[message]));
+});

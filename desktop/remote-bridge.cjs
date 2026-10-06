@@ -6,6 +6,7 @@
 // session service, which answers as the MCP server. No port is opened on the machine's network and sshd needs no
 // settings. The relay runs on python3 (any Hermes) or node (Claude Code, Codex, OpenCode containers).
 const {randomBytes}=require('node:crypto');
+const {StringDecoder}=require('node:string_decoder');
 const {quote}=require('./process.cjs');
 // Listener: prints {"port":n}, then one JSON line per chunk {"c":id,"d":base64} and {"c":id,"x":1} when a client goes;
 // reads the same lines on stdin for the way back. Exits when Opaya's channel closes.
@@ -89,13 +90,14 @@ class RemoteBridge{
     c.data(Buffer.from(String(m.d||''),'base64'));
   }
   connection(id){
+    const decoder=new StringDecoder('utf8');
     const write=o=>{if(!this.closed)this.child.stdin.write(JSON.stringify(o)+'\n');};
     let buf='',authed=false,onLine=null,ended=false;
     const conn={
       send:text=>write({c:id,d:Buffer.from(String(text)+'\n').toString('base64')}),
       close:()=>write({c:id,x:1}),
       lines:fn=>{onLine=fn;},
-      data:chunk=>{buf+=chunk.toString('utf8');let i;while((i=buf.indexOf('\n'))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);
+      data:chunk=>{buf+=decoder.write(chunk);let i;while((i=buf.indexOf('\n'))>=0){const line=buf.slice(0,i);buf=buf.slice(i+1);
         // The first line is the token: anything else on that machine reaching the relay is cut off.
         if(!authed){if(line.trim()===this.token){authed=true;this.onConnection(conn);}else{conn.close();ended=true;return;}continue;}
         if(!ended)onLine?.(line);}},
