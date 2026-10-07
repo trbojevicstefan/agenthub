@@ -1555,7 +1555,12 @@ body.dragging-key [data-drop].drop-over,body.dragging-key .agent-nav-row.drop-ov
 .grid-pick{width:30px;height:26px;padding:0;color:#7f8b90;border-radius:7px}
 .grid-pick.selected{color:#c9f7dd;background:#22302a;box-shadow:inset 0 0 0 1px #3d5c4b}
 @media (max-width:1100px){.mg-keys{grid-template-columns:1fr}.mg-flow{display:none}}
-@media (max-width:760px){.mg-card{width:auto;right:16px}.mg-hero{height:340px}.chat-win{width:min(340px,calc(100vw - 32px))}}
+@media (max-width:760px){.chat-win{width:min(340px,calc(100vw - 32px))}}
+/* The hero adapts to its own width (the sidebars and docked panels take room too, not only a small window): when the
+   card would cover most of the stage, the stage moves above the card with the whole width to itself. */
+#mg-p-hero,#fl-hero{container-type:inline-size}
+.mg-stage-caption{position:absolute;right:16px;bottom:10px;z-index:1;font-size:10.5px;color:#6f8a7c;pointer-events:none;letter-spacing:.2px}
+
 @media(prefers-reduced-motion:reduce){.mg-cube,.mg-flow i{animation:none!important}}
 /* Light theme, hand-tuned */
 body[data-theme="light"] .mg-hero{background:radial-gradient(120% 140% at 72% 40%,#dff5e8 0%,#eef6f1 50%,#f7faf8 100%);border-color:#cfe3d7}
@@ -2594,7 +2599,6 @@ body[data-theme="light"] .fleet-tip b{color:#33443b}
 body[data-theme="light"] .mg-hero{box-shadow:0 16px 36px -28px #1d3a2a40,inset 0 1px 0 #ffffff}
 body[data-theme="light"] .mg-card{box-shadow:0 10px 28px -18px #1d3a2a40,inset 0 1px 0 #ffffff}
 body[data-theme="light"] .mg-card:hover{box-shadow:0 14px 32px -18px #1d3a2a52,0 0 0 1px #bfdccb}
-@media (max-width:760px){.ov-hero{padding:14px}.ov-hero .mg-card.ov-card{width:100%}}
 .clone-note{display:block;margin-top:6px;font-size:11.5px;line-height:1.5;color:var(--muted)}
 #mg-p-alerts .ov-manage-actions{grid-template-columns:repeat(auto-fit,minmax(165px,1fr))}
 /* 0.30 Vault: backup state, how it works, back up & restore */
@@ -2667,3 +2671,59 @@ body[data-theme="light"] .sched-main p{color:#3c4a44}
 body[data-theme="light"] .sched-native{border-color:#e3e9e5}
 body[data-theme="light"] .sched-agent{border-color:#eef2ef}
 body[data-theme="light"] .sched-out{background:#f6f8f7;border-color:#e0e6e2}
+@container (max-width:880px){
+  .mg-hero{height:auto;display:flex;flex-direction:column}
+  .mg-hero .mg-stage{position:relative;inset:auto;height:clamp(170px,32cqw,230px);flex:none}
+  .mg-hero .mg-card,.ov-hero .mg-card.ov-card{position:relative;left:auto;top:auto;bottom:auto;width:auto;min-height:0;margin:0 14px 14px}
+  .ov-hero{padding:0;align-items:stretch}
+  .mg-hero .mg-card:hover{transform:none}
+  .mg-stage-caption{top:12px;bottom:auto;left:16px;right:auto}
+}
+@container (max-width:520px){
+  .mg-hero .mg-card{margin:0 8px 8px;padding:16px}
+  .mg-id h1{font-size:20px}
+  .mg-hero .mg-card .ov-actions>button,.mg-hero-actions>button{flex:1 1 auto}
+}
+/* The agent's name, machine and status stay on one line and shorten before they squeeze the view tabs. */
+.agent-context{flex:1 1 220px;min-width:170px;flex-wrap:nowrap;overflow:hidden}
+.agent-context>strong{flex:0 1 auto;min-width:48px}
+.agent-context>.text-button{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.agent-context>.agent-chat-context{flex:0 1 auto;min-width:0;overflow:hidden}
+.agent-destinations .dest-tab{position:relative}
+.dest-live{width:6px;height:6px;border-radius:50%;background:#6ee7a8;box-shadow:0 0 0 3px #6ee7a81f;margin-left:-2px}
+/* The agent sidebar follows the open view: its chats (searchable, by day), its terminal windows or its Manage sections.
+   The view's actions sit at the bottom, so a long list never pushes them away. */
+.an-group>header small{font-size:10px;font-weight:600;letter-spacing:0;color:#56626a;margin-left:4px}
+.an-chats>header,.an-terms>header{position:sticky;top:-4px;z-index:1;background:inherit;padding-top:4px}
+.an-scroll{background:inherit}
+.an-search{position:relative;margin:0 2px 8px}
+.an-search>span{position:absolute;left:9px;top:50%;transform:translateY(-50%);display:flex;color:#5f6c72;pointer-events:none}
+.an-search svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round}
+.an-search input{width:100%;height:30px;padding:0 10px 0 28px;border-radius:9px;border:1px solid #262d30;background:#0f1214;color:#e6ecea;font-size:12px;outline:none}
+.an-search input:focus{border-color:#3b5a49;box-shadow:0 0 0 3px #6ee7a814}
+.an-search input::-webkit-search-cancel-button{filter:invert(.6)}
+.an-day{padding:10px 10px 3px;font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#56626a}
+.an-day:first-child{padding-top:2px}
+.an-chat-row{position:relative;display:flex;align-items:center;border-radius:9px}
+.an-chat-row .an-chat{padding-right:10px}
+.an-chat-row:hover .an-chat small,.an-chat-row:focus-within .an-chat small{visibility:hidden}
+.an-row-act{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:24px;height:24px;padding:0;border:0;border-radius:7px;background:transparent;color:#8b979c;opacity:0;transition:opacity .15s,background .15s,color .15s}
+.an-row-act svg,.an-foot svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.an-chat-row:hover .an-row-act,.an-row-act:focus-visible{opacity:1}
+.an-row-act:hover{background:#26302c;color:#6ee7a8}
+.an-chat .status-dot{display:inline-block;vertical-align:middle}
+.an-chat.an-win.hidden span{color:#7d8a90;font-style:italic}
+.an-chat.an-win.ended span{color:#6a767b;text-decoration:line-through}
+.an-foot{flex:none;display:flex;flex-direction:column;gap:1px;padding:8px;border-top:1px solid #20252a}
+.an-foot .an-item{min-height:31px;font-size:12px}
+.an-item:disabled{opacity:.45;cursor:default}
+.an-item:disabled:hover{background:transparent;color:inherit}
+.an-item.rail-only{display:none}
+@media (max-width:1100px){
+  .an-item.rail-only{display:flex}
+  .an-foot{border-top:0;padding:4px 8px 10px}
+  .an-search,.an-day{display:none}
+}
+body[data-theme="light"] .an-search input{background:#fff;border-color:#d6dfda;color:#17201c}
+body[data-theme="light"] .an-foot{border-color:#e3e9e5}
+body[data-theme="light"] .an-row-act:hover{background:#dff0e6;color:#15803d}

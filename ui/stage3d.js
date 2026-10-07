@@ -101,9 +101,15 @@ class Hero {
   resize() {
     if (!this.renderer) return; const w = this.el.clientWidth || 1, h = this.el.clientHeight || 1;
     this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
-    // The constellation sits on the right; the agent card covers the left of the hero.
-    const half = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * this.camera.position.z * this.camera.aspect;
-    this.world.position.x = w < 720 ? 0 : half * .36; this.dust.position.x = this.world.position.x * .5;
+    // The constellation sits in the part of the hero the card leaves free (beside it on wide screens, the whole
+    // stage when the card stacks below it), and shrinks to fit there so no satellite hides behind the card.
+    const halfH = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * 8, half = halfH * this.camera.aspect;
+    const box = this.el.getBoundingClientRect(), card = this.el.closest('.mg-hero')?.querySelector('.mg-card')?.getBoundingClientRect();
+    const covered = card && card.width && card.top < box.bottom - 8 && card.bottom > box.top + 8 && card.left < box.left + w / 2 ? Math.max(0, Math.min(w * .7, card.right - box.left)) : 0;
+    const free = w - covered, unit = 2 * half / w;
+    this.world.position.x = (covered + free / 2 - w / 2) * unit; this.dust.position.x = this.world.position.x * .5;
+    // The orbit spans about 11 units across (labels included) and 4.4 up and down.
+    this.world.scale.setScalar(Math.max(.4, Math.min(1, (free - 24) * unit / 11, 2 * halfH / 4.4)));
   }
   set(opts) {
     const agentChanged = opts.agent && opts.agent !== this.opts.agent;
@@ -153,7 +159,7 @@ class Hero {
     const speed = this.opts.busy ? 2.6 : this.opts.status === 'connected' ? 1 : .35, t = now / 1000;
     const enter = Math.min(1, (now - this.entered) / 1100), e = still ? 1 : back(enter);
     const p = this.pointer; p.x += (p.tx - p.x) * .08; p.y += (p.ty - p.y) * .08;
-    this.camera.position.x = p.x * 1.2; this.camera.position.y = -p.y * .8; this.camera.position.z = 8 + (1 - e) * 5; this.camera.lookAt(this.world.position.x * .6, 0, 0);
+    this.camera.position.x = p.x * 1.2; this.camera.position.y = -p.y * .8; this.camera.position.z = 8 + (1 - e) * 5; this.camera.lookAt(p.x * .4, -p.y * .3, 0);
     this.core.rotation.y += dt * .35 * speed; this.core.rotation.x += dt * .12 * speed; this.shell.rotation.y -= dt * .18 * speed; this.shell.rotation.z += dt * .05;
     const breathe = 1 + Math.sin(t * (this.opts.busy ? 4 : 1.6)) * .04; this.core.scale.setScalar(e * breathe); this.shell.scale.setScalar(e); this.halo.scale.setScalar(5.2 * e * (.95 + Math.sin(t * 1.3) * .05));
     this.dust.rotation.y += dt * .01; this.dust.position.y = Math.sin(t * .2) * .2;

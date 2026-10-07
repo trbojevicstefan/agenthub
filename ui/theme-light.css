@@ -586,6 +586,7 @@
 :where(body[data-theme="light"]) .grid-picker{background:#e4e8ea;border:1px solid #cfd6d8}
 :where(body[data-theme="light"]) .grid-pick{color:#50595c}
 :where(body[data-theme="light"]) .grid-pick.selected{color:#0a2315;background:#cfddd7}
+:where(body[data-theme="light"]) .mg-stage-caption{color:#6f8a7c}
 :where(body[data-theme="light"]) .sidebar-bottom>button.sidebar-hide-btn{color:#50595e}
 :where(body[data-theme="light"]) .manage-pop{background:linear-gradient(160deg,#dce1e4f7,#e5e9ebf7);border:1px solid #c7d0d4}
 :where(body[data-theme="light"]) .mp-col{background:#ffffff05;border:1px solid #ffffff08}
@@ -937,3 +938,14 @@
 :where(body[data-theme="light"]) .sched-native{border-top:1px solid #d6dde0}
 :where(body[data-theme="light"]) .sched-agent{border-bottom:1px solid #dbe1e3}
 :where(body[data-theme="light"]) .sched-out{background:#eceff0;border:1px solid #d6dde0}
+:where(body[data-theme="light"]) .dest-live{background:#6ee7a8}
+:where(body[data-theme="light"]) .an-group>header small{color:#56626a}
+:where(body[data-theme="light"]) .an-search>span{color:#5f6c72}
+:where(body[data-theme="light"]) .an-search input{border:1px solid #d4dadd;background:#ebeef0;color:#0e1211}
+:where(body[data-theme="light"]) .an-search input:focus{border-color:#aecabb}
+:where(body[data-theme="light"]) .an-day{color:#56626a}
+:where(body[data-theme="light"]) .an-row-act{color:#475054}
+:where(body[data-theme="light"]) .an-row-act:hover{background:#cfd9d5;color:#1b5e3b}
+:where(body[data-theme="light"]) .an-chat.an-win.hidden span{color:#50595e}
+:where(body[data-theme="light"]) .an-chat.an-win.ended span{color:#6a767b}
+:where(body[data-theme="light"]) .an-foot{border-top:1px solid #d9dee2}

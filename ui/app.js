@@ -1132,6 +1132,7 @@
         const row=!view&&document.querySelector(`#content .set-row[data-key="${CSS.escape(k)}"]`);if(row){row.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});row.classList.remove('flash');void row.offsetWidth;row.classList.add('flash');}
         const item=(row&&manageKeyed[k])||manageActions(a)[k];if(item&&!item.disabled)await item.run();});return;}
     if(name==='an-term'){showWindow(id);return;}
+    if(name==='an-pop'){const c=state.conversations.find(x=>x.id===id),a=c&&state.agents.find(x=>x.id===c.agentId);if(a)action(()=>openChatWindow(a,c.id));return;}
     if(name==='an-chat'){action(()=>openProjectChat(id));return;}
     if(name==='an-new-chat'){const a=state.agents.find(x=>x.id===id);if(a)action(async()=>{await api.newConversation({agentId:a.id});state=await api.snapshot();await setAgentMode(a,'chat');$('#message-input')?.focus();});return;}
     if(name==='an-connect'){const a=state.agents.find(x=>x.id===id),c=a&&agentActions(a).connect;if(c&&!c.disabled)action(()=>c.run());return;}
@@ -1456,7 +1457,7 @@
   const agentChats=a=>state.conversations.filter(c=>c.agentId===a.id).slice().sort((x,y)=>String(y.createdAt).localeCompare(String(x.createdAt)));
   function topbar(crumb,page='',screen=''){
     const a=selected(),chatty=a&&a.protocol!=='terminal'&&a.surface!=='terminal';
-    const destinations=a&&screen?`<div class="agent-context"><strong>${esc(title(a))}</strong><button type="button" class="text-button" data-action="agent-machine" title="Open machine">${esc(location(a))}</button><span>${dot(a)} ${esc(status(a))}</span>${screen==='manage'?`<span class="ac-section" aria-label="Section in view" ${mgSection==='overview'?'hidden':''}>&#8250; ${esc((AN_SECTIONS.find(x=>x.key===mgSection)||{}).name||'')}</span>`:''}${screen==='chat'&&(crumb||page)?`<div class="agent-chat-context">${crumb}${page}</div>`:''}</div><nav class="agent-destinations" aria-label="Agent destinations">${(chatty?[['chat','Chat'],['console','Terminal'],['manage','Manage']]:[['console','Terminal'],['manage','Manage']]).map(([mode,label])=>`<button type="button" class="secondary dest-tab ${screen===mode?'selected':''}" data-action="agent-mode" data-mode="${mode}" data-id="${esc(a.id)}" ${screen===mode?'aria-current="page"':''} title="${esc({chat:'Chat with it in Opaya',console:'Its CLI and shells in terminals',manage:'Settings and actions: model, keys, machine, clone, updates...'}[mode])}">${{chat:AN_ICON.chat,console:AN_ICON.console,manage:AN_ICON.overview}[mode]}<span>${label}</span></button>`).join('')}</nav>`:'';
+    const destinations=a&&screen?`<div class="agent-context"><strong>${esc(title(a))}</strong><button type="button" class="text-button" data-action="agent-machine" title="Open machine">${esc(location(a))}</button><span>${dot(a)} ${esc(status(a))}</span>${screen==='manage'?`<span class="ac-section" aria-label="Section in view" ${mgSection==='overview'?'hidden':''}>&#8250; ${esc((AN_SECTIONS.find(x=>x.key===mgSection)||{}).name||'')}</span>`:''}${screen==='chat'&&(crumb||page)?`<div class="agent-chat-context">${crumb}${page}</div>`:''}</div><nav class="agent-destinations" aria-label="Agent destinations">${(()=>{const live={chat:screen!=='chat'&&chatDock.some(d=>dockConv(d.id)?.agentId===a.id)?'Its chat window is open':'',console:screen!=='console'&&!$('#terminal-panel')?.hidden&&ctxWindows(a.id).some(v=>!v.hiddenPane)?'Its terminal is open beside this view':''};return (chatty?[['chat','Chat'],['console','Terminal'],['manage','Manage']]:[['console','Terminal'],['manage','Manage']]).map(([mode,label])=>`<button type="button" class="secondary dest-tab ${screen===mode?'selected':''}" data-action="agent-mode" data-mode="${mode}" data-id="${esc(a.id)}" ${screen===mode?'aria-current="page"':''} title="${esc({chat:'Chat with it in Opaya',console:'Its CLI and shells in terminals',manage:'Settings and actions: model, keys, machine, clone, updates...'}[mode])}">${{chat:AN_ICON.chat,console:AN_ICON.console,manage:AN_ICON.overview}[mode]}<span>${label}</span>${live[mode]?`<i class="dest-live" title="${live[mode]}"></i>`:''}</button>`).join('');})()}</nav>`:'';
     $('#topbar').innerHTML=`<button type="button" class="topbar-back" data-action="nav-back" ${navBack.length?'':'disabled'} title="${navBack.length?esc(`Back to ${navLabel(navBack.at(-1))} (Alt+Left)`):'Back'}" aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg></button>${destinations||`<div class="breadcrumb">${crumb}</div>${page?`<div class="topbar-page">${page}</div>`:''}<div class="topbar-spacer"></div>`}<button type="button" class="topbar-search" data-action="find" title="Find anything: agents, settings, actions, machines, chats and keys"><span class="topbar-search-ico" aria-hidden="true">${dkIcon('inspect')}</span><span class="topbar-search-text">Search</span><kbd>${esc(mod().trim())}${state.platform==='darwin'?'':'+'}K</kbd></button><div class="topbar-actions"></div>`;
     placeBrowser();
   }
@@ -1608,6 +1609,14 @@
     model:anI('<path d="M12 3 20 12l-8 9-8-9z"/>'),access:anI('<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3"/>'),machine:anI('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>'),
     deploy:anI('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>'),projects:anI('<path d="M3 7h7l2 2h9v10H3z"/>'),care:anI('<path d="M20 12a8 8 0 1 1-3-6.2M20 4v5h-5"/>'),
     profile:anI('<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>'),danger:anI('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>')};
+  Object.assign(AN_ICON,{pop:anI('<path d="M14 4h6v6M20 4l-8 8"/><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'),export:anI('<path d="M12 4v11M7 10l5 5 5-5M4 19h16"/>'),history:anI('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>'),
+    search:anI('<circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5"/>')});
+  // The agent sidebar's chat search (kept while you move between its chats).
+  let anFilter='';
+  document.addEventListener('input',event=>{if(event.target.id!=='an-chat-filter')return;anFilter=event.target.value;const a=selected();if(a)renderAgentNav(a,'chat');});
+  document.addEventListener('keydown',event=>{if(event.target.id==='an-chat-filter'&&event.key==='Escape'&&anFilter){event.preventDefault();event.stopPropagation();anFilter='';const a=selected();if(a)renderAgentNav(a,'chat');}},true);
+  // A chat's day group, as the sidebar and History list them.
+  function dayLabel(iso){const t=new Date(iso).getTime(),today=new Date();today.setHours(0,0,0,0);const d=today.getTime(),day=864e5;return t>=d?'Today':t>=d-day?'Yesterday':t>=d-6*day?'This week':t>=d-29*day?'This month':'Older';}
   Object.assign(AN_ICON,{keys:AN_ICON.access,vault:AN_ICON.access,mcp:anI('<path d="M9 7V3M15 7V3M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>'),machines:AN_ICON.machine,newVps:AN_ICON.plus,dockerize:anI('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/>'),backups:AN_ICON.projects,surface:AN_ICON.chat,connect:AN_ICON.power,library:anI('<path d="m12 3 2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>'),shareSkills:anI('<path d="M4 8h13l-3-3M20 16H7l3 3"/>')});
   // From general to specific; each action of the agent is in exactly one of them. hk: its key on the Manage screens.
   const AN_SECTIONS=[
@@ -1669,40 +1678,56 @@
         </section>
       </div>`;
   }
+  let anFilterAgent='';
   function renderAgentNav(a,screen){
     const nav=$('#agent-side');if(!nav)return;
+    if(a&&a.id!==anFilterAgent){anFilterAgent=a.id;anFilter='';}
     if(screen==='opaya'){const html=opayaSideHtml();if(nav.hidden){nav.hidden=false;document.body.classList.add('agent-open');requestAnimationFrame(()=>placePanes());}if(html!==anHtml){anHtml=html;nav.innerHTML=html;}return;}
     if(!a||!screen){if(!nav.hidden){nav.hidden=true;anHtml='';document.body.classList.remove('agent-open');requestAnimationFrame(()=>placePanes());}return;}
-    const chatty=a.protocol!=='terminal'&&a.surface!=='terminal',chats=chatty?agentChats(a):[],winOpen=chatDock.some(d=>dockConv(d.id)?.agentId===a.id),on=a.status==='connected',termOpen=!$('#terminal-panel')?.hidden&&ctxWindows(a.id).some(v=>!v.hiddenPane);
+    // The sidebar follows the view open in the top bar's Chat / Terminal / Manage tabs (they are the only switch):
+    // Chat lists the agent's chats, Terminal its terminal windows, Manage its sections.
+    const chatty=a.protocol!=='terminal'&&a.surface!=='terminal',on=a.status==='connected';
     const item=(cls,attrs,icon,label,extra='')=>`<button type="button" class="an-item ${cls}" ${attrs}><span class="an-ico" aria-hidden="true">${icon}</span><span class="an-label">${esc(label)}</span>${extra}</button>`;
-    const acts=manageActions(a),sw={itrust:!!a.itrust,browser:hasBrowser(a),pin:!!a.pinned},hasExport=screen==='chat'&&!!currentConversation();
-    // The open view's or section's actions, indented under it; each opens its section, marks its row and runs.
-    const sub=(section,open)=>{if(!open)return '';const list=(AN_SUB[section]||[]).filter(([k])=>k==='export'?hasExport:acts[k]);if(!list.length)return '';
-      // Terminal also lists its terminal windows: a hidden one comes back with a click.
-      const wins=section==='console'?ctxWindows(a.id).map(v=>`<button type="button" class="an-sub-item an-win ${v.hiddenPane?'hidden':''} ${v.exited?'ended':''}" data-action="an-term" data-id="${esc(v.id)}" title="${v.hiddenPane?'Hidden: click to show it':'Its window'}"><span>${esc(tabTitle(v))}</span><small>${v.exited?'ended':v.hiddenPane?'hidden':'open'}</small></button>`).join(''):'';
-      return `<div class="an-sub" role="group">${wins}${list.map(([k,label])=>`<button type="button" class="an-sub-item ${acts[k]?.danger?'danger':''}" data-action="an-sub" data-section="${section}" data-key="${k}" ${acts[k]?.disabled?`disabled title="${esc(acts[k].hint||'Unavailable for this agent')}"`:''} ${k in sw?`role="switch" aria-checked="${sw[k]}"`:''}><span>${esc(label)}${acts[k]?.disabled?`<small>${esc(acts[k].hint||'Unavailable for this agent')}</small>`:''}</span>${k in sw?`<span class="an-switch ${sw[k]?'on':''}" aria-hidden="true"></span>`:''}</button>`).join('')}</div>`;};
-    const caret=open=>`<span class="an-caret ${open?'open':''}" aria-hidden="true">&#8250;</span>`;
-    const keys=keyLists.get(a.id),backAt=backupLists.get(a.id)?.backups?.[0]?.createdAt,running=agentJobs(a).length;
-    const flag={access:keys&&!keys.keys.length?'warn':'',care:running?'busy':a.install?.backup&&backupLists.has(a.id)&&(!backAt||Date.now()-new Date(backAt)>7*864e5)?'warn':'',profile:a.error?'bad':''};
+    const acts=manageActions(a);
+    // The view's actions as rows: a label beside the sidebar's full width, an icon in the narrow sidebar.
+    const actRow=(section,k,icon,label,hint,cls='')=>{const x=acts[k];if(!x)return '';return item(cls,`data-action="an-sub" data-section="${section}" data-key="${k}" ${x.disabled?`disabled`:''} title="${esc(x.disabled?x.hint||'Unavailable for this agent':hint)}"`,icon,label);};
+    let body='',foot='';
+    if(screen==='chat'&&chatty){
+      const chats=agentChats(a),cur=currentConversation(),q=anFilter.trim().toLowerCase();
+      const list=q?chats.filter(c=>`${chatLabel(c)} ${projectOf(c)?.name||''}`.toLowerCase().includes(q)):chats,groups=[];
+      for(const c of list.slice(0,300)){const l=dayLabel(c.createdAt);let g=groups.find(x=>x[0]===l);if(!g)groups.push(g=[l,[]]);g[1].push(c);}
+      const row=c=>`<div class="an-chat-row ${cur?.id===c.id?'active':''}" data-hist="${esc(c.id)}"><button type="button" class="an-chat ${cur?.id===c.id?'active':''}" data-action="an-chat" data-id="${esc(c.id)}" title="${esc(chatLabel(c))}" ${cur?.id===c.id?'aria-current="true"':''}><span>${esc(chatLabel(c))}</span><small>${a.busy&&cur?.id===c.id?'<span class="status-dot working"></span>':esc(ago(c.createdAt))}</small></button><button type="button" class="an-row-act" data-action="an-pop" data-id="${esc(c.id)}" title="Open in a window: it floats beside every screen while you work elsewhere" aria-label="Open ${esc(chatLabel(c))} in a window">${AN_ICON.pop}</button></div>`;
+      body=`<section class="an-group an-chats"><header><span>Chats${chats.length?` <small>${chats.length}</small>`:''}</span><button type="button" class="an-add" data-action="an-new-chat" data-id="${esc(a.id)}" title="New chat (${mod()}N)" aria-label="New chat">${AN_ICON.plus}</button></header>
+          ${chats.length>6?`<div class="an-search"><span aria-hidden="true">${AN_ICON.search}</span><input id="an-chat-filter" type="search" placeholder="Search chats" aria-label="Search ${esc(title(a))}'s chats" autocomplete="off" spellcheck="false"></div>`:''}
+          <div class="an-chat-list">${groups.map(([l,items])=>`<div class="an-day">${esc(l)}</div>${items.map(row).join('')}`).join('')||`<p class="an-empty">${chats.length?'No chat matches.':'No chats yet. Start one with +.'}</p>`}</div></section>`;
+      foot=[item('rail-only',`data-action="an-new-chat" data-id="${esc(a.id)}" title="New chat (${mod()}N)"`,AN_ICON.plus,'New chat'),
+        item('',`data-action="an-pop" data-id="${esc(cur?.id||'')}" ${cur?'':'disabled'} title="Move this chat into a floating window. It stays open beside every screen; its expand button brings it back here."`,AN_ICON.pop,'Open in a window'),
+        item('',`data-action="export" ${cur?'':'disabled'} title="Save this chat as a Markdown file"`,AN_ICON.export,'Export this chat'),
+        item('',`data-action="history-toggle" title="Every agent's chats, with search (${mod()}Shift+H)"`,AN_ICON.history,'All history')].join('');
+    }else if(screen==='console'){
+      const wins=ctxWindows(a.id);
+      body=`<section class="an-group an-terms"><header><span>Terminal windows${wins.length?` <small>${wins.length}</small>`:''}</span></header>
+          ${wins.length?wins.map(v=>`<button type="button" class="an-chat an-win ${v.hiddenPane?'hidden':''} ${v.exited?'ended':''} ${v.id===currentTerminal&&!v.hiddenPane?'active':''}" data-action="an-term" data-id="${esc(v.id)}" title="${v.hiddenPane?'Hidden: click to show it':'Show this window'}"><span>${esc(tabTitle(v))}</span><small>${v.exited?'ended':v.hiddenPane?'hidden':'open'}</small></button>`).join(''):`<p class="an-empty">No terminal windows yet.</p>`}</section>`;
+      // New windows come from the terminal's own + New; the sidebar adds what the terminal does not show.
+      foot=actRow('console','files',AN_ICON.projects,'Files',`Browse files on ${location(a)}`);
+    }else{
+      const keys=keyLists.get(a.id),backAt=backupLists.get(a.id)?.backups?.[0]?.createdAt,running=agentJobs(a).length;
+      const flag={access:keys&&!keys.keys.length?'warn':'',care:running?'busy':a.install?.backup&&backupLists.has(a.id)&&(!backAt||Date.now()-new Date(backAt)>7*864e5)?'warn':'',profile:a.error?'bad':''};
+      body=`<section class="an-group"><header><span>Manage</span></header>
+          ${item(mgSection==='overview'?'active':'','data-action="agent-section" data-key="overview" title="Overview: status, what it is connected to and quick actions (Esc)"',AN_ICON.overview,'Overview')}
+          ${AN_SECTIONS.slice(1).map(x=>item(`${mgSection===x.key?'active':''} ${x.key==='danger'?'danger':''}`,`data-action="agent-section" data-key="${x.key}" title="${esc(x.desc)} (${x.hk})"`,x.icon,x.name,`${flag[x.key]?`<span class="an-flag ${flag[x.key]}"></span>`:''}<kbd>${x.hk}</kbd>`)).join('')}
+        </section>`;
+    }
     const html=`<div class="an-head">
         <button type="button" class="an-id" data-action="agent-section" data-key="overview" title="${esc(title(a))}: overview">${badge(a)}<span class="an-id-text"><strong>${esc(title(a))}</strong><small>${dot(a)}${esc(status(a))}</small><small class="an-where" title="${esc(location(a))}">${esc(location(a))}</small></span></button>
         <button type="button" class="an-power ${on?'on':''} ${a.status==='connecting'||a.busy?'busy':''}" data-action="an-connect" data-id="${esc(a.id)}" title="${esc(agentActions(a).connect.label)}" aria-label="${esc(agentActions(a).connect.label)}" aria-pressed="${on}">${AN_ICON.power}</button>
       </div>
-      <nav class="an-views" aria-label="${esc(title(a))}">
-        ${chatty?item(screen==='chat'?'active':'',`data-action="agent-mode" data-mode="chat" data-id="${esc(a.id)}" title="Chat"`,AN_ICON.chat,'Chat',(winOpen&&screen!=='chat'?'<span class="an-live" title="Its chat window is open"></span>':'')+caret(screen==='chat'))+sub('chat',screen==='chat'):''}
-        ${item(`${screen==='console'?'active':''} ${termOpen&&screen!=='console'?'open':''}`,`data-action="agent-mode" data-mode="console" data-id="${esc(a.id)}" title="Terminal: its terminal"`,AN_ICON.console,'Terminal',(termOpen&&screen!=='console'?'<span class="an-live" title="Open next to the chat"></span>':'')+caret(screen==='console'||termOpen))+sub('console',screen==='console'||termOpen)}
-        ${item(screen==='manage'?'active':'',`data-action="agent-mode" data-mode="manage" data-id="${esc(a.id)}" title="Manage this agent"`,AN_ICON.overview,'Manage')}
-      </nav>
-      <div class="an-scroll">
-        ${chatty?`<section class="an-group"><header><span>Chats</span><button type="button" class="an-add" data-action="an-new-chat" data-id="${esc(a.id)}" title="New chat (${mod()}N)" aria-label="New chat">${AN_ICON.plus}</button></header>
-          ${chats.length?chats.slice(0,6).map(c=>`<button type="button" class="an-chat ${screen==='chat'&&c.id===state.activeConversationId?'active':''}" data-action="an-chat" data-id="${esc(c.id)}" title="${esc(chatLabel(c))}"><span>${esc(chatLabel(c))}</span><small>${esc(ago(c.createdAt))}</small></button>`).join(''):'<p class="an-empty">No chats yet</p>'}
-          ${chats.length>6?`<button type="button" class="an-more" data-action="history-toggle">All ${chats.length} chats</button>`:chats.length?'<button type="button" class="an-more" data-action="history-toggle">Search chats</button>':''}</section>`:''}
-        <section class="an-group"><header><span>Manage</span></header>
-          ${AN_SECTIONS.slice(1).map(x=>item(`${screen==='manage'&&mgSection===x.key?'active':''} ${x.key==='danger'?'danger':''}`,`data-action="agent-section" data-key="${x.key}" title="${esc(x.desc)}${screen==='manage'?` (${x.hk})`:''}"`,x.icon,x.name,`${flag[x.key]?`<span class="an-flag ${flag[x.key]}"></span>`:''}${screen==='manage'?`<kbd>${x.hk}</kbd>`:''}`)).join('')}
-        </section>
-      </div>`;
+      <div class="an-scroll an-mode-${esc(screen)}">${body}</div>${foot?`<div class="an-foot" role="group" aria-label="${screen==='chat'?'This chat':'Terminal'}">${foot}</div>`:''}`;
+    // Typing in the chat search re-renders the list; the box keeps its text, focus and caret.
+    const typing=document.activeElement?.id==='an-chat-filter'?[document.activeElement.selectionStart,document.activeElement.selectionEnd]:null;
     if(nav.hidden){nav.hidden=false;document.body.classList.add('agent-open');requestAnimationFrame(()=>placePanes());}
     if(html!==anHtml){anHtml=html;nav.innerHTML=html;}
+    const f=$('#an-chat-filter');if(f){if(f.value!==anFilter)f.value=anFilter;if(typing){f.focus();f.setSelectionRange(...typing);}}
   }
   // Every action of an agent by key, as the Manage pages and the agent's sidebar offer them; manage-run runs them.
   function manageActions(a){
@@ -1782,7 +1807,7 @@
     const fact=(text,key,tone='',hint='')=>text?`<button type="button" class="ov-chip ${tone}" data-action="agent-section" data-key="${key}" title="${esc(hint||AN_SECTIONS.find(x=>x.key===key)?.name||'')}">${esc(text)}</button>`:'';
     const facts=[fact(location(a),'machine','','Machine & Docker'),fact(version,'care','',fullVersion?`${fullVersion} / Updates & backups`:''),fact(shared.length?`${isProfile?'Profile on':'Shared'} ${labels[cap.framework]||'install'} \u00b7 ${shared.length+1} agents`:'','care','',sharedHelp),
       fact(keyList?plural(keyList.keys.length,'API key'):'','access',keyList&&!keyList.keys.length?'warn':''),fact(cap.backup&&backs?lastBack?`Backed up ${ago(lastBack.createdAt)} ago`:'Never backed up':'','care',cap.backup&&backs&&(!lastBack||backAge>7)?'warn':''),fact(a.itrust?'iTrust on':'','access','warn')].join('');
-    const ovHero=`<section class="mg-hero ov-hero" data-drop="key" data-agent-target="${esc(a.id)}"><div class="mg-stage" id="mg-stage" aria-hidden="true"></div>
+    const ovHero=`<section class="mg-hero ov-hero" data-drop="key" data-agent-target="${esc(a.id)}"><div class="mg-stage" id="mg-stage" aria-hidden="true"></div><span class="mg-stage-caption" aria-hidden="true">What ${esc(title(a))} is connected to. Click one to open it.</span>
           <div class="mg-card glass ov-card" data-drag="agent" data-drag-id="${esc(a.id)}" title="Drag onto a machine in Deploy & clone to copy ${esc(title(a))} there">
             <div class="mg-id">${badge(a,true)}<div class="mg-id-text"><h1>${esc(title(a))}</h1><p>${esc(description(a))}</p></div></div>
             <div class="ov-facts"><span class="ov-status ${esc(a.busy?'working':a.error?'error':a.status||'disconnected')}"><i></i>${esc(status(a))}</span>${facts}</div>
@@ -1901,7 +1926,8 @@
   for(const type of ['wheel','touchmove'])$('#content')?.addEventListener(type,()=>{mgPinned='';},{passive:true});
   // The stage's labels open the section about them.
   document.addEventListener('click',event=>{const label=event.target.closest('.ov-hero .stage-label');const a=label&&selected();if(!a)return;
-    const key={machine:'machine',docker:'machine',key:'access',git:'projects',chat:'projects',skill:'model'}[label.dataset.kind];if(key)action(()=>openManage(a.id,key));});
+    if(label.dataset.kind==='chat'){action(()=>setAgentMode(a,'chat'));return;}
+    const key={machine:'machine',docker:'machine',key:'access',git:'projects',skill:'model'}[label.dataset.kind];if(key)action(()=>openManage(a.id,key));});
   // On the Manage screen a letter goes to its section (shown in the agent's sidebar) and Esc back to the top, unless
   // something is being typed or a dialog or menu is open.
   document.addEventListener('keydown',event=>{if(!manageId||event.ctrlKey||event.metaKey||event.altKey||$('#app-dialog')||document.querySelector('dialog[open]')||$('.context-menu'))return;const el=document.activeElement;if(el&&(el.isContentEditable||/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)||viewOf(el)))return;
@@ -2015,11 +2041,16 @@
     window.addEventListener('resize',()=>renderDock());
     return root;
   }
-  // The agent's window: an open one, else its latest chat, else a new chat that does not change the selected agent.
+  // The agent's window: the chat on screen, else an open window, else its latest chat, else a new chat that does not
+  // change the selected agent.
   async function openChatWindow(a,conversationId=''){
     if(!a)return;if(a.protocol==='terminal'||a.surface==='terminal'&&!conversationId){await setAgentMode(a,'console');return;}
-    let id=conversationId||chatDock.find(d=>dockConv(d.id)?.agentId===a.id)?.id||agentChats(a)[0]?.id;
+    const shown=!overview&&!opayaView&&!playgroundView&&selected()?.id===a.id&&modeOf(a)==='chat'?currentConversation()?.id:'';
+    let id=conversationId||shown||chatDock.find(d=>dockConv(d.id)?.agentId===a.id)?.id||agentChats(a)[0]?.id;
     if(!id){const c=await api.newConversation({agentId:a.id,activate:false});id=c.id;state=await api.snapshot();}
+    // A chat is never in the main view and its window at once (the dock hides a window whose chat fills the page), so
+    // popping out the chat on screen shows the agent's Manage page behind its window.
+    if(id===shown){await openManage(a.id);if(!tipsSeen.has('tip:chat-window')){tipsSeen.add('tip:chat-window');toast('The chat is in a window now. It stays beside every screen; its expand button brings it back full size.');}}
     const at=chatDock.findIndex(d=>d.id===id);if(at>=0)chatDock.splice(at,1);
     for(const d of chatDock)d.min=true;chatDock.unshift({id,min:false});chatDock=chatDock.slice(0,8);dockUnread.delete(id);
     saveView();renderDock();if(manageId)render();
@@ -3473,8 +3504,8 @@
       <button type="button" class="history-open" data-hist-act="open" title="${esc(c.title)}">${!historyAgent&&a?badge(a):''}<span class="history-text"><span class="history-title">${esc(c.title)}</span><span class="history-meta">${chatChip(c)}${c.essence?`<span class="essence-mark" title="Condensed by ${esc(c.essence.by||'')}">&#10022; Essence</span>`:''}<small>${busyIn(c)?'<span class="status-dot working"></span>':esc(ago(c.createdAt))}</small></span></span></button>
       <div class="history-actions"><button type="button" class="term-icon" data-hist-act="condense" title="Condense to the essence" aria-label="Condense"><span aria-hidden="true">&#8860;</span></button><button type="button" class="term-icon" data-hist-act="share" title="Share" aria-label="Share"><span aria-hidden="true">&#8599;</span></button><button type="button" class="term-icon danger" data-hist-act="delete" title="Delete chat" aria-label="Delete chat"><span aria-hidden="true">&#10005;</span></button></div></div>`;};
     const group=(label,items)=>items.length?`<div class="history-group"><div class="history-group-label">${esc(label)}<small>${items.length}</small></div>${items.map(row).join('')}</div>`:'';
-    const buckets=[];const today=new Date();today.setHours(0,0,0,0);const day=86400000;
-    for(const c of list){const t=new Date(c.createdAt).getTime(),label=t>=today.getTime()?'Today':t>=today.getTime()-day?'Yesterday':t>=today.getTime()-6*day?'This week':t>=today.getTime()-29*day?'This month':'Older';let b=buckets.find(x=>x[0]===label);if(!b)buckets.push(b=[label,[]]);b[1].push(c);}
+    const buckets=[];
+    for(const c of list){const label=dayLabel(c.createdAt);let b=buckets.find(x=>x[0]===label);if(!b)buckets.push(b=[label,[]]);b[1].push(c);}
     const tabs=[['all','All'],['chat','Chats'],['project','Projects'],['playground','Playground']];
     const html=`<header class="projects-header"><strong>History</strong><small>${all.length||''}</small></header>
       <div class="history-toolbar"><select id="history-agent" aria-label="Agent"><option value="">All agents</option>${state.agents.map(a=>`<option value="${esc(a.id)}" ${a.id===historyAgent?'selected':''}>${esc(title(a))}</option>`).join('')}</select><button class="icon-button" data-action="history-toggle" title="Close history" aria-label="Close history">&#10005;</button></div>
@@ -3516,7 +3547,7 @@
     else if(act==='delete')deleteChat(c);
     else if(act==='share'){const r=b.getBoundingClientRect();openMenu(r.left-180,r.bottom+4,shareItems(c),'Share',b);}
   });
-  document.addEventListener('contextmenu',event=>{const r=event.target.closest('#history-panel [data-hist]'),pc=event.target.closest('[data-action="project-open-chat"]');if(!r&&!pc)return;const c=state.conversations.find(x=>x.id===(r?r.dataset.hist:pc.dataset.id));if(!c)return;event.preventDefault();event.stopPropagation();openMenu(event.clientX,event.clientY,historyMenu(c),c.title);},true);
+  document.addEventListener('contextmenu',event=>{const r=event.target.closest('#history-panel [data-hist],#agent-side [data-hist]'),pc=event.target.closest('[data-action="project-open-chat"]');if(!r&&!pc)return;const c=state.conversations.find(x=>x.id===(r?r.dataset.hist:pc.dataset.id));if(!c)return;event.preventDefault();event.stopPropagation();openMenu(event.clientX,event.clientY,historyMenu(c),c.title);},true);
   function renameChat(c){
     modal('Rename chat','',`<form id="chat-rename-form"><label class="field"><span>Title</span><input name="title" value="${esc(c.title)}" maxlength="120" autocomplete="off" required></label><div class="modal-footer"><div></div><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Rename</button></div></div></form>`);
     const f=$('#chat-rename-form');f.elements.title.select();
