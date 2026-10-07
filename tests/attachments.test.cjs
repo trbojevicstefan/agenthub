@@ -7,7 +7,10 @@ const {childMock,context,temp,secure}=require('./helpers.cjs');
 const posix=process.platform==='win32'?'runs a POSIX shell':false;
 const PNG=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==','base64');
 const PDF=Buffer.concat([Buffer.from('%PDF-1.7\n%'),Buffer.from([0xe2,0xe3,0xcf,0xd3]),Buffer.from('\n1 0 obj\n<<>>\nendobj\n')]);
-async function files(t){const dir=await temp(t),p=name=>path.join(dir,name);
+// Attachments are read from their resolved path (on Windows the long name, not the 8.3 short name of the temp folder),
+// so the tests build their expected paths from the resolved folder too.
+const real=async t=>fs.realpath(await temp(t));
+async function files(t){const dir=await real(t),p=name=>path.join(dir,name);
   await fs.writeFile(p('notes.md'),'# Notes\nSee ```js\nx()\n```\n');await fs.writeFile(p('photo.txt'),PNG);await fs.writeFile(p('doc.pdf'),PDF);await fs.writeFile(p('empty.txt'),'');
   await fs.writeFile(p('data.bin'),Buffer.from([1,2,0,3]));await fs.writeFile(p('big.log'),'line\n'.repeat(130*1024));await fs.mkdir(p('folder'));return {dir,p};}
 async function server(t,handler){const s=http.createServer(handler);await new Promise(r=>s.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>{s.closeAllConnections();s.close(r);}));return `http://127.0.0.1:${s.address().port}/v1`;}
@@ -40,7 +43,7 @@ test('files are read as text, image or other file by their bytes, and Opaya\'s o
   await fs.truncate(p('one'),21*1024*1024);await assert.rejects(()=>attach.load([{path:p('one')}]),/one is 21\.0 MB/);
 });
 test('attachment restrictions check links and preserve allowed resolved paths',{skip:process.platform==='win32'},async t=>{
-  const dir=await temp(t),root=path.join(dir,'opaya'),p=name=>path.join(dir,name);
+  const dir=await real(t),root=path.join(dir,'opaya'),p=name=>path.join(dir,name);
   await fs.mkdir(path.join(root,'attachments'),{recursive:true});
   await fs.writeFile(path.join(root,'vault.json'),'fixture private content');await fs.writeFile(p('notes.txt'),'public notes');
   await fs.mkdir(path.join(root,'..private'));await fs.writeFile(path.join(root,'..private','workspace.json'),'fixture private content');
@@ -78,7 +81,7 @@ test('the prompt carries text files as fenced blocks and names the rest with the
   assert.equal(attach.earlier([{name:'a.png',kind:'image',mime:'image/png',size:2048}]),'[Attached earlier, not sent again: a.png (image, 2.0 KB)]');
 });
 test('pasted files are staged by the window, moved into the chat folder by the service and cleaned up',async t=>{
-  const root=await temp(t),{p}=await files(t);
+  const root=await real(t),{p}=await files(t);
   const same={agentId:'a',text:'x',attachments:[{path:p('notes.md')}]};assert.equal((await attach.stage(same,root)).input,same,'nothing pasted, nothing written');
   const staged=await attach.stage({agentId:'a',text:'look',attachments:[{name:'shot.png',mime:'image/png',data:PNG.toString('base64')},{path:p('notes.md')}]},root);
   assert.equal(staged.files.length,1);assert.equal(path.dirname(staged.files[0]),path.join(root,'attachments','pasted'));assert.deepEqual(staged.input.attachments[1],{path:p('notes.md')});
@@ -95,7 +98,7 @@ test('pasted files are staged by the window, moved into the chat folder by the s
   await attach.remove(root,'conv-1');await assert.rejects(()=>fs.stat(path.join(root,'attachments','conv-1')));
 });
 test('files for an agent on another machine or in a container are copied there over stdin',{skip:posix},async t=>{
-  const home=await temp(t),{p}=await files(t),[pdf]=await attach.load([{path:p('doc.pdf')}]),seen=[],events=[];
+  const home=await real(t),{p}=await files(t),[pdf]=await attach.load([{path:p('doc.pdf')}]),seen=[],events=[];
   const ssh={name:'vps hermes',provider:'hermes',protocol:'acp',transport:'ssh',hostId:'h',command:'hermes',args:[],cwd:'/srv'};
   const where=await attach.locate(ssh,{name:'my-vps'},[pdf],'conv-1',{spawn:shell(home,seen),onEvent:e=>events.push(e)});
   const remote=where.get(pdf);assert.match(remote,new RegExp(`^${home}/\\.opaya/attachments/conv-1/[0-9a-f]{8}-doc\\.pdf$`));assert.deepEqual(await fs.readFile(remote),PDF);
@@ -111,7 +114,7 @@ test('files for an agent on another machine or in a container are copied there o
   assert.equal(attach.placeOf({protocol:'openai',transport:'http',endpoint:'https://gw.example.com/v1'}),'api');assert.equal(attach.placeOf({protocol:'openai',transport:'http',endpoint:'http://127.0.0.1:8642/v1'}),'local');
 });
 test('the broker keeps only name, size, type and kind in the transcript and gives the adapter the files',async t=>{
-  const root=await temp(t),{p}=await files(t),runs=[];
+  const root=await real(t),{p}=await files(t),runs=[];
   const b=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory:()=>({connect:async()=>({}),close(){},run:async ctx=>{runs.push(ctx);return {};}})});await b.init();t.after(()=>b.close());
   const a=await b.saveAgent({agent:{name:'claude',provider:'claude',protocol:'claude',command:'claude'}});await b.connect(a.id);
   await assert.rejects(()=>b.send({agentId:a.id,text:'x',attachments:Array.from({length:11},()=>({path:p('notes.md')}))}),/at most 10/);
@@ -157,7 +160,7 @@ test('Hermes and OpenClaw get small images inline and other files by the path wh
   await assert.rejects(async()=>remote.run(context({attachments:await items('doc.pdf')})),/Opaya reaches Cloud Hermes only through its API/);
 });
 test('Claude gets images as stream-json image blocks and reads other files from a folder it is allowed',async t=>{
-  const root=await temp(t),{p}=await files(t),filesDir=path.join(root,'attachments','c1');let argv,input;
+  const root=await real(t),{p}=await files(t),filesDir=path.join(root,'attachments','c1');let argv,input;
   const a=new ClaudeAdapter({agent:{args:[]},spawnAgent:(_a,args)=>{argv=args;return claudeChild(x=>input=x);}});
   const items=await attach.load(['photo.txt','notes.md','doc.pdf'].map(n=>({path:p(n)})));
   await a.run(context({text:'check',attachments:items,filesDir,conversation:{id:'c1',externalSessionId:''}}));
@@ -169,7 +172,7 @@ test('Claude gets images as stream-json image blocks and reads other files from 
   await a.run(context({text:'plain',attachments:await attach.load([{path:p('notes.md')}]),filesDir}));assert.equal(argv.includes('--input-format'),false);assert.equal(argv.includes('--add-dir'),false);assert.match(input,/^plain\n\n\[Attached file: notes\.md/);
 });
 test('Claude over SSH gets other files copied to that machine first',{skip:posix},async t=>{
-  const home=await temp(t),{p}=await files(t);let argv;
+  const home=await real(t),{p}=await files(t);let argv;
   const a=new ClaudeAdapter({agent:{name:'vps claude',transport:'ssh',command:'claude',args:[]},host:{name:'vps'},spawnAgent:(agent,args,host)=>{if(args[0]==='-c')return shell(home)(agent,args);argv=args;return claudeChild();}});
   await a.run(context({attachments:await attach.load([{path:p('doc.pdf')}]),conversation:{id:'c9',externalSessionId:''}}));
   assert.equal(argv[argv.indexOf('--add-dir')+1],path.join(home,'.opaya','attachments','c9'));

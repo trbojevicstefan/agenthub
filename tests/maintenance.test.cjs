@@ -102,7 +102,7 @@ test('this computer keeps its Opaya name, note and backup folder across restarts
   await assert.rejects(()=>b.saveSettings({machineName:'x'.repeat(61)}),/machine name/);
   await b.close();
   const again=await make();
-  assert.deepEqual({...again.data.settings},{itrustAll:false,itrustOpaya:true,opayaDefaults:2,machineName:'Studio Mac',machineNote:'Office',backupDir:dir,updateChecks:true,autoFix:true,interface:'',chatOpens:'full',consoleOpens:'panel',notifyReplies:true,notifyApprovals:true,notifyJobs:true,notifySound:true,tips:true,autoConnect:false,sendKey:'enter'});
+  assert.deepEqual({...again.data.settings},{itrustAll:false,itrustOpaya:true,opayaDefaults:2,machineName:'Studio Mac',machineNote:'Office',backupDir:dir,updateChecks:true,autoFix:true,interface:'',chatOpens:'full',consoleOpens:'panel',notifyReplies:true,notifyApprovals:true,notifyJobs:true,notifySound:true,tips:true,autoConnect:false,sendKey:'enter',vaultMcp:true});
   // iTrust for the Opaya Agent is on after the 0.19 upgrade, and stays off once the user turns it off.
   // Chat opens a chat window unless the user picks the full view.
   await again.saveSettings({chatOpens:'window',consoleOpens:'full'});assert.equal(again.data.settings.chatOpens,'window');assert.equal(again.data.settings.consoleOpens,'full');await assert.rejects(()=>again.saveSettings({consoleOpens:'tab'}),/full screen/);await assert.rejects(()=>again.saveSettings({chatOpens:'popup'}),/chat window or the full view/);
