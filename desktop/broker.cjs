@@ -51,7 +51,7 @@ class Broker{
     this.data.agents=this.data.agents.map(a=>schema.agent(a));
     // 0.19: iTrust for the Opaya Agent is on by default (once for existing settings too); the user can turn it off.
     {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:s.opayaDefaults===2?!!s.itrustOpaya:true,opayaDefaults:2,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false,interface:['chat','terminal'].includes(s.interface)?s.interface:'',chatOpens:s.chatOpens==='window'?'window':'full',consoleOpens:s.consoleOpens==='full'?'full':'panel',
-      notifyReplies:s.notifyReplies!==false,notifyApprovals:s.notifyApprovals!==false,notifyJobs:s.notifyJobs!==false,notifySound:s.notifySound!==false,tips:s.tips!==false,autoConnect:s.autoConnect===true,sendKey:s.sendKey==='mod-enter'?'mod-enter':'enter'};}
+      vaultMcp:s.vaultMcp!==false,notifyReplies:s.notifyReplies!==false,notifyApprovals:s.notifyApprovals!==false,notifyJobs:s.notifyJobs!==false,notifySound:s.notifySound!==false,tips:s.tips!==false,autoConnect:s.autoConnect===true,sendKey:s.sendKey==='mod-enter'?'mod-enter':'enter'};}
     this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
     this.data.schedules=(Array.isArray(this.data.schedules)?this.data.schedules:[]).flatMap(x=>{try{return [require('./schedules.cjs').schedule(x,x)];}catch{return [];}});
     this.migrateLinkedCopies();

@@ -225,6 +225,12 @@ Alternatively, update the connected adapter's reference whenever the broker repl
 
 ### F12 — P2: Restart re-enables disabled Vault access
 
+- [x] Fixed on 2026-10-07 by preserving `vaultMcp` during broker initialization.
+
+Disabled Vault access stays disabled after a restart.
+Regression tests cover disabled, enabled, and missing settings through a fresh broker and its MCP configuration.
+Missing settings retain the enabled default.
+
 Location: [desktop/broker.cjs:53–54](desktop/broker.cjs#L53-L54).
 
 The Vault switch saves `settings.vaultMcp: false`.
