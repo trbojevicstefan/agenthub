@@ -22,7 +22,20 @@ function acpServer({loadSession=false,requestPermission=false,onlyAlways=false,t
 }
 test('ACP session isolation, explicit allow-once approval and capability handshake',async()=>{const child=acpServer({requestPermission:true}),events=[],sessions=[];const a=new AcpAdapter({agent:{provider:'hermes',args:[],cwd:path.resolve('.')},approve:async()=>true,spawnAgent:()=>child});await a.connect();await a.run(context({onEvent:e=>events.push(e),onSession:async id=>sessions.push(id)}));assert.equal(events.filter(e=>e.type==='text').map(e=>e.text).join(''),'ACP reply');assert.deepEqual(events.filter(e=>e.type==='activity').map(e=>e.text).slice(0,2),['Waiting for your approval: Run test?','Approved: Run test?']);assert.equal(sessions[0],'acp-1');assert.ok(a.diagnostics().entries.some(e=>e.direction==='out'&&e.text.includes('session/prompt')));assert.equal(child.frames.find(f=>f.id===991).result.outcome.optionId,'once');const init=child.frames.find(f=>f.method==='initialize');assert.equal(init.params.clientCapabilities.terminal,false);assert.equal(init.params.clientCapabilities.fs.writeTextFile,false);a.close();});
 test('ACP exposes Hermes thinking, plan and detailed tool progress to the UI',()=>{assert.equal(activityOf({sessionUpdate:'agent_thought_chunk'}),'Thinking');assert.equal(activityOf({sessionUpdate:'plan',entries:[{content:'Inspect local gateway',status:'in_progress'}]}),'Plan 0/1: Inspect local gateway');assert.equal(activityOf({sessionUpdate:'tool_call',title:'Read config',locations:[{path:'C:\\Users\\me\\.hermes'}]}),'Read config — C:\\Users\\me\\.hermes');assert.equal(activityOf({sessionUpdate:'tool_call_update',title:'Run diagnostic',status:'completed'}),'Run diagnostic — completed');});
-test('ACP uses the Hermes Docker profile as session cwd',async()=>{const child=acpServer();const agent={provider:'hermes',command:'docker',args:['exec','-i','a2a-hermes-leads','hermes'],cwd:'/root',hermesHome:'/opt/data'};const a=new AcpAdapter({agent,approve:async()=>false,spawnAgent:()=>child});assert.equal(sessionCwd(agent),'/opt/data');await a.connect();await a.run(context());assert.equal(child.frames.find(f=>f.method==='session/new').params.cwd,'/opt/data');a.close();});
+test('ACP uses the Hermes Docker profile as session cwd',async()=>{const child=acpServer();const agent={provider:'hermes',command:'docker',args:['exec','-i','a2a-hermes-leads','hermes'],cwd:'/root',hermesHome:'/opt/data'};const a=new AcpAdapter({agent,approve:async()=>false,spawnAgent:()=>child});assert.equal(sessionCwd(agent),'/opt/data');await a.connect();await a.listModels();await a.run(context());assert.equal(child.frames.find(f=>f.method==='session/new').params.cwd,'/opt/data');assert.equal(child.frames.filter(f=>f.method==='session/new').length,1);a.close();});
+for(const [label,cwd] of [['default',undefined],['matching project',path.resolve('default-project')],['different project',path.resolve('selected-project')]])test(`ACP model refresh respects the ${label} folder`,async t=>{
+  const defaultCwd=path.resolve('default-project'),child=acpServer();
+  const a=new AcpAdapter({agent:{provider:'custom',args:[],cwd:defaultCwd},approve:async()=>false,spawnAgent:()=>child});
+  t.after(()=>a.close());await a.connect();await a.listModels();await a.listModels();
+  const sessions=[],ctx=context({cwd,onSession:async id=>sessions.push(id)});
+  const expectedCwds=cwd&&cwd!==defaultCwd?[defaultCwd,cwd]:[defaultCwd];
+  const sessionId=`acp-${expectedCwds.length}`;
+  assert.equal((await a.run(ctx)).externalSessionId,sessionId);
+  await a.run(ctx);
+  assert.deepEqual(child.frames.filter(f=>f.method==='session/new').map(f=>f.params.cwd),expectedCwds);
+  assert.deepEqual(child.frames.filter(f=>f.method==='session/prompt').map(f=>f.params.sessionId),[sessionId,sessionId]);
+  assert.deepEqual(sessions,[sessionId]);
+});
 test('ACP denies tools when native approval is declined',async()=>{const child=acpServer({requestPermission:true});const a=new AcpAdapter({agent:{provider:'custom',args:[],cwd:path.resolve('.')},approve:async()=>false,spawnAgent:()=>child});await a.connect();await a.run(context());assert.equal(child.frames.find(f=>f.id===991).result.outcome.outcome,'cancelled');a.close();});
 for(const [label,toolCall] of [
   ['command arguments',{title:'Run a command',kind:'execute',rawInput:{command:'printf opaya-browser'}}],

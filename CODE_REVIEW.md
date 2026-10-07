@@ -177,6 +177,11 @@ Alternatively, retain bytes until a complete message is available.
 
 ### F09 — P2: Refreshing ACP models can select the wrong project folder
 
+- [x] Fixed on 2026-10-07 by checking the prepared session's working directory before reuse.
+
+A new conversation uses a prepared session only when its working directory matches.
+Regression tests cover different projects, matching folders, repeated turns, and the Hermes Docker profile folder.
+
 Locations: [desktop/adapters/acp.cjs:99–107](desktop/adapters/acp.cjs#L99-L107) and [desktop/adapters/acp.cjs:180–182](desktop/adapters/acp.cjs#L180-L182).
 
 `listModels()` prepares a session in the agent's default folder.

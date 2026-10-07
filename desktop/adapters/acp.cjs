@@ -97,6 +97,7 @@ class AcpAdapter {
     if(!sessionId){
       const cwd=ctx.cwd||sessionCwd(this.agent);
       if(!cwd)throw new Error('ACP requires an absolute working directory. Edit this agent first.');
+      if(this.preparedSession&&this.preparedCwd!==cwd)this.preparedSession=null;
       if(ctx.conversation.externalSessionId){
         if(!this.capabilities.loadSession)throw new Error('This ACP server cannot resume a previous process session. The local transcript is preserved. Start a new conversation.');
         this.readModels(await this.rpc.request('session/load',{sessionId:ctx.conversation.externalSessionId,cwd,mcpServers:this.sessionMcp()}),ctx.conversation.externalSessionId);
@@ -177,7 +178,10 @@ class AcpAdapter {
     if(shown.join()!==this.lastLevels.join()){this.lastLevels=shown;this.onChange();}
   }
   async listModels(){
-    if(!this.preparedSession){this.preparedSig=this.mcpSignature();this.preparedSession=await this.rpc.request('session/new',{cwd:sessionCwd(this.agent),mcpServers:this.sessionMcp()},60000);}
+    if(!this.preparedSession){
+      const cwd=sessionCwd(this.agent);this.preparedCwd=cwd;this.preparedSig=this.mcpSignature();
+      this.preparedSession=await this.rpc.request('session/new',{cwd,mcpServers:this.sessionMcp()},60000);
+    }
     this.readModels(this.preparedSession,this.preparedSession?.sessionId,true);
     return this.modelIds||[];
   }
