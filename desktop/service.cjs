@@ -33,8 +33,9 @@ const guide = require('./guide.cjs');
 const toolchain = require('./toolchain.cjs');
 const {visionOf, SUPPORTED:VISION_MODELS} = require('./vision.cjs');
 const pasting = require('./clipboard.cjs');
-async function start({app, safeStorage}, root) {
-  let broker, terminals, listener, opaya, stopping = false, setupTrust = false;
+async function start({app, safeStorage, shell: electronShell}, root) {
+  let broker, terminals, listener, opaya, stopping = false, setupTrust = false, codexLogins = null;
+  const codexWhere = new Map(), codexChecks = new Map(), codexSeen = new Set(); // codex-login.cjs: where a terminal's command runs; pending screen reads
   const startedAt = new Date().toISOString(), approvals = new Map();
   const descriptor = path.join(root, 'session-service.json');
   await fs.mkdir(root,{recursive:true,mode:0o700});
@@ -105,7 +106,7 @@ async function start({app, safeStorage}, root) {
       listener.notify(socket,'browser-request',{id,op:String(input.op||''),args:input.args&&typeof input.args==='object'?input.args:{},owner:/^[A-Za-z0-9_-]{1,80}$/.test(String(input.agent||''))?String(input.agent):'user'});
     });
   }
-  terminals = new Terminals(event => { listener?.broadcast('terminal',event); if (event.type !== 'data') emit(); },{root});
+  terminals = new Terminals(event => { listener?.broadcast('terminal',event); if (event.type === 'data') codexWatch(event); else { if (event.type === 'exit') codexLogins?.stopTerminal(event.id); emit(); } },{root});
   await stage('terminals');
   await terminals.init();
   // Installs and diagnostics run in visible one-off terminals; the UI is told to show them.
@@ -139,11 +140,46 @@ async function start({app, safeStorage}, root) {
   // The agent (or pseudo agent) a terminal session was opened for: to start it again, or to take pasted files there.
   const sessionAgent=s=>shells.sessionAgent(s,{broker,home:app.getPath('home')});
   // owner: whose screen the terminal belongs to (an agent's id, 'opaya' for the Opaya Agent); none: the screen in front.
-  async function runInTerminal({label,key,host,command,owner}){
+  // where: where the command runs ({host, container}) when that is not just the machine (a docker exec in it).
+  async function runInTerminal({label,key,host,command,owner,where}){
     const pseudo={id:`svc_${key}_${host?host.id:'local'}`.slice(0,80),name:label,provider:'custom',transport:host?'ssh':'local',hostId:host?.id||'',command:'',args:[],cwd:host?'':app.getPath('home'),ephemeral:true,run:host?command:''};
     const reused=terminals.hasLive(pseudo.id,'shell'),view=terminals.open(pseudo,host,'shell',{cols:110,rows:30});
     if(!host||reused)terminals.write(view.id,command+'\r');
+    if(where)codexWhere.set(view.id,{host:where.host||null,container:where.container||''});
     listener?.broadcast('terminal',{type:'opened',id:view.id,...(owner?{owner}:{})});emit();return view;
+  }
+  // ---- Codex sign-in on a machine or in a container (codex-login.cjs) -------------------------------------------------
+  // `codex login` there prints a sign-in link whose answer goes to 127.0.0.1 where Codex runs. When a terminal on a
+  // machine or in a container shows one, Opaya listens on that port here, opens the link in the browser, and passes the
+  // browser's answer to Codex there. Terminals on this computer are left alone: Codex opens the browser itself.
+  codexLogins=new (require('./codex-login.cjs').CodexLogins)({shell:require('./clone.cjs').shell,collect,
+    open:url=>electronShell?.openExternal?electronShell.openExternal(url):Promise.reject(new Error('No browser available from the session service.')),
+    notify:n=>{
+      const text={open:`Finish it in your browser. Opaya passes the answer to Codex on ${n.name}.`,paste:`${n.error?`${n.error} `:''}Open the sign-in page, sign in, then paste the address the browser ends on (it starts with http://127.0.0.1:${n.port}/auth/callback).`,done:`Codex on ${n.name} is signed in.`,failed:`Codex on ${n.name} did not accept the sign-in (${n.status}). Start the sign-in again.`}[n.phase];
+      notice({kind:'codex-login',level:n.phase==='failed'?'error':n.phase==='done'?'done':'info',title:n.phase==='done'?'Codex signed in':'Codex sign-in',text,phase:n.phase,state:n.state,url:n.url,port:n.port,machine:n.name,terminalId:n.terminalId});
+      emit();
+    }});
+  // Where a terminal's program runs: the container named by its launcher, the agent's own place, or the machine.
+  function terminalWhere(session){
+    if(codexWhere.has(session.id))return codexWhere.get(session.id);
+    let host=null;try{host=session.hostId?broker.host(session.hostId):null;}catch{}
+    try{const a=broker.agent(session.agentId);return require('./clone.cjs').place({agent:a,host:a.transport==='ssh'?broker.host(a.hostId):null});}catch{}
+    return {host,container:''};
+  }
+  const codexPlace=where=>`${where.host?where.host.name:machineName()}${where.container?` (container ${where.container})`:''}`;
+  function codexWatch({id,data}){
+    if(!codexLogins||codexChecks.has(id)||!/oauth|authorize|openai/.test(String(data||'')))return;
+    codexChecks.set(id,setTimeout(()=>{codexChecks.delete(id);codexScan(id).catch(()=>{});},400));
+  }
+  async function codexScan(id){
+    let session;try{session=terminals.attach(id);}catch{return;}
+    const where=terminalWhere(session);if(!where.host&&!where.container)return;
+    const {findAuthUrl}=require('./codex-login.cjs'),{render}=require('./screen.cjs');
+    const tail=String(session.buffer||'').slice(-60000),shown=await render(tail,session.cols,session.rows);
+    // What is on screen now (or was just printed), never a link from an earlier sign-in further back.
+    const auth=findAuthUrl(shown.lines)||findAuthUrl(tail.slice(-6000).replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*(\x07|\x1b\\)/g,'').replace(/\r/g,''));
+    if(!auth||codexSeen.has(auth.state))return;codexSeen.add(auth.state);
+    await codexLogins.start({auth,where,name:codexPlace(where),terminalId:id});
   }
   // Update, uninstall and local backups. Update and uninstall show the exact command for approval and run in a visible
   // terminal; an uninstall prints an end marker so the job knows when it finished and can then remove the connection.
@@ -420,7 +456,7 @@ async function start({app, safeStorage}, root) {
     return startJob({kind:'install',route:{from:p.framework.name,fromWhere:`Docker / ${p.image}`,to:p.container,toWhere:host.name,toHostId:host.id,provider:p.connection.provider==='custom'?'custom':p.connection.provider},title:`Installing ${p.framework.name} in Docker`,detail:`${host.name} / container ${p.container}`,
       steps:[['install','Start the container and install'],['signin','Sign in (in the terminal)'],['save','Add to Opaya'],['connect','Connect']]},async progress=>{
       progress({step:'install',state:'active',message:`Running on ${host.name}. Follow it in the terminal below; the first download can take a few minutes.`});
-      const view=await runInTerminal({label:`Install ${p.framework.name} (Docker)`,key:`docker_${p.container}`.slice(0,60),host,command:`${p.command}; echo "[opaya] finished with exit code $?"`});
+      const view=await runInTerminal({label:`Install ${p.framework.name} (Docker)`,key:`docker_${p.container}`.slice(0,60),host,command:`${p.command}; echo "[opaya] finished with exit code $?"`,where:{host,container:p.container}});
       progress({step:'install',state:'done',message:'Installing. When it is done, sign in in the terminal.'});progress({step:'signin',state:'active',message:'Waiting for the sign-in in the terminal to finish'});
       const code=await waitForMark(view.id,markCount(view.id),60*60*1000);
       if(code!==0)throw new Error(containers.EXIT[code]||`The install ended with exit code ${code}. See the terminal.`);
@@ -674,7 +710,7 @@ async function start({app, safeStorage}, root) {
   async function shutdown() {
     if (stopping) return true; stopping = true; for (const w of webs.values()) w.tunnel?.close();
     for (const a of approvals.values()) a.finish(false);
-    await terminals.shutdown(); await opaya?.close?.(); await broker.close();
+    codexLogins?.close(); await terminals.shutdown(); await opaya?.close?.(); await broker.close();
     await fs.rm(descriptor,{force:true});
     setTimeout(()=>app.exit(0),100).unref(); return true;
   }
@@ -682,6 +718,17 @@ async function start({app, safeStorage}, root) {
     agentModels:x=>broker.models(schema.id(x.id)),selectModel:x=>broker.selectModel(x),gateway:x=>broker.gateway(x),
     // Reasoning effort under the chat, and what a picked or dropped file is ([{path,name,size,mime}]) before it is attached.
     selectEffort:x=>broker.selectEffort(x), fileInfo:x=>require('./attachments.cjs').inspect(x?.paths),
+    // The address the browser ended on after a Codex sign-in, for a sign-in Opaya could not finish by itself. Without a
+    // waiting sign-in, the agent or terminal says where Codex runs.
+    codexLoginFinish:async x=>{
+      let where=null;
+      if(x.terminalId){try{where=terminalWhere(terminals.attach(String(x.terminalId)));}catch{}}
+      else if(x.agentId){const a=broker.agent(schema.id(x.agentId));where=require('./clone.cjs').place({agent:a,host:a.transport==='ssh'?broker.host(a.hostId):null});}
+      else if(x.hostId)where={host:broker.host(schema.id(x.hostId)),container:String(x.container||'')};
+      if(where&&!where.host&&!where.container)where=null;
+      return codexLogins.finish({text:String(x.url||''),where,name:where?codexPlace(where):''});
+    },
+    codexLogins:()=>codexLogins.list(),
     snapshot, saveAgent:x=>broker.saveAgent(x), reorderAgents:x=>broker.reorderAgents(x), updateAgentDisplay:x=>broker.updateAgentDisplay(x), saveHost:x=>broker.saveHost(x), removeHost:x=>broker.removeHost(x.id),
     removeAgent:async x=>{const a=broker.agent(x.id); if(!await approve(a,'Remove this agent connection?','Deletes its saved connection and local chat transcripts, not the agent installation.'))return false;terminals.closeAgent(a.id);await broker.removeAgent(a.id);return true;},
     discover:x=>broker.discover(x), connect:x=>broker.connect(x.id), disconnect:x=>broker.disconnect(x.id), clearError:x=>broker.clearError(x.id),

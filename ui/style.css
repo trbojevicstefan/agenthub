@@ -816,6 +816,8 @@ body.opaya-busy .opaya-mark img{animation:op-breathe 2.4s ease-in-out infinite}
 .missing-card small{font-size:10.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .missing-card .agent-avatar{width:26px;height:26px;margin:0;border-radius:7px;font-size:11px}
 .opaya-nudge{position:fixed;left:16px;bottom:118px;z-index:40;width:236px;display:flex;align-items:flex-start;gap:10px;padding:12px 10px 12px 12px;border:1px solid #2f4a3a;border-radius:12px;background:#17201b;box-shadow:0 14px 36px #0008;animation:op-nudge .32s cubic-bezier(.2,.8,.2,1)}
+#codex-login-card{left:auto!important;right:20px!important;top:112px!important;bottom:auto!important;width:320px}
+#codex-login-card p{font-size:12px;line-height:1.5;color:#b9c6be;margin:4px 0 6px}
 .opaya-nudge.leaving{opacity:0;transform:translateY(6px);transition:opacity .2s,transform .2s}
 @keyframes op-nudge{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
 .opaya-nudge .opaya-mark{margin-top:2px}

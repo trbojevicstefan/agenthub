@@ -42,7 +42,8 @@ test('the install script pulls, starts, installs and signs in, and reuses an exi
   assert.deepEqual(calls.map(c=>c.split(' ')[0]),['info','inspect','image','run','exec','exec'],'an image already on the machine is not pulled again');
   assert.match(calls[3],new RegExp(`run -d --name opaya-work --restart unless-stopped -v ${home}/opaya-agents/work:/root -w /root node:24-bookworm sleep infinity`));
   assert.match(calls[4],/exec opaya-work npm install -g @openai\/codex@latest/);
-  assert.match(calls[5],/exec -e HOME=\/root -i opaya-work sh -c codex login --device-auth/);assert(!/\|\| codex login( |$)/.test(calls[5]),'no browser login on a server');
+  // The browser sign-in: Opaya opens Codex's link here and passes the answer into the container (codex-login.cjs).
+  assert.match(calls[5],/exec -e HOME=\/root -i opaya-work sh -c codex login \|\| echo/);assert(!/device-auth/.test(calls[5]),'no device code: a workspace can turn it off');
   await fs.stat(path.join(home,'opaya-agents','work'));
   const again=path.join(home,'again');await fakeDocker(again,{exists:true});
   runPlan(containers.plan('hermes',{name:'h'}),home,again);

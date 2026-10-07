@@ -352,6 +352,7 @@
 :where(body[data-theme="light"]) .discover-dot.added{background:#cacdce}
 :where(body[data-theme="light"]) .missing-card{border:1px dashed #bccbc2}
 :where(body[data-theme="light"]) .opaya-nudge{border:1px solid #bcd5c6;background:#dfe8e3}
+:where(body[data-theme="light"]) #codex-login-card p{color:#29322d}
 :where(body[data-theme="light"]) .opaya-nudge strong{color:#0e2f1b}
 :where(body[data-theme="light"]) .opaya-nudge p{color:#18201b}
 :where(body[data-theme="light"]) .choice-card input[type="radio"]{accent-color:#badeca}

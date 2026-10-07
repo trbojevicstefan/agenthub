@@ -115,7 +115,7 @@ const SETUP={
     status:{posix:'openclaw status; openclaw gateway status',windows:'openclaw status; openclaw gateway status'}},
   claude:{sign_in:{posix:'claude',windows:'claude',note:'Claude Code opens: the user picks how to sign in and finishes in the browser, then types /exit (or you send ctrl_c twice once it says they are signed in).'}},
   codex:{
-    sign_in:{posix:'codex login',remote:'codex login --device-auth',windows:'codex.cmd login',note:'On this computer a browser page opens for the ChatGPT sign-in; on a machine Codex shows a link and a code to enter on any device.'},
+    sign_in:{posix:'codex login',windows:'codex.cmd login',note:'The ChatGPT sign-in opens in the browser on this computer. On a machine or in a container Opaya opens it here and passes the browser\'s answer to Codex there, so no device code is needed.'},
     status:{posix:'codex login status',windows:'codex.cmd login status'}},
   opencode:{sign_in:{posix:'opencode auth login',windows:'opencode auth login',note:'OpenCode asks for a provider and its key.'},status:{posix:'opencode auth list',windows:'opencode auth list'}},
   // DeepSeek Harness has no sign-in: it reads DEEPSEEK_API_KEY (or other providers' keys) from ~/.dsh/.env, which the

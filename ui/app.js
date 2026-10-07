@@ -2911,8 +2911,30 @@
     // A reply opens in the agent's chat window, over whatever screen is open.
     const a=state.agents.find(x=>x.id===target.agentId);await openChatWindow(a,state.conversations.some(c=>c.id===target.conversationId&&c.agentId===a.id)?target.conversationId:'');
   }));
+  // Codex signing in on a machine or in a container: its sign-in page opens in the browser here and Opaya passes the
+  // answer there. The card stays until it is done, with the page again and, when Opaya cannot listen, a paste box.
+  function codexLoginCard(n){
+    document.getElementById('codex-login-card')?.remove();
+    if(n.phase==='done'){toast(`${n.title}. ${n.text}`);return;}
+    if(n.phase==='failed')return false;
+    const card=document.createElement('div');card.id='codex-login-card';card.className='opaya-nudge';card.setAttribute('role','status');
+    card.innerHTML=`<span class="opaya-mark small" aria-hidden="true"><img src="assets/opaya-logo.png" alt=""><i></i></span><div><strong>${esc(n.title)} on ${esc(n.machine||'a machine')}</strong><p>${esc(n.text)}</p><div class="nudge-actions"><button type="button" class="text-button" data-codex="open">Sign-in page</button><button type="button" class="text-button" data-codex="paste">Paste address</button><button type="button" class="text-button" data-codex="close">Close</button></div></div>`;
+    card.addEventListener('click',e=>{const b=e.target.closest('[data-codex]');if(!b)return;const act=b.dataset.codex;
+      if(act==='close')card.remove();
+      else if(act==='open'&&n.url)action(()=>api.openLink({url:n.url}));
+      else if(act==='paste')codexPaste(n);});
+    document.body.append(card);
+    if(n.phase==='paste')codexPaste(n);
+  }
+  function codexPaste(n){
+    modal('Finish the Codex sign-in',`After you sign in, the browser tries to open http://127.0.0.1:${n.port||1455}/... and shows that it cannot connect. Copy that whole address from the address bar and paste it here: Opaya passes it to Codex on ${n.machine||'the machine'}.`,`<form id="codex-paste-form"><label class="field"><span>Address from the browser</span><input name="url" placeholder="http://127.0.0.1:${n.port||1455}/auth/callback?code=..." autocomplete="off" spellcheck="false" required></label><div class="modal-footer"><button type="button" class="text-button" data-codex-open>Open the sign-in page</button><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button class="primary" type="submit">Finish sign-in</button></div></div></form>`);
+    const f=$('#codex-paste-form');f.elements.url.focus();
+    f.querySelector('[data-codex-open]').onclick=()=>{if(n.url)action(()=>api.openLink({url:n.url}));};
+    f.onsubmit=event=>{event.preventDefault();action(async()=>{const r=await api.codexLoginFinish({url:f.elements.url.value,terminalId:n.terminalId||''});closeModal();document.getElementById('codex-login-card')?.remove();toast(`Codex on ${r.machine} is signed in.`);});};
+  }
   api.onNotice?.(n=>{
     if(n.kind==='updates'){renderToolChip();return;}
+    if(n.kind==='codex-login'&&codexLoginCard(n)!==false)return;
     if(n.kind==='surface'){stageAgent='';if(n.agentId&&agentModes.get(n.agentId)==='chat')agentModes.set(n.agentId,'console');refresh().catch(()=>{});}
     if(n.level!=='error'){toast(n.text?`${n.title}. ${n.text}`:n.title);return;}
     document.getElementById('opaya-nudge')?.remove();

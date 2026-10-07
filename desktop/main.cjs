@@ -162,6 +162,8 @@ if(hostMode){
       handlers.pickFiles=async()=>{const result=await dialog.showOpenDialog(win,{title:'Attach files',properties:['openFile','multiSelections']});return result.canceled||!result.filePaths.length?[]:client.call('fileInfo',{paths:result.filePaths});};
       handlers.send=async input=>{const attachments=require('./attachments.cjs'),staged=await attachments.stage(input,app.getPath('userData'));try{return await client.call('send',staged.input);}catch(error){await attachments.unstage(staged.files);throw error;}};
       for(const method of ['agentModels','selectModel','gateway'])handlers[method]=input=>client.call(method,input);
+      // A Codex sign-in finished by pasting the browser's address: passed to Codex over SSH or docker exec.
+      handlers.codexLoginFinish=input=>client.call('codexLoginFinish',input,60000);
       for(const method of ['scheduleSave','scheduleRemove','scheduleRun','tokenRemove'])handlers[method]=input=>client.call(method,input,60000);
       handlers.agentSchedules=input=>client.call('agentSchedules',input,40000);
       for(const method of ['opayaHoldSecret','opayaForgetSecret','agentGiveSecret','opayaGiveAll','vaultGiveAgent','agentKeys','agentWeb'])handlers[method]=input=>client.call(method,input);

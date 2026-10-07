@@ -23,7 +23,7 @@ const PLANS={
     connection:c=>({provider:'hermes',protocol:'acp',command:'docker',args:['exec','-i',c,'hermes'],hermesHome:'/opt/data',cwd:''})},
   claude:{name:'Claude Code',npm:'@anthropic-ai/claude-code',signIn:'claude',signInNote:'Claude Code opens and asks you to sign in. Type /exit when you are signed in.',
     connection:c=>({provider:'claude',protocol:'claude',command:'docker',args:['exec','-i','-w','/root',c,'claude'],cwd:'/root'})},
-  codex:{name:'Codex CLI',npm:'@openai/codex',signIn:"codex login --device-auth || echo 'Sign in later with Run native CLI: codex login --device-auth, or with an API key: printenv OPENAI_API_KEY | codex login --with-api-key'",signInNote:'Codex shows a link and a code: open the link on any device and enter the code to sign in with ChatGPT.',
+  codex:{name:'Codex CLI',npm:'@openai/codex',signIn:"codex login || echo 'Sign in later with Run native CLI: codex login, or with an API key: printenv OPENAI_API_KEY | codex login --with-api-key'",signInNote:'The ChatGPT sign-in opens in your browser here; Opaya passes its answer to Codex in the container.',
     connection:c=>({provider:'codex',protocol:'codex',command:'docker',args:['exec','-i','-w','/root',c,'codex'],cwd:'/root'})},
   openclaw:{name:'OpenClaw',image:OPENCLAW_IMAGE,gateway:true,signIn:'openclaw onboard --mode local --no-install-daemon --skip-health',signInNote:'OpenClaw onboarding asks for your model provider and its sign-in or API key.',
     connection:(c,port)=>({provider:'openclaw',protocol:'openai',endpoint:`http://127.0.0.1:${port}/v1`,model:'openclaw',command:'docker',args:['exec','-i',c,'openclaw'],cwd:''})},
