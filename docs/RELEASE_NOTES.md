@@ -1,3 +1,12 @@
+# Opaya 0.31.5 - sign in instead of an error, and agent installs that work everywhere
+
+- **The Opaya Agent opens the sign-in for you.** When Codex CLI or Claude Code is not signed in, or its login expired or was revoked (for example "OAuth access token is invalid"), Opaya no longer shows the error. It opens the sign-in in your browser (`claude auth login`, `codex login`) in a visible terminal, waits until the new login really works, and connects the Opaya Agent again. This happens in the setup guide, when Test in Model settings finds an expired login, and in the chat, where a calm "Sign in" card replaces the error.
+- **Agent installs, checked on fresh machines.** Every agent (Hermes, Claude Code, Codex, OpenClaw, OpenCode, DeepSeek Harness, Goose, Aider) is now installed by an automatic test with Opaya's own commands on a fresh Ubuntu server (as root and as a user with sudo), a Debian server as root without sudo, in Docker containers, and on Linux, macOS and Windows computers, and Opaya must find and run each one afterwards. What it found is fixed:
+  - **Windows:** the Claude Code and Hermes installers failed with "Get-FileHash is not recognized" when Opaya was started from PowerShell 7. They work now.
+  - **Aider** installs with uv, so it works on current Linux servers (which refuse pip --user) and is found on Windows.
+  - **Goose** installs on fresh servers (it needed bzip2, which Opaya now adds).
+  - **Servers where you log in as root without sudo** (common on Debian): Node.js, Python, Git, tmux and the rest install directly.
+
 # Opaya 0.31.4 - Hermes cron jobs show up on remote machines and in containers
 
 - **Hermes cron jobs are listed again.** Hermes writes its `cron/jobs.json` without a final newline, so the agent's page in Schedules could not read it ("{ "jobs": [ {" in red) and the crontab below it showed "Not read". Both are read correctly now, on this computer, on a VPS and in a Docker container.
