@@ -1,0 +1,95 @@
+name: Agent install matrix
+# Installs every agent with Opaya's own commands on fresh machines (this computer, a VPS over SSH, Docker containers)
+# and checks that Opaya finds and runs each one (scripts/install-matrix.cjs).
+on:
+  push:
+    branches: [main, 'claude/**']
+    paths: ['desktop/catalog.cjs', 'desktop/containers.cjs', 'desktop/toolchain.cjs', 'desktop/process.cjs', 'desktop/updates.cjs', 'scripts/install-matrix.cjs', '.github/workflows/install-matrix.yml']
+  schedule:
+    - cron: '41 5 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: install-matrix-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  vps:
+    name: VPS over SSH (${{ matrix.user }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        user: [root, opaya]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Start a fresh Ubuntu 24.04 server with SSH (like a new VPS)
+        run: |
+          mkdir -p vps && ssh-keygen -q -t ed25519 -N '' -f vps/key
+          cp vps/key.pub vps/authorized_keys
+          cat > vps/Dockerfile <<'EOF'
+          FROM ubuntu:24.04
+          # What a fresh Ubuntu cloud server has: SSH, sudo, curl, wget, git, Python 3; no Node.js.
+          RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server sudo curl wget ca-certificates git python3 xz-utils unzip less \
+           && mkdir -p /run/sshd && useradd -m -s /bin/bash opaya && echo 'opaya ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/opaya \
+           && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
+          COPY authorized_keys /root/.ssh/authorized_keys
+          COPY authorized_keys /home/opaya/.ssh/authorized_keys
+          RUN chown -R opaya:opaya /home/opaya/.ssh && chmod 700 /root/.ssh /home/opaya/.ssh && chmod 600 /root/.ssh/authorized_keys /home/opaya/.ssh/authorized_keys
+          CMD ["/usr/sbin/sshd", "-D", "-e"]
+          EOF
+          docker build -q -t opaya-vps vps
+          docker run -d --name vps -p 2222:22 opaya-vps
+          for i in $(seq 1 30); do ssh -i vps/key -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR ${{ matrix.user }}@127.0.0.1 true && break; sleep 1; done
+      - name: Install every agent over SSH
+        run: node scripts/install-matrix.cjs --where ssh --ssh ${{ matrix.user }}@127.0.0.1:2222 --key vps/key
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-matrix-vps-${{ matrix.user }}
+          path: artifacts/install-matrix-*.json
+  docker:
+    name: Docker containers
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install every agent as a Docker container
+        run: node scripts/install-matrix.cjs --where docker
+      - if: always()
+        run: docker ps -a
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-matrix-docker
+          path: artifacts/install-matrix-*.json
+  local:
+    name: This computer (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install every agent on this computer
+        run: node scripts/install-matrix.cjs --where local
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: install-matrix-local-${{ matrix.os }}
+          path: artifacts/install-matrix-*.json
