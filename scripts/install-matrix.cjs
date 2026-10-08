@@ -3,7 +3,7 @@
 // that Opaya finds and runs each one. Run in CI (.github/workflows/install-matrix.yml) on throwaway machines.
 //   --where local   this computer: the built-in installer for Node.js, Python, Git and uv, then each agent's install
 //                   command in a shell with Opaya's environment; found with Opaya's own PATH lookup.
-//   --where ssh     a VPS: ssh -tt user@host '<command>' like Opaya's install terminal; found with Opaya's remote PATH.
+//   --where ssh     a VPS: ssh user@host '<command>' like Opaya's install terminal; found with Opaya's remote PATH.
 //                   --ssh user@host:port --key <private key>
 //   --where docker  each agent installed as a Docker container (containers.cjs), checked with docker exec.
 //   --only a,b      just these agents.
@@ -17,7 +17,7 @@ const where=arg('where')||'local',only=arg('only')?arg('only').split(','):null,w
 const BIN={hermes:'hermes',claude:'claude',codex:'codex',openclaw:'openclaw',opencode:'opencode',dsh:'dsh',goose:'goose',aider:'aider'};
 const pick=ids=>ids.filter(id=>!only||only.includes(id));
 
-function run(file,args,{timeout=25*60*1000,env=process.env,input=null,shell=false}={}){
+function run(file,args,{timeout=15*60*1000,env=process.env,input=null,shell=false}={}){
   return new Promise(resolve=>{
     const started=Date.now();let out='';
     const child=spawn(file,args,{env,shell,windowsHide:true,stdio:[input===null?'ignore':'pipe','pipe','pipe']});
@@ -41,7 +41,7 @@ async function local(){
   }
   const ids=pick(Object.keys(BIN).filter(id=>{try{catalog.command(id,{remote:false});return true;}catch{return false;}}));
   for(const id of ids){
-    const {command}=catalog.command(id,{remote:false});await proc.primeShellPath();const env=proc.environment();
+    console.log(`...  ${id}: installing`);const {command}=catalog.command(id,{remote:false});await proc.primeShellPath();const env=proc.environment();
     const r=win?await run('powershell.exe',['-NoProfile','-ExecutionPolicy','Bypass','-Command',command],{env}):await run(process.env.SHELL&&!/fish/.test(process.env.SHELL)?process.env.SHELL:'/bin/bash',['-lc',command],{env});
     report({id,...await verifyLocal(id),seconds:r.seconds,log:tail(r.out),installExit:r.code});
   }
@@ -57,14 +57,15 @@ async function verifyLocal(id){
 async function ssh(){
   const m=/^([^@]+)@([^:]+):(\d+)$/.exec(arg('ssh')||'');if(!m)throw new Error('--ssh user@host:port');
   const base=['-p',m[3],'-i',arg('key'),'-o','StrictHostKeyChecking=no','-o','UserKnownHostsFile=/dev/null','-o','LogLevel=ERROR','-o','ServerAliveInterval=30',`${m[1]}@${m[2]}`];
-  // As Opaya's install terminal runs it: the command (with its exit mark) as ssh's remote command, in a pseudo terminal.
-  const remote=(command,timeout)=>run('ssh',['-tt',...base,`${command}; echo "[opaya] finished with exit code $?"`],{timeout,input:''});
-  const ess=await remote(catalog.command('essentials',{remote:true}).command,30*60*1000);
+  // As Opaya's install terminal runs it: the command (with its exit mark) as ssh's remote command. Without a terminal:
+  // with one, installers start their interactive setup at the end (hermes setup), which the user answers in Opaya.
+  const remote=(command,timeout)=>run('ssh',['-T',...base,`${command}; echo "[opaya] finished with exit code $?"`],{timeout,input:''});
+  console.log('...  essentials: installing');const ess=await remote(catalog.command('essentials',{remote:true}).command,20*60*1000);
   const have=await run('ssh',[...base,`${proc.REMOTE_PATH}; for t in node npm python3 git uv tmux; do printf '%s ' "$t"; command -v $t >/dev/null 2>&1 && echo ok || echo MISSING; done`],{timeout:60000});
   report({id:'essentials',ok:!/MISSING/.test(have.out),seconds:ess.seconds,version:tail(have.out,8).replace(/\n/g,', '),error:/MISSING/.test(have.out)?tail(have.out,8).replace(/\n/g,', '):'',log:tail(ess.out)});
   for(const id of pick(Object.keys(BIN))){
     let command;try{({command}=catalog.command(id,{remote:true}));}catch(e){report({id,ok:false,error:e.message});continue;}
-    const r=await remote(command,25*60*1000);
+    console.log(`...  ${id}: installing`);const r=await remote(command,15*60*1000);
     const v=await run('ssh',[...base,`${proc.REMOTE_PATH}; command -v ${BIN[id]} && ${BIN[id]} --version`],{timeout:180000});
     report({id,ok:v.code===0,seconds:r.seconds,version:v.code===0?tail(v.out,2).replace(/\n/g,' '):'',error:v.code===0?'':`${BIN[id]} is not found with Opaya's remote PATH after the install (exit ${v.code}) ${tail(v.out,2)}`,log:tail(r.out)});
   }
@@ -75,7 +76,7 @@ async function docker(){
   for(const id of pick(Object.keys(containers.PLANS))){
     const plan=containers.plan(id,{name:`ci-${id}`});
     // No terminal: the sign-in step at the end reads end of input and stops, as when the user skips it.
-    const r=await run('bash',['-c',plan.command],{timeout:25*60*1000,input:''});
+    console.log(`...  ${id}: installing as a container`);const r=await run('bash',['-c',plan.command],{timeout:15*60*1000,input:''});
     const args=plan.connection.args.filter((a,i,all)=>a!=='-i'&&a!=='--profile'&&all[i-1]!=='--profile'),bin=args.at(-1)==='acp'?args.slice(0,-1):args;
     const v=await run('docker',[...bin,'--version'],{timeout:120000});
     let extra='';

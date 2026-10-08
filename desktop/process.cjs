@@ -84,6 +84,9 @@ function environment(extra = {}) {
     dirs.push(path.join(process.env.APPDATA || '', 'npm'), path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'OpenSSH'), ...windowsToolDirs(), ...windowsRegistryPath().split(';'));
     const registry = windowsRegistryEnv();
     for (const name of REGISTRY_VARS) if (!env[name] && registry[name]) env[name] = registry[name];
+    // Started from PowerShell 7 (or a terminal under it), Windows PowerShell inherits its module path and installers that
+    // use Get-FileHash and other built-in commands fail (Claude Code, Hermes). Without it each PowerShell finds its own.
+    for (const k of Object.keys(env)) if (k.toUpperCase() === 'PSMODULEPATH') delete env[k];
   } else dirs.push(...shellPath.value, '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin');
   dirs.push(...userToolDirs());
   env.PATH = [...new Set([...opayaToolDirs(), ...(env.PATH || '').split(path.delimiter), ...dirs].filter(Boolean))].join(path.delimiter);

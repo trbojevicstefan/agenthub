@@ -25,8 +25,11 @@ const FRAMEWORKS = [
     docs:'https://block.github.io/goose/', after:'Run `goose configure`. Add it as a terminal agent.',
     posix:'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash', windows:''},
   {id:'aider', name:'Aider', provider:'custom', icon:'', command:'aider', description:'AI pair programming in your terminal.',
-    docs:'https://aider.chat/docs/install.html', after:'Run `aider` inside a git repository. Add it as a terminal agent.', requires:'Python 3.9+',
-    posix:'python3 -m pip install --user aider-install && aider-install', windows:'py -m pip install aider-install; aider-install'},
+    docs:'https://aider.chat/docs/install.html', after:'Run `aider` inside a git repository. Add it as a terminal agent.',
+    // With uv (as aider-install does): pip --user is refused on current Linux (PEP 668) and pip's Scripts folder is not on
+    // PATH on Windows. aider lands in ~/.local/bin, which Opaya searches.
+    posix:'command -v uv >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | sh; export PATH="$HOME/.local/bin:$PATH"; uv tool install --force --python python3.12 --with pip aider-chat@latest',
+    windows:"if (-not (Get-Command uv -ErrorAction SilentlyContinue)) { irm https://astral.sh/uv/install.ps1 | iex; $env:Path=[Environment]::GetEnvironmentVariable('Path','User')+';'+[Environment]::GetEnvironmentVariable('Path','Machine') }; uv tool install --force --python python3.12 --with pip aider-chat@latest"},
   {id:'ollama', name:'Ollama', provider:'custom', icon:'ollama', command:'ollama', runtime:true, description:'Local model runtime. Useful as the Opaya Agent model.',
     docs:'https://ollama.com/download', after:'Run `ollama pull <model>`. Point the Opaya Agent at http://127.0.0.1:11434/v1.',
     posix:'if [ "$(uname)" = Darwin ]; then mkdir -p "$HOME/Applications" && curl -fsSL -o /tmp/Ollama-darwin.zip https://ollama.com/download/Ollama-darwin.zip && ditto -x -k /tmp/Ollama-darwin.zip "$HOME/Applications" && open -a "$HOME/Applications/Ollama.app" && echo \'Ollama is installed in your Applications folder.\'; else curl -fsSL https://ollama.com/install.sh | sh; fi', windows:"if (Get-Command winget -ErrorAction SilentlyContinue) { winget install --id Ollama.Ollama -e --accept-source-agreements --accept-package-agreements } else { $ProgressPreference='SilentlyContinue'; Invoke-WebRequest https://ollama.com/download/OllamaSetup.exe -OutFile \"$env:TEMP\\OllamaSetup.exe\" -UseBasicParsing; Start-Process \"$env:TEMP\\OllamaSetup.exe\" -ArgumentList '/VERYSILENT','/NORESTART' -Wait; 'Ollama is installed.' }"},
