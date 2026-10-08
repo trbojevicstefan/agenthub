@@ -1,3 +1,13 @@
+# Opaya 0.31.3 - a Schedules page for every agent, with its own cron jobs you can edit
+
+- **Schedules has a page for every agent.** Pick the Opaya Agent or any agent on the left. Its page shows the messages Opaya sends it on a schedule, and the jobs the agent schedules itself, as cards with the schedule in words, the next and last run, the status and the last error. No more raw console text.
+- **Add, edit, pause, run now and delete an agent's own jobs**, with the same options the agent offers, done with its own tools where it runs (this computer, a VPS or a Docker container):
+  - **Hermes cron jobs** (`hermes cron`, its profile included): a cron schedule, an interval or once at a date and time; the prompt, where to deliver it, repeat, skills, model and provider, reasoning effort, working folder, script, script only and continuity.
+  - **OpenClaw cron** (`openclaw cron`, only this agent's jobs): cron with a time zone, an interval or once; an agent message, a system event or a shell command; session, model, thinking, timeout, delivery (none, a chat or a webhook) and delete after it runs.
+  - **Goose schedules** (`goose schedule`): Opaya writes a recipe with your prompt and schedules it.
+  - **The crontab** where the agent runs, for every agent (Claude Code, Codex and OpenCode keep no schedules of their own): lines are edited in place, paused by commenting them out and named with a comment above; other lines stay as they are, and a change is refused if the line changed meanwhile.
+- **Home: Connect is a power button.** On each agent card it is green when connected and pulses while connecting, so Chat, Terminal and Manage fit on one line.
+
 # Opaya 0.31.2 - Codex signs in on a VPS or in Docker with your browser
 
 - **Codex on a machine or in a container signs in with the browser on this computer.** `codex login` there waits for the answer from the browser at http://127.0.0.1:1455 where it runs, which a browser on your computer cannot reach. A device code is no way around it when the workspace turns device codes off. Now, as soon as Codex shows its sign-in link in a terminal on a machine or in a container, Opaya listens on that port here and opens the link in your browser. When you sign in, Opaya passes the answer to Codex there over its own SSH or docker exec channel, and Codex's "signed in" page comes back to your browser. This works the same for Codex installed directly on a VPS and for Codex in a Docker container, from setup, from Docker installs, and when you run `codex login` in any terminal on a machine.
