@@ -51,19 +51,24 @@ function openclawAgent(agent) {
 function listScript(agent) {
   const parts = [REMOTE_PATH];
   for (const kind of kindsFor(agent)) {
-    parts.push(`echo '${MARK}${kind}'`);
+    parts.push(`printf '\\n%s\\n' '${MARK}${kind}'`);
     if (kind === 'hermes') parts.push(`H=${hermesHome(agent)}; echo "@@home:$H"; if [ -f "$H/cron/jobs.json" ]; then cat "$H/cron/jobs.json"; else echo '{"jobs":[]}'; fi`);
     if (kind === 'openclaw') parts.push(`if command -v openclaw >/dev/null 2>&1; then openclaw cron list --all --json 2>&1; else echo '@@missing'; fi`);
     if (kind === 'goose') parts.push(`if command -v goose >/dev/null 2>&1; then out=$(goose schedule list 2>&1); printf '%s\\n' "$out"; printf '%s\\n' "$out" | sed -n 's/^ *Recipe Source[^:]*: *//p' | while IFS= read -r f; do echo "@@recipe:$f"; head -c 16000 "$f" 2>/dev/null; echo; done; else echo '@@missing'; fi`);
     if (kind === 'crontab') parts.push(`if command -v crontab >/dev/null 2>&1; then crontab -l 2>/dev/null; true; else echo '@@missing'; fi`);
   }
-  parts.push(`echo '${MARK}end'`);
+  parts.push(`printf '\\n%s\\n' '${MARK}end'`);
   return parts.join('; ');
 }
 function sections(text) {
   const out = {}; let cur = null;
+  // A tool's output may not end with a newline (Hermes writes jobs.json without one): a marker can follow it on a line.
   for (const line of String(text || '').split('\n')) {
-    if (line.startsWith(MARK)) { cur = line.slice(MARK.length).trim(); if (cur !== 'end') out[cur] = []; continue; }
+    const at = line.indexOf(MARK);
+    if (at >= 0 && /^[\w-]+\s*$/.test(line.slice(at + MARK.length))) {
+      if (at > 0 && cur && out[cur]) out[cur].push(line.slice(0, at));
+      cur = line.slice(at + MARK.length).trim(); if (cur !== 'end') out[cur] = []; continue;
+    }
     if (cur && out[cur]) out[cur].push(line);
   }
   return Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.join('\n').replace(/\n+$/, '')]));
@@ -71,7 +76,7 @@ function sections(text) {
 function json(text) {
   const s = String(text || ''), i = s.search(/[[{]/);
   if (i < 0) throw new Error(s.trim().split('\n').slice(-2).join(' ').slice(0, 300) || 'No output.');
-  try { return JSON.parse(s.slice(i)); } catch { throw new Error(s.trim().split('\n').slice(0, 3).join(' ').slice(0, 300)); }
+  try { return JSON.parse(s.slice(i)); } catch (error) { throw new Error(`Could not read its output as JSON (${error.message}): ${s.trim().slice(0, 160)}`); }
 }
 const iso = v => { if (v === null || v === undefined || v === '') return ''; const d = new Date(typeof v === 'number' ? v : String(v)); return Number.isNaN(d.getTime()) ? '' : d.toISOString(); };
 const str = v => v === null || v === undefined ? '' : String(v);

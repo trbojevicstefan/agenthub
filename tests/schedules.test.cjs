@@ -40,6 +40,12 @@ test('agent cron jobs come back as plain jobs',()=>{
   const g=cron.parse({provider:'goose'},['@@opaya:goose','Scheduled Jobs:','- ID: daily','  Status: ⏸️  PAUSED','  Cron: 0 9 * * *','  Recipe Source (in store): /r/daily.yaml','  Last Run: Never','@@recipe:/r/daily.yaml','version: 1.0.0','title: "Daily"','prompt: |','  Line one','  Line two','@@opaya:crontab','@@opaya:end'].join('\n'));
   assert.deepEqual([g[0].jobs[0].name,g[0].jobs[0].prompt,g[0].jobs[0].enabled],['Daily','Line one\nLine two',false]);
 });
+test('a jobs.json without a final newline does not swallow the next section',()=>{
+  const out=['','@@opaya:hermes','@@home:/opt/data','{"jobs":[{"id":"x1","name":"Brief","prompt":"hi","schedule":{"kind":"cron","expr":"0 9 * * *"}}]}@@opaya:crontab','0 3 * * * /bin/backup.sh','','@@opaya:end',''].join('\n');
+  const [h,c]=cron.parse({provider:'hermes',command:'docker',args:['exec','-i','box','hermes']},out);
+  assert.equal(h.error,'');assert.deepEqual(h.jobs.map(j=>j.name),['Brief']);assert.equal(c.available,true);assert.deepEqual(c.jobs.map(j=>j.prompt),['/bin/backup.sh']);
+  assert.match(cron.listScript({provider:'hermes',command:'hermes',args:[]}),/printf '\\n%s\\n' '@@opaya:crontab'/);
+});
 test('agent cron changes use each agent\'s own command and options',()=>{
   const herm={provider:'hermes',command:'hermes',args:['-p','blondie']};
   const create=cron.hermesCommand(herm,'save',{name:'Brief',prompt:'-start here',schedule:{kind:'every',every:30},opts:{deliver:'telegram',skills:['a','b'],reasoningEffort:'high',continuity:true}});

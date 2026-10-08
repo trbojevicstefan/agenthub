@@ -1,3 +1,7 @@
+# Opaya 0.31.4 - Hermes cron jobs show up on remote machines and in containers
+
+- **Hermes cron jobs are listed again.** Hermes writes its `cron/jobs.json` without a final newline, so the agent's page in Schedules could not read it ("{ "jobs": [ {" in red) and the crontab below it showed "Not read". Both are read correctly now, on this computer, on a VPS and in a Docker container.
+
 # Opaya 0.31.3 - a Schedules page for every agent, with its own cron jobs you can edit
 
 - **Schedules has a page for every agent.** Pick the Opaya Agent or any agent on the left. Its page shows the messages Opaya sends it on a schedule, and the jobs the agent schedules itself, as cards with the schedule in words, the next and last run, the status and the last error. No more raw console text.
