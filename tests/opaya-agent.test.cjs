@@ -183,7 +183,7 @@ test('every framework and dependency has an update command, and the essentials u
   for(const f of catalog.FRAMEWORKS)assert(catalog.UPDATES[f.id],`${f.id} has an update entry`);
   assert.match(catalog.command('hermes',{remote:true,update:true}).command,/hermes\|installer\) hermes update;;/);
   const all=catalog.command('essentials',{remote:true,update:true}).command;for(const bin of ['node','python3','git','uv self update','tmux'])assert(all.includes(bin),bin);
-  assert.match(catalog.command('node',{remote:true}).command,/sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs/);
+  assert.match(catalog.command('node',{remote:true}).command,/\$S env DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs/);
 });
 test('setup_agent runs the fixed onboarding and gateway steps where the agent runs',async t=>{
   const {agent,broker,commands,approvals}=await fixture(t,[

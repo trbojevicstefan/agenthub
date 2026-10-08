@@ -15,28 +15,31 @@ concurrency:
   cancel-in-progress: true
 jobs:
   vps:
-    name: VPS over SSH (${{ matrix.user }})
+    name: VPS over SSH (${{ matrix.label }})
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        user: [root, opaya]
+        include:
+          - {label: 'Ubuntu 24.04, root', image: 'ubuntu:24.04', user: root, extra: 'sudo'}
+          - {label: 'Ubuntu 24.04, sudo user', image: 'ubuntu:24.04', user: opaya, extra: 'sudo'}
+          - {label: 'Debian 12, root without sudo', image: 'debian:12', user: root, extra: ''}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - name: Start a fresh Ubuntu 24.04 server with SSH (like a new VPS)
+      - name: Start a fresh server with SSH (like a new VPS)
         run: |
           mkdir -p vps && ssh-keygen -q -t ed25519 -N '' -f vps/key
           cp vps/key.pub vps/authorized_keys
           cat > vps/Dockerfile <<'EOF'
-          FROM ubuntu:24.04
-          # What a fresh Ubuntu cloud server has: SSH, sudo, curl, wget, git, Python 3; no Node.js.
-          RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server sudo curl wget ca-certificates git python3 xz-utils unzip less \
-           && mkdir -p /run/sshd && useradd -m -s /bin/bash opaya && echo 'opaya ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/opaya \
+          FROM ${{ matrix.image }}
+          # What a fresh cloud server has: SSH, curl, wget, git, Python 3 (sudo on Ubuntu); no Node.js.
+          RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server ${{ matrix.extra }} curl wget ca-certificates git python3 xz-utils unzip less \
+           && mkdir -p /run/sshd /etc/sudoers.d && useradd -m -s /bin/bash opaya && echo 'opaya ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/opaya \
            && sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' /etc/ssh/sshd_config
           COPY authorized_keys /root/.ssh/authorized_keys
           COPY authorized_keys /home/opaya/.ssh/authorized_keys
@@ -51,7 +54,7 @@ jobs:
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: install-matrix-vps-${{ matrix.user }}
+          name: install-matrix-vps-${{ matrix.user }}-${{ strategy.job-index }}
           path: artifacts/install-matrix-*.json
   docker:
     name: Docker containers

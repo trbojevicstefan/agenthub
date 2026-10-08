@@ -23,7 +23,8 @@ const FRAMEWORKS = [
     posix:'npm install -g @deepseek-ai/dsh || { mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global && npm install -g @deepseek-ai/dsh; }', windows:'npm.cmd install -g @deepseek-ai/dsh'},
   {id:'goose', name:'Goose', provider:'custom', icon:'goose', command:'goose', description:'Extensible open-source agent from Block.',
     docs:'https://block.github.io/goose/', after:'Run `goose configure`. Add it as a terminal agent.',
-    posix:'curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash', windows:''},
+    // Its release is a .tar.bz2: a fresh Ubuntu or Debian server has no bzip2.
+    posix:'command -v bzip2 >/dev/null 2>&1 || { if command -v apt-get >/dev/null 2>&1; then sudo apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y bzip2; elif command -v dnf >/dev/null 2>&1; then sudo dnf install -y bzip2; elif command -v brew >/dev/null 2>&1; then brew install bzip2; fi; }; curl -fsSL https://github.com/block/goose/releases/download/stable/download_cli.sh | bash', windows:''},
   {id:'aider', name:'Aider', provider:'custom', icon:'', command:'aider', description:'AI pair programming in your terminal.',
     docs:'https://aider.chat/docs/install.html', after:'Run `aider` inside a git repository. Add it as a terminal agent.',
     // With uv (as aider-install does): pip --user is refused on current Linux (PEP 668) and pip's Scripts folder is not on
@@ -53,6 +54,9 @@ const FRAMEWORKS = [
   {id:'homebrew', kind:'dependency', name:'Homebrew', provider:'custom', icon:'', description:'macOS package manager used to install the other dependencies.', docs:'https://brew.sh', after:'Follow the printed "Next steps" to add brew to PATH.', macOnly:true,
     posix:'command -v brew >/dev/null 2>&1 && echo "brew is already installed" || /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"', windows:''}
 ];
+// As root (many servers log in as root, and a minimal Debian has no sudo) package managers run directly; otherwise with
+// sudo, which asks for the password in the visible terminal.
+for(const f of FRAMEWORKS)if(f.posix&&/\bsudo /.test(f.posix))f.posix='S=; [ "$(id -u)" = 0 ] || S=sudo; '+f.posix.replace(/\bsudo -E /g,'$S ').replace(/\bsudo DEBIAN_FRONTEND=/g,'$S env DEBIAN_FRONTEND=').replace(/\bsudo /g,'$S ');
 // Updates to the latest version. Same rules as installs: fixed commands, nothing interpolated. Each script finds how the
 // tool is installed on the machine (Homebrew, the npm that owns it, npx, the vendor's updater, uv, pipx, winget...) and
 // updates that copy (updates.cjs). `how` forces one method (the Opaya Agent, after the detected one failed).
