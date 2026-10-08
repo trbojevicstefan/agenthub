@@ -1074,10 +1074,11 @@ body[data-theme="light"] .context-menu button.submenu-open{background:#edf4ee;co
 .ws-filters .tag-chip small{color:var(--faint);margin-left:3px}
 .ws-filter-gap{width:1px;height:18px;background:var(--border);margin:0 4px}
 .ws-none{grid-column:1/-1;padding:24px;text-align:center;color:var(--muted);font-size:12px}
-.card-quick{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)}
-.card-quick button{font-size:11px;padding:6px 9px;white-space:nowrap;flex:none}
+.card-quick{display:flex;flex-wrap:nowrap;align-items:center;gap:5px;margin-top:12px;padding-top:12px;border-top:1px solid var(--border);min-width:0}
+/* One line on every card: the labels give way (ellipsis) before anything wraps. */
+.card-quick button{font-size:11px;padding:6px 8px;white-space:nowrap;flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 /* Connect is a power button, so every quick action fits on one line. */
-.card-quick .card-power{width:30px;height:30px;padding:0;display:inline-grid;place-items:center;border-radius:50%;border:1px solid #2a3135;background:#171b1d;color:#7d8a90;transition:color .2s,border-color .2s,box-shadow .3s}
+.card-quick .card-power{flex:none;width:30px;height:30px;padding:0;display:inline-grid;place-items:center;border-radius:50%;border:1px solid #2a3135;background:#171b1d;color:#7d8a90;transition:color .2s,border-color .2s,box-shadow .3s}
 .card-power svg{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 .card-power:hover{color:#e6ecea;border-color:#3a4448}
 .card-power.on{color:#6ee7a8;border-color:#2f5a44;box-shadow:0 0 0 3px #6ee7a814,0 0 16px -4px #6ee7a866}
