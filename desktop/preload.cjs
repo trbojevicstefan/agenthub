@@ -9,7 +9,7 @@ methods.push('selectEffort','pickFiles','fileInfo');
 methods.push('projectRemoteInfo','projectRemoteStart','projectRemoteSend','projectRemoteBring','projectRemoteApply','projectRemoteStop','projectRemoteGithubLogin','guideScan','guidePlan','guideStart','toolVersions','toolCheckAll','toolUpdate','agentInstallInfo','agentMaintenanceCommand','agentUpdate','agentUpdateAll','agentBackup','agentBackups','backupRemove','agentUninstall','revealBackup');
 methods.push('opayaFreeModels','opayaFreeSetup','saveSettings','projectSave','projectRemove','projectInfo','projectBranches','projectGit','projectClone','mcpSave','mcpRemove','agentMcp','agentSkills','skillAction','agentDiagnostics','moveAgent','connectAll','playground','files','installFramework','opayaSaveConfig','opayaTest','opayaForgetKey','opayaSend','opayaNewSession','opayaSelectSession','opayaDeleteSession','opayaStop','opayaClear','windowControl','ask');
 methods.push('opayaHoldSecret','opayaForgetSecret','agentGiveSecret','opayaGiveAll','vaultGiveAgent','agentKeys','agentWeb');
-methods.push('vaultImportScan','vaultImportCommit','pickSecretFile','vaultBackupSave','pickVaultBackup','vaultBackupRestore','agentFile','agentFileOpen','agentFileSave','agentFileReveal','scheduleSave','scheduleRemove','scheduleRun','agentSchedules','tokenRemove');
+methods.push('vaultImportScan','vaultImportCommit','pickSecretFile','vaultBackupSave','pickVaultBackup','vaultBackupRestore','agentFile','agentFileOpen','agentFileSave','agentFileReveal','scheduleSave','scheduleRemove','scheduleRun','agentCron','agentCronDo','tokenRemove');
 methods.push('mcpCatalog','mcpInstall');
 methods.push('dockerList','dockerAction','dockerTerminal','dockerStats','dockerInspect','dockerLogs');
 methods.push('codexLoginFinish');

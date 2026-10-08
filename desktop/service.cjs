@@ -812,10 +812,29 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     tokenRemove:async x=>{await broker.removeToken(schema.id(x.id));emit();return true;},
     scheduleSave:async x=>{const r=await broker.saveSchedule(x);emit();return r;},scheduleRemove:async x=>{await broker.removeSchedule(x.id);emit();return true;},
     scheduleRun:async x=>{const s=(broker.data.schedules||[]).find(y=>y.id===x.id);if(!s)throw new Error('Schedule not found.');await runSchedule(s,{manual:true});return true;},
-    // What an agent schedules itself (Hermes cron jobs, OpenClaw cron, the crontab where it runs), as text.
-    agentSchedules:async x=>{const a=broker.agent(x.id),clone=require('./clone.cjs'),where=clone.place({agent:a,host:a.transport==='ssh'?broker.host(a.hostId):null});
-      if(clone.isLocal(where)&&process.platform==='win32')return {text:'Windows keeps scheduled tasks in Task Scheduler. Agents on this computer have no crontab.'};
-      try{return {text:String(await require('./process.cjs').collect(clone.shell(where,schedules.nativeListScript(a)),{timeout:30000,maxBytes:256*1024})).slice(0,60000)};}catch(error){return {text:'',error:String(error?.message||error).slice(0,300)};}},
+    // What an agent schedules itself (Hermes cron jobs, OpenClaw cron, Goose schedules, the crontab where it runs), as
+    // jobs the Schedules screen shows and edits with that agent's own tools (agent-cron.cjs).
+    agentCron:async x=>{const a=broker.agent(x.id),cron=require('./agent-cron.cjs'),clone=require('./clone.cjs'),where=clone.place({agent:a,host:a.transport==='ssh'?broker.host(a.hostId):null});
+      if(clone.isLocal(where)&&process.platform==='win32')return {kinds:[],note:'Windows keeps scheduled tasks in Task Scheduler. Agents on this computer have no crontab; Opaya schedules above still work.'};
+      try{return {kinds:cron.parse(a,await require('./process.cjs').collect(clone.shell(where,cron.listScript(a)),{timeout:45000,maxBytes:4*1024*1024}))};}catch(error){return {kinds:[],error:String(error?.message||error).slice(0,300)};}},
+    agentCronDo:async x=>{const a=broker.agent(x.id),cron=require('./agent-cron.cjs'),clone=require('./clone.cjs'),proc=require('./process.cjs'),where=clone.place({agent:a,host:a.transport==='ssh'?broker.host(a.hostId):null});
+      const kind=String(x.kind||''),op=String(x.op||''),job=x.job&&typeof x.job==='object'?x.job:{};
+      if(!cron.kindsFor(a).includes(kind))throw new Error('This agent has no such schedules.');if(!['save','pause','resume','run','remove'].includes(op))throw new Error('Unknown action.');
+      if(clone.isLocal(where)&&process.platform==='win32')throw new Error('Agents on this computer have no crontab on Windows.');
+      const sh=(script,opts={})=>proc.collect(clone.shell(where,`${proc.REMOTE_PATH}; ${script}`),{timeout:60000,maxBytes:1024*1024,...opts});
+      const fail=error=>{throw new Error(String(String(error?.stdout||'').trim()||error?.message||error).replace(/\s+/g,' ').trim().slice(0,400));};
+      try{
+        if(kind==='crontab'){
+          if(op==='run'){await sh(cron.crontabRun(job));return {ok:true};}
+          const current=await sh('crontab -l 2>/dev/null; true'),lines=cron.crontabEdit(current,op,job);
+          await sh('crontab -',{input:lines.length?lines.join('\n')+'\n':''});return {ok:true};
+        }
+        const command=kind==='hermes'?cron.hermesCommand(a,op,job):kind==='openclaw'?cron.openclawCommand(a,op,job):cron.gooseCommand(a,op,job);
+        const out=await sh(`${command} 2>&1`,{timeout:kind==='openclaw'&&op==='run'?120000:60000});
+        if(/^(Failed|Error|error:)/m.test(String(out))||/"ok"\s*:\s*false/.test(String(out)))fail(out);
+        return {ok:true,output:String(out||'').slice(0,4000)};
+      }catch(error){fail(error);}
+    },
     agentDiagnostics:x=>broker.diagnostics(x.id),
     projectSave:x=>broker.saveProject(x), projectRemove:x=>broker.removeProject(x.id), projectInfo:x=>broker.projectInfo(x.id), projectBranches:x=>broker.projectBranches(x.id),
     // Git and GitHub CLI actions run as fixed commands in the project's own visible terminal.

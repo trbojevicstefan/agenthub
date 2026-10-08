@@ -418,6 +418,10 @@
 :where(body[data-theme="light"]) .uninstall-kind{border:1px solid #cbd6d0;background:#dee5e2}
 :where(body[data-theme="light"]) .uninstall-kind small{color:#49544e}
 :where(body[data-theme="light"]) .ws-control em{color:#554219}
+:where(body[data-theme="light"]) .card-quick .card-power{border:1px solid #cfd6d9;background:#e2e6e8;color:#50595e}
+:where(body[data-theme="light"]) .card-power:hover{color:#0e1211;border-color:#bec7cb}
+:where(body[data-theme="light"]) .card-power.on{color:#1b5e3b;border-color:#aed5c1}
+:where(body[data-theme="light"]) .card-power.busy{color:#58411a;border-color:#d8cbaf}
 :where(body[data-theme="light"]) .maintenance-form .switch-row small{color:#49544e}
 :where(body[data-theme="light"]) .status-tools{background:#ebe5d5;border-color:#d3c7a4;color:#473b15}
 :where(body[data-theme="light"]) .tool-row{border:1px solid #cfd9d4}
@@ -939,6 +943,14 @@
 :where(body[data-theme="light"]) .sched-native{border-top:1px solid #d6dde0}
 :where(body[data-theme="light"]) .sched-agent{border-bottom:1px solid #dbe1e3}
 :where(body[data-theme="light"]) .sched-out{background:#eceff0;border:1px solid #d6dde0}
+:where(body[data-theme="light"]) .sched-tab em{background:#cbd7db;color:#28332e}
+:where(body[data-theme="light"]) .sched-pane>.sched-sec{border-top:1px solid #d6dde0}
+:where(body[data-theme="light"]) .sched-chip{background:#d4e0dc;border:1px solid #c4d5cd;color:#193e2a}
+:where(body[data-theme="light"]) .sched-chip.off{background:#d3d7d9;border-color:#c2c8cb;color:#383f42}
+:where(body[data-theme="light"]) .sched-chip.run{background:#e3e2d4;border-color:#d8cbaf;color:#58411a}
+:where(body[data-theme="light"]) .sched-chip.bad{background:#e2d2d2;border-color:#d1aaaa;color:#411313}
+:where(body[data-theme="light"]) .sched-err{color:#411313}
+:where(body[data-theme="light"]) .sched-tags span{background:#d9dfe2;border:1px solid #ced5d7;color:#313a3d}
 :where(body[data-theme="light"]) .dest-live{background:#6ee7a8}
 :where(body[data-theme="light"]) .an-group>header small{color:#56626a}
 :where(body[data-theme="light"]) .an-search>span{color:#5f6c72}

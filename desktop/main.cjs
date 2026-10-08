@@ -165,7 +165,7 @@ if(hostMode){
       // A Codex sign-in finished by pasting the browser's address: passed to Codex over SSH or docker exec.
       handlers.codexLoginFinish=input=>client.call('codexLoginFinish',input,60000);
       for(const method of ['scheduleSave','scheduleRemove','scheduleRun','tokenRemove'])handlers[method]=input=>client.call(method,input,60000);
-      handlers.agentSchedules=input=>client.call('agentSchedules',input,40000);
+      handlers.agentCron=input=>client.call('agentCron',input,60000);handlers.agentCronDo=input=>client.call('agentCronDo',input,150000);
       for(const method of ['opayaHoldSecret','opayaForgetSecret','agentGiveSecret','opayaGiveAll','vaultGiveAgent','agentKeys','agentWeb'])handlers[method]=input=>client.call(method,input);
       // Vault import: reading agents on other machines can take a while. The file comes from Opaya's own picker (hidden
       // files shown, since .env files are hidden) or a file dropped on the Vault.

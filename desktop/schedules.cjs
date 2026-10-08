@@ -1,7 +1,7 @@
 'use strict';
 // Opaya's schedules: a message Opaya sends to an agent (or the Opaya Agent) on a cron schedule, while its session service
 // runs. Cron is the usual five fields (minute hour day-of-month month day-of-week) with *, lists, ranges and steps, in
-// this computer's local time. Agents' own schedules (Hermes cron jobs, OpenClaw cron, crontab) are read where they run.
+// this computer's local time. Agents' own schedules (Hermes cron jobs, OpenClaw cron, Goose, crontab) are in agent-cron.cjs.
 const {randomUUID}=require('node:crypto');
 const FIELDS=[[0,59],[0,23],[1,31],[1,12],[0,7]];
 const NAMES=[null,null,null,{jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12},{sun:0,mon:1,tue:2,wed:3,thu:4,fri:5,sat:6}];
@@ -56,13 +56,4 @@ function schedule(input,existing={}){
   return {id:existing.id||randomUUID(),name:name||prompt.split('\n')[0].slice(0,60),agentId,cron,prompt,enabled:input.enabled??existing.enabled??true,createdAt:existing.createdAt||new Date().toISOString(),
     lastRun:existing.lastRun||'',lastStatus:existing.lastStatus||'',conversationId:existing.conversationId||''};
 }
-// What an agent schedules itself, read where it runs: Hermes cron jobs, OpenClaw cron and the machine's crontab.
-function nativeListScript(agent){
-  const q=s=>`'${String(s).replace(/'/g,`'\\''`)}'`;
-  const inContainer=agent.command==='docker',cli=inContainer?'':agent.command;
-  const pre=(agent.args||[]).filter(x=>!['acp','--acp','--profile'].includes(x)&&!/^acp$/.test(x));
-  const hermes=agent.provider==='hermes'?`echo '== Hermes cron jobs'; ${inContainer?'hermes':q(cli||'hermes')} ${inContainer?'':pre.filter(x=>x!=='chat').map(q).join(' ')} cron list 2>&1 || cat "\${HERMES_HOME:-$HOME/.hermes}/cron/jobs.json" 2>/dev/null || echo '(none)'; `:'';
-  const openclaw=agent.provider==='openclaw'?`echo '== OpenClaw cron'; openclaw cron list 2>&1 || echo '(none)'; `:'';
-  return `${hermes}${openclaw}echo '== crontab of '"$(id -un 2>/dev/null)"; crontab -l 2>/dev/null || echo '(none)'`;
-}
-module.exports={parse,matches,next,describe,schedule,nativeListScript};
+module.exports={parse,matches,next,describe,schedule};
