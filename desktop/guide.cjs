@@ -25,7 +25,8 @@ const GOALS={
 // Agents the guide can install, and what each one needs first.
 const AGENTS={
   codex:{name:'Codex CLI',needs:['node'],signIn:{posix:'codex login',windows:'codex.cmd login'},signInNote:'A browser page opens: sign in with your ChatGPT account. When it says you are signed in, come back here.'},
-  claude:{name:'Claude Code',needs:[],needsWindows:['git'],signIn:{posix:'claude',windows:'claude'},signInNote:'Claude Code starts in the terminal below. Pick how to sign in (your Claude account), finish in the browser, then type /exit and press Enter.'},
+  // claude auth login opens the browser sign-in straight away; a Claude Code without it starts and offers /login.
+  claude:{name:'Claude Code',needs:[],needsWindows:['git'],signIn:{posix:"if claude auth --help 2>/dev/null | grep -q login; then claude auth login --claudeai; else claude; fi",windows:'claude auth login --claudeai'},signInNote:'A browser page opens: sign in with your Claude account (Pro or Max). When it says you are signed in, come back here.'},
   opencode:{name:'OpenCode',needs:['node']}
 };
 const TOOL_NAMES={git:'Git',node:'Node.js',python:'Python',uv:'uv',gh:'GitHub CLI',codex:'Codex CLI',claude:'Claude Code',opencode:'OpenCode'};
@@ -40,6 +41,11 @@ function signedIn(tool,home=os.homedir(),env=process.env){
   if(tool==='codex')return exists(path.join(env.CODEX_HOME||path.join(home,'.codex'),'auth.json'));
   if(tool==='claude')return exists(path.join(env.CLAUDE_CONFIG_DIR||path.join(home,'.claude'),'.credentials.json'))||/"oauthAccount"\s*:\s*\{/.test(read(path.join(home,'.claude.json')));
   return false;
+}
+// When the CLI last wrote its sign-in files: a new sign-in changes it (even over an expired login that left them behind).
+function signInStamp(tool,home=os.homedir(),env=process.env){
+  const files=tool==='codex'?[path.join(env.CODEX_HOME||path.join(home,'.codex'),'auth.json')]:tool==='claude'?[path.join(env.CLAUDE_CONFIG_DIR||path.join(home,'.claude'),'.credentials.json'),path.join(home,'.claude.json')]:[];
+  return Math.max(0,...files.map(f=>{try{return fs.statSync(f).mtimeMs;}catch{return 0;}}));
 }
 // The computer as the guide describes it. installed: tool id -> version text (versions.installed).
 function describe({installed={},platform=process.platform,arch=process.arch,memory=os.totalmem(),home=os.homedir(),env=process.env}={}){
@@ -93,4 +99,4 @@ function withPath(command,{windows,dirs=opayaToolDirs(windows?'win32':process.pl
   if(windows)return `$env:Path=(${dirs.map(d=>`'${d.replace(/'/g,"''")}'`).join(',')} -join ';')+';'+[Environment]::GetEnvironmentVariable('Path','User')+';'+[Environment]::GetEnvironmentVariable('Path','Machine')+';'+$env:USERPROFILE+'\\.local\\bin'; ${command}`;
   return `export PATH="${dirs.map(d=>d.replace(/["\\$`]/g,'\\$&')).join(':')}:$HOME/.local/bin:$HOME/.npm-global/bin:$HOME/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; ${command}`;
 }
-module.exports={WAYS,GOALS,AGENTS,TOOL_NAMES,WHY,signedIn,describe,plan,handoff,marked,markOf,withPath};
+module.exports={WAYS,GOALS,AGENTS,TOOL_NAMES,WHY,signedIn,signInStamp,describe,plan,handoff,marked,markOf,withPath};

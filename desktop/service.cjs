@@ -614,19 +614,38 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     }
     progress({step:step.id,state:'error',message:`${step.title} did not work. The terminal below shows why.`});return false;
   }
-  async function guideSignIn(step,progress){
-    const a=guide.AGENTS[step.tool];progress({step:step.id,state:'active',message:a.signInNote});
-    // Its own terminal: an interactive sign-in (Claude Code opens its app) must not catch the next setup commands.
-    const view=await runInTerminal({owner:'opaya',label:`Sign in to ${guide.TOOL_NAMES[step.tool]}`,key:`signin_${step.tool}`,host:null,command:guide.withPath(windowsHere?a.signIn.windows:a.signIn.posix,{windows:windowsHere})});
-    const end=Date.now()+30*60*1000;
-    while(!guide.signedIn(step.tool)){if(Date.now()>end)throw new Error(`Sign-in to ${guide.TOOL_NAMES[step.tool]} did not finish within 30 minutes. Start the guide again when you are ready.`);await new Promise(r=>setTimeout(r,2500));}
+  // Sign in to Codex CLI or Claude Code in a visible terminal (the browser opens), then wait until the sign-in really
+  // works: with again (the old login was expired or revoked, its files still there) the files must change and the
+  // Opaya Agent's own check must pass, so a stale login never counts as done.
+  async function guideSignIn(step,progress,{again=false}={}){
+    const a=guide.AGENTS[step.tool],name=guide.TOOL_NAMES[step.tool];progress({step:step.id,state:'active',message:a.signInNote});
+    const before=guide.signInStamp(step.tool);
+    // Its own terminal: an interactive sign-in must not catch the next setup commands.
+    const view=await runInTerminal({owner:'opaya',label:`Sign in to ${name}`,key:`signin_${step.tool}`,host:null,command:guide.withPath(windowsHere?a.signIn.windows:a.signIn.posix,{windows:windowsHere})});
+    const end=Date.now()+30*60*1000;let checked=0;
+    for(;;){
+      if(Date.now()>end)throw new Error(`Sign-in to ${name} did not finish within 30 minutes. Start it again when you are ready.`);
+      await new Promise(r=>setTimeout(r,2500));
+      const changed=guide.signInStamp(step.tool)>before;
+      if(!again&&guide.signedIn(step.tool)||changed){
+        if(!again)break;
+        if(Date.now()-checked<8000)continue;checked=Date.now();
+        try{await opaya.test({preset:step.tool});break;}catch(e){if(!e?.signIn)break;}
+      }
+    }
     progress({step:step.id,state:'done',message:'Signed in'});
     setTimeout(()=>{try{terminals.close(view.id);emit();}catch{}},4000);
   }
   async function guideBrain(step,progress){
     progress({step:step.id,state:'active',message:`Connecting the Opaya Agent to ${guide.TOOL_NAMES[step.tool]}`});
-    let last;
-    for(let i=0;i<4;i++){try{const r=await opaya.test({preset:step.tool});await opaya.saveConfig({preset:step.tool,model:''});progress({step:step.id,state:'done',message:r.message});return true;}catch(e){last=e;await new Promise(r=>setTimeout(r,4000));}}
+    let last,signedAgain=false;
+    for(let i=0;i<4;i++){
+      try{const r=await opaya.test({preset:step.tool});await opaya.saveConfig({preset:step.tool,model:''});progress({step:step.id,state:'done',message:r.message});return true;}
+      catch(e){last=e;
+        // An expired or revoked login: sign in again right here, once, instead of failing.
+        if(e?.signIn&&!signedAgain){signedAgain=true;progress({step:step.id,state:'warn',message:`${guide.TOOL_NAMES[step.tool]} needs you to sign in again. A sign-in opens in your browser.`});await guideSignIn({...step,id:step.id},progress,{again:true});progress({step:step.id,state:'active',message:`Connecting the Opaya Agent to ${guide.TOOL_NAMES[step.tool]}`});continue;}
+        await new Promise(r=>setTimeout(r,4000));}
+    }
     progress({step:step.id,state:'error',message:safeError(last)});return false;
   }
   async function guideAdd(step,progress){
@@ -646,6 +665,16 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   }
   const guideActions={
     guideScan:async()=>guideFacts(),
+    // The sign-in wizard: Codex CLI or Claude Code is not signed in (or its login expired) for the Opaya Agent.
+    opayaSignIn:async x=>{
+      const tool=String(x?.tool||'');if(!['codex','claude'].includes(tool))throw new Error('Choose Codex CLI or Claude Code.');
+      const name=guide.TOOL_NAMES[tool],running=[...jobs.values()].find(j=>j.kind==='signin'&&j.status==='running');if(running)return running;
+      return startJob({kind:'signin',route:{from:name,fromWhere:machineName(),to:'Opaya Agent',toWhere:machineName(),provider:tool},title:`Sign in to ${name}`,detail:'For the Opaya Agent',steps:[[`signin-${tool}`,`Sign in to ${name}`],[`brain-${tool}`,'Connect the Opaya Agent']]},async progress=>{
+        await guideSignIn({id:`signin-${tool}`,tool},progress,{again:true});
+        if(!await guideBrain({id:`brain-${tool}`,tool},progress))throw new Error(`${name} still does not answer. Look at the "Sign in to ${name}" terminal, then try again.`);
+        return {ready:true};
+      });
+    },
     guidePlan:async x=>{const facts=await guideFacts();return {facts,steps:guide.plan({way:String(x.way||''),goals:[].concat(x.goals||[]),agents:[].concat(x.agents||[]),facts})};},
     guideStart:async x=>{
       const facts=await guideFacts(),way=String(x.way||''),goals=[].concat(x.goals||[]).map(String),agents=[].concat(x.agents||[]).map(String);
@@ -950,7 +979,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     opayaFreeModels:async()=>({models:free.FREE_MODELS.map(({id,label,size,note})=>({id,label,size,note})),recommended:free.recommended(),installed:await free.ollamaModels()}),
     opayaFreeSetup:async x=>{const model=String(x?.model||free.recommended());const m=free.FREE_MODELS.find(f=>f.id===model);if(!m)throw new Error('Choose one of the free models.');
       return startJob({kind:'free-model',route:{from:m.label,fromWhere:`Free / ${m.size}`,to:'Opaya Agent',toWhere:'This computer',provider:'ollama'},title:`Setting up ${m.label}`,detail:'Free local model through Ollama. No account and no key.',steps:[['ollama','Install and start Ollama'],['download',`Download ${m.label} (${m.size})`],['connect','Connect the Opaya Agent']]},progress=>free.setupFree({opaya,model,progress}).then(r=>{emit();return r;}));},
-    opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}), opayaForgetKey:()=>opaya.forgetKey(),
+    opayaSaveConfig:x=>opaya.saveConfig(x), opayaTest:x=>opaya.test(x||{}).catch(e=>{if(e?.signIn)return {ok:false,signIn:e.signIn,message:e.message,models:[]};throw e;}), opayaForgetKey:()=>opaya.forgetKey(),
     opayaSend:x=>opaya.begin(x.text), opayaNewSession:()=>opaya.newSession(), opayaSelectSession:x=>opaya.selectSession(String(x.id||'')), opayaDeleteSession:x=>opaya.deleteSession(String(x.id||'')), opayaStop:()=>opaya.stop(), opayaClear:()=>opaya.clear(),
     ...maintenanceActions, ...toolActions, ...projectRemoteActions, ...guideActions,
     shutdown

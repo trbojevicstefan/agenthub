@@ -962,3 +962,5 @@
 :where(body[data-theme="light"]) .an-chat.an-win.hidden span{color:#50595e}
 :where(body[data-theme="light"]) .an-chat.an-win.ended span{color:#6a767b}
 :where(body[data-theme="light"]) .an-foot{border-top:1px solid #d9dee2}
+:where(body[data-theme="light"]) .inline-notice.signin-notice{border-color:#aed5c1;background:#dfeae3}
+:where(body[data-theme="light"]) .inline-notice.signin-notice>span{color:#1b5e3b}

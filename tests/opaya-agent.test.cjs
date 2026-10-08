@@ -59,6 +59,7 @@ test('Opaya Agent uses the local Codex app-server and exposes live tool activity
   const root=await temp(t),broker=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory:()=>({connect:async()=>({}),close(){}})});await broker.init();
   const child=childMock((m,c)=>{
     if(m.method==='initialize')c.reply(m,{});
+    if(m.method==='account/read')c.reply(m,{account:{type:'chatgpt',email:'me@example.com',planType:'plus'},requiresOpenaiAuth:true});
     if(m.method==='model/list')c.reply(m,{data:[{model:'gpt-local'}]});
     if(m.method==='thread/start'){assert.equal(m.params.sandbox,'read-only');assert.equal(m.params.approvalPolicy,'never');assert.equal(m.params.dynamicTools.some(x=>x.name==='get_workspace'),true);c.reply(m,{thread:{id:'opaya-thread'}});}
     if(m.method==='turn/start'){c.reply(m,{turn:{id:'opaya-turn'}});c.send({method:'turn/started',params:{threadId:'opaya-thread',turn:{id:'opaya-turn'}}});c.send({id:77,method:'item/tool/call',params:{threadId:'opaya-thread',turnId:'opaya-turn',callId:'call-1',tool:'get_workspace',arguments:{}}});}
@@ -68,6 +69,22 @@ test('Opaya Agent uses the local Codex app-server and exposes live tool activity
   t.after(async()=>{await agent.close();await broker.close();});
   assert.deepEqual((await agent.test({preset:'codex'})).models,['gpt-local']);agent.begin('Inspect my workspace');await settle(agent);
   const answer=agent.describe().messages.at(-1);assert.equal(answer.content,'Local Codex works.');assert.deepEqual(answer.activity,['Using get workspace']);
+});
+test('a Codex CLI that is not signed in, or whose login expired, asks for the sign-in instead of failing',async t=>{
+  const root=await temp(t),broker=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>true,adapterFactory:()=>({connect:async()=>({}),close(){}})});await broker.init();
+  let signedIn=false;const spawn=()=>childMock((m,c)=>{
+    if(m.method==='initialize')c.reply(m,{});
+    if(m.method==='account/read')c.reply(m,signedIn?{account:{type:'chatgpt',email:'me@example.com',planType:'plus'},requiresOpenaiAuth:true}:{account:null,requiresOpenaiAuth:true});
+    if(m.method==='model/list')c.reply(m,{data:[{model:'gpt-local'}]});
+  });
+  const agent=new OpayaAgent({root,vault:broker.vault,broker,terminals:{describe:()=>[]},approve:async()=>true,emit:()=>{},runInTerminal:async()=>({id:'x'}),spawnAgent:spawn});await agent.init();
+  t.after(async()=>{await agent.close();await broker.close();});
+  await assert.rejects(()=>agent.test({preset:'codex'}),e=>e.signIn==='codex'&&/Codex CLI needs you to sign in/.test(e.message));
+  signedIn=true;assert.match((await agent.test({preset:'codex'})).message,/connected as me@example.com/);
+  const {asSignIn}=require('../desktop/opaya-agent.cjs');
+  assert.equal(asSignIn('codex',new Error('unexpected status 401 Unauthorized: token expired')).signIn,'codex');
+  assert.equal(asSignIn('claude',new Error('Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth access token is invalid."}}')).signIn,'claude');
+  assert.equal(asSignIn('codex',new Error('The model is overloaded.')).signIn,undefined);
 });
 test('Opaya Agent changes connections only after approval and never stores tokens it is given',async t=>{
   const {agent,broker,approvals}=await fixture(t,[call('save_connection',{connection:{...apiAgent('added',8650),token:'secret-token'}}),{content:'Added.'}]);

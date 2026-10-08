@@ -1071,6 +1071,7 @@
     if(name==='modal-close'){closeModal();return;}
     if(name==='opaya'){overview=false;opayaView=true;playgroundView=false;closeModal();render();saveView();$('#message-input')?.focus();return;}
     if(name==='opaya-config'){openOpayaConfig();return;}
+    if(name==='opaya-signin'){startSignIn(button.dataset.tool);return;}
     if(name==='opaya-free'){openFreeModel();return;}
     if(name==='guide-open'){closeModal();startGuide();return;}
     if(name==='toggle-group'){toggleGroup(button.dataset.group);return;}
@@ -2560,6 +2561,14 @@
     }catch(e){g.keyError=e.message;}
     renderOpaya();
   }
+  // Codex CLI or Claude Code is not signed in (or its login expired): no error to read, the sign-in opens by itself
+  // (once each time it is needed) and the card shows where it is; the button opens it again.
+  const SIGNIN_NAME={codex:'Codex CLI',claude:'Claude Code'};let signInStarted='';
+  const signInJob=()=>[...jobs.values()].find(j=>j.kind==='signin'&&j.status==='running');
+  function signInNotice(tool){const running=signInJob();
+    return `<div class="inline-notice signin-notice"><span>&#10140;</span><div><strong>${esc(SIGNIN_NAME[tool]||tool)} needs you to sign in${running?'':' again'}</strong><p>${running?`A sign-in page opened in your browser. Sign in with your ${tool==='claude'?'Claude':'ChatGPT'} account there; Opaya connects by itself when you are done.`:`Your login expired or was signed out. Sign in once and the Opaya Agent works again.`}</p>${running?'':`<button type="button" class="primary small" data-action="opaya-signin" data-tool="${esc(tool)}">Sign in to ${esc(SIGNIN_NAME[tool]||tool)}</button>`}</div></div>`;}
+  function startSignIn(tool){signInStarted=tool;return action(async()=>{const job=await api.opayaSignIn({tool});if(job?.id)onJob(job,{quiet:true});toast(`Sign in to ${SIGNIN_NAME[tool]||tool} in your browser.`);renderOpaya();});}
+  function autoSignIn(tool){if(signInStarted===tool||signInJob())return;startSignIn(tool);}
   function renderOpaya(){
     const o=opaya(),entering=renderKey!=='opaya';
     // Its model, iTrust, setup guide and chats are in its own sidebar.
@@ -2588,7 +2597,8 @@
       return;
     }
     $('#opaya-messages').dataset.guide='';
-    $('#opaya-banner').innerHTML=!o.configured?`<div class="opaya-setup"><div class="opaya-setup-art" aria-hidden="true"><span class="opaya-mark large"><img src="assets/opaya-logo.png" alt=""><i></i></span></div><div><h2>Connect the Opaya Agent to a model.</h2><p><strong>Start free</strong>: Opaya installs Ollama and a free open model on this computer. No account, no key, nothing to type. Or use the Codex CLI, a free tier (Ollama Cloud, OpenRouter, Groq, Cerebras, Gemini) or any API: DeepSeek, OpenAI, xAI, Mistral, LM Studio or OpenAI-compatible. API keys stay in the OS keychain.</p><ul class="opaya-abilities"><li><strong>Install</strong> Hermes, Claude Code, Codex, OpenClaw and more, here or on a VPS</li><li><strong>Maintain</strong> connections, machines and SSH keys</li><li><strong>Troubleshoot</strong> agents that do not connect or answer</li></ul><div class="opaya-setup-actions"><button class="primary" data-action="opaya-free">Start free &#8594;</button><button class="secondary" data-action="opaya-config">Connect a model</button><button class="secondary" data-action="install-catalog">Install agents without the assistant</button></div></div></div>`:o.error&&!o.busy?`<div class="inline-notice error-notice"><span>!</span><div><strong>The last request failed</strong><p>${esc(o.error)}</p><button class="text-button" data-action="opaya-config">Model settings</button></div></div>`:'';
+    $('#opaya-banner').innerHTML=!o.configured?`<div class="opaya-setup"><div class="opaya-setup-art" aria-hidden="true"><span class="opaya-mark large"><img src="assets/opaya-logo.png" alt=""><i></i></span></div><div><h2>Connect the Opaya Agent to a model.</h2><p><strong>Start free</strong>: Opaya installs Ollama and a free open model on this computer. No account, no key, nothing to type. Or use the Codex CLI, a free tier (Ollama Cloud, OpenRouter, Groq, Cerebras, Gemini) or any API: DeepSeek, OpenAI, xAI, Mistral, LM Studio or OpenAI-compatible. API keys stay in the OS keychain.</p><ul class="opaya-abilities"><li><strong>Install</strong> Hermes, Claude Code, Codex, OpenClaw and more, here or on a VPS</li><li><strong>Maintain</strong> connections, machines and SSH keys</li><li><strong>Troubleshoot</strong> agents that do not connect or answer</li></ul><div class="opaya-setup-actions"><button class="primary" data-action="opaya-free">Start free &#8594;</button><button class="secondary" data-action="opaya-config">Connect a model</button><button class="secondary" data-action="install-catalog">Install agents without the assistant</button></div></div></div>`:o.signIn&&!o.busy?signInNotice(o.signIn):o.error&&!o.busy?`<div class="inline-notice error-notice"><span>!</span><div><strong>The last request failed</strong><p>${esc(o.error)}</p><button class="text-button" data-action="opaya-config">Model settings</button></div></div>`:'';
+    if(o.signIn&&!o.busy)autoSignIn(o.signIn);
     const list=$('#opaya-messages'),atBottom=list.scrollHeight-list.scrollTop-list.clientHeight<110,now=performance.now();
     if(opayaCount<0)o.messages.forEach(m=>opayaSeen.set(m.id,-1e9));opayaCount=o.messages.length;
     const live=o.live||{content:'',activity:[],status:'streaming'};live.status='streaming';
@@ -2986,7 +2996,7 @@
     form.addEventListener('change',event=>{if(event.target.name==='preset')syncPreset(true);});
     syncPreset(false);
     const values=()=>({preset:form.elements.preset.value,baseUrl:form.elements.baseUrl.value.trim(),model:form.elements.model.value.trim(),apiKey:form.elements.apiKey.value,remember:form.elements.remember.checked});
-    $('#opaya-test').onclick=()=>action(async()=>{const out=$('#opaya-test-result');out.textContent='Testing...';try{const selected=form.elements.model.value,r=await api.opayaTest(values());out.textContent=r.message;fillModels(r.models,selected); }catch(e){out.textContent=e.message;}});
+    $('#opaya-test').onclick=()=>action(async()=>{const out=$('#opaya-test-result');out.textContent='Testing...';try{const selected=form.elements.model.value,r=await api.opayaTest(values());if(r.signIn){out.textContent=`${SIGNIN_NAME[r.signIn]} is not signed in: a sign-in page opens in your browser. Test again when you are done.`;startSignIn(r.signIn);return;}out.textContent=r.message;fillModels(r.models,selected); }catch(e){out.textContent=e.message;}});
     form.addEventListener('submit',event=>{event.preventDefault();action(async()=>{await api.opayaSaveConfig(values());closeModal();opayaView=true;overview=false;render();saveView();toast('Opaya Agent is ready.');});});
   }
   // ---- Update checks: installed agents and tools per machine, with newer versions -----------------------------------
@@ -3992,6 +4002,7 @@
     const prev=jobs.get(j.id);jobs.set(j.id,j);
     if(!prev&&j.status==='running'){jobShown=j.id;jobMinimized=j.kind==='guide'||j.kind==='free-model'&&guideOn();}
     // The guide shows its own progress, and continues by itself when the free model is ready.
+    if(j.kind==='signin'){if(j.status==='done')signInStarted='';if(opayaView)refresh().then(()=>renderOpaya()).catch(()=>{});}
     if(guide){if(j.kind==='free-model'&&j.status==='done'&&guide.step==='free'){guide.step='goals';refresh().then(()=>renderOpaya());}if(opayaView&&(j.kind==='guide'||j.kind==='free-model'))renderOpaya();}
     if(prev?.status==='running'&&j.status!=='running'){
       if(j.status==='done'){const r=j.result||{},bits=[r.copied&&`Copied: ${r.copied.join(', ')}`,r.skills&&`${r.skills.length} skill${r.skills.length===1?'':'s'}`,r.keys&&`${r.keys.length} API key${r.keys.length===1?'':'s'}`,r.mcp&&`MCP: ${r.mcp.join(', ')}`,r.token&&'API token',r.file&&`saved as ${r.file}`,r.after?.removed&&'connection removed'].filter(Boolean);if(j.kind==='backup'||j.kind==='uninstall'){backupLists.clear();installInfo.clear();}

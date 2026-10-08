@@ -54,6 +54,14 @@ const PRESETS={
   custom:{label:'Custom OpenAI-compatible API',baseUrl:'',model:'',models:[]}
 };
 const KEY='opaya-agent',MAX_STEPS=40,TIMEOUT=120000;
+// A Codex CLI or Claude Code answer that means "sign in (again)": no login, an expired or revoked token, a 401. The
+// error carries signIn (the CLI), so Opaya opens the sign-in instead of showing the error.
+const AUTH_FAILED=/\b401\b|unauthori[sz]ed|oauth|(invalid|expired|revoked|missing)[^.]{0,30}(token|credential|session)|(token|credential|session)[^.]{0,30}(invalid|expired|revoked)|not (logged|signed) in|please (log|sign) ?in|\/login|codex login|authenticat|credential|api key/i;
+const CLI_NAMES={codex:'Codex CLI',claude:'Claude Code'};
+function signInError(tool,detail=''){
+  const e=new Error(`${CLI_NAMES[tool]} needs you to sign in${detail?' again':''}. Opaya opens the sign-in for you.${detail?` (${String(detail).replace(/\s+/g,' ').slice(0,200)})`:''}`);e.signIn=tool;return e;
+}
+const asSignIn=(tool,error)=>error?.signIn?error:AUTH_FAILED.test(String(error?.message||error))?signInError(tool,error?.message||error):error;
 // Opens a website or an app on this computer. Values are passed as arguments, never parsed by a shell.
 function openCommand(target,platform){
   const url=/^https?:\/\//i.test(target);
@@ -304,7 +312,7 @@ class OpayaAgent{
   configured(){return this.cli()||!!(this.config.baseUrl&&this.config.model);}
   describe(){
     const shown=this.messages.filter(m=>m.role==='user'||m.summary).slice(-80).map(({id,role,content,activity,createdAt,error})=>({id,role,content:content||'',activity:activity||[],createdAt,error}));
-    return {configured:this.configured(),config:this.config,hasKey:!this.cli()&&this.vault.has(KEY),presets:PRESETS,busy:this.busy,status:this.status,error:this.error,messages:shown,live:this.liveReply?{...this.liveReply}:null,home:this.home,sessionId:this.sessionId,sessions:(this.sessions||[]).slice().reverse().map(({id,title,updatedAt})=>({id,title,updatedAt})),
+    return {configured:this.configured(),signIn:this.signIn||'',config:this.config,hasKey:!this.cli()&&this.vault.has(KEY),presets:PRESETS,busy:this.busy,status:this.status,error:this.error,messages:shown,live:this.liveReply?{...this.liveReply}:null,home:this.home,sessionId:this.sessionId,sessions:(this.sessions||[]).slice().reverse().map(({id,title,updatedAt})=>({id,title,updatedAt})),
       // Held secrets: names and masks only, newest first; current marks this chat's.
       vaultBackup:this.lastVaultBackup||null,
       secrets:this.secrets.slice().reverse().map(s=>({id:s.id,name:s.name,mask:s.mask,global:!!s.global,kept:!!s.kept,endpoint:s.endpoint||'',reference:secrets.reference(s),current:s.session===this.sessionId,createdAt:s.createdAt,stored:s.stored.map(({agentId,agentName,name,at})=>({agentId,agent:agentName,name,at}))}))};
@@ -316,20 +324,27 @@ class OpayaAgent{
     if(!codex&&!config.model)throw new Error('Choose a model from the provider list.');
     if(!codex&&apiKey!==undefined&&apiKey!=='')await this.vault.set(KEY,schema.text(apiKey,'API key',16000).trim(),Boolean(remember));
     if(this.config.preset!==config.preset||this.config.model!==config.model||this.config.baseUrl!==config.baseUrl){await this.closeCodex();this.claudeSessionId='';}
-    this.config=config;await atomicJson(path.join(this.home,'config.json'),config);this.error='';this.emit();return this.describe();
+    this.config=config;await atomicJson(path.join(this.home,'config.json'),config);this.error='';this.signIn='';this.emit();return this.describe();
   }
   async forgetKey(){await this.vault.set(KEY,'',true);this.emit();return true;}
   headers(candidateKey,preset=this.config.preset){const key=candidateKey||(this.vault.has(KEY)?this.vault.get(KEY):'');return {'Content-Type':'application/json',...(key?{Authorization:`Bearer ${key}`}:{}),...(key&&preset==='anthropic'?{'x-api-key':key,'anthropic-version':'2023-06-01'}:{}),'X-Title':'Opaya'};}
   async test(candidate={}){
     const preset=candidate.preset||this.config.preset;
     if(preset==='codex'){
-      const rpc=await this.ensureCodex(),result=await rpc.request('model/list',{limit:200});
-      const models=(result.data||[]).map(m=>m.model||m.id).filter(m=>typeof m==='string');
-      return {ok:true,models,message:`Codex CLI connected. ${models.length} models available.`};
+      try{
+        const rpc=await this.ensureCodex();
+        // Signed in at all (an expired login is refreshed here, or reported as none)? An older Codex without account/read
+        // goes on to the model list.
+        const account=await rpc.request('account/read',{refreshToken:true},15000).catch(e=>AUTH_FAILED.test(String(e?.message||e))?Promise.reject(e):null);
+        if(account&&!account.account&&account.requiresOpenaiAuth)throw signInError('codex');
+        const result=await rpc.request('model/list',{limit:200});
+        const models=(result.data||[]).map(m=>m.model||m.id).filter(m=>typeof m==='string');
+        this.signIn='';return {ok:true,models,message:`Codex CLI connected${account?.account?.email?` as ${account.account.email}`:''}. ${models.length} models available.`};
+      }catch(error){await this.closeCodex().catch(()=>{});throw asSignIn('codex',error);}
     }
     if(preset==='claude'){
       const text=await this.claudeOnce('Reply with the single word OK.',60000);
-      return {ok:true,models:PRESETS.claude.models,message:/\bok\b/i.test(text)?'Claude Code is signed in and answering.':'Claude Code answered.'};
+      this.signIn='';return {ok:true,models:PRESETS.claude.models,message:/\bok\b/i.test(text)?'Claude Code is signed in and answering.':'Claude Code answered.'};
     }
     const baseUrl=schema.endpoint(candidate.baseUrl||this.config.baseUrl||PRESETS[preset]?.baseUrl);
     if(!baseUrl)throw new Error('Choose a model provider first.');
@@ -422,7 +437,9 @@ class OpayaAgent{
         this.controller.signal.throwIfAborted();
         if(step===MAX_STEPS-1)reply.content=(reply.content?reply.content+'\n\n':'')+'I stopped after the maximum number of steps. Ask me to continue if needed.';
       }
-    }catch(error){reply.error=this.controller.signal.aborted?'Stopped.':secrets.shieldOutput(String(error.message||error),this.heldValues()).slice(0,600);this.error=reply.error;}
+    }catch(error){
+      const e=this.cli()&&!this.controller.signal.aborted?asSignIn(this.config.preset,error):error;if(e?.signIn){this.signIn=e.signIn;if(e.signIn==='codex')await this.closeCodex().catch(()=>{});}
+      reply.error=this.controller.signal.aborted?'Stopped.':secrets.shieldOutput(String(e.message||e),this.heldValues()).slice(0,600);this.error=reply.error;}
     finally{
       // Internal tool turns stay in history for context; the chat shows one reply per request.
       this.messages.push({...reply,summary:true});
@@ -454,7 +471,7 @@ class OpayaAgent{
   async ensureCodex(){
     if(this.codexRpc&&!this.codexRpc.closed)return this.codexRpc;
     await primeShellPath();
-    if(this.spawnAgent===launch&&!findExecutable('codex'))throw new Error('The Codex CLI was not found on this computer. Install it (Install agents > Codex CLI, or ask with another model), run codex once in Terminal to sign in, then try again.');
+    if(this.spawnAgent===launch&&!findExecutable('codex'))throw new Error('The Codex CLI was not found on this computer. Install it (Install agents > Codex CLI, or ask with another model), then try again; Opaya opens the sign-in when it is needed.');
     await fs.mkdir(this.home,{recursive:true}).catch(()=>{});
     const agent={id:'opaya-local-codex',name:'Local Codex CLI',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[],cwd:this.home,hermesHome:''};
     agent.extraEnv=codexEnv(this.userHome?path.join(this.userHome,'.codex'):undefined);
@@ -503,7 +520,7 @@ class OpayaAgent{
   claudeAgent(){return {id:'opaya-local-claude',name:'Local Claude Code',provider:'claude',protocol:'claude',transport:'local',command:'claude',args:[],cwd:this.home,hermesHome:''};}
   async claudeReady(){
     await primeShellPath();
-    if(this.spawnAgent===launch&&!findExecutable('claude',environment()))throw new Error('Claude Code was not found on this computer. Install it (Install agents > Claude Code), run claude once in Terminal to sign in, then try again.');
+    if(this.spawnAgent===launch&&!findExecutable('claude',environment()))throw new Error('Claude Code was not found on this computer. Install it (Install agents > Claude Code), then try again; Opaya opens the sign-in when it is needed.');
     await fs.mkdir(this.home,{recursive:true}).catch(()=>{});
   }
   claudeSpawn(args){return this.spawnAgent(this.claudeAgent(),args,null,{cwd:this.home,env:environment({MCP_TOOL_TIMEOUT:'900000',MCP_TIMEOUT:'30000'})});}
@@ -512,11 +529,11 @@ class OpayaAgent{
     await this.claudeReady();
     const child=this.claudeSpawn(['-p','--output-format','json']);
     return new Promise((resolve,reject)=>{
-      let out='',err='';const timer=setTimeout(()=>{terminate(child);reject(new Error('Claude Code did not answer in time. Run claude once in Terminal to sign in.'));},timeout);
+      let out='',err='';const timer=setTimeout(()=>{terminate(child);reject(new Error('Claude Code did not answer in time. If it waits for a sign-in, sign in with Opaya > Opaya Agent > Model > Sign in.'));},timeout);
       child.stdout.setEncoding('utf8');child.stderr.setEncoding('utf8');child.stdout.on('data',d=>{out+=d;});child.stderr.on('data',d=>{err=(err+d).slice(-2000);});
       child.on('error',e=>{clearTimeout(timer);reject(e);});
       child.on('close',code=>{clearTimeout(timer);let r={};try{r=JSON.parse(out.trim().split('\n').pop()||'{}');}catch{}
-        if(code!==0||r.is_error){const msg=String(r.result||err||`Claude Code exited (${code}).`);reject(new Error(/log ?in|login|auth|credential|api key/i.test(msg)?`Claude Code is not signed in yet. Run claude once in Terminal and sign in. (${msg.slice(0,200)})`:msg.slice(0,400)));}
+        if(code!==0||r.is_error){const msg=String(r.result||err||`Claude Code exited (${code}).`);reject(AUTH_FAILED.test(msg)?signInError('claude',msg):new Error(msg.slice(0,400)));}
         else resolve(String(r.result||''));});
       child.stdin.on('error',()=>{});child.stdin.end(prompt);
     });
@@ -1189,4 +1206,4 @@ class OpayaAgent{
     }
   }
 }
-module.exports={OpayaAgent,PRESETS,TOOLS,DIAGNOSTICS,stripAnsi,promptState,INSTALL_PROCEDURE,APP_GUIDE};
+module.exports={OpayaAgent,PRESETS,TOOLS,DIAGNOSTICS,stripAnsi,promptState,INSTALL_PROCEDURE,APP_GUIDE,AUTH_FAILED,signInError,asSignIn};

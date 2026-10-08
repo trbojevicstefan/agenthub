@@ -2775,3 +2775,9 @@ body[data-theme="light"] .sched-tab em{background:#e3ebe6;color:#3c4a44}
 body[data-theme="light"] .an-search input{background:#fff;border-color:#d6dfda;color:#17201c}
 body[data-theme="light"] .an-foot{border-color:#e3e9e5}
 body[data-theme="light"] .an-row-act:hover{background:#dff0e6;color:#15803d}
+/* The Opaya Agent's CLI needs a sign-in: a calm card, not an error. */
+.inline-notice.signin-notice{border-color:#2f5a44;background:#152019}
+.inline-notice.signin-notice>span{color:#6ee7a8}
+.inline-notice.signin-notice .primary{margin-top:8px}
+body[data-theme="light"] .inline-notice.signin-notice{border-color:#9fd3b5;background:#eef8f2}
+body[data-theme="light"] .inline-notice.signin-notice>span{color:#15803d}

@@ -44,9 +44,15 @@ test('Claude Code can be the Opaya Agent\'s model: it reaches the Opaya tools th
   assert.deepEqual(fake.spawns.at(-1).args.slice(fake.spawns.at(-1).args.indexOf('--resume'),fake.spawns.at(-1).args.indexOf('--resume')+2),['--resume','sess-1'],'the same Claude session continues');
   await agent.newSession();agent.begin('Fresh');await settle(agent);assert.equal(fake.spawns.at(-1).args.includes('--resume'),false);
 });
-test('a Claude Code that is not signed in says so plainly',async t=>{
+test('a Claude Code that is not signed in, or whose login expired, opens the sign-in instead of an error',async t=>{
   const {agent}=await fixture(t,async()=>[{type:'result',is_error:true,result:'Invalid API key · Please run /login'}]);
-  await assert.rejects(()=>agent.test({preset:'claude'}),/not signed in yet/);
+  await assert.rejects(()=>agent.test({preset:'claude'}),e=>e.signIn==='claude'&&/Claude Code needs you to sign in/.test(e.message));
+});
+test('a chat turn that fails on an expired Claude login marks the Opaya Agent for sign-in',async t=>{
+  const {agent}=await fixture(t,async({args})=>args.includes('json')?[{type:'result',is_error:false,result:'OK'}]:[{type:'result',is_error:true,result:'Failed to authenticate. API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"OAuth access token is invalid."}}'}]);
+  await agent.saveConfig({preset:'claude',model:''});agent.begin('Hello');await settle(agent);
+  assert.equal(agent.describe().signIn,'claude');
+  await agent.test({preset:'claude'});assert.equal(agent.describe().signIn,'','a working sign-in clears it');
 });
 const guide=require('../desktop/guide.cjs');const fsp=require('node:fs/promises');const path=require('node:path');const {execFileSync}=require('node:child_process');
 test('the guide gets a model first, then hands the rest to the Opaya Agent; nothing already installed is installed again',()=>{
