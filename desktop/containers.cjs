@@ -38,7 +38,7 @@ const slug=value=>String(value||'').toLowerCase().replace(/[^a-z0-9_-]+/g,'-').r
 const EXIT={3:'Docker is not installed on this machine. Install Docker first (Install agents > Docker on this machine), then try again.',4:'This SSH user cannot use Docker. On the machine run: sudo usermod -aG docker $USER, log in again, then retry.',5:'The port for this container is already used on the machine. Choose another name.'};
 // OpenClaw: start the gateway container, onboard interactively in it, then turn on the chat API with the container's
 // token and restart it. Opaya then imports the token and connects over the SSH tunnel.
-function openclawPlan(p,n){
+function openclawPlan(p,n,{signIn=true}={}){
   const container=`opaya-${n}`.slice(0,60),port=openclawPort(container),c=q(container);
   const lines=[
     'export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"',
@@ -52,7 +52,7 @@ function openclawPlan(p,n){
     'fi',
     `echo; echo 'OpenClaw runs in container ${container} (data in the Docker volume ${container}-data, gateway on 127.0.0.1:${port} of this machine).'`,
     `echo '${p.signInNote} Opaya adds the agent when you are done here.'; echo`,
-    `if [ -t 0 ]; then t=-it; else t=-i; fi; docker exec $t ${c} ${p.signIn} || echo 'Onboarding did not finish; you can do it later with Run native CLI: openclaw onboard.'`,
+    ...(signIn?[`if [ -t 0 ]; then t=-it; else t=-i; fi; docker exec $t ${c} ${p.signIn} || echo 'Onboarding did not finish; you can do it later with Run native CLI: openclaw onboard.'`]:[]),
     // The gateway keeps the container's token; the chat API Opaya uses is switched on, then the gateway restarts.
     `docker exec ${c} sh -c 'openclaw config set gateway.auth.mode token >/dev/null && openclaw config set gateway.auth.token "$OPENCLAW_GATEWAY_TOKEN" >/dev/null && openclaw config set gateway.http.endpoints.chatCompletions.enabled true >/dev/null' || echo 'Could not turn on the gateway chat API yet.'`,
     `docker restart ${c} >/dev/null && echo 'Gateway restarted.'`,
@@ -62,10 +62,11 @@ function openclawPlan(p,n){
   return {framework:{id:'openclaw',name:p.name},container,folder:`Docker volume ${container}-data`,image:p.image,port,importToken:true,command:`sh -c ${q(lines.join('\n'))}`,preview:lines.join('\n'),
     connection:{name:`${p.name} (Docker)`,transport:'ssh',tags:['docker'],...p.connection(container,port)}};
 }
-function plan(id,{name}={}){
+// signIn false leaves out the interactive sign-in at the end (the install matrix in CI has nobody to sign in).
+function plan(id,{name,signIn=true}={}){
   const p=PLANS[id];if(!p)throw new Error('This agent has no Docker install. Use the regular install.');
   const n=slug(name||id);if(!n)throw new Error('Give the container a name with letters or numbers.');
-  if(p.gateway)return openclawPlan(p,n);
+  if(p.gateway)return openclawPlan(p,n,{signIn});
   const container=`opaya-${n}`.slice(0,60),folder=p.dir||'opaya-agents',mount=p.mount||'/root',image=p.image||NODE_IMAGE;
   const exec=`docker exec -e HOME=${q(mount)}${p.mount?` -e HERMES_HOME=${q(mount)}`:''}`;
   const lines=[
@@ -83,7 +84,7 @@ function plan(id,{name}={}){
     `echo; echo '${p.name} runs in container ${container}. Data: '"$dir"`,
     `echo '${p.signInNote} Opaya adds the agent when you are done here.'; echo`,
     // Interactive sign-in in this terminal; a failed or skipped sign-in does not undo the install.
-    `if [ -t 0 ]; then t=-it; else t=-i; fi; ${exec} $t ${q(container)} sh -c ${q(p.signIn)} || echo 'Sign-in did not finish; you can do it later with Run native CLI.'`,
+    ...(signIn?[`if [ -t 0 ]; then t=-it; else t=-i; fi; ${exec} $t ${q(container)} sh -c ${q(p.signIn)} || echo 'Sign-in did not finish; you can do it later with Run native CLI.'`]:[]),
     'true'
   ];
   return {framework:{id,name:p.name},container,folder:`~/${folder}/${n}`,image,command:`sh -c ${q(lines.join('\n'))}`,preview:lines.join('\n'),

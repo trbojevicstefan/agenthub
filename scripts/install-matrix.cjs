@@ -20,12 +20,16 @@ const pick=ids=>ids.filter(id=>!only||only.includes(id));
 function run(file,args,{timeout=15*60*1000,env=process.env,input=null,shell=false}={}){
   return new Promise(resolve=>{
     const started=Date.now();let out='';
-    const child=spawn(file,args,{env,shell,windowsHide:true,stdio:[input===null?'ignore':'pipe','pipe','pipe']});
+    // Its own process group (POSIX), so a timeout also stops what it started (docker exec, a waiting login).
+    const child=spawn(file,args,{env,shell,windowsHide:true,detached:!win,stdio:[input===null?'ignore':'pipe','pipe','pipe']});let done=false;
+    const finish=code=>{if(done)return;done=true;clearTimeout(timer);resolve({code,out,seconds:Math.round((Date.now()-started)/1000)});};
     const keep=d=>{out=(out+d).slice(-60000);};child.stdout.on('data',keep);child.stderr.on('data',keep);
     if(input!==null){child.stdin.on('error',()=>{});child.stdin.end(input);}
-    const timer=setTimeout(()=>{out+=`\n[install-matrix] timed out after ${Math.round(timeout/60000)} minutes`;try{child.kill('SIGKILL');}catch{}},timeout);
+    const timer=setTimeout(()=>{out+=`\n[install-matrix] timed out after ${Math.round(timeout/60000)} minutes`;
+      try{if(win)execFileSync('taskkill',['/pid',String(child.pid),'/T','/F'],{stdio:'ignore'});else process.kill(-child.pid,'SIGKILL');}catch{try{child.kill('SIGKILL');}catch{}}
+      setTimeout(()=>finish(124),3000).unref?.();},timeout);
     child.on('error',e=>{out+=`\n${e.message}`;});
-    child.on('close',code=>{clearTimeout(timer);resolve({code:code??1,out,seconds:Math.round((Date.now()-started)/1000)});});
+    child.on('close',code=>finish(code??1));
   });
 }
 const tail=(text,n=40)=>String(text||'').replace(/\x1b\[[0-9;?]*[A-Za-z]/g,'').replace(/\r/g,'').split('\n').filter(l=>l.trim()).slice(-n).join('\n');
@@ -74,8 +78,8 @@ async function ssh(){
 // ---- Docker containers --------------------------------------------------------------------------------------------------
 async function docker(){
   for(const id of pick(Object.keys(containers.PLANS))){
-    const plan=containers.plan(id,{name:`ci-${id}`});
-    // No terminal: the sign-in step at the end reads end of input and stops, as when the user skips it.
+    const plan=containers.plan(id,{name:`ci-${id}`,signIn:false});
+    // Without the sign-in at the end: in Opaya the user signs in there (codex login waits for the browser).
     console.log(`...  ${id}: installing as a container`);const r=await run('bash',['-c',plan.command],{timeout:15*60*1000,input:''});
     const args=plan.connection.args.filter((a,i,all)=>a!=='-i'&&a!=='--profile'&&all[i-1]!=='--profile'),bin=args.at(-1)==='acp'?args.slice(0,-1):args;
     const v=await run('docker',[...bin,'--version'],{timeout:120000});
