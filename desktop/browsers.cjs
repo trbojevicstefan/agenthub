@@ -20,12 +20,13 @@ function candidates({platform=process.platform,env=process.env}={}){
       vivaldi:[local&&at(local,'Vivaldi','Application','vivaldi.exe'),at(pf,'Vivaldi','Application','vivaldi.exe')]};
   }
   if(platform==='darwin'){
-    const apps=['/Applications',path.join(env.HOME||'','Applications')];
-    const app=name=>apps.map(d=>path.join(d,`${name}.app`));
+    // POSIX paths whatever platform Opaya's tests run on.
+    const apps=['/Applications',path.posix.join(env.HOME||'','Applications')];
+    const app=name=>apps.map(d=>path.posix.join(d,`${name}.app`));
     return {chrome:app('Google Chrome'),edge:app('Microsoft Edge'),firefox:app('Firefox'),brave:app('Brave Browser'),arc:app('Arc'),opera:app('Opera'),vivaldi:app('Vivaldi'),safari:['/Applications/Safari.app']};
   }
   const dirs=String(env.PATH||'/usr/bin:/usr/local/bin').split(':').concat(['/usr/bin','/usr/local/bin','/snap/bin']);
-  const bin=(...names)=>names.flatMap(n=>dirs.map(d=>path.join(d,n)));
+  const bin=(...names)=>names.flatMap(n=>dirs.map(d=>path.posix.join(d,n)));
   return {chrome:bin('google-chrome','google-chrome-stable'),chromium:bin('chromium','chromium-browser'),firefox:bin('firefox'),edge:bin('microsoft-edge','microsoft-edge-stable'),brave:bin('brave-browser','brave'),opera:bin('opera'),vivaldi:bin('vivaldi')};
 }
 // [{id, label, path}] of the browsers that are installed.
