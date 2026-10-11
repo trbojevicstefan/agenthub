@@ -1,3 +1,8 @@
+# Opaya 0.32.2 - the real ChatGPT models in the setup wizard
+
+- **Pick from your ChatGPT models.** When you set an agent up with ChatGPT, the wizard lists the models your account offers, as Codex on this computer reports them, with Codex's default first, instead of a model name typed in for you. "Another model..." still takes any name.
+- **Codex on this computer**: an OpenClaw on the same computer can use the ChatGPT sign-in Codex already has, with nothing to sign in.
+
 # Opaya 0.32.1 - sign in with your subscription, connect chat apps, and always see the model
 
 - **Sign in with your subscription** in the setup wizard: ChatGPT (Plus, Pro, Business) and Claude (Pro, Max) in your browser, plus Grok, GitHub Copilot (OpenClaw) and Nous Portal (Hermes), where Opaya opens the page and shows you the code to enter. Opaya passes the sign-in to the agent on your VPS or in its container; you copy nothing.
