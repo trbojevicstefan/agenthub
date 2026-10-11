@@ -1,3 +1,10 @@
+# Opaya 0.32.5 - sign-ins that finish, and every option your agent offers
+
+- **Sign-in that goes through.** Some agents wait for the browser on the IPv6 localhost (`::1`) while the browser or Opaya used `127.0.0.1`, so the ChatGPT sign-in stopped at the last step. Opaya now listens on both and forwards the sign-in to whichever address the agent uses.
+- **Every provider and model your agent offers.** For an OpenClaw that is already running, the setup wizard asks it for its own list of providers and models and shows all of them, including ones Opaya has no special support for. You pick a model from a list instead of typing it.
+- **A model that works on a new install.** If the model you picked is not offered by the OpenClaw that was just installed, Opaya picks its default (or first) model for that provider and tells you.
+- **More Hermes providers:** Z.AI, Hugging Face, NVIDIA and Alibaba.
+
 # Opaya 0.32.4 - sign in with the right browser, and cancel an install
 
 0.32.4 is 0.32.3 with a build fix, so it is also available for Windows.

@@ -42,22 +42,42 @@ const PROVIDERS=[
   {id:'deepseek',label:'DeepSeek',env:'DEEPSEEK_API_KEY',signup:'https://platform.deepseek.com/api_keys',hermes:'deepseek',openclaw:'deepseek',
     model:'deepseek-v4-pro',models:['deepseek-v4-pro','deepseek-flash']},
   {id:'xai',label:'xAI (Grok)',env:'XAI_API_KEY',signup:'https://console.x.ai',hermes:'xai',openclaw:'xai',
-    model:'grok-4.7',models:['grok-4.7']}
+    model:'grok-4.7',models:['grok-4.7']},
+  // More of Hermes' own providers (its auth registry). OpenClaw offers its whole catalog live (openclawCatalog below).
+  {id:'zai',label:'Z.AI (GLM)',env:'ZAI_API_KEY',signup:'https://z.ai/manage-apikey/apikey-list',hermes:'zai',openclaw:'zai',model:'glm-5.2',models:['glm-5.2']},
+  {id:'huggingface',label:'Hugging Face',env:'HF_TOKEN',free:'Free tier',signup:'https://huggingface.co/settings/tokens',hermes:'huggingface',openclaw:null,model:'openai/gpt-oss-120b',models:['openai/gpt-oss-120b','openai/gpt-oss-20b']},
+  {id:'nvidia',label:'NVIDIA NIM',env:'NVIDIA_API_KEY',free:'Free tier',signup:'https://build.nvidia.com/settings/api-keys',hermes:'nvidia',openclaw:null,model:'openai/gpt-oss-120b',models:['openai/gpt-oss-120b']},
+  {id:'alibaba',label:'Qwen Cloud (Alibaba)',env:'DASHSCOPE_API_KEY',signup:'https://modelstudio.console.alibabacloud.com',hermes:'alibaba',openclaw:null,model:'qwen3-max',models:['qwen3-max']}
 ];
+// A provider only OpenClaw's own catalog knows (id oc:<provider>): its key is given with openclaw models auth
+// paste-api-key on the command's input.
+const PROVIDER_ID=/^[a-z0-9][a-z0-9._-]{0,60}$/;
+const catalogProvider=id=>{const oc=String(id).slice(3);if(!PROVIDER_ID.test(oc))throw new Error('Choose one of the providers in the list.');return {id,label:oc,openclaw:oc,hermes:null,model:'',models:[],pasteKey:true};};
 const MODEL=/^[\w.:@+\/-]{1,160}$/;
 const FRAMEWORKS=['hermes','openclaw'];
-const provider=id=>{if(id==='codex-login')id='chatgpt';const p=PROVIDERS.find(x=>x.id===id);if(!p)throw new Error('Choose one of the providers in the list.');return p;};
+const provider=id=>{if(id==='codex-login')id='chatgpt';if(String(id).startsWith('oc:'))return catalogProvider(id);const p=PROVIDERS.find(x=>x.id===id);if(!p)throw new Error('Choose one of the providers in the list.');return p;};
 const checkModel=(p,model)=>{const m=String(model||'').trim()||p.model;if(!m&&!p.model)return '';if(!MODEL.test(m))throw new Error('The model name has characters a model name does not use.');return m;};
 // OpenClaw's model reference: <provider>/<model> (a model of an aggregator keeps its own slashes).
 const openclawRef=(p,model)=>model.startsWith(`${p.openclaw}/`)?model:`${p.openclaw}/${model}`;
 
+// OpenClaw's own catalog (openclaw models list --all --json): every provider it knows with its models and the default.
+function openclawCatalog(text){
+  const {json}=require('./openclaw.cjs');let data;try{data=json(text);}catch{return null;}
+  const list=Array.isArray(data?.models)?data.models:Array.isArray(data)?data:[];const out=new Map();
+  for(const m of list){const key=typeof m==='string'?m:m?.key||m?.id;if(typeof key!=='string'||!MODEL.test(key))continue;const i=key.indexOf('/');if(i<1)continue;
+    const id=key.slice(0,i),model=key.slice(i+1);if(!PROVIDER_ID.test(id))continue;
+    if(!out.has(id))out.set(id,{id,models:[],default:''});const p=out.get(id);if(p.models.length<200&&!p.models.includes(model))p.models.push(model);
+    const tags=Array.isArray(m?.tags)?m.tags:[];if(tags.includes('default')&&!p.default)p.default=model;}
+  return [...out.values()];
+}
 // What the wizard offers: keys the user already has (by name only) and every provider for a new key.
 // vault: [{id, name, mask}] (the Opaya Vault); opaya: {preset, model, hasKey} (the Opaya Agent's model).
 // found: keys Opaya found on this computer and in other agents, not in the Vault yet ([{scan, item, name, mask, where}]).
 // framework: the agent being set up (hermes or openclaw); providers it cannot use are left out.
 // codex: {models, default} from Codex on this computer, the real list for the ChatGPT sign-in.
 // codexLogin: Codex is signed in on this computer and the agent runs here too (its login can be reused).
-function choices({vault=[],found=[],opaya=null,claudeHere=false,framework='',codex=null,codexLogin=false}={}){
+// catalog: OpenClaw's own providers and models (openclawCatalog), when the agent exists: the lists come from it.
+function choices({vault=[],found=[],opaya=null,claudeHere=false,framework='',codex=null,codexLogin=false,catalog=null}={}){
   const saved=[],fits=p=>!framework||!!p[framework],keyFor=name=>PROVIDERS.find(x=>!x.login&&fits(x)&&x.env===name);
   // The subscription the Opaya Agent itself uses comes first.
   const subscriptions=PROVIDERS.filter(p=>p.login&&fits(p)).map(p=>({id:p.id,label:p.label,detail:p.detail,model:p.model,models:p.models,login:p.login,
@@ -70,7 +90,14 @@ function choices({vault=[],found=[],opaya=null,claudeHere=false,framework='',cod
   // A Vault key under another name counts when its endpoint says whose it is (API_KEY for https://openrouter.ai/...).
   for(const k of vault){const p=keyFor(k.name)||keyFor(k.endpointKey);if(p&&!saved.some(s=>s.source==='vault'&&s.provider===p.id))saved.push({source:'vault',secret:k.id,provider:p.id,label:`${p.label} key from your Vault`,detail:`${k.name} ${k.mask||''}`.trim(),model:p.model});}
   for(const f of found){const p=keyFor(f.name);if(p&&!saved.some(s=>s.provider===p.id))saved.push({source:'found',scan:f.scan,item:f.item,provider:p.id,label:`${p.label} key found in ${f.where}`,detail:`${f.name} ${f.mask||''}`.trim(),model:p.model});}
-  return {subscriptions,saved,providers:PROVIDERS.filter(p=>!p.login&&fits(p)).map(({id,label,env,free,signup,model,models})=>({id,label,env,free:free||'',signup,model,models}))};
+  let providers=PROVIDERS.filter(p=>!p.login&&fits(p)).map(({id,label,env,free,signup,model,models,openclaw})=>({id,label,env,free:free||'',signup,model,models,openclaw}));
+  if(catalog?.length&&framework==='openclaw'){
+    const by=new Map(catalog.map(c=>[c.id,c]));
+    providers=providers.map(p=>{const c=by.get(p.openclaw);return c?.models.length?{...p,models:c.models,model:c.models.includes(p.model)?p.model:c.default||c.models[0],live:true}:p;});
+    for(const c of catalog)if(!providers.some(p=>p.openclaw===c.id)&&!PROVIDERS.some(p=>p.login&&p.openclaw===c.id))providers.push({id:`oc:${c.id}`,label:c.id,env:'',free:'',signup:'',model:c.default||c.models[0]||'',models:c.models,live:true,openclaw:c.id,fromAgent:true});
+    for(const s of subscriptions){const c=by.get(PROVIDERS.find(p=>p.id===s.id)?.openclaw||(s.id==='codex-login'?'openai':''));if(c?.models.length&&!s.live){s.models=c.models;s.model=c.models.includes(s.model)?s.model:c.default||c.models[0];s.live=true;}}
+  }
+  return {subscriptions,saved,providers:providers.map(({openclaw,...p})=>p)};
 }
 
 // The CLI commands that set the model, as arguments for launch() with the agent's own command.
@@ -112,18 +139,23 @@ function shInContainer(agent,script){const all=dockerExecArgs(agent,agent.args||
 // `restart()` restarts what has to load the new key and model (a container, OpenClaw's gateway). Returns what it did.
 async function apply({agent,host,provider:providerId,model,run,restart,signIn,progress=()=>{}}){
   run??=args=>collect(launch(agent,args,host),{timeout:180000,maxBytes:1024*1024});
-  const steps=modelSteps(agent,providerId,model),p=provider(providerId),m=checkModel(p,model),done=[];
+  const steps=modelSteps(agent,providerId,model),p=provider(providerId),done=[];let m=checkModel(p,model);
   if(agent.provider==='openclaw'){
-    // Without a model step (the sign-in picks it) a new OpenClaw still needs its settings first.
-    try{await run(cliArgs(agent,steps[0]||['models','status']));}
-    catch(error){
-      // A new OpenClaw has no config yet: make one without its wizard, then set the model.
+    // Its own list of this provider's models; a new OpenClaw without settings gets them first (no wizard).
+    const list=async()=>openclawCatalog(await run(cliArgs(agent,['models','list','--all','--provider',p.openclaw,'--json'])))?.find(c=>c.id===p.openclaw)||null;
+    let offered;
+    try{offered=await list();}
+    catch{
       progress({message:'OpenClaw has no settings yet: creating them (openclaw onboard --non-interactive)'});
       try{await run(cliArgs(agent,OPENCLAW_ONBOARD));}catch(e){throw new Error(`openclaw onboard failed: ${String(e.message||e).slice(0,300)}`);}
-      done.push('openclaw onboard');
-      if(steps[0])try{await run(cliArgs(agent,steps[0]));}catch(e){throw new Error(`openclaw models set ${openclawRef(p,m)} failed: ${String(e.message||error.message||e).slice(0,300)}`);}
+      done.push('openclaw onboard');offered=await list().catch(()=>null);
     }
-    if(steps[0])done.push(`openclaw models set ${openclawRef(p,m)}`);
+    // The model the wizard chose only when this OpenClaw offers it; else the one it offers for this provider.
+    if(offered?.models.length&&m&&!offered.models.includes(m)&&!offered.models.includes(m.replace(`${p.openclaw}/`,''))){
+      const instead=offered.default||offered.models[0];progress({message:`This OpenClaw does not offer ${m} for ${p.label}; using ${instead}, which it does.`});m=instead;
+    }else if(offered?.models.length&&!m)m=offered.default||offered.models[0];
+    if(m)try{await run(cliArgs(agent,['models','set',openclawRef(p,m)]));done.push(`openclaw models set ${openclawRef(p,m)}`);}
+    catch(e){throw new Error(`openclaw models set ${openclawRef(p,m)} failed: ${String(e.message||e).slice(0,300)}`);}
     if(containerOf(agent))await run(shInContainer(agent,OPENCLAW_GATEWAY)).then(()=>done.push('gateway token and chat API'),()=>progress({message:'Could not check the gateway token and chat API in the container; Opaya continues.'}));
     else await run(cliArgs(agent,['config','set','gateway.http.endpoints.chatCompletions.enabled','true'])).then(()=>done.push('gateway chat API on'),()=>{});
   }else{
@@ -165,4 +197,4 @@ const channel=id=>{const c=CHANNELS.find(x=>x.id===id);if(!c)throw new Error('Ch
 // After the tokens are in its .env: OpenClaw adds the channel from them (`--use-env`); Hermes starts it from .env.
 function channelSteps(agent,id){channel(id);return agent.provider==='openclaw'?[['channels','add','--channel',id,'--use-env']]:[];}
 function pairArgs(id,code){channel(id);const c=String(code||'').trim();if(!/^[A-Za-z0-9-]{3,24}$/.test(c))throw new Error('Paste the pairing code the bot sent you (letters and digits).');return ['pairing','approve',id,c];}
-module.exports={CHANNELS,channelSteps,pairArgs,deviceLoginArgs,deviceCode,PROVIDERS,choices,modelSteps,openclawRef,apply,OPENCLAW_ONBOARD,OPENCLAW_GATEWAY,containerOf,chatgptLoginArgs,CLAUDE_TOKEN_ARGS,CLAUDE_TOKEN,claudeSetupToken};
+module.exports={openclawCatalog,catalogProvider,CHANNELS,channelSteps,pairArgs,deviceLoginArgs,deviceCode,PROVIDERS,choices,modelSteps,openclawRef,apply,OPENCLAW_ONBOARD,OPENCLAW_GATEWAY,containerOf,chatgptLoginArgs,CLAUDE_TOKEN_ARGS,CLAUDE_TOKEN,claudeSetupToken};

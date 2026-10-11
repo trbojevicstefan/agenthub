@@ -41,17 +41,26 @@ function parseCallback(text){
   return {port,path,state:u.searchParams.get('state')||'',code:!!u.searchParams.get('code')||!!u.searchParams.get('error')};
 }
 const SAFE_PATH=/^\/[A-Za-z0-9/_\-.~%?=&+]*$/;
-// Fetches one address from Codex where it runs and prints the raw HTTP answer: curl, else python3, else node.
+// Fetches one address from the sign-in where it runs and prints the raw HTTP answer: curl, else python3, else node.
+// The agent may listen on 127.0.0.1 (Codex), or on localhost that is ::1 only (a Node program such as OpenClaw, where
+// localhost resolves to IPv6 first): each is tried in turn.
+const HOSTS=['127.0.0.1','::1'];
 function forwardScript(port,path){
   if(!SAFE_PATH.test(path)||!Number.isInteger(port))throw new Error('Not a Codex sign-in address.');
-  const url=`http://127.0.0.1:${port}${path}`;
+  const urls=[`http://127.0.0.1:${port}${path}`,`http://[::1]:${port}${path}`];
   const py=`import sys,http.client
-c=http.client.HTTPConnection("127.0.0.1",${port},timeout=20);c.request("GET",${JSON.stringify(path)});r=c.getresponse()
+r=None
+for h in ("127.0.0.1","::1"):
+  try:
+    c=http.client.HTTPConnection(h,${port},timeout=20);c.request("GET",${JSON.stringify(path)});r=c.getresponse();break
+  except OSError:
+    r=None
+if r is None:sys.exit(7)
 o=sys.stdout.buffer;o.write(("HTTP/1.1 %d %s\\r\\n"%(r.status,r.reason)).encode())
 for k,v in r.getheaders():o.write(("%s: %s\\r\\n"%(k,v)).encode())
 o.write(b"\\r\\n");o.write(r.read());o.flush()`;
-  const js=`require("http").get({host:"127.0.0.1",port:${port},path:${JSON.stringify(path)}},r=>{let h="HTTP/1.1 "+r.statusCode+" "+r.statusMessage+"\\r\\n";for(let i=0;i<r.rawHeaders.length;i+=2)h+=r.rawHeaders[i]+": "+r.rawHeaders[i+1]+"\\r\\n";process.stdout.write(h+"\\r\\n");r.pipe(process.stdout);}).on("error",e=>{console.error(e.message);process.exit(1);})`;
-  return `if command -v curl >/dev/null 2>&1; then exec curl -sS -i --max-time 20 ${quote(url)}; elif command -v python3 >/dev/null 2>&1; then exec python3 -c ${quote(py)}; elif command -v node >/dev/null 2>&1; then exec node -e ${quote(js)}; else echo 'Neither curl, python3 nor node is available where Codex runs.' >&2; exit 3; fi`;
+  const js=`const H=["127.0.0.1","::1"],get=i=>require("http").get({host:H[i],port:${port},path:${JSON.stringify(path)}},r=>{let h="HTTP/1.1 "+r.statusCode+" "+r.statusMessage+"\\r\\n";for(let i=0;i<r.rawHeaders.length;i+=2)h+=r.rawHeaders[i]+": "+r.rawHeaders[i+1]+"\\r\\n";process.stdout.write(h+"\\r\\n");r.pipe(process.stdout);}).on("error",e=>{if(i+1<H.length)get(i+1);else{console.error(e.message);process.exit(7);}});get(0)`;
+  return `if command -v curl >/dev/null 2>&1; then for u in ${urls.map(quote).join(' ')}; do curl -sS -g -i --max-time 20 "$u" && exit 0; c=$?; [ $c = 7 ] || exit $c; done; exit 7; elif command -v python3 >/dev/null 2>&1; then exec python3 -c ${quote(py)}; elif command -v node >/dev/null 2>&1; then exec node -e ${quote(js)}; else echo 'Neither curl, python3 nor node is available where Codex runs.' >&2; exit 3; fi`;
 }
 // A raw HTTP answer split into status, headers and body. curl -i prints every response of a redirect chain; the last wins.
 function parseResponse(raw){
@@ -82,23 +91,27 @@ class CodexLogins{
     const entry={auth,where,name,terminalId,server:null,done:false,info:{state:auth.state,port:auth.port,name,listening:false,url:auth.url,terminalId}};
     this.pending.set(auth.state,entry);
     entry.timer=setTimeout(()=>this.stop(auth.state),this.timeout);entry.timer.unref?.();
-    try{entry.server=await this.listen(entry);entry.info.listening=true;entry.info.localPort=entry.server.address().port;}
+    try{entry.server=await this.listen(entry);entry.info.listening=true;entry.info.localPort=entry.server.address().port;
+      // A browser may open localhost as ::1 first: listen there too when this computer has IPv6 loopback.
+      if(this.listenHost==='127.0.0.1')entry.server6=await this.listen(entry,'::1',entry.info.localPort).catch(()=>null);}
     catch(error){entry.info.error=error.code==='EADDRINUSE'?`Port ${auth.port} is in use on this computer.`:error.message;}
     this.notify({type:'codex-login',phase:entry.info.listening?'open':'paste',...entry.info});
     if(entry.info.listening)try{await this.open(auth.url);}catch(error){this.notify({type:'codex-login',phase:'paste',...entry.info,error:`Could not open the browser: ${error.message}`});}
     return entry.info;
   }
-  listen(entry){
+  listen(entry,host=this.listenHost,port=this.localPort(entry.auth)){
     return new Promise((resolve,reject)=>{
       const server=http.createServer((req,res)=>this.serve(entry,req,res).catch(error=>{if(!res.headersSent){res.writeHead(502,{'content-type':'text/html; charset=utf-8'});res.end(page('Sign-in not finished',String(error.message).replace(/[<>&]/g,'')));}}));
       server.once('error',reject);
-      server.listen(this.localPort(entry.auth),this.listenHost,()=>{server.off('error',reject);server.unref?.();resolve(server);});
+      server.listen(port,host,()=>{server.off('error',reject);server.unref?.();resolve(server);});
     });
   }
   // Only Codex's own pages, and the callback only with the state of this sign-in.
   async serve(entry,req,res){
     const path=String(req.url||'/'),u=new URL(path,'http://127.0.0.1');
-    const callback=u.pathname===entry.auth.callbackPath,known=callback||/^\/(success|cancel|favicon\.ico)$/.test(u.pathname);
+    // The callback, and the agent's own pages around it (a success or error page, its stylesheet): every agent names them
+    // differently, so any plain path of this sign-in is passed through; only the callback carries the code.
+    const callback=u.pathname===entry.auth.callbackPath,known=true;
     if(req.method!=='GET'||!known||!SAFE_PATH.test(path)){res.writeHead(404);res.end();return;}
     if(callback&&u.searchParams.get('state')!==entry.auth.state){res.writeHead(400,{'content-type':'text/html; charset=utf-8'});res.end(page('Not this sign-in','This answer belongs to another Codex sign-in. Start the sign-in again in Opaya.'));return;}
     const answer=await this.forward(entry,path);
@@ -129,7 +142,7 @@ class CodexLogins{
     if(this.pending.has(cb.state))this.stop(cb.state);
     return {ok:true,machine:entry.name};
   }
-  stop(state){const e=this.pending.get(state);if(!e)return;this.pending.delete(state);clearTimeout(e.timer);try{e.server?.close();e.server?.closeAllConnections?.();}catch{}}
+  stop(state){const e=this.pending.get(state);if(!e)return;this.pending.delete(state);clearTimeout(e.timer);for(const s of [e.server,e.server6])try{s?.close();s?.closeAllConnections?.();}catch{}}
   // The terminal Codex signed in from ended: its sign-in cannot finish any more.
   stopTerminal(id){for(const [state,e] of [...this.pending])if(e.terminalId===id&&!e.done)this.stop(state);}
   list(){return [...this.pending.values()].map(e=>({...e.info,done:e.done}));}

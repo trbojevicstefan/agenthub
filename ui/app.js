@@ -617,7 +617,8 @@
   // key, model, gateway, connection) and shows its progress in the job card: no terminal and nothing to type there.
   async function openSetupWizard({agent=null,install=null}){
     const name=agent?title(agent):install.name||install.label;
-    let c;try{c=await api.agentSetupChoices({framework:agent?agent.provider:install.id,id:agent?.id});}catch(e){toast(e.message,true);return;}
+    modal(`Set up ${name}`,'',`<div class="setup-wizard"><p class="setup-lead"><span class="status-dot working"></span> ${agent?`Reading what ${esc(name)} offers: its sign-ins, providers and models...`:'Reading the keys and sign-ins you already have...'}</p></div>`,true);
+    let c;try{c=await api.agentSetupChoices({framework:agent?agent.provider:install.id,id:agent?.id});}catch(e){closeModal();toast(e.message,true);return;}
     const subs=c.subscriptions||[],byId=id=>c.providers.find(p=>p.id===id)||subs.find(p=>p.id===id),free=c.providers.filter(p=>p.free),paid=c.providers.filter(p=>!p.free);
     const subRec=subs.some(x=>x.recommended&&!x.unavailable);let n=0;const num=()=>`<b>${++n}</b>`;
     let pick=null;
@@ -628,7 +629,7 @@
       ${c.saved.length?`<h3>${num()} Or use a key you already have <small class="setup-sub">in your Vault, on this computer or in your other agents</small></h3><div class="setup-cards">${c.saved.map((x,i)=>card(`data-setup-saved="${i}"`,x.label,x.detail,i===0&&!subRec?'Recommended':'')).join('')}</div>`:''}
       <h3>${num()} Or get a free key: it takes a minute</h3>
       <div class="setup-cards">${free.map(p=>card(`data-setup-new="${esc(p.id)}"`,p.label,p.free,p.id==='ollama-cloud'&&!c.saved.length&&!subRec?'Recommended':'')).join('')}</div>
-      <details class="setup-more"><summary>Other providers (paid key)</summary><div class="setup-cards">${paid.map(p=>card(`data-setup-new="${esc(p.id)}"`,p.label,p.env)).join('')}</div></details>
+      <details class="setup-more" ${paid.some(p=>p.fromAgent)?'open':''}><summary>Other providers${paid.some(p=>p.fromAgent)?` (${paid.length}, as ${esc(name)} offers them)`:' (paid key)'}</summary><div class="setup-cards">${paid.map(p=>card(`data-setup-new="${esc(p.id)}"`,p.label,p.fromAgent?`From ${name}'s own list`:p.env)).join('')}</div></details>
       <div class="setup-key" id="setup-login" hidden><div class="setup-key-step"><b>&#10003;</b><div><strong>Opaya opens the sign-in in your browser</strong><span id="setup-login-text"></span></div></div></div>
       <div class="setup-key" id="setup-key" hidden>
         <div class="setup-key-step"><b>A</b><div><strong id="setup-key-title">Get a key</strong><span>Opens the provider's page. Sign in, create a key and copy it.</span></div><button type="button" class="secondary" id="setup-signup">Open the page</button></div>
@@ -645,13 +646,14 @@
       keyBox.hidden=next.source!=='new';$('#setup-login').hidden=next.source!=='login';
       const sub=subs.find(q=>q.id===next.provider);
       if(next.source==='login')$('#setup-login-text').textContent=sub?.login==='codex-login'?`Codex on this computer is already signed in to ChatGPT: ${name} uses that sign-in. Nothing to do in the browser.`:sub?.login==='device'?`Opaya opens ${sub.label}'s page and shows you a short code to enter there. Nothing else to copy.`:next.provider==='claude'?`Sign in with your Claude account there. Opaya then gives ${name} a token for your plan; you do not copy anything.`:`When ${name} is ready for it, sign in with your ChatGPT account there. Opaya passes the answer to ${name}${install?' in its container':''}; you do not copy anything.`;
+      $('#setup-signup').hidden=!p?.signup;
       if(next.source==='new'){$('#setup-key-title').textContent=`Get a ${p.label} key${p.free?` (${p.free.toLowerCase()})`:''}`;setTimeout(()=>value.focus(),50);}
       // The models to pick from: for ChatGPT the list Codex on this computer gets for the account; else the usual ones.
       const list=[...new Set([next.model||p.model,...(sub?.models||p.models||[])].filter(Boolean))],pickBox=$('#setup-model-pick');
       $('#setup-model-row').hidden=false;model.value=next.model||p.model||'';
       pickBox.innerHTML=list.map(m=>`<option value="${esc(m)}" ${m===model.value?'selected':''}>${esc(m)}</option>`).join('')+'<option value="__other">Another model...</option>';
       pickBox.hidden=!list.length;model.hidden=!!list.length;
-      $('#setup-model-note').textContent=sub?.live?'The models your ChatGPT account offers (as Codex on this computer lists them).':p.id==='nous'||sub?.id==='nous'?'Nous Portal picks its model; you can change it later.':'You can change it any time; after setup the agent shows its full list.';
+      $('#setup-model-note').textContent=(sub||p)?.live&&agent?`The models ${name} offers for ${(sub||p).label}, as it lists them now.`:sub?.live?'The models your ChatGPT account offers (as Codex on this computer lists them).':p.id==='nous'||sub?.id==='nous'?'Nous Portal picks its model; you can change it later.':'You can change it any time; after setup the agent shows its full list.';
       ready();
     };
     root.addEventListener('click',event=>{

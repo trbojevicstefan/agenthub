@@ -306,7 +306,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     },
     agentSetupChoices:async x=>{let a=null;try{a=x?.id?broker.agent(x.id):null;}catch{}return setupChoices(['hermes','openclaw'].includes(x?.framework)?x.framework:'',a);},
     agentSetupModel:async x=>{
-      const a=broker.agent(x.id),reuse=x.setup?.provider==='codex-login',p=agentSetup.PROVIDERS.find(q=>q.id===(reuse?'chatgpt':x.setup?.provider));if(!p)throw new Error('Choose a model provider.');
+      const a=broker.agent(x.id),reuse=x.setup?.provider==='codex-login',p=setupProvider(reuse?'chatgpt':x.setup?.provider);
       if(!await approve(a,`Set up ${a.name} with ${p.label}?`,`Opaya ${reuse?'gives it the ChatGPT sign-in Codex has on this computer':setupHow(p)}, sets its model to ${x.setup.model||p.model}${a.provider==='openclaw'?' and restarts its gateway':''}, then connects it again.`))throw new Error('Setup cancelled.');
       return startJob({kind:'setup',cancellable:true,route:{from:'Opaya',fromWhere:p.label,to:a.name,toWhere:whereName(a),provider:a.provider},title:`Setting up ${a.name}`,detail:`${p.label} / ${x.setup.model||p.model}`,
         steps:[['key','Give it the key'],['model','Set the model'],['connect','Connect']]},async(progress,ctl)=>{
@@ -553,7 +553,13 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     if(sel?.source==='new'){const r=await opaya.holdFromUser({name:p.env,value:String(sel.value||'')});return opaya.secretEntry(r.id);}
     throw new Error('Choose which key to use.');
   }
-  const setupHow=p=>p.login==='chatgpt'?'signs it in to ChatGPT (you sign in in your browser)':p.login==='claude'?'signs it in to Claude (you sign in in your browser)':`gives it your ${p.label} key (${p.env})`;
+  // A provider of the wizard: Opaya's table, or one only the agent's OpenClaw catalog knows (oc:<id>).
+  const setupProvider=id=>{if(String(id||'').startsWith('oc:'))return agentSetup.catalogProvider(id);const p=agentSetup.PROVIDERS.find(q=>q.id===id);if(!p)throw new Error('Choose a model provider.');return p;};
+  // OpenClaw's own providers and models where it runs (openclaw models list --all), for the wizard's lists.
+  async function openclawCatalog(a){
+    try{const out=await collect(require('./process.cjs').launch(a,management.cliArgs(a,['models','list','--all','--json']),hostOf(a)),{timeout:40000,maxBytes:16*1024*1024});return agentSetup.openclawCatalog(out);}catch{return null;}
+  }
+  const setupHow=p=>p.pasteKey?`gives it your ${p.label} key`:p.login==='chatgpt'?'signs it in to ChatGPT (you sign in in your browser)':p.login==='claude'?'signs it in to Claude (you sign in in your browser)':`gives it your ${p.label} key (${p.env})`;
   const claudeHere=()=>!!require('./process.cjs').findExecutable('claude',require('./process.cjs').environment());
   // Keys found on this computer (shell profiles, .env, tools) and in the other agents, by name and mask only; their
   // values stay in the scan until one is used. A slow machine does not hold the wizard up.
@@ -565,15 +571,15 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   }
   // The ChatGPT models for this account, from Codex on this computer (it lists them for the signed-in account).
   const codexModels=()=>Promise.race([opaya.codexModels(),new Promise(r=>setTimeout(()=>r(null),12000))]).catch(()=>null);
-  const setupChoices=async(framework='',agent=null)=>{const d=opaya.describe(),[found,codex]=await Promise.all([foundKeys(),codexModels()]);
+  const setupChoices=async(framework='',agent=null)=>{const d=opaya.describe(),[found,codex,catalog]=await Promise.all([foundKeys(),codexModels(),agent?.provider==='openclaw'&&agent.command?openclawCatalog(agent):null]);
     // Codex is signed in here (it listed models) and this OpenClaw runs here too: it can take over that sign-in.
     const codexLogin=!!codex?.models?.length&&!!agent&&agent.transport!=='ssh'&&!agentSetup.containerOf(agent);
-    return agentSetup.choices({framework,found,codex,codexLogin,claudeHere:claudeHere(),vault:(opaya.secrets||[]).filter(k=>k.kept||k.global||k.stored?.length).map(k=>({id:k.id,name:k.name,mask:k.mask,endpointKey:k.endpoint?moves.endpointKey(k.endpoint):''})),opaya:{preset:d.config?.preset,model:d.config?.model,hasKey:d.hasKey}});};
+    return agentSetup.choices({framework,found,codex,codexLogin,catalog,claudeHere:claudeHere(),vault:(opaya.secrets||[]).filter(k=>k.kept||k.global||k.stored?.length).map(k=>({id:k.id,name:k.name,mask:k.mask,endpointKey:k.endpoint?moves.endpointKey(k.endpoint):''})),opaya:{preset:d.config?.preset,model:d.config?.model,hasKey:d.hasKey}});};
   // Key into the agent's .env, model with its CLI, then a restart where the key and model need one (an OpenClaw
   // container or gateway; Hermes reads them when Opaya starts it again).
   async function setupAgentModel(a,setup,progress,ctl={}){
     const live=()=>{if(ctl.signal?.aborted)throw new Error('Cancelled.');};
-    const reuse=setup?.provider==='codex-login',p=agentSetup.PROVIDERS.find(x=>x.id===(reuse?'chatgpt':setup?.provider));if(!p)throw new Error('Choose a model provider.');
+    const reuse=setup?.provider==='codex-login',p=setupProvider(reuse?'chatgpt':setup?.provider);
     if(!['hermes','openclaw'].includes(a.provider))throw new Error('Opaya sets up Hermes and OpenClaw this way.');
     const host=hostOf(a),box=agentSetup.containerOf(a);let signIn=null;
     if(p.login==='claude'){
@@ -591,6 +597,14 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       signIn=async()=>{const home=require('node:os').homedir(),from=process.env.CODEX_HOME||require('node:path').join(home,'.codex');
         await collect(require('./process.cjs').launch(a,management.cliArgs(a,['migrate','apply','codex','--from',from,'--agent','main','--include-secrets','--item','auth:openai','--yes']),null),{timeout:120000});
         progress({step:'key',state:'done',message:'OpenClaw uses the ChatGPT sign-in of Codex on this computer'});};
+    }else if(p.pasteKey){
+      // A provider from OpenClaw's own catalog: the key goes in on the input of openclaw models auth paste-api-key.
+      if(setup.key?.source!=='new')throw new Error(`Paste the ${p.label} key.`);
+      const value=String(setup.key.value||'').trim();if(!value)throw new Error(`Paste the ${p.label} key.`);
+      progress({step:'key',state:'active',message:`Giving ${a.name} the ${p.label} key`});
+      const s=await opaya.holdSecret(value,{name:`${p.openclaw.toUpperCase().replace(/[^A-Z0-9]+/g,'_')}_API_KEY`,source:'setup'});s.kept=true;await opaya.saveSecrets();
+      await collect(require('./process.cjs').launch(a,management.cliArgs(a,['models','auth','paste-api-key','--provider',p.openclaw]),host),{timeout:60000,input:value+'\n'});
+      progress({step:'key',state:'done',message:`${a.name} has the ${p.label} key (also in your Vault)`});
     }else if(p.login==='device'){
       progress({step:'key',state:'active',message:`${p.label} sign-in: Opaya opens the page and shows the code to enter there.`});
       signIn=()=>deviceSignIn(a,host,p,progress,ctl);

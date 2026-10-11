@@ -26,10 +26,11 @@ test('the model is set with each agent\'s own CLI',()=>{
 
 test('a new OpenClaw gets its settings without the wizard, then the model, the container token and a restart',async()=>{
   const calls=[];let restarted=0;
-  const run=async args=>{calls.push(args.join(' '));if(args.includes('models')&&!calls.some(c=>c.includes('onboard')))throw new Error('No config found. Run openclaw onboard.');return '';};
+  const run=async args=>{calls.push(args.join(' '));if(args.includes('list')&&!calls.some(c=>c.includes('onboard')))throw new Error('No config found. Run openclaw onboard.');return '';};
   const r=await s.apply({agent:claw,provider:'ollama-cloud',model:'',run,restart:async()=>{restarted++;}});
-  assert.deepEqual(calls.slice(0,3),['exec -i opaya-claw openclaw models set ollama-cloud/gpt-oss:120b',`exec -i opaya-claw openclaw ${s.OPENCLAW_ONBOARD.join(' ')}`,'exec -i opaya-claw openclaw models set ollama-cloud/gpt-oss:120b']);
-  assert.equal(calls[3],`exec -i opaya-claw sh -c ${s.OPENCLAW_GATEWAY}`);
+  const list='exec -i opaya-claw openclaw models list --all --provider ollama-cloud --json';
+  assert.deepEqual(calls.slice(0,4),[list,`exec -i opaya-claw openclaw ${s.OPENCLAW_ONBOARD.join(' ')}`,list,'exec -i opaya-claw openclaw models set ollama-cloud/gpt-oss:120b']);
+  assert.equal(calls[4],`exec -i opaya-claw sh -c ${s.OPENCLAW_GATEWAY}`);
   assert.equal(restarted,1);assert.deepEqual([r.provider,r.model,r.env],['ollama-cloud','gpt-oss:120b','OLLAMA_API_KEY']);
   assert(s.OPENCLAW_ONBOARD.includes('--non-interactive')&&s.OPENCLAW_ONBOARD.includes('--auth-choice'));
 });
@@ -62,7 +63,7 @@ test('subscriptions come first: ChatGPT and Claude, signed in in the browser',as
   // The sign-in runs after the model is set and before the restart.
   const order=[];
   await s.apply({agent:claw,provider:'chatgpt',model:'',run:async a=>{order.push(a.includes('sh')?'sh -c':a.slice(4,6).join(' '));return '';},signIn:async()=>order.push('sign-in'),restart:async()=>order.push('restart')});
-  assert.deepEqual(order,['models set','sh -c','sign-in','restart']);
+  assert.deepEqual(order,['models list','models set','sh -c','sign-in','restart']);
 });
 
 test('the Claude setup token is read from Claude Code\'s output in memory, and only a finished sign-in gives one',async()=>{
@@ -113,4 +114,20 @@ test('cancelling the Claude sign-in ends it at once',async()=>{
   const spawn=()=>({onData(){},onExit(){},kill(){killed=true;}});
   const p=s.claudeSetupToken({spawn,bin:'claude',signal:ac.signal});ac.abort();
   await assert.rejects(p,/Cancelled/);assert(killed);
+});
+
+test('an existing OpenClaw offers its whole catalog, and an install keeps a model only when OpenClaw has it',async()=>{
+  const listing=JSON.stringify({models:[{key:'openai/gpt-6.1-sol',tags:['default']},{key:'openai/gpt-6-luna'},{key:'moonshot/kimi-k3'},{key:'groq/openai/gpt-oss-120b'}]});
+  const cat=s.openclawCatalog('[plugins] ok\n'+listing);
+  assert.deepEqual(cat.map(c=>[c.id,c.models,c.default]),[['openai',['gpt-6.1-sol','gpt-6-luna'],'gpt-6.1-sol'],['moonshot',['kimi-k3'],''],['groq',['openai/gpt-oss-120b'],'']]);
+  const c=s.choices({framework:'openclaw',catalog:cat});
+  assert.deepEqual(c.providers.find(p=>p.id==='groq').models,['openai/gpt-oss-120b']);assert(c.providers.find(p=>p.id==='groq').live);
+  const extra=c.providers.find(p=>p.id==='oc:moonshot');assert.deepEqual([extra.label,extra.model,extra.fromAgent],['moonshot','kimi-k3',true]);
+  assert.deepEqual(c.subscriptions.find(x=>x.id==='chatgpt').models,['gpt-6.1-sol','gpt-6-luna']);
+  assert.deepEqual(s.modelSteps(claw,'oc:moonshot','kimi-k3'),[['models','set','moonshot/kimi-k3']]);
+  assert.throws(()=>s.modelSteps(claw,'oc:bad id',''),/providers in the list/);
+  // A model this OpenClaw does not have is replaced with one it does.
+  const calls=[],msgs=[];
+  const r=await s.apply({agent:claw,provider:'openai',model:'gpt-6-sol',progress:e=>e.message&&msgs.push(e.message),run:async a=>{calls.push(a.slice(4).join(' '));return a.includes('list')?listing:'';}});
+  assert.equal(r.model,'gpt-6.1-sol');assert(calls.includes('models set openai/gpt-6.1-sol'));assert(msgs.some(m=>/does not offer gpt-6-sol/.test(m)));
 });
