@@ -18,15 +18,22 @@ const PROVIDERS=[
     model:'gpt-6-astra',models:['gpt-6-astra','gpt-6.1-sol','gpt-6-sol','gpt-6-luna']},
   {id:'claude',label:'Claude',login:'claude',env:'CLAUDE_CODE_OAUTH_TOKEN',detail:'Your Claude plan (Pro, Max). Sign in in the browser.',hermes:'anthropic',openclaw:'anthropic',
     model:'claude-sonnet-5-5',models:['claude-sonnet-5-5','claude-opus-5-5','claude-haiku-5-5']},
+  // Sign-ins with a code the user enters on the provider's page (device code): Opaya shows the code and opens the page.
+  {id:'xai-oauth',label:'Grok (SuperGrok, X Premium+)',login:'device',detail:'Your Grok plan. Enter a code on x.ai.',hermes:'xai-oauth',openclaw:'xai',
+    loginArgs:{hermes:['auth','add','xai-oauth','--type','oauth','--no-browser'],openclaw:['models','auth','login','--provider','xai','--method','oauth']},model:'grok-4.7',models:['grok-4.7']},
+  {id:'copilot',label:'GitHub Copilot',login:'device',detail:'Your Copilot plan. Enter a code on github.com.',hermes:null,openclaw:'github-copilot',
+    loginArgs:{openclaw:['models','auth','login-github-copilot','--yes']},model:'claude-sonnet-5',models:['claude-sonnet-5','gpt-5.6-sol']},
+  {id:'nous',label:'Nous Portal',login:'device',detail:'Free sign-in from Nous Research. Enter a code on their page.',hermes:'nous',openclaw:null,
+    loginArgs:{hermes:['auth','add','nous','--type','oauth','--no-browser']},model:'',models:[]},
   {id:'ollama-cloud',label:'Ollama Cloud',env:'OLLAMA_API_KEY',free:'Free account',signup:'https://ollama.com/settings/keys',hermes:'ollama-cloud',openclaw:'ollama-cloud',
     model:'gpt-oss:120b',models:['gpt-oss:120b','gpt-oss:20b','deepseek-v4-flash','kimi-k3','glm-5.2']},
-  {id:'groq',label:'Groq',env:'GROQ_API_KEY',free:'Free tier',signup:'https://console.groq.com/keys',hermes:'groq',openclaw:'groq',
+  {id:'groq',label:'Groq',env:'GROQ_API_KEY',free:'Free tier',signup:'https://console.groq.com/keys',hermes:null,openclaw:'groq',
     model:'openai/gpt-oss-120b',models:['openai/gpt-oss-120b','openai/gpt-oss-20b']},
   {id:'google',label:'Google Gemini',env:'GEMINI_API_KEY',free:'Free tier',signup:'https://aistudio.google.com/apikey',hermes:'gemini',openclaw:'google',
     model:'gemini-3.8-flash',models:['gemini-3.8-flash','gemini-3.1-pro-preview']},
   {id:'openrouter',label:'OpenRouter',env:'OPENROUTER_API_KEY',free:'Free models',signup:'https://openrouter.ai/keys',hermes:'openrouter',openclaw:'openrouter',
     model:'deepseek/deepseek-chat-v3.1:free',models:['deepseek/deepseek-chat-v3.1:free','qwen/qwen3-coder:free','openrouter/auto']},
-  {id:'mistral',label:'Mistral',env:'MISTRAL_API_KEY',free:'Free tier',signup:'https://console.mistral.ai/api-keys',hermes:'mistral',openclaw:'mistral',
+  {id:'mistral',label:'Mistral',env:'MISTRAL_API_KEY',free:'Free tier',signup:'https://console.mistral.ai/api-keys',hermes:null,openclaw:'mistral',
     model:'mistral-large-latest',models:['mistral-large-latest','mistral-small-latest']},
   {id:'openai',label:'OpenAI',env:'OPENAI_API_KEY',signup:'https://platform.openai.com/api-keys',hermes:'openai-api',openclaw:'openai',
     model:'gpt-6-sol',models:['gpt-6-sol','gpt-6-luna','gpt-6.1-sol']},
@@ -40,29 +47,34 @@ const PROVIDERS=[
 const MODEL=/^[\w.:@+\/-]{1,160}$/;
 const FRAMEWORKS=['hermes','openclaw'];
 const provider=id=>{const p=PROVIDERS.find(x=>x.id===id);if(!p)throw new Error('Choose one of the providers in the list.');return p;};
-const checkModel=(p,model)=>{const m=String(model||'').trim()||p.model;if(!MODEL.test(m))throw new Error('The model name has characters a model name does not use.');return m;};
+const checkModel=(p,model)=>{const m=String(model||'').trim()||p.model;if(!m&&!p.model)return '';if(!MODEL.test(m))throw new Error('The model name has characters a model name does not use.');return m;};
 // OpenClaw's model reference: <provider>/<model> (a model of an aggregator keeps its own slashes).
 const openclawRef=(p,model)=>model.startsWith(`${p.openclaw}/`)?model:`${p.openclaw}/${model}`;
 
 // What the wizard offers: keys the user already has (by name only) and every provider for a new key.
 // vault: [{id, name, mask}] (the Opaya Vault); opaya: {preset, model, hasKey} (the Opaya Agent's model).
-function choices({vault=[],opaya=null,claudeHere=false}={}){
-  const saved=[];
+// found: keys Opaya found on this computer and in other agents, not in the Vault yet ([{scan, item, name, mask, where}]).
+// framework: the agent being set up (hermes or openclaw); providers it cannot use are left out.
+function choices({vault=[],found=[],opaya=null,claudeHere=false,framework=''}={}){
+  const saved=[],fits=p=>!framework||!!p[framework],keyFor=name=>PROVIDERS.find(x=>!x.login&&fits(x)&&x.env===name);
   // The subscription the Opaya Agent itself uses comes first.
-  const subscriptions=PROVIDERS.filter(p=>p.login).map(p=>({id:p.id,label:p.label,detail:p.detail,model:p.model,models:p.models,login:p.login,
+  const subscriptions=PROVIDERS.filter(p=>p.login&&fits(p)).map(p=>({id:p.id,label:p.label,detail:p.detail,model:p.model,models:p.models,login:p.login,
     recommended:opaya?.preset===(p.login==='chatgpt'?'codex':'claude'),
     ...(p.login==='claude'&&!claudeHere?{unavailable:'Needs Claude Code on this computer (Install agents > Claude Code), signed in.'}:{})}));
-  if(opaya?.hasKey&&PROVIDERS.some(p=>p.id===opaya.preset)){const p=provider(opaya.preset);saved.push({source:'opaya',provider:p.id,label:`Same as the Opaya Agent`,detail:`${p.label}${opaya.model?` / ${opaya.model}`:''}`,model:opaya.model&&MODEL.test(opaya.model)?opaya.model:p.model});}
-  for(const k of vault){const p=PROVIDERS.find(x=>!x.login&&x.env===k.name);if(p&&!saved.some(s=>s.source==='vault'&&s.provider===p.id))saved.push({source:'vault',secret:k.id,provider:p.id,label:`${p.label} key from your Vault`,detail:`${k.name} ${k.mask||''}`.trim(),model:p.model});}
-  return {subscriptions,saved,providers:PROVIDERS.filter(p=>!p.login).map(({id,label,env,free,signup,model,models})=>({id,label,env,free:free||'',signup,model,models}))};
+  if(opaya?.hasKey&&PROVIDERS.some(p=>p.id===opaya.preset&&!p.login&&fits(p))){const p=provider(opaya.preset);saved.push({source:'opaya',provider:p.id,label:`Same as the Opaya Agent`,detail:`${p.label}${opaya.model?` / ${opaya.model}`:''}`,model:opaya.model&&MODEL.test(opaya.model)?opaya.model:p.model});}
+  // A Vault key under another name counts when its endpoint says whose it is (API_KEY for https://openrouter.ai/...).
+  for(const k of vault){const p=keyFor(k.name)||keyFor(k.endpointKey);if(p&&!saved.some(s=>s.source==='vault'&&s.provider===p.id))saved.push({source:'vault',secret:k.id,provider:p.id,label:`${p.label} key from your Vault`,detail:`${k.name} ${k.mask||''}`.trim(),model:p.model});}
+  for(const f of found){const p=keyFor(f.name);if(p&&!saved.some(s=>s.provider===p.id))saved.push({source:'found',scan:f.scan,item:f.item,provider:p.id,label:`${p.label} key found in ${f.where}`,detail:`${f.name} ${f.mask||''}`.trim(),model:p.model});}
+  return {subscriptions,saved,providers:PROVIDERS.filter(p=>!p.login&&fits(p)).map(({id,label,env,free,signup,model,models})=>({id,label,env,free:free||'',signup,model,models}))};
 }
 
 // The CLI commands that set the model, as arguments for launch() with the agent's own command.
 function modelSteps(agent,providerId,model){
   if(!FRAMEWORKS.includes(agent.provider))throw new Error('Opaya sets up Hermes and OpenClaw this way.');
   const p=provider(providerId),m=checkModel(p,model);
-  if(agent.provider==='hermes')return [['config','set','model.provider',p.hermes],['config','set','model.default',m]];
-  return [['models','set',openclawRef(p,m)]];
+  if(!p[agent.provider])throw new Error(`${p.label} does not work with ${agent.provider==='hermes'?'Hermes':'OpenClaw'}. Choose another one.`);
+  if(agent.provider==='hermes')return [['config','set','model.provider',p.hermes],...(m?[['config','set','model.default',m]]:[])];
+  return m?[['models','set',openclawRef(p,m)]]:[];
 }
 // A first OpenClaw config without its wizard (the model and key come from Opaya; no daemon: Opaya starts the gateway).
 const OPENCLAW_ONBOARD=['onboard','--non-interactive','--accept-risk','--mode','local','--auth-choice','skip','--no-install-daemon','--skip-channels','--skip-search','--skip-skills','--skip-ui','--skip-health'];
@@ -73,6 +85,16 @@ const OPENCLAW_GATEWAY='openclaw config set gateway.auth.mode token >/dev/null &
 function chatgptLoginArgs(agent,{relay=false}={}){
   if(agent.provider==='openclaw')return ['models','auth','login','--provider','openai'];
   return ['auth','add','openai-codex','--type','oauth','--browser',...(relay?['--no-browser']:[])];
+}
+// A device-code sign-in (Grok, GitHub Copilot, Nous Portal): the agent prints a page and a code to enter there.
+function deviceLoginArgs(agent,p){const a=p.loginArgs?.[agent.provider];if(!a)throw new Error(`${p.label} sign-in does not work with this agent.`);return a;}
+// The page and the code in what a device-code sign-in printed.
+function deviceCode(text){
+  const t=String(text||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g,'').replace(/\x1b\][^\x07]*\x07/g,'');
+  const urls=[...t.matchAll(/https:\/\/[^\s'"<>)\]]+/g)].map(m=>m[0].replace(/[.,;:]+$/,''));
+  const url=urls.reverse().find(u=>/device|activate|login|verify|code|portal|oauth/i.test(u))||'';
+  const code=[...t.matchAll(/\b([A-Z0-9]{4,5}-[A-Z0-9]{4,5})\b/g)].pop()?.[1]||'';
+  return url&&code?{url,code}:null;
 }
 // OpenClaw takes a Claude setup token on its input (never on the command line).
 const CLAUDE_TOKEN_ARGS=['models','auth','paste-token','--provider','anthropic','--expires-in','365d'];
@@ -87,15 +109,16 @@ async function apply({agent,host,provider:providerId,model,run,restart,signIn,pr
   run??=args=>collect(launch(agent,args,host),{timeout:180000,maxBytes:1024*1024});
   const steps=modelSteps(agent,providerId,model),p=provider(providerId),m=checkModel(p,model),done=[];
   if(agent.provider==='openclaw'){
-    try{await run(cliArgs(agent,steps[0]));}
+    // Without a model step (the sign-in picks it) a new OpenClaw still needs its settings first.
+    try{await run(cliArgs(agent,steps[0]||['models','status']));}
     catch(error){
       // A new OpenClaw has no config yet: make one without its wizard, then set the model.
       progress({message:'OpenClaw has no settings yet: creating them (openclaw onboard --non-interactive)'});
       try{await run(cliArgs(agent,OPENCLAW_ONBOARD));}catch(e){throw new Error(`openclaw onboard failed: ${String(e.message||e).slice(0,300)}`);}
       done.push('openclaw onboard');
-      try{await run(cliArgs(agent,steps[0]));}catch(e){throw new Error(`openclaw models set ${openclawRef(p,m)} failed: ${String(e.message||error.message||e).slice(0,300)}`);}
+      if(steps[0])try{await run(cliArgs(agent,steps[0]));}catch(e){throw new Error(`openclaw models set ${openclawRef(p,m)} failed: ${String(e.message||error.message||e).slice(0,300)}`);}
     }
-    done.push(`openclaw models set ${openclawRef(p,m)}`);
+    if(steps[0])done.push(`openclaw models set ${openclawRef(p,m)}`);
     if(containerOf(agent))await run(shInContainer(agent,OPENCLAW_GATEWAY)).then(()=>done.push('gateway token and chat API'),()=>progress({message:'Could not check the gateway token and chat API in the container; Opaya continues.'}));
     else await run(cliArgs(agent,['config','set','gateway.http.endpoints.chatCompletions.enabled','true'])).then(()=>done.push('gateway chat API on'),()=>{});
   }else{
@@ -118,4 +141,22 @@ function claudeSetupToken({spawn,bin,args=['setup-token'],env,timeout=10*60*1000
       m?finish(null,m[0]):finish(new Error(/not logged in|login|sign in/i.test(out)?'Claude Code did not finish the sign-in. Try again and sign in in the browser.':'Claude Code did not print a setup token.'));});
   });
 }
-module.exports={PROVIDERS,choices,modelSteps,openclawRef,apply,OPENCLAW_ONBOARD,OPENCLAW_GATEWAY,containerOf,chatgptLoginArgs,CLAUDE_TOKEN_ARGS,CLAUDE_TOKEN,claudeSetupToken};
+// ---- Messaging channels, the same way: tokens in Opaya's wizard, no terminal ---------------------------------------
+// Each channel with the tokens both agents read from their .env, and plain steps to get them. After the gateway starts
+// with them, the user messages the bot, which answers with a pairing code; Opaya approves it (`pairing approve`).
+const CHANNELS=[
+  {id:'telegram',label:'Telegram',easiest:true,page:'https://t.me/BotFather',pageLabel:'Open BotFather',
+    steps:['Open BotFather in Telegram with the button below.','Send /newbot, then a name, then a username that ends in "bot".','BotFather answers with a token like 123456789:AAE... Copy it and paste it here.'],
+    tokens:[{env:'TELEGRAM_BOT_TOKEN',label:'Bot token',pattern:'^\\d{5,}:[\\w-]{20,}$'}]},
+  {id:'discord',label:'Discord',page:'https://discord.com/developers/applications',pageLabel:'Open the Discord Developer Portal',
+    steps:['Open the Developer Portal and click New Application, give it a name.','Open Bot: click Reset Token and copy the token. Turn on Message Content Intent there.','Open OAuth2 > URL Generator, tick bot, open the link and add the bot to your server.'],
+    tokens:[{env:'DISCORD_BOT_TOKEN',label:'Bot token'}]},
+  {id:'slack',label:'Slack',page:'https://api.slack.com/apps?new_app=1',pageLabel:'Open Slack apps',
+    steps:['Create a new app From scratch in your workspace.','Socket Mode: turn it on and create an app-level token (xapp-...) with connections:write.','OAuth & Permissions: add chat:write, im:history, app_mentions:read, then Install to Workspace and copy the Bot token (xoxb-...).','Event Subscriptions: turn on and subscribe the bot to message.im and app_mention.'],
+    tokens:[{env:'SLACK_BOT_TOKEN',label:'Bot token (xoxb-...)',pattern:'^xoxb-'},{env:'SLACK_APP_TOKEN',label:'App token (xapp-...)',pattern:'^xapp-'}]}
+];
+const channel=id=>{const c=CHANNELS.find(x=>x.id===id);if(!c)throw new Error('Choose Telegram, Discord or Slack.');return c;};
+// After the tokens are in its .env: OpenClaw adds the channel from them (`--use-env`); Hermes starts it from .env.
+function channelSteps(agent,id){channel(id);return agent.provider==='openclaw'?[['channels','add','--channel',id,'--use-env']]:[];}
+function pairArgs(id,code){channel(id);const c=String(code||'').trim();if(!/^[A-Za-z0-9-]{3,24}$/.test(c))throw new Error('Paste the pairing code the bot sent you (letters and digits).');return ['pairing','approve',id,c];}
+module.exports={CHANNELS,channelSteps,pairArgs,deviceLoginArgs,deviceCode,PROVIDERS,choices,modelSteps,openclawRef,apply,OPENCLAW_ONBOARD,OPENCLAW_GATEWAY,containerOf,chatgptLoginArgs,CLAUDE_TOKEN_ARGS,CLAUDE_TOKEN,claudeSetupToken};

@@ -16,6 +16,7 @@ function mcpFile(servers){
 const CLAUDE_MODELS=['sonnet','opus','haiku','opusplan','claude-opus-5-5','claude-sonnet-5','claude-fable-5-1','claude-haiku-4-5-20251001'];
 class ClaudeAdapter{
   async listModels(){return [...new Set([...CLAUDE_MODELS,this.agent.model].filter(Boolean))];}
+  get currentModel(){return this.lastModel||this.agent.model||'';}
   constructor({agent,host,spawnAgent=launch,mcpServers=()=>[],trusted=()=>false,onChange=()=>{}}){this.trusted=trusted;this.agent=agent;this.host=host;this.spawnAgent=spawnAgent;this.mcpServers=mcpServers;this.onChange=onChange;this.noEffort=false;}
   // --effort takes these; a Claude Code too old for the flag gets none (found on the first turn that uses it).
   get efforts(){return this.noEffort?[]:levels.CLAUDE;}
@@ -68,6 +69,8 @@ class ClaudeAdapter{
         if(e.session_id)sessionId=e.session_id;
         if(e.type==='stream_event'&&e.event?.delta?.type==='text_delta'){sawText=true;ctx.onEvent({type:'text',text:e.event.delta.text});}
         if(e.type==='assistant'&&!sawText){for(const c of e.message?.content||[])if(c.type==='text'){ctx.onEvent({type:'text',text:c.text});sawText=true;}}
+        // Claude Code names the model it runs in its first (init) event.
+        if(e.type==='system'&&e.subtype==='init'&&typeof e.model==='string'&&e.model&&e.model!==this.lastModel){this.lastModel=e.model.slice(0,200);this.onChange?.();}
         if(e.type==='system'&&e.subtype==='api_retry')ctx.onEvent({type:'activity',text:'Claude is retrying a provider request.'});
         if(e.type==='result'){
           resultSeen=true;

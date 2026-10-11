@@ -974,3 +974,5 @@
 :where(body[data-theme="light"]) .setup-more summary{color:#343e37}
 :where(body[data-theme="light"]) .setup-key{border:1px solid #c5d0cb;background:#e3e9e6}
 :where(body[data-theme="light"]) .setup-key-step span{color:#343e37}
+:where(body[data-theme="light"]) .setup-wizard h3 .setup-sub{color:#445149}
+:where(body[data-theme="light"]) .setup-step-text{color:#18201b}

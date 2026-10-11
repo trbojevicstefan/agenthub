@@ -2812,3 +2812,8 @@ body[data-theme="light"] .setup-card span,body[data-theme="light"] .setup-key-st
 body[data-theme="light"] .setup-lead{color:#33433a}
 body[data-theme="light"] .setup-key{background:#f6faf7;border-color:#d3ddd6}
 body[data-theme="light"] .setup-wizard h3 b,body[data-theme="light"] .setup-key-step b{background:#d9f2e3;color:#1d7a46}
+.setup-wizard h3 .setup-sub{font-weight:400;font-size:12px;color:#8fa096}
+body[data-theme="light"] .setup-wizard h3 .setup-sub{color:#5d6e64}
+.setup-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.setup-step-text{font-size:13.5px;color:#d3ddd6;line-height:1.5}
+body[data-theme="light"] .setup-step-text{color:#2f3d35}

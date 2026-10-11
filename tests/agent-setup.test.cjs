@@ -38,7 +38,8 @@ test('Hermes in its container gets provider and model in its own home; a failure
   const calls=[];
   await s.apply({agent:hermes,provider:'anthropic',model:'claude-haiku-5-5',run:async a=>{calls.push(a.join(' '));return '';}});
   assert.deepEqual(calls,['exec -i opaya-tuco hermes config set model.provider anthropic','exec -i opaya-tuco hermes config set model.default claude-haiku-5-5']);
-  await assert.rejects(()=>s.apply({agent:hermes,provider:'groq',model:'',run:async()=>{throw new Error('unknown key');}}),/hermes config set model.provider groq failed: unknown key/);
+  await assert.rejects(()=>s.apply({agent:hermes,provider:'deepseek',model:'',run:async()=>{throw new Error('unknown key');}}),/hermes config set model.provider deepseek failed: unknown key/);
+  assert.throws(()=>s.modelSteps(hermes,'groq',''),/does not work with Hermes/);
 });
 
 test('a Docker install for the wizard has no interactive sign-in',()=>{
@@ -50,9 +51,9 @@ test('a Docker install for the wizard has no interactive sign-in',()=>{
 
 test('subscriptions come first: ChatGPT and Claude, signed in in the browser',async()=>{
   const c=s.choices({opaya:{preset:'codex'},claudeHere:false});
-  assert.deepEqual(c.subscriptions.map(x=>[x.id,!!x.recommended,!!x.unavailable]),[['chatgpt',true,false],['claude',false,true]]);
+  assert.deepEqual(c.subscriptions.slice(0,2).map(x=>[x.id,!!x.recommended,!!x.unavailable]),[['chatgpt',true,false],['claude',false,true]]);
   assert(!c.providers.some(p=>p.id==='chatgpt'||p.id==='claude'),'not offered as keys');
-  assert.equal(s.choices({claudeHere:true}).subscriptions[1].unavailable,undefined);
+  assert.equal(s.choices({claudeHere:true}).subscriptions[1].unavailable,undefined);assert.equal(s.choices({}).subscriptions.length,5);
   // The agent's own ChatGPT sign-in; where Opaya relays the browser's answer it must not open a browser there.
   assert.deepEqual(s.chatgptLoginArgs(claw),['models','auth','login','--provider','openai']);
   assert.deepEqual(s.chatgptLoginArgs(hermes,{relay:true}),['auth','add','openai-codex','--type','oauth','--browser','--no-browser']);
@@ -69,4 +70,29 @@ test('the Claude setup token is read from Claude Code\'s output in memory, and o
   const token='sk-ant-oat01-'+'A1b2_C3d4-'.repeat(8);
   assert.equal(await s.claudeSetupToken({spawn:fake(['Opening browser...\r\n','\x1b[32mYour token: ',token.slice(0,30),token.slice(30),'\x1b[0m\r\n']),bin:'claude'}),token);
   await assert.rejects(()=>s.claudeSetupToken({spawn:fake(['Error: not logged in\r\n']),bin:'claude'}),/did not finish the sign-in/);
+});
+
+test('every sign-in and saved key the agent can use: device codes, keys found elsewhere, keys saved with an endpoint',()=>{
+  const h=s.choices({framework:'hermes',claudeHere:true,vault:[{id:'S4',name:'API_KEY',mask:'m',endpointKey:'OPENROUTER_API_KEY'}],found:[{scan:'x',item:'i3',name:'DEEPSEEK_API_KEY',mask:'sk…9',where:'Shell profile .zshrc'},{scan:'x',item:'i4',name:'GROQ_API_KEY',mask:'g',where:'.env'}]});
+  assert.deepEqual(h.subscriptions.map(x=>x.id),['chatgpt','claude','xai-oauth','nous']);
+  assert.deepEqual(h.saved.map(x=>[x.source,x.provider]),[['vault','openrouter'],['found','deepseek']],'Groq is not a Hermes provider');
+  assert.equal(h.saved[1].label,'DeepSeek key found in Shell profile .zshrc');
+  assert(!h.providers.some(p=>p.id==='groq'||p.id==='mistral'));
+  assert.deepEqual(s.choices({framework:'openclaw',claudeHere:true}).subscriptions.map(x=>x.id),['chatgpt','claude','xai-oauth','copilot']);
+  assert.deepEqual(s.deviceLoginArgs(claw,s.PROVIDERS.find(p=>p.id==='copilot')),['models','auth','login-github-copilot','--yes']);
+  assert.deepEqual(s.modelSteps(hermes,'nous',''),[['config','set','model.provider','nous']],'Nous picks its own model');
+  assert.deepEqual(s.deviceCode('To sign in, open \x1b[4mhttps://accounts.x.ai/oauth2/device\x1b[0m and enter WDJB-MJHT.'),{url:'https://accounts.x.ai/oauth2/device',code:'WDJB-MJHT'});
+  assert.equal(s.deviceCode('waiting...'),null);
+});
+
+test('the model behind a gateway route is read from the agent\'s CLI',{skip:process.platform==='win32'},async t=>{
+  const fs=require('node:fs/promises'),path=require('node:path'),{temp}=require('./helpers.cjs'),{Broker}=require('../desktop/broker.cjs');
+  const dir=await temp(t),oc=path.join(dir,'openclaw'),hm=path.join(dir,'hermes');
+  await fs.writeFile(oc,`#!/bin/sh\necho '[plugins] ok'\necho '{"models":[{"key":"ollama-cloud/gpt-oss:120b","tags":["default","configured"],"available":true}]}'\n`,{mode:0o755});
+  await fs.writeFile(hm,`#!/bin/sh\ncase "$3" in model.provider) echo openrouter;; model.default) echo 'deepseek/deepseek-chat-v3.1:free';; esac\n`,{mode:0o755});
+  const resolve=a=>Broker.prototype.resolveModel.call({host:()=>null},{transport:'local',args:[],...a});
+  assert.equal(await resolve({provider:'openclaw',protocol:'openai',command:oc,model:'openclaw'}),'ollama-cloud/gpt-oss:120b');
+  assert.equal(await resolve({provider:'hermes',protocol:'openai',command:hm,model:'hermes-agent'}),'openrouter/deepseek/deepseek-chat-v3.1:free');
+  assert.equal(await resolve({provider:'openclaw',protocol:'openai',command:oc,model:'anthropic/claude-sonnet-5-5'}),'','a real model needs no lookup');
+  assert.equal(await resolve({provider:'deepseek',protocol:'openai',command:'',model:'deepseek-flash'}),'');
 });

@@ -39,6 +39,8 @@ function elicitationContent(schema){
 class CodexAdapter{
   constructor({agent,host,approve,spawnAgent=launch,trusted=()=>false,mcpServers=()=>[],onChange=()=>{}}){this.trusted=trusted;this.mcpServers=mcpServers;this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.onChange=onChange;this.threads=new Map();this.threadModels=new Map();this.modelInfo=new Map();this.defaultModel='';this.active=null;}
   // Reasoning effort levels of the agent's model as model/list reports them (read in the background on connect).
+  // The model Codex answers with: the last thread's, else the one it is set to, else its default.
+  get currentModel(){return this.lastModel||this.agent.model||this.defaultModel||'';}
   get efforts(){return this.modelInfo.get(this.agent.model||this.defaultModel)?.efforts??levels.CODEX;}
   async connect(){
     this.rpc=new Rpc(this.spawnAgent(codexLaunch(this.agent),[...this.agent.args,...SHELL_ENV,...codexMcpArgs(this.agent,this.mcpServers()||[]),'app-server'],this.host),{jsonrpc:false,onRequest:async(method,params)=>{
@@ -98,6 +100,7 @@ class CodexAdapter{
       this.threads.set(ctx.conversation.id,threadId);await ctx.onSession(threadId);
     }
     const actual=model||this.threadModels.get(threadId)||this.defaultModel,info=this.modelInfo.get(actual);
+    if(actual&&actual!==this.lastModel){this.lastModel=actual;this.onChange?.();}
     // Reasoning effort: the chosen level, or the nearest one this model offers.
     let effort=ctx.effort||'';
     if(effort&&info?.efforts){const fit=levels.nearest(effort,info.efforts);if(fit!==effort)ctx.onEvent({type:'activity',text:fit?`Using ${fit} reasoning effort: ${actual} does not offer ${effort}.`:`${actual} has no reasoning effort setting, so it uses its own.`});effort=fit;}

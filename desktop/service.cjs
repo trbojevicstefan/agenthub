@@ -247,7 +247,33 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     },
     agentChannels:async x=>{const a=broker.agent(x.id);return management.channels(a,hostOf(a));},
     // Opaya's setup wizard: what it can use, and setting up an agent that is already added (from its Manage page).
-    agentSetupChoices:async()=>setupChoices(),
+    // Messaging channels with Opaya's wizard: the tokens go into the agent's .env from the Vault, OpenClaw adds the
+    // channel from them, the gateway restarts; then the bot's pairing code is approved. No terminal.
+    agentChannelConnect:async x=>{
+      const a=broker.agent(x.id),host=hostOf(a),c=agentSetup.CHANNELS.find(q=>q.id===x.channel);if(!c)throw new Error('Choose Telegram, Discord or Slack.');
+      if(!['hermes','openclaw'].includes(a.provider))throw new Error('Opaya connects channels for Hermes and OpenClaw.');
+      const tokens=c.tokens.map(t=>{const v=String(x.tokens?.[t.env]||'').trim();if(!v)throw new Error(`Paste the ${t.label}.`);if(t.pattern&&!new RegExp(t.pattern).test(v))throw new Error(`That does not look like a ${c.label} ${t.label.toLowerCase()}.`);return {...t,value:v};});
+      return startJob({kind:'setup',route:{from:c.label,fromWhere:'Messaging channel',to:a.name,toWhere:whereName(a),provider:a.provider},title:`Connecting ${c.label} to ${a.name}`,detail:c.label,
+        steps:[['tokens','Give it the token'],['channel','Turn on the channel'],['gateway','Restart its gateway']]},async progress=>{
+        progress({step:'tokens',state:'active',message:`Saving ${tokens.map(t=>t.env).join(' and ')} where ${a.name} reads them`});
+        for(const t of tokens){const s=await opaya.holdSecret(t.value,{name:t.env,source:'channel'});s.kept=true;await opaya.saveSecrets();await opaya.storeSecret({secret:s.id,agent_id:a.id,name:t.env},{approved:true});}
+        progress({step:'tokens',state:'done',message:'Saved (also in your Vault)'});
+        progress({step:'channel',state:'active',message:`Turning on ${c.label}`});
+        for(const args of agentSetup.channelSteps(a,c.id))await collect(require('./process.cjs').launch(a,management.cliArgs(a,args),host),{timeout:120000});
+        progress({step:'channel',state:'done',message:`${c.label} is on`});
+        progress({step:'gateway',state:'active',message:'Restarting its gateway so it starts the channel'});
+        await restartGateway(a,host);
+        progress({step:'gateway',state:'done',message:`Send your bot a message in ${c.label}: it answers with a pairing code. Paste it in Opaya to finish.`});
+        return {channel:c.id,label:c.label,agent:{id:a.id,name:a.name},pairing:true};
+      });
+    },
+    agentChannelOptions:async()=>agentSetup.CHANNELS,
+    agentChannelPair:async x=>{
+      const a=broker.agent(x.id),host=hostOf(a),args=agentSetup.pairArgs(String(x.channel||''),x.code);
+      const out=await collect(require('./process.cjs').launch(a,management.cliArgs(a,args),host),{timeout:60000}).catch(e=>{throw new Error(`The pairing code was not accepted: ${safeError(e).slice(0,200)}`);});
+      return {ok:true,output:safeError(String(out||'').trim()).slice(0,400)};
+    },
+    agentSetupChoices:async x=>setupChoices(['hermes','openclaw'].includes(x?.framework)?x.framework:''),
     agentSetupModel:async x=>{
       const a=broker.agent(x.id),p=agentSetup.PROVIDERS.find(q=>q.id===x.setup?.provider);if(!p)throw new Error('Choose a model provider.');
       if(!await approve(a,`Set up ${a.name} with ${p.label}?`,`Opaya ${setupHow(p)}, sets its model to ${x.setup.model||p.model}${a.provider==='openclaw'?' and restarts its gateway':''}, then connects it again.`))throw new Error('Setup cancelled.');
@@ -487,12 +513,26 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   async function setupSecret(sel,p){
     if(sel?.source==='vault')return opaya.secretEntry(String(sel.secret||''));
     if(sel?.source==='opaya')return opaya.holdModelKey(p.env);
+    // A key found on this computer or in another agent: it goes into the Vault first, like Import keys does.
+    if(sel?.source==='found'){
+      const r=await opaya.vaultImportCommit({id:String(sel.scan||''),picks:[{key:String(sel.item||''),name:p.env}]});
+      if(r.imported?.[0])return opaya.secretEntry(r.imported[0].id);
+      throw new Error(r.skipped?.[0]?.why==='already in the Vault'?'That key is already in your Vault: choose it there.':'That key could not be read again. Open the wizard again.');
+    }
     if(sel?.source==='new'){const r=await opaya.holdFromUser({name:p.env,value:String(sel.value||'')});return opaya.secretEntry(r.id);}
     throw new Error('Choose which key to use.');
   }
   const setupHow=p=>p.login==='chatgpt'?'signs it in to ChatGPT (you sign in in your browser)':p.login==='claude'?'signs it in to Claude (you sign in in your browser)':`gives it your ${p.label} key (${p.env})`;
   const claudeHere=()=>!!require('./process.cjs').findExecutable('claude',require('./process.cjs').environment());
-  const setupChoices=()=>{const d=opaya.describe();return agentSetup.choices({claudeHere:claudeHere(),vault:(opaya.secrets||[]).filter(k=>k.kept||k.global||k.stored?.length).map(k=>({id:k.id,name:k.name,mask:k.mask})),opaya:{preset:d.config?.preset,model:d.config?.model,hasKey:d.hasKey}});};
+  // Keys found on this computer (shell profiles, .env, tools) and in the other agents, by name and mask only; their
+  // values stay in the scan until one is used. A slow machine does not hold the wizard up.
+  async function foundKeys(){
+    try{
+      const scan=await Promise.race([opaya.vaultImportScan({tools:true}),new Promise(r=>setTimeout(()=>r(null),8000))]);if(!scan)return [];
+      return scan.sources.flatMap(src=>src.items.filter(i=>!i.inVault&&!i.also).map(i=>({scan:scan.id,item:i.key,name:i.name,mask:i.mask,where:src.label})));
+    }catch{return [];}
+  }
+  const setupChoices=async(framework='')=>{const d=opaya.describe();return agentSetup.choices({framework,found:await foundKeys(),claudeHere:claudeHere(),vault:(opaya.secrets||[]).filter(k=>k.kept||k.global||k.stored?.length).map(k=>({id:k.id,name:k.name,mask:k.mask,endpointKey:k.endpoint?moves.endpointKey(k.endpoint):''})),opaya:{preset:d.config?.preset,model:d.config?.model,hasKey:d.hasKey}});};
   // Key into the agent's .env, model with its CLI, then a restart where the key and model need one (an OpenClaw
   // container or gateway; Hermes reads them when Opaya starts it again).
   async function setupAgentModel(a,setup,progress){
@@ -507,6 +547,9 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       if(a.provider==='openclaw')await collect(require('./process.cjs').launch(a,management.cliArgs(a,agentSetup.CLAUDE_TOKEN_ARGS),host),{timeout:120000,input:token+'\n'});
       else await opaya.storeSecret({secret:s.id,agent_id:a.id,name:p.env},{approved:true});
       progress({step:'key',state:'done',message:`Signed in with Claude. ${a.name} has its token (kept in your Vault as ${p.env}).`});
+    }else if(p.login==='device'){
+      progress({step:'key',state:'active',message:`${p.label} sign-in: Opaya opens the page and shows the code to enter there.`});
+      signIn=()=>deviceSignIn(a,host,p,progress);
     }else if(p.login==='chatgpt'){
       // ChatGPT: the agent's own sign-in where it runs; Opaya opens it in the browser here and passes the answer back.
       progress({step:'key',state:'active',message:'ChatGPT sign-in: Opaya opens it in your browser once the agent is ready for it.'});
@@ -518,10 +561,8 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       progress({step:'key',state:'done',message:`${p.env} saved where ${a.name} reads keys`});
     }
     progress({step:'model',state:'active',message:`Setting its model: ${p.label} / ${setup.model||p.model}`});
-    let port='';try{port=new URL(a.endpoint).port;}catch{}
-    const wait=/^\d+$/.test(port)?`; i=0; while [ $i -lt 60 ]; do curl -fsS http://127.0.0.1:${port}/healthz >/dev/null 2>&1 && break; i=$((i+1)); sleep 1; done`:'';
     // Hermes over its gateway API (not ACP) reads the new model when its gateway starts again.
-    const restart=a.provider==='hermes'?(a.protocol==='openai'&&a.command?()=>management.gatewayOperation(a,host,'restart'):null):box?()=>require('./clone.cjs').run({host,container:''},`docker restart ${quote(box)} >/dev/null${wait}`,180000):()=>management.gatewayOperation(a,host,'restart');
+    const restart=a.provider==='hermes'?(a.protocol==='openai'&&a.command?()=>management.gatewayOperation(a,host,'restart'):null):()=>restartGateway(a,host);
     const r=await agentSetup.apply({agent:a,host,provider:p.id,model:setup.model,restart,signIn,progress});
     progress({step:'model',state:'done',message:`${r.label} / ${r.model}`});
     return r;
@@ -544,6 +585,42 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     const code=await waitForMark(view.id,0,15*60*1000,'ChatGPT sign-in');
     if(code!==0)throw new Error('The ChatGPT sign-in did not finish. Open Set up model and try again; sign in in the browser window that opens.');
     progress({step:'key',state:'done',message:'Signed in with ChatGPT'});
+  }
+  // A device-code sign-in in a terminal kept in the background: Opaya reads the page and the code it prints, opens the
+  // page in the browser here and shows the code in the job (and a notice), then waits for the sign-in to finish.
+  async function deviceSignIn(a,host,p,progress){
+    const command=management.cliCommand(a,agentSetup.deviceLoginArgs(a,p),{remote:!!host,windows:process.platform==='win32'});
+    const view=await runInTerminal({owner:a.id,label:`${a.name}: ${p.label} sign-in`,key:`device_${Date.now().toString(36)}`,host,command:marked(a,command),background:true});
+    const end=Date.now()+15*60*1000;let shown='';
+    for(;;){
+      let v;try{v=terminals.attach(view.id);}catch{throw new Error(`The ${p.label} sign-in stopped.`);}
+      const text=String(v.buffer||''),found=agentSetup.deviceCode(text.slice(-20000));
+      if(found&&found.code!==shown){shown=found.code;
+        progress({step:'key',message:`Enter the code ${found.code} on ${found.url} (Opaya opened it in your browser).`});
+        notice({kind:'device-code',level:'info',title:`${p.label} sign-in for ${a.name}`,text:`Enter the code ${found.code} on the page Opaya opened: ${found.url}`});
+        electronShell?.openExternal?.(found.url)?.catch?.(()=>{});}
+      const m=marks(v);if(m.length){if(Number(m.at(-1)[1])!==0)throw new Error(`The ${p.label} sign-in did not finish. Open Set up model and try again.`);break;}
+      if(v.exited)throw new Error(`The ${p.label} sign-in stopped before it finished.`);
+      if(Date.now()>end)throw new Error(`The ${p.label} sign-in was not finished within 15 minutes.`);
+      await new Promise(r=>setTimeout(r,1500));
+    }
+    progress({step:'key',state:'done',message:`Signed in with ${p.label}`});
+  }
+  // Restart what has to load new keys or channels: an OpenClaw container (waiting for its gateway) or gateway; Hermes'
+  // gateway, started when it was not running (an Opaya Hermes container chats over ACP and runs no gateway until then).
+  async function restartGateway(a,host){
+    const box=agentSetup.containerOf(a);
+    if(a.provider==='openclaw'){
+      let port='';try{port=new URL(a.endpoint).port;}catch{}
+      const wait=/^\d+$/.test(port)?`; i=0; while [ $i -lt 60 ]; do curl -fsS http://127.0.0.1:${port}/healthz >/dev/null 2>&1 && break; i=$((i+1)); sleep 1; done`:'';
+      return box?require('./clone.cjs').run({host,container:''},`docker restart ${quote(box)} >/dev/null${wait}`,180000):management.gatewayOperation(a,host,'restart');
+    }
+    try{return await management.gatewayOperation(a,host,'restart');}
+    catch{
+      const windows=!host&&!box&&process.platform==='win32',c=catalog.setupCommand('hermes','start_gateway',{remote:!!host,windows,hermesHome:a.hermesHome||'',container:box});
+      if(windows)return collect(require('node:child_process').spawn('powershell.exe',['-NoProfile','-Command',c.command],{windowsHide:true}),{timeout:120000});
+      return require('./clone.cjs').run({host,container:''},c.command,120000);
+    }
   }
   // A program's output line by line into the job's log, without a terminal; resolves with its exit code.
   function runLogged(host,command,progress,step,timeout=60*60*1000){

@@ -11,10 +11,11 @@ function run(agent,host,args,{timeout=45000,maxBytes=4*1024*1024}={}){
   return collect(child,{timeout,maxBytes});
 }
 // JSON from a CLI that may print a banner or warnings before it.
+// A log line can start with [ too ("[plugins] loaded"): each candidate is tried until one parses.
 function json(text){
-  const s=String(text||''),start=s.search(/^\s*[{[]/m);
-  if(start<0)throw new Error('OpenClaw returned no JSON.');
-  return JSON.parse(s.slice(start));
+  const s=String(text||'');let last;
+  for(const m of s.matchAll(/^[ \t]*[{[]/gm)){try{return JSON.parse(s.slice(m.index));}catch(error){last=error;}}
+  throw last||new Error('OpenClaw returned no JSON.');
 }
 // A model key as OpenClaw writes it (provider/model); the gateway chat routes are openclaw and openclaw/<agent>.
 const isRoute=model=>/^openclaw(\/|$)/.test(String(model||''));

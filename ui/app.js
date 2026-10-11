@@ -318,7 +318,10 @@
   }
   function renderCompose(a){
     const c=currentConversation(),chatModel=c?.model||'',model=chatModel||a.model||'',m=$('#compose-model'),e=$('#compose-effort');
-    if(m){m.hidden=a.protocol==='terminal';const html=`<span class="chip-glyph" aria-hidden="true">&#9672;</span><span class="chip-label">${esc(modelText(model)||'Agent\'s model')}</span>${chatModel?'<em>this chat</em>':''}<span class="chip-caret" aria-hidden="true">&#9662;</span>`;if(m.dataset.html!==html){m.innerHTML=html;m.dataset.html=html;}m.disabled=!!a.busy;}
+    // Always the model it answers with: the chat's own, else what the agent reports (its session, Codex, Claude Code), else
+    // what a gateway route (openclaw, hermes-agent) stands for, else the connection's setting.
+    const route=/^openclaw(\/|$)|^hermes-agent$/.test(model),shown=chatModel&&!route?chatModel:(a.activeModel&&!/^openclaw(\/|$)|^hermes-agent$/.test(a.activeModel)?a.activeModel:'')||(route||!model?a.resolvedModel:'')||model;
+    if(m){m.hidden=a.protocol==='terminal';m.title=route&&shown!==model?`${shown} (through ${model})`:'Model';const html=`<span class="chip-glyph" aria-hidden="true">&#9672;</span><span class="chip-label">${esc(modelText(shown)||'Agent\'s model')}</span>${chatModel?'<em>this chat</em>':''}<span class="chip-caret" aria-hidden="true">&#9662;</span>`;if(m.dataset.html!==html){m.innerHTML=html;m.dataset.html=html;}m.disabled=!!a.busy;}
     const levels=Array.isArray(a.efforts)?a.efforts:[],effort=c?.effort||a.effort||'';
     if(e){e.hidden=!levels.length;const html=`<span class="chip-glyph" aria-hidden="true">&#9889;</span><span class="chip-label">${esc(effort?EFFORT_LABELS[effort]||effort:'Effort: auto')}</span><span class="chip-caret" aria-hidden="true">&#9662;</span>`;if(e.dataset.html!==html){e.innerHTML=html;e.dataset.html=html;}e.disabled=!!a.busy;}
     const box=$('#compose-files');if(box&&box.dataset.key!==draftKey()){box.dataset.key=draftKey();renderComposeFiles();}
@@ -614,7 +617,7 @@
   // key, model, gateway, connection) and shows its progress in the job card: no terminal and nothing to type there.
   async function openSetupWizard({agent=null,install=null}){
     const name=agent?title(agent):install.name||install.label;
-    let c;try{c=await api.agentSetupChoices();}catch(e){toast(e.message,true);return;}
+    let c;try{c=await api.agentSetupChoices({framework:agent?agent.provider:install.id});}catch(e){toast(e.message,true);return;}
     const subs=c.subscriptions||[],byId=id=>c.providers.find(p=>p.id===id)||subs.find(p=>p.id===id),free=c.providers.filter(p=>p.free),paid=c.providers.filter(p=>!p.free);
     const subRec=subs.some(x=>x.recommended&&!x.unavailable);let n=0;const num=()=>`<b>${++n}</b>`;
     let pick=null;
@@ -622,7 +625,7 @@
     modal(`Set up ${name}`,install?`${install.label} in Docker on ${install.host}`:`${location(agent)}`,`<div class="setup-wizard">
       <p class="setup-lead">Choose the model ${esc(name)} thinks with. Opaya does the rest by itself: ${install?'the container, ':''}the key, the model and the connection. Nothing to type in a terminal.</p>
       ${subs.length?`<h3>${num()} Sign in with your subscription</h3><div class="setup-cards">${subs.map(x=>x.unavailable?`<button type="button" class="setup-card" disabled title="${esc(x.unavailable)}"><strong>${esc(x.label)}</strong><span>${esc(x.unavailable)}</span></button>`:card(`data-setup-login="${esc(x.id)}"`,x.label,x.detail,x.recommended?'Recommended':'')).join('')}</div>`:''}
-      ${c.saved.length?`<h3>${num()} Or use a key you already have</h3><div class="setup-cards">${c.saved.map((x,i)=>card(`data-setup-saved="${i}"`,x.label,x.detail,i===0&&!subRec?'Recommended':'')).join('')}</div>`:''}
+      ${c.saved.length?`<h3>${num()} Or use a key you already have <small class="setup-sub">in your Vault, on this computer or in your other agents</small></h3><div class="setup-cards">${c.saved.map((x,i)=>card(`data-setup-saved="${i}"`,x.label,x.detail,i===0&&!subRec?'Recommended':'')).join('')}</div>`:''}
       <h3>${num()} Or get a free key: it takes a minute</h3>
       <div class="setup-cards">${free.map(p=>card(`data-setup-new="${esc(p.id)}"`,p.label,p.free,p.id==='ollama-cloud'&&!c.saved.length&&!subRec?'Recommended':'')).join('')}</div>
       <details class="setup-more"><summary>Other providers (paid key)</summary><div class="setup-cards">${paid.map(p=>card(`data-setup-new="${esc(p.id)}"`,p.label,p.env)).join('')}</div></details>
@@ -640,7 +643,8 @@
       for(const b of root.querySelectorAll('.setup-card'))b.classList.toggle('selected',b===button);
       pick=next;const p=byId(next.provider);
       keyBox.hidden=next.source!=='new';$('#setup-login').hidden=next.source!=='login';
-      if(next.source==='login')$('#setup-login-text').textContent=next.provider==='claude'?`Sign in with your Claude account there. Opaya then gives ${name} a token for your plan; you do not copy anything.`:`When ${name} is ready for it, sign in with your ChatGPT account there. Opaya passes the answer to ${name}${install?' in its container':''}; you do not copy anything.`;
+      const sub=subs.find(q=>q.id===next.provider);
+      if(next.source==='login')$('#setup-login-text').textContent=sub?.login==='device'?`Opaya opens ${sub.label}'s page and shows you a short code to enter there. Nothing else to copy.`:next.provider==='claude'?`Sign in with your Claude account there. Opaya then gives ${name} a token for your plan; you do not copy anything.`:`When ${name} is ready for it, sign in with your ChatGPT account there. Opaya passes the answer to ${name}${install?' in its container':''}; you do not copy anything.`;
       if(next.source==='new'){$('#setup-key-title').textContent=`Get a ${p.label} key${p.free?` (${p.free.toLowerCase()})`:''}`;setTimeout(()=>value.focus(),50);}
       $('#setup-model-row').hidden=false;model.value=next.model||p.model;$('#setup-models').innerHTML=(p.models||[]).map(m=>`<option value="${esc(m)}"></option>`).join('');
       ready();
@@ -648,14 +652,14 @@
     root.addEventListener('click',event=>{
       const saved=event.target.closest('[data-setup-saved]'),fresh=event.target.closest('[data-setup-new]'),login=event.target.closest('[data-setup-login]');
       if(login){const x=subs.find(q=>q.id===login.dataset.setupLogin);choose(login,{source:'login',provider:x.id,model:x.model});}
-      else if(saved){const x=c.saved[Number(saved.dataset.setupSaved)];choose(saved,{source:x.source,secret:x.secret,provider:x.provider,model:x.model});}
+      else if(saved){const x=c.saved[Number(saved.dataset.setupSaved)];choose(saved,{source:x.source,secret:x.secret,scan:x.scan,item:x.item,provider:x.provider,model:x.model});}
       else if(fresh){const p=byId(fresh.dataset.setupNew);choose(fresh,{source:'new',provider:p.id,model:p.model});}
     });
     value.addEventListener('input',ready);model.addEventListener('input',ready);
     $('#setup-signup').onclick=()=>{const p=pick&&byId(pick.provider);if(p?.signup)action(()=>api.openLink({url:p.signup}));};
     $('#setup-cancel').onclick=()=>{if(install)confirmInstall(install.id,install.hostId,'docker');else closeModal();};
     go.onclick=()=>action(async()=>{
-      const setup={provider:pick.provider,model:model.value.trim(),key:pick.source==='login'?{source:'login'}:pick.source==='new'?{source:'new',value:value.value.trim()}:pick.source==='vault'?{source:'vault',secret:pick.secret}:{source:'opaya'}};
+      const setup={provider:pick.provider,model:model.value.trim(),key:pick.source==='login'?{source:'login'}:pick.source==='found'?{source:'found',scan:pick.scan,item:pick.item}:pick.source==='new'?{source:'new',value:value.value.trim()}:pick.source==='vault'?{source:'vault',secret:pick.secret}:{source:'opaya'}};
       go.disabled=true;
       try{
         if(install){const job=await api.installFramework({id:install.id,hostId:install.hostId,runtime:'docker',name:install.name,setup});if(job){closeModal();toast(`Installing ${install.label} on ${install.host}. Opaya sets it up and tells you when it is ready.`);}}
@@ -677,22 +681,64 @@
     $('.setup-wizard').addEventListener('click',event=>{const b=event.target.closest('[data-ready]');if(!b)return;const k=b.dataset.ready;closeModal();
       if(k==='chat')action(()=>selectAgent(a.id,'chat'));else if(k==='model')openSetupWizard({agent:a});else if(k==='channels')openChannels(a);else openManage(a.id,'model');});
   }
+  // ---- Channel wizard: connect Telegram, Discord or Slack without a terminal; the Opaya Agent helps when asked ------------
+  const askOpaya=async text=>{await api.opayaSend({text});closeModal();overview=false;opayaView=true;playgroundView=false;manageId='';render();saveView();};
+  async function openChannelWizard(a,pickId=''){
+    let list;try{list=await api.agentChannelOptions();}catch(e){toast(e.message,true);return;}
+    const c=list.find(x=>x.id===pickId);
+    if(!c){
+      modal(`Connect ${title(a)} to a chat app`,'Reach it from your phone. Opaya does the setup; you only create a bot.',`<div class="setup-wizard">
+        <h3><b>1</b> Where do you want to talk to ${esc(title(a))}?</h3>
+        <div class="setup-cards">${list.map(x=>`<button type="button" class="setup-card" data-channel="${esc(x.id)}">${x.easiest?'<em>Easiest</em>':''}<strong>${esc(x.label)}</strong><span>${esc(x.tokens.length===1?'One token':'Two tokens')} from ${esc(x.label)}</span></button>`).join('')}
+          <button type="button" class="setup-card" data-channel-ai="other"><strong>Something else</strong><span>WhatsApp, Signal, Matrix... the Opaya Agent sets it up with you</span></button></div>
+        <div class="modal-footer"><button type="button" class="secondary" id="ch-cancel">Cancel</button><span></span></div></div>`,true);
+      $('.setup-wizard').addEventListener('click',e=>{const b=e.target.closest('[data-channel]');if(b){openChannelWizard(a,b.dataset.channel);return;}
+        if(e.target.closest('[data-channel-ai]'))action(()=>askOpaya(`Help me connect ${title(a)} (agent_id ${a.id}, ${a.provider} on ${location(a)}) to a messaging app other than Telegram, Discord or Slack. Ask me which one, explain each step simply, and do the setup yourself with your tools; I only do what needs my phone or account.`));});
+      $('#ch-cancel').onclick=()=>closeModal();return;
+    }
+    modal(`Connect ${c.label} to ${title(a)}`,'Three short steps in '+c.label+'. Opaya does the rest.',`<div class="setup-wizard">
+      <h3><b>1</b> Create the bot</h3>
+      <div class="setup-key">${c.steps.map((t,i)=>`<div class="setup-key-step"><b>${String.fromCharCode(65+i)}</b><div><span class="setup-step-text">${esc(t)}</span></div></div>`).join('')}
+        <div class="setup-actions"><button type="button" class="secondary" id="ch-page">${esc(c.pageLabel)}</button><button type="button" class="text-button" id="ch-help">Help me with this (Opaya Agent)</button></div></div>
+      <h3><b>2</b> Paste ${c.tokens.length===1?'the token':'the tokens'}</h3>
+      ${c.tokens.map(t=>`<label class="field"><span>${esc(t.label)}</span><input type="password" class="setup-input" data-token="${esc(t.env)}" autocomplete="off" spellcheck="false" placeholder="Paste it here"></label>`).join('')}
+      <p class="field-help">Opaya keeps ${c.tokens.length===1?'it':'them'} in your Vault and gives ${c.tokens.length===1?'it':'them'} only to ${esc(title(a))}.</p>
+      <div class="modal-footer"><button type="button" class="secondary" id="ch-back">Back</button><button type="button" class="primary setup-go" id="ch-go" disabled>Connect ${esc(c.label)}</button></div></div>`,true);
+    const inputs=[...document.querySelectorAll('[data-token]')],go=$('#ch-go');
+    const ready=()=>{go.disabled=inputs.some(i=>!i.value.trim());};inputs.forEach(i=>i.addEventListener('input',ready));setTimeout(()=>inputs[0]?.focus(),50);
+    $('#ch-page').onclick=()=>action(()=>api.openLink({url:c.page}));
+    $('#ch-help').onclick=()=>action(()=>askOpaya(`Help me connect ${title(a)} (agent_id ${a.id}, ${a.provider} on ${location(a)}) to ${c.label}. Walk me through creating the bot step by step, in short simple sentences, one step at a time, and wait for me after each. When I have the ${c.tokens.map(t=>t.label).join(' and ')}, tell me to paste ${c.tokens.length===1?'it':'them'} in Opaya's channel wizard (${title(a)} > Manage > Keys & tools > Messaging channels > Add a channel > ${c.label}); Opaya does the rest.`));
+    $('#ch-back').onclick=()=>openChannelWizard(a);
+    go.onclick=()=>action(async()=>{go.disabled=true;try{const tokens=Object.fromEntries(inputs.map(i=>[i.dataset.token,i.value.trim()]));await api.agentChannelConnect({id:a.id,channel:c.id,tokens});closeModal();toast(`Connecting ${c.label}. Opaya tells you when to send your bot a message.`);}finally{ready();}});
+  }
+  // The last step: the bot answers the first message with a code; Opaya approves it.
+  function openChannelPair(r){
+    const a=state.agents.find(x=>x.id===r.agent?.id);if(!a)return;
+    modal(`Say hi to your ${r.label} bot`,`Last step for ${title(a)}`,`<div class="setup-wizard">
+      <div class="setup-key"><div class="setup-key-step"><b>1</b><div><strong>Send your bot any message in ${esc(r.label)}</strong><span>It answers with a short pairing code.</span></div></div>
+        <div class="setup-key-step"><b>2</b><div><strong>Paste the code here</strong><span>So only you can talk to ${esc(title(a))} there.</span></div></div>
+        <input class="setup-input" id="pair-code" autocomplete="off" spellcheck="false" placeholder="Pairing code"></div>
+      <div class="modal-footer"><button type="button" class="secondary" id="pair-later">Later</button><button type="button" class="primary setup-go" id="pair-go" disabled>Finish</button></div></div>`,true);
+    const code=$('#pair-code'),go=$('#pair-go');code.addEventListener('input',()=>{go.disabled=!code.value.trim();});setTimeout(()=>code.focus(),50);
+    $('#pair-later').onclick=()=>closeModal();
+    go.onclick=()=>action(async()=>{go.disabled=true;try{await api.agentChannelPair({id:a.id,channel:r.channel,code:code.value.trim()});closeModal();toast(`${r.label} is connected. Message ${title(a)} there any time.`);}finally{go.disabled=!code.value.trim();}});
+  }
   // Messaging channels of a Hermes or OpenClaw agent: what is set up, and its own setup in a terminal to add one.
   async function openChannels(a){
     const setup=a.provider==='openclaw'?'openclaw channels add':'hermes gateway setup';
-    modal('Messaging channels',`${title(a)} / ${location(a)}`,`<div id="channels-body"><p class="field-help">Reading its channels...</p></div><div class="modal-footer"><button class="secondary" id="channels-refresh">Refresh</button><button class="primary" id="channels-add" title="Runs ${esc(setup)} in a terminal">Add a channel</button></div>`);
+    modal('Messaging channels',`${title(a)} / ${location(a)}`,`<div id="channels-body"><p class="field-help">Reading its channels...</p></div><div class="modal-footer"><button class="secondary" id="channels-refresh">Refresh</button><button class="primary" id="channels-add" >Add a channel</button></div>`);
     const body=$('#channels-body'),refresh=$('#channels-refresh');
     const load=async()=>{
       refresh.disabled=true;body.innerHTML='<p class="field-help">Reading its channels...</p>';
       try{
         const r=await api.agentChannels({id:a.id}),list=r.channels||[],on=list.filter(c=>c.connected);
         const rows=[...on,...list.filter(c=>!c.connected)].map(c=>`<div class="set-row"><span class="set-ico" aria-hidden="true">&#9993;</span><span class="set-text"><strong>${esc(c.name)}</strong>${c.detail?`<small>${esc(c.detail)}</small>`:''}</span><span class="set-val ${c.connected?'ok':''}">${c.connected?'Connected':'Not set up'}</span><span></span></div>`).join('');
-        body.innerHTML=`<p class="field-help">${on.length?`${plural(on.length,'channel')} set up.`:'No channel is set up yet.'} Add one with ${esc(title(a))}'s own setup (<code>${esc(r.setup||setup)}</code>): it asks for the bot token or pairing in a terminal. Restart its gateway afterwards if the channel does not start.</p>${rows?`<div class="set-card">${rows}</div>`:''}`;
+        body.innerHTML=`<p class="field-help">${on.length?`${plural(on.length,'channel')} set up.`:'No channel is set up yet.'} Add a channel: Opaya walks you through creating the bot and does the rest, no terminal.</p>${rows?`<div class="set-card">${rows}</div>`:''}`;
       }catch(e){body.innerHTML=`<p class="field-help">${esc(e.message)}</p>`;}
       finally{refresh.disabled=false;}
     };
     refresh.onclick=load;
-    $('#channels-add').onclick=()=>action(async()=>{await api.agentChannelSetup({id:a.id});closeModal();toast('Finish the channel setup in the terminal.');});
+    $('#channels-add').onclick=()=>openChannelWizard(a);
     await load();
   }
   function openSettings(focus=''){
@@ -1916,7 +1962,7 @@
     const sections={
       model:()=>sec('model','',[card('Model',[
           row('setup','Set up model','Opaya gives it a key and a model: one you have, or a free one'),
-          row('models','Model','The model it answers with',modelText(a.activeModel||a.model)||'Its own setting'),
+          row('models','Model','The model it answers with',modelText(a.activeModel&&!/^openclaw(\/|$)/.test(a.activeModel)?a.activeModel:(/^openclaw(\/|$)|^hermes-agent$/.test(a.model||'')&&a.resolvedModel)||a.activeModel||a.model)||'Its own setting'),
           row('effort','Reasoning','How long it thinks before answering',a.effort?EFFORT_LABELS[a.effort]||a.effort:'Auto')],'A chat can use its own model and reasoning: pick them under the message box.'),
         card('Skills',[
           row('skills','Skills & commands','What it can do; install new skills',skillList?skillList.supported===false?'Not readable':`${skillList.skills?.length||0} skills${a.commands?.length?`, ${a.commands.length} commands`:''}`:'Reading...'),
@@ -4103,6 +4149,7 @@
     // The guide shows its own progress, and continues by itself when the free model is ready.
     if(j.kind==='signin'){if(j.status==='done')signInStarted='';if(opayaView)refresh().then(()=>renderOpaya()).catch(()=>{});}
     if(guide){if(j.kind==='free-model'&&j.status==='done'&&guide.step==='free'){guide.step='goals';refresh().then(()=>renderOpaya());}if(opayaView&&(j.kind==='guide'||j.kind==='free-model'))renderOpaya();}
+    if(prev?.status==='running'&&j.status==='done'&&j.result?.pairing)setTimeout(()=>openChannelPair(j.result),300);
     if(prev?.status==='running'&&j.status==='done'&&j.result?.ready)setTimeout(()=>openAgentReady(j.result),300);
     if(prev?.status==='running'&&j.status!=='running'){
       if(j.status==='done'){const r=j.result||{},bits=[r.copied&&`Copied: ${r.copied.join(', ')}`,r.skills&&`${r.skills.length} skill${r.skills.length===1?'':'s'}`,r.keys&&`${r.keys.length} API key${r.keys.length===1?'':'s'}`,r.mcp&&`MCP: ${r.mcp.join(', ')}`,r.token&&'API token',r.file&&`saved as ${r.file}`,r.after?.removed&&'connection removed'].filter(Boolean);if(j.kind==='backup'||j.kind==='uninstall'){backupLists.clear();installInfo.clear();}

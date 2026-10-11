@@ -74,7 +74,7 @@ class Broker{
   runtimeFor(id){if(!this.runtime.has(id))this.runtime.set(id,{status:'disconnected',error:'',models:[]});return this.runtime.get(id);}
   snapshot(){
     const {agents,hosts,conversations,activeAgentId,activeConversationId}=this.data;
-    return {version:'0.2.1',schedules:this.data.schedules||[],drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',activeModel:r.adapter?.currentModel||'',commands:r.adapter?.commands||[],models:r.models||[],efforts:effortLevels(a,r.adapter),hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,settings:this.data.settings,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations:conversations.map(({essence,...c})=>essence?{...c,essence:{by:essence.by,at:essence.at}}:c),activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||(this.data.view?.chatDock||[]).some(d=>d.id===id)||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
+    return {version:'0.2.1',schedules:this.data.schedules||[],drafts:this.data.drafts,view:this.data.view,recoveryNotice:this.data.recoveryNotice||'',agents:agents.map(a=>{const r=this.runtimeFor(a.id);return {...a,status:r.status,error:r.error||'',adapterDescription:r.description||'',agentVersion:r.agentVersion||'',activeModel:r.adapter?.currentModel||'',resolvedModel:r.resolvedModel||'',commands:r.adapter?.commands||[],models:r.models||[],efforts:effortLevels(a,r.adapter),hasToken:this.vault.has(a.id),busy:this.turns.has(a.id),turnStartedAt:this.turns.get(a.id)?.startedAt||0,lastEventAt:this.turns.get(a.id)?.lastEventAt||0,lastEvent:this.turns.get(a.id)?.lastEvent||''};}),hosts,settings:this.data.settings,projects:this.data.projects||[],mcpServers:(this.data.mcpServers||[]).map(mcp.publicView),conversations:conversations.map(({essence,...c})=>essence?{...c,essence:{by:essence.by,at:essence.at}}:c),activeAgentId,activeConversationId:activeConversationId||'',histories:Object.fromEntries([...this.histories].filter(([id])=>id===activeConversationId||(this.data.view?.chatDock||[]).some(d=>d.id===id)||Object.values(this.data.playground?.conversations||{}).includes(id))),playground:this.data.playground||null,secureStorage:this.vault.available(),platform:process.platform};
   }
   changed(){if(!this.closing)this.emit(this.snapshot());}
   async persist(){await this.store.write(this.data);this.changed();}
@@ -440,6 +440,8 @@ class Broker{
         const info=await adapter.connect();
         if(r.generation!==generation){adapter.close();return;}
         Object.assign(r,info,{status:'connected'});
+        // A gateway route (openclaw, openclaw/<agent>, hermes-agent) is not a model: ask the agent's CLI which one it uses.
+        r.resolvedModel='';this.resolveModel(a).then(m=>{if(m&&r.adapter===adapter){r.resolvedModel=m;this.changed();}}).catch(()=>{});
         const closed=error=>{if(r.adapter!==adapter||r.generation!==generation)return;r.status='error';r.error=safeError(error,token);this.changed();try{this.onAgentError?.(a,r.error,'dropped');}catch{}};
         adapter.rpc?.on('closed',closed);adapter.tunnel?.on('closed',closed);
       }catch(error){adapter?.close();if(r.generation===generation){r.adapter=null;r.status='error';r.error=safeError(error,token);}try{this.onConnectError?.(a,safeError(error,token));}catch{}throw new Error(safeError(error,token));}
@@ -480,6 +482,19 @@ class Broker{
     if(effort&&!offered.includes(effort))throw new Error(offered.length?`${a.displayName||a.name} takes these reasoning efforts: ${offered.join(', ')}.`:`${a.displayName||a.name} has no reasoning effort setting.`);
     if(scope==='conversation'){const c=this.data.conversations.find(c=>c.id===schema.id(conversationId)&&c.agentId===a.id);if(!c)throw new Error('Start a conversation first.');c.effort=effort;await this.persist();return true;}
     a.effort=effort;await this.persist();return true;
+  }
+  // The model behind a gateway route, read where the agent runs: OpenClaw's default model (openclaw models list), or
+  // Hermes' provider/model (hermes config get). '' when it cannot be read (an API-only connection, no CLI there).
+  async resolveModel(a){
+    const route=/^openclaw(\/|$)/.test(a.model||'')||a.provider==='hermes'&&a.protocol==='openai';
+    if(!route||!a.command||!['hermes','openclaw'].includes(a.provider))return '';
+    const host=a.transport==='ssh'?this.host(a.hostId):null,{cliArgs}=require('./management.cjs'),{launch,collect}=require('./process.cjs');
+    const run=args=>collect(launch(a,cliArgs(a,args),host),{timeout:45000,maxBytes:2*1024*1024});
+    if(a.provider==='openclaw'){const oc=require('./openclaw.cjs');return oc.parseModels(oc.json(await run(['models','list','--json']))).default||'';}
+    const clean=v=>String(v||'').replace(/\x1b\[[0-9;]*m/g,'').trim().split('\n').pop().replace(/^['"]|['"]$/g,'').trim();
+    const [prov,model]=await Promise.all([run(['config','get','model.provider']).then(clean,()=>''),run(['config','get','model.default']).then(clean,()=>'')]);
+    const ok=v=>/^[\w.:@+\/-]{1,160}$/.test(v);
+    return ok(model)?(ok(prov)&&!model.startsWith(prov+'/')?`${prov}/${model}`:model):'';
   }
   async gateway({id,operation}){
     const a=this.agent(id);if(this.turns.has(id))throw new Error('Stop this agent\'s current turn first.');
