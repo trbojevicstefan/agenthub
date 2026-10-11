@@ -250,7 +250,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     agentSetupChoices:async()=>setupChoices(),
     agentSetupModel:async x=>{
       const a=broker.agent(x.id),p=agentSetup.PROVIDERS.find(q=>q.id===x.setup?.provider);if(!p)throw new Error('Choose a model provider.');
-      if(!await approve(a,`Set up ${a.name} with ${p.label}?`,`Opaya gives it your ${p.label} key (${p.env}), sets its model to ${x.setup.model||p.model}${a.provider==='openclaw'?' and restarts its gateway':''}, then connects it again.`))throw new Error('Setup cancelled.');
+      if(!await approve(a,`Set up ${a.name} with ${p.label}?`,`Opaya ${setupHow(p)}, sets its model to ${x.setup.model||p.model}${a.provider==='openclaw'?' and restarts its gateway':''}, then connects it again.`))throw new Error('Setup cancelled.');
       return startJob({kind:'setup',route:{from:'Opaya',fromWhere:p.label,to:a.name,toWhere:whereName(a),provider:a.provider},title:`Setting up ${a.name}`,detail:`${p.label} / ${x.setup.model||p.model}`,
         steps:[['key','Give it the key'],['model','Set the model'],['connect','Connect']]},async progress=>{
         const model=await setupAgentModel(a,x.setup,progress);
@@ -490,25 +490,60 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     if(sel?.source==='new'){const r=await opaya.holdFromUser({name:p.env,value:String(sel.value||'')});return opaya.secretEntry(r.id);}
     throw new Error('Choose which key to use.');
   }
-  const setupChoices=()=>{const d=opaya.describe();return agentSetup.choices({vault:(opaya.secrets||[]).filter(k=>k.kept||k.global||k.stored?.length).map(k=>({id:k.id,name:k.name,mask:k.mask})),opaya:{preset:d.config?.preset,model:d.config?.model,hasKey:d.hasKey}});};
+  const setupHow=p=>p.login==='chatgpt'?'signs it in to ChatGPT (you sign in in your browser)':p.login==='claude'?'signs it in to Claude (you sign in in your browser)':`gives it your ${p.label} key (${p.env})`;
+  const claudeHere=()=>!!require('./process.cjs').findExecutable('claude',require('./process.cjs').environment());
+  const setupChoices=()=>{const d=opaya.describe();return agentSetup.choices({claudeHere:claudeHere(),vault:(opaya.secrets||[]).filter(k=>k.kept||k.global||k.stored?.length).map(k=>({id:k.id,name:k.name,mask:k.mask})),opaya:{preset:d.config?.preset,model:d.config?.model,hasKey:d.hasKey}});};
   // Key into the agent's .env, model with its CLI, then a restart where the key and model need one (an OpenClaw
   // container or gateway; Hermes reads them when Opaya starts it again).
   async function setupAgentModel(a,setup,progress){
     const p=agentSetup.PROVIDERS.find(x=>x.id===setup?.provider);if(!p)throw new Error('Choose a model provider.');
     if(!['hermes','openclaw'].includes(a.provider))throw new Error('Opaya sets up Hermes and OpenClaw this way.');
-    const host=hostOf(a),box=agentSetup.containerOf(a);
-    progress({step:'key',state:'active',message:`Giving ${a.name} the ${p.label} key (${p.env})`});
-    const s=await setupSecret(setup.key,p);
-    await opaya.storeSecret({secret:s.id,agent_id:a.id,name:p.env},{approved:true});
-    progress({step:'key',state:'done',message:`${p.env} saved where ${a.name} reads keys`});
+    const host=hostOf(a),box=agentSetup.containerOf(a);let signIn=null;
+    if(p.login==='claude'){
+      // Claude: a setup token from Claude Code on this computer (browser sign-in here), then into the agent.
+      progress({step:'key',state:'active',message:'Opening the Claude sign-in in your browser. Sign in there, then come back.'});
+      const token=await claudeToken();
+      const s=await opaya.holdSecret(token,{name:p.env,source:'claude-setup-token'});s.kept=true;await opaya.saveSecrets();
+      if(a.provider==='openclaw')await collect(require('./process.cjs').launch(a,management.cliArgs(a,agentSetup.CLAUDE_TOKEN_ARGS),host),{timeout:120000,input:token+'\n'});
+      else await opaya.storeSecret({secret:s.id,agent_id:a.id,name:p.env},{approved:true});
+      progress({step:'key',state:'done',message:`Signed in with Claude. ${a.name} has its token (kept in your Vault as ${p.env}).`});
+    }else if(p.login==='chatgpt'){
+      // ChatGPT: the agent's own sign-in where it runs; Opaya opens it in the browser here and passes the answer back.
+      progress({step:'key',state:'active',message:'ChatGPT sign-in: Opaya opens it in your browser once the agent is ready for it.'});
+      signIn=()=>chatgptSignIn(a,host,progress);
+    }else{
+      progress({step:'key',state:'active',message:`Giving ${a.name} the ${p.label} key (${p.env})`});
+      const s=await setupSecret(setup.key,p);
+      await opaya.storeSecret({secret:s.id,agent_id:a.id,name:p.env},{approved:true});
+      progress({step:'key',state:'done',message:`${p.env} saved where ${a.name} reads keys`});
+    }
     progress({step:'model',state:'active',message:`Setting its model: ${p.label} / ${setup.model||p.model}`});
     let port='';try{port=new URL(a.endpoint).port;}catch{}
     const wait=/^\d+$/.test(port)?`; i=0; while [ $i -lt 60 ]; do curl -fsS http://127.0.0.1:${port}/healthz >/dev/null 2>&1 && break; i=$((i+1)); sleep 1; done`:'';
     // Hermes over its gateway API (not ACP) reads the new model when its gateway starts again.
     const restart=a.provider==='hermes'?(a.protocol==='openai'&&a.command?()=>management.gatewayOperation(a,host,'restart'):null):box?()=>require('./clone.cjs').run({host,container:''},`docker restart ${quote(box)} >/dev/null${wait}`,180000):()=>management.gatewayOperation(a,host,'restart');
-    const r=await agentSetup.apply({agent:a,host,provider:p.id,model:setup.model,restart,progress});
+    const r=await agentSetup.apply({agent:a,host,provider:p.id,model:setup.model,restart,signIn,progress});
     progress({step:'model',state:'done',message:`${r.label} / ${r.model}`});
     return r;
+  }
+  // `claude setup-token` on this computer, in memory only (agent-setup.cjs).
+  async function claudeToken(){
+    const proc=require('./process.cjs'),env=proc.environment(),bin=proc.findExecutable('claude',env);
+    if(!bin)throw new Error('Claude Code is not installed on this computer. Install it (Install agents > Claude Code), sign in once, then try again.');
+    const l=proc.windowsLaunch(bin,['setup-token']);
+    return agentSetup.claudeSetupToken({spawn:require('node-pty').spawn,bin:l.command,args:l.args,env});
+  }
+  // The agent's ChatGPT sign-in in a terminal kept in the background. On a machine or in a container Opaya finds the
+  // sign-in link in it, opens it in the browser here and passes the answer to the agent (codex-login.cjs); on this
+  // computer the agent opens the browser itself. Waits for it to finish.
+  async function chatgptSignIn(a,host,progress){
+    const where=require('./clone.cjs').place({agent:a,host}),relay=!!(where.host||where.container);
+    const command=management.cliCommand(a,agentSetup.chatgptLoginArgs(a,{relay}),{remote:!!host,windows:process.platform==='win32'});
+    const view=await runInTerminal({owner:a.id,label:`${a.name}: ChatGPT sign-in`,key:`chatgpt_${Date.now().toString(36)}`,host,command:marked(a,command),where:relay?{host:where.host,container:where.container}:null,background:true});
+    progress({step:'key',message:'Sign in to ChatGPT in the browser window Opaya opened.'});
+    const code=await waitForMark(view.id,0,15*60*1000,'ChatGPT sign-in');
+    if(code!==0)throw new Error('The ChatGPT sign-in did not finish. Open Set up model and try again; sign in in the browser window that opens.');
+    progress({step:'key',state:'done',message:'Signed in with ChatGPT'});
   }
   // A program's output line by line into the job's log, without a terminal; resolves with its exit code.
   function runLogged(host,command,progress,step,timeout=60*60*1000){
@@ -525,7 +560,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   // with no terminal and nothing to type. Progress is the job's steps and log.
   async function installContainerSetup(host,x,p){
     const setup=x.setup,choice=agentSetup.PROVIDERS.find(q=>q.id===setup?.provider);if(!choice)throw new Error('Choose a model provider.');
-    if(!await approve({name:'Opaya'},`Install ${p.framework.name} in a Docker container on ${host.name}?`,`Container ${p.container} (${p.image}), data in ${p.folder}. It restarts with the machine. Opaya then gives it your ${choice.label} key (${choice.env}), sets its model to ${setup.model||choice.model} and connects it. Nothing to type in a terminal.\n\nRuns on ${host.name}:\n\n${p.preview}`))throw new Error('Install cancelled.');
+    if(!await approve({name:'Opaya'},`Install ${p.framework.name} in a Docker container on ${host.name}?`,`Container ${p.container} (${p.image}), data in ${p.folder}. It restarts with the machine. Opaya then ${setupHow(choice)}, sets its model to ${setup.model||choice.model} and connects it. Nothing to type in a terminal.\n\nRuns on ${host.name}:\n\n${p.preview}`))throw new Error('Install cancelled.');
     return startJob({kind:'install',route:{from:p.framework.name,fromWhere:`Docker / ${p.image}`,to:p.container,toWhere:host.name,toHostId:host.id,provider:p.connection.provider},title:`Installing ${p.framework.name} in Docker`,detail:`${host.name} / container ${p.container} / ${choice.label}`,
       steps:[['install','Start the container'],['save','Add to Opaya'],['key','Give it the key'],['model','Set the model'],['connect','Connect']]},async progress=>{
       progress({step:'install',state:'active',message:`Running on ${host.name}. The first download can take a few minutes.`});

@@ -615,14 +615,18 @@
   async function openSetupWizard({agent=null,install=null}){
     const name=agent?title(agent):install.name||install.label;
     let c;try{c=await api.agentSetupChoices();}catch(e){toast(e.message,true);return;}
-    const byId=id=>c.providers.find(p=>p.id===id),free=c.providers.filter(p=>p.free),paid=c.providers.filter(p=>!p.free);
+    const subs=c.subscriptions||[],byId=id=>c.providers.find(p=>p.id===id)||subs.find(p=>p.id===id),free=c.providers.filter(p=>p.free),paid=c.providers.filter(p=>!p.free);
+    const subRec=subs.some(x=>x.recommended&&!x.unavailable);let n=0;const num=()=>`<b>${++n}</b>`;
     let pick=null;
     const card=(attrs,head,text,tag='')=>`<button type="button" class="setup-card" ${attrs}>${tag?`<em>${esc(tag)}</em>`:''}<strong>${esc(head)}</strong><span>${esc(text)}</span></button>`;
     modal(`Set up ${name}`,install?`${install.label} in Docker on ${install.host}`:`${location(agent)}`,`<div class="setup-wizard">
       <p class="setup-lead">Choose the model ${esc(name)} thinks with. Opaya does the rest by itself: ${install?'the container, ':''}the key, the model and the connection. Nothing to type in a terminal.</p>
-      ${c.saved.length?`<h3><b>1</b> Use a key you already have</h3><div class="setup-cards">${c.saved.map((x,i)=>card(`data-setup-saved="${i}"`,x.label,x.detail,i===0?'Recommended':'')).join('')}</div><h3><b>2</b> Or get a free key</h3>`:'<h3><b>1</b> Get a free key: it takes a minute</h3>'}
-      <div class="setup-cards">${free.map(p=>card(`data-setup-new="${esc(p.id)}"`,p.label,p.free,p.id==='ollama-cloud'&&!c.saved.length?'Recommended':'')).join('')}</div>
+      ${subs.length?`<h3>${num()} Sign in with your subscription</h3><div class="setup-cards">${subs.map(x=>x.unavailable?`<button type="button" class="setup-card" disabled title="${esc(x.unavailable)}"><strong>${esc(x.label)}</strong><span>${esc(x.unavailable)}</span></button>`:card(`data-setup-login="${esc(x.id)}"`,x.label,x.detail,x.recommended?'Recommended':'')).join('')}</div>`:''}
+      ${c.saved.length?`<h3>${num()} Or use a key you already have</h3><div class="setup-cards">${c.saved.map((x,i)=>card(`data-setup-saved="${i}"`,x.label,x.detail,i===0&&!subRec?'Recommended':'')).join('')}</div>`:''}
+      <h3>${num()} Or get a free key: it takes a minute</h3>
+      <div class="setup-cards">${free.map(p=>card(`data-setup-new="${esc(p.id)}"`,p.label,p.free,p.id==='ollama-cloud'&&!c.saved.length&&!subRec?'Recommended':'')).join('')}</div>
       <details class="setup-more"><summary>Other providers (paid key)</summary><div class="setup-cards">${paid.map(p=>card(`data-setup-new="${esc(p.id)}"`,p.label,p.env)).join('')}</div></details>
+      <div class="setup-key" id="setup-login" hidden><div class="setup-key-step"><b>&#10003;</b><div><strong>Opaya opens the sign-in in your browser</strong><span id="setup-login-text"></span></div></div></div>
       <div class="setup-key" id="setup-key" hidden>
         <div class="setup-key-step"><b>A</b><div><strong id="setup-key-title">Get a key</strong><span>Opens the provider's page. Sign in, create a key and copy it.</span></div><button type="button" class="secondary" id="setup-signup">Open the page</button></div>
         <div class="setup-key-step"><b>B</b><div><strong>Paste the key here</strong><span>Opaya keeps it in your Vault and gives it only to ${esc(name)}.</span></div></div>
@@ -635,20 +639,23 @@
     const choose=(button,next)=>{
       for(const b of root.querySelectorAll('.setup-card'))b.classList.toggle('selected',b===button);
       pick=next;const p=byId(next.provider);
-      keyBox.hidden=next.source!=='new';if(next.source==='new'){$('#setup-key-title').textContent=`Get a ${p.label} key${p.free?` (${p.free.toLowerCase()})`:''}`;setTimeout(()=>value.focus(),50);}
+      keyBox.hidden=next.source!=='new';$('#setup-login').hidden=next.source!=='login';
+      if(next.source==='login')$('#setup-login-text').textContent=next.provider==='claude'?`Sign in with your Claude account there. Opaya then gives ${name} a token for your plan; you do not copy anything.`:`When ${name} is ready for it, sign in with your ChatGPT account there. Opaya passes the answer to ${name}${install?' in its container':''}; you do not copy anything.`;
+      if(next.source==='new'){$('#setup-key-title').textContent=`Get a ${p.label} key${p.free?` (${p.free.toLowerCase()})`:''}`;setTimeout(()=>value.focus(),50);}
       $('#setup-model-row').hidden=false;model.value=next.model||p.model;$('#setup-models').innerHTML=(p.models||[]).map(m=>`<option value="${esc(m)}"></option>`).join('');
       ready();
     };
     root.addEventListener('click',event=>{
-      const saved=event.target.closest('[data-setup-saved]'),fresh=event.target.closest('[data-setup-new]');
-      if(saved){const x=c.saved[Number(saved.dataset.setupSaved)];choose(saved,{source:x.source,secret:x.secret,provider:x.provider,model:x.model});}
+      const saved=event.target.closest('[data-setup-saved]'),fresh=event.target.closest('[data-setup-new]'),login=event.target.closest('[data-setup-login]');
+      if(login){const x=subs.find(q=>q.id===login.dataset.setupLogin);choose(login,{source:'login',provider:x.id,model:x.model});}
+      else if(saved){const x=c.saved[Number(saved.dataset.setupSaved)];choose(saved,{source:x.source,secret:x.secret,provider:x.provider,model:x.model});}
       else if(fresh){const p=byId(fresh.dataset.setupNew);choose(fresh,{source:'new',provider:p.id,model:p.model});}
     });
     value.addEventListener('input',ready);model.addEventListener('input',ready);
     $('#setup-signup').onclick=()=>{const p=pick&&byId(pick.provider);if(p?.signup)action(()=>api.openLink({url:p.signup}));};
     $('#setup-cancel').onclick=()=>{if(install)confirmInstall(install.id,install.hostId,'docker');else closeModal();};
     go.onclick=()=>action(async()=>{
-      const setup={provider:pick.provider,model:model.value.trim(),key:pick.source==='new'?{source:'new',value:value.value.trim()}:pick.source==='vault'?{source:'vault',secret:pick.secret}:{source:'opaya'}};
+      const setup={provider:pick.provider,model:model.value.trim(),key:pick.source==='login'?{source:'login'}:pick.source==='new'?{source:'new',value:value.value.trim()}:pick.source==='vault'?{source:'vault',secret:pick.secret}:{source:'opaya'}};
       go.disabled=true;
       try{
         if(install){const job=await api.installFramework({id:install.id,hostId:install.hostId,runtime:'docker',name:install.name,setup});if(job){closeModal();toast(`Installing ${install.label} on ${install.host}. Opaya sets it up and tells you when it is ready.`);}}

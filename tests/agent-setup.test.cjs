@@ -47,3 +47,26 @@ test('a Docker install for the wizard has no interactive sign-in',()=>{
     assert.doesNotMatch(p.preview,/hermes setup|openclaw onboard/);
   }
 });
+
+test('subscriptions come first: ChatGPT and Claude, signed in in the browser',async()=>{
+  const c=s.choices({opaya:{preset:'codex'},claudeHere:false});
+  assert.deepEqual(c.subscriptions.map(x=>[x.id,!!x.recommended,!!x.unavailable]),[['chatgpt',true,false],['claude',false,true]]);
+  assert(!c.providers.some(p=>p.id==='chatgpt'||p.id==='claude'),'not offered as keys');
+  assert.equal(s.choices({claudeHere:true}).subscriptions[1].unavailable,undefined);
+  // The agent's own ChatGPT sign-in; where Opaya relays the browser's answer it must not open a browser there.
+  assert.deepEqual(s.chatgptLoginArgs(claw),['models','auth','login','--provider','openai']);
+  assert.deepEqual(s.chatgptLoginArgs(hermes,{relay:true}),['auth','add','openai-codex','--type','oauth','--browser','--no-browser']);
+  assert.deepEqual(s.modelSteps(hermes,'chatgpt',''),[['config','set','model.provider','openai-codex'],['config','set','model.default','gpt-6-astra']]);
+  assert.deepEqual(s.modelSteps(claw,'claude',''),[['models','set','anthropic/claude-sonnet-5-5']]);
+  // The sign-in runs after the model is set and before the restart.
+  const order=[];
+  await s.apply({agent:claw,provider:'chatgpt',model:'',run:async a=>{order.push(a.includes('sh')?'sh -c':a.slice(4,6).join(' '));return '';},signIn:async()=>order.push('sign-in'),restart:async()=>order.push('restart')});
+  assert.deepEqual(order,['models set','sh -c','sign-in','restart']);
+});
+
+test('the Claude setup token is read from Claude Code\'s output in memory, and only a finished sign-in gives one',async()=>{
+  const fake=(chunks)=>(bin,args,opts)=>{assert.deepEqual(args,['setup-token']);assert.equal(opts.cols,500);let data,exit;setTimeout(()=>{for(const c of chunks)data(c);exit({exitCode:0});},5);return {onData:f=>{data=f;},onExit:f=>{exit=f;},kill(){}};};
+  const token='sk-ant-oat01-'+'A1b2_C3d4-'.repeat(8);
+  assert.equal(await s.claudeSetupToken({spawn:fake(['Opening browser...\r\n','\x1b[32mYour token: ',token.slice(0,30),token.slice(30),'\x1b[0m\r\n']),bin:'claude'}),token);
+  await assert.rejects(()=>s.claudeSetupToken({spawn:fake(['Error: not logged in\r\n']),bin:'claude'}),/did not finish the sign-in/);
+});
