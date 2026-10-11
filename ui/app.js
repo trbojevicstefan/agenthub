@@ -3184,15 +3184,29 @@
   }));
   // Codex signing in on a machine or in a container: its sign-in page opens in the browser here and Opaya passes the
   // answer there. The card stays until it is done, with the page again and, when Opaya cannot listen, a paste box.
+  // A sign-in opens in the browser the user picks: the one signed in to the account they want. Remembered when asked.
+  async function openBrowserChooser(n){
+    let b={browsers:[],current:''};try{b=await api.browsersList();}catch{}
+    const all=[...b.browsers,{id:'default',label:'Default browser'}];
+    modal(n.title||'Sign in','Open it in the browser where you are signed in to the account you want.',`<div class="setup-wizard">
+      ${n.code?`<div class="setup-key"><div class="setup-key-step"><b>#</b><div><strong>Your code: <span class="job-wait-code">${esc(n.code)}</span></strong><span>Enter it on the page that opens.</span></div></div></div>`:''}
+      <div class="setup-cards">${all.map(x=>`<button type="button" class="setup-card" data-browser="${esc(x.id)}">${x.id===b.current?'<em>Last used</em>':''}<strong>${esc(x.label)}</strong><span>${x.id==='default'?'The one your system opens links in':'Open the sign-in here'}</span></button>`).join('')}</div>
+      <label class="switch-row"><input type="checkbox" id="browser-remember"><span class="switch" aria-hidden="true"></span><span>Always use this browser for sign-ins <small>(change it any time here)</small></span></label>
+      <div class="modal-footer"><button type="button" class="text-button" id="browser-copy">Copy the link instead</button><span></span></div></div>`,true);
+    $('.setup-wizard').addEventListener('click',e=>{const x=e.target.closest('[data-browser]');if(!x)return;
+      action(async()=>{await api.openInBrowser({url:n.url,browser:x.dataset.browser,remember:$('#browser-remember').checked});closeModal();toast('Sign in there, then come back: Opaya continues by itself.');});});
+    $('#browser-copy').onclick=()=>action(async()=>{await api.clipboardWrite({text:n.url});toast('Link copied. Paste it in the browser you want.');});
+  }
   function codexLoginCard(n){
     document.getElementById('codex-login-card')?.remove();
     if(n.phase==='done'){toast(`${n.title}. ${n.text}`);return;}
     if(n.phase==='failed')return false;
     const card=document.createElement('div');card.id='codex-login-card';card.className='opaya-nudge';card.setAttribute('role','status');
-    card.innerHTML=`<span class="opaya-mark small" aria-hidden="true"><img src="assets/opaya-logo.png" alt=""><i></i></span><div><strong>${esc(n.title)} on ${esc(n.machine||'a machine')}</strong><p>${esc(n.text)}</p><div class="nudge-actions"><button type="button" class="text-button" data-codex="open">Sign-in page</button><button type="button" class="text-button" data-codex="paste">Paste address</button><button type="button" class="text-button" data-codex="close">Close</button></div></div>`;
+    card.innerHTML=`<span class="opaya-mark small" aria-hidden="true"><img src="assets/opaya-logo.png" alt=""><i></i></span><div><strong>${esc(n.title)} on ${esc(n.machine||'a machine')}</strong><p>${esc(n.text)}</p><div class="nudge-actions"><button type="button" class="text-button" data-codex="open">Open in a browser...</button><button type="button" class="text-button" data-codex="copy">Copy link</button><button type="button" class="text-button" data-codex="paste">Paste address</button><button type="button" class="text-button" data-codex="close">Close</button></div></div>`;
     card.addEventListener('click',e=>{const b=e.target.closest('[data-codex]');if(!b)return;const act=b.dataset.codex;
       if(act==='close')card.remove();
-      else if(act==='open'&&n.url)action(()=>api.openLink({url:n.url}));
+      else if(act==='open'&&n.url)openBrowserChooser({title:n.title||'Codex sign-in',url:n.url});
+      else if(act==='copy'&&n.url)action(async()=>{await api.clipboardWrite({text:n.url});toast('Sign-in link copied. Paste it in the browser where you are signed in.');});
       else if(act==='paste')codexPaste(n);});
     document.body.append(card);
     if(n.phase==='paste')codexPaste(n);
@@ -3205,6 +3219,7 @@
   }
   api.onNotice?.(n=>{
     if(n.kind==='updates'){renderToolChip();return;}
+    if(n.kind==='signin-browser'){openBrowserChooser(n);return;}
     if(n.kind==='codex-login'&&codexLoginCard(n)!==false)return;
     if(n.kind==='surface'){stageAgent='';if(n.agentId&&agentModes.get(n.agentId)==='chat')agentModes.set(n.agentId,'console');refresh().catch(()=>{});}
     if(n.level!=='error'){toast(n.text?`${n.title}. ${n.text}`:n.title);return;}
@@ -4160,6 +4175,7 @@
     if(prev?.status==='running'&&j.status!=='running'){
       if(j.status==='done'){const r=j.result||{},bits=[r.copied&&`Copied: ${r.copied.join(', ')}`,r.skills&&`${r.skills.length} skill${r.skills.length===1?'':'s'}`,r.keys&&`${r.keys.length} API key${r.keys.length===1?'':'s'}`,r.mcp&&`MCP: ${r.mcp.join(', ')}`,r.token&&'API token',r.file&&`saved as ${r.file}`,r.after?.removed&&'connection removed'].filter(Boolean);if(j.kind==='backup'||j.kind==='uninstall'){backupLists.clear();installInfo.clear();}
         toast(`${j.title.replace(/^Cloning/,'Cloned').replace(/^Redeploying/,'Redeployed').replace(/^Transferring/,'Transferred').replace(/^Installing skills/,'Installed skills').replace(/^Installing /,'Installed ').replace(/^Setting up/,'Set up').replace(/^Adding skills/,'Added skills').replace(/^Backing up/,'Backed up').replace(/^Uninstalling/,'Uninstalled')}. ${bits.join(', ')}${bits.length?'.':''}`);if(j.kind!=='library')skillCache.clear();refresh();if(j.kind==='library'&&$('#library-body'))drawLibrary?.();if(j.kind==='free-model'){overview=false;playgroundView=false;opayaView=true;refresh().then(()=>{render();saveView();$('#message-input')?.focus();});}if(j.kind==='condense'&&j.result?.conversationId)refresh().then(()=>openEssence(j.result.conversationId));if(j.kind==='project-bring'&&j.result)refresh().then(()=>openBringReview(j.result));if(j.kind==='project-remote'&&j.result?.dir)refresh().then(()=>{projectsExpanded.add(j.result.projectId);toggleProjects(true);const c=(state.projects||[]).find(x=>x.id===j.result.projectId);if(c&&j.result.agentId)startProjectChat(c,j.result.agentId);});}
+      else if(j.status==='cancelled')toast(`${j.title.replace(/^Installing/,'Install of').replace(/^Setting up/,'Setup of')} cancelled.`);
       else toast(`${j.title} failed: ${j.error}`,true);
     }
     renderJobs();
@@ -4184,6 +4200,8 @@
         else if(act==='install'){action(async()=>{await api.installFramework({id:'hermes',hostId:job?.route?.toHostId||undefined});toast('Installing Hermes in Terminal. Clone again when it finishes.');});}
         else if(act==='gh-login'&&job?.route?.hostId){action(()=>api.projectRemoteGithubLogin({hostId:job.route.hostId}));}
         else if(act==='reveal'&&job?.result?.file){action(()=>api.revealBackup({file:job.result.file}));}
+        else if(act==='signin-again'){action(()=>api.signInAgain());}
+        else if(act==='cancel'&&job){opayaAsk({title:job.kind==='install'?'Cancel this install?':'Cancel this setup?',text:job.kind==='install'?'Opaya stops it and removes what it set up: the container, its data and the agent in Opaya.':'Opaya stops it. What was already changed stays.',ok:job.kind==='install'?'Cancel and remove':'Cancel setup',cancel:'Keep going',danger:job.kind==='install'}).then(ok=>{if(ok)action(()=>api.jobCancel({id:job.id}));});}
         else if(act==='copy'){action(()=>api.clipboardWrite({text:job.log.map(l=>`${new Date(l.at).toLocaleTimeString()} ${l.text}`).join('\n')}));toast('Log copied.');}
       });}
     const pct=jobPercent(j),rate=j.status==='running'?trackRate(j):0,eta=rate>0&&j.total?(j.total-j.bytes)/rate:NaN,elapsed=((j.finishedAt||Date.now())-j.startedAt)/1000;
@@ -4191,7 +4209,7 @@
     const icon=s=>({done:'<span class="job-step-icon done">&#10003;</span>',active:'<span class="job-step-icon active"></span>',error:'<span class="job-step-icon error">&#10005;</span>',warn:'<span class="job-step-icon warn">!</span>',skipped:'<span class="job-step-icon skipped">&#8211;</span>'}[s]||'<span class="job-step-icon"></span>');
     const head=`<div class="job-title"><strong>${esc(j.title)}</strong><small>${esc(j.detail||'')}</small></div><button type="button" class="icon-button" data-job="min" title="Minimize" aria-label="Minimize">&#8211;</button><button type="button" class="icon-button" data-job="close" title="${j.status==='running'?'Hide (keeps running)':'Close'}" aria-label="Close">&#10005;</button>`;
     const route=`<div class="job-node"><span class="job-node-icon">${badge({provider:r.provider||'hermes'})}</span><strong>${esc(r.from||'')}</strong><small>${esc(r.fromWhere||'')}</small></div><div class="job-wire ${copying?'flowing':''}"><i></i><i></i><i></i><i></i></div><div class="job-node"><span class="job-node-icon target"><span class="machine-icon"></span></span><strong>${esc(r.to||'')}</strong><small>${esc(r.toWhere||'')}</small></div>`;
-    const status=j.status==='done'?'Complete':j.status==='error'?'Stopped':copying?`${fmtBytes(j.bytes)} of ${fmtBytes(j.total)}`:j.steps.find(s=>s.state==='active')?.label||'Working';
+    const status=j.status==='done'?'Complete':j.status==='cancelled'?'Cancelled':j.status==='error'?'Stopped':copying?`${fmtBytes(j.bytes)} of ${fmtBytes(j.total)}`:j.steps.find(s=>s.state==='active')?.label||'Working';
     const stats=`<span>Speed <b>${copying&&rate>0?fmtBytes(rate)+'/s':'--'}</b></span><span>Left <b>${copying?fmtTime(eta):'--'}</b></span><span>Elapsed <b>${fmtTime(elapsed)}</b></span>`;
     const foot=j.status!=='running'?`${j.status==='error'?`<p class="job-error">${esc(j.error)}</p>${/Hermes is not installed/.test(j.error)?'<button type="button" class="secondary" data-job="install">Install Hermes there</button>':''}${/Sign in to GitHub there/.test(j.error)&&r.hostId?'<button type="button" class="secondary" data-job="gh-login">Sign in to GitHub there</button>':''}`:''}<button type="button" class="text-button" data-job="copy">Copy log</button>${j.status==='done'&&j.result?.agent?`<button type="button" class="primary" data-job="open">Open ${esc(j.result.agent.name)}</button>`:''}${j.status==='done'&&j.result?.file?'<button type="button" class="secondary" data-job="reveal">Show in folder</button>':''}<button type="button" class="secondary" data-job="close">Close</button>`:'';
     // Progress arrives several times a second. Rebuilding the window restarted every animation (flicker), and moving
@@ -4199,7 +4217,7 @@
     // the parts that differ; new log lines are appended.
     if(win.dataset.job!==j.id){
       win.dataset.job=j.id;win.dataset.log='';
-      win.innerHTML=`<header class="job-head"></header><div class="job-route"></div><div class="job-progress"><div class="job-percent"><span><b class="job-pct"></b><small>%</small></span><em></em></div><div class="job-bar"><span></span></div><div class="job-stats"></div></div><ol class="job-steps"></ol><div class="job-log" id="job-log"></div><footer class="job-foot" hidden></footer>`;
+      win.innerHTML=`<header class="job-head"></header><div class="job-route"></div><div class="job-progress"><div class="job-percent"><span><b class="job-pct"></b><small>%</small></span><em></em></div><div class="job-bar"><span></span></div><div class="job-stats"></div></div><div class="job-wait" hidden></div><ol class="job-steps"></ol><div class="job-log" id="job-log"></div><footer class="job-foot" hidden></footer>`;
     }
     const part=(selector,html)=>{const el=$(selector,win);if(el&&el.dataset.html!==html){el.innerHTML=html;el.dataset.html=html;}return el;};
     const text=(selector,value)=>{const el=$(selector,win);if(el&&el.textContent!==String(value))el.textContent=value;};
@@ -4222,6 +4240,10 @@
     win.dataset.log=shown.length?key(shown.at(-1)):'';
     if(atBottom&&log.scrollHeight-log.clientHeight-log.scrollTop>1)log.scrollTop=log.scrollHeight;
     const footer=part('.job-foot',foot);footer.hidden=!foot;
+    // Waiting for the user: one clear box above the steps, with what to do and the way to open it again. A job that can
+    // be stopped says what Cancel removes.
+    const waitHtml=j.status==='running'&&(j.waiting||j.cancellable)?`${j.waiting?`<div class="job-wait-box"><span class="job-wait-pulse" aria-hidden="true"></span><div><strong>Waiting for you</strong><p>${esc(j.waiting)}</p>${j.waitCode?`<p class="job-wait-code">${esc(j.waitCode)}</p>`:''}</div></div><div class="job-wait-actions"><button type="button" class="primary" data-job="signin-again">Open the sign-in again</button>`:'<div class="job-wait-actions">'}${j.cancellable?`<button type="button" class="secondary" data-job="cancel" title="Stops it and removes what it set up">${j.kind==='install'?'Cancel install':'Cancel'}</button>`:''}</div>`:'';
+    const waitEl=part('.job-wait',waitHtml);waitEl.hidden=!waitHtml;waitEl.classList.toggle('waiting',!!j.waiting);
   }
   api.onJob?.(onJob);
   api.jobs?.().then(list=>{for(const j of list||[]){jobs.set(j.id,j);if(j.status==='running'){jobShown=j.id;jobMinimized=true;}}renderJobs();}).catch(()=>{});

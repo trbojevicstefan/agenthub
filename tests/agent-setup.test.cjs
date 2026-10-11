@@ -107,3 +107,10 @@ test('ChatGPT offers the models Codex lists for the account, and a local OpenCla
   assert.equal(s.choices({framework:'openclaw'}).subscriptions.find(x=>x.id==='chatgpt').live,undefined);
   assert(!s.choices({framework:'hermes',codex,codexLogin:true}).subscriptions.some(x=>x.id==='codex-login'));
 });
+
+test('cancelling the Claude sign-in ends it at once',async()=>{
+  const ac=new AbortController();let killed=false;
+  const spawn=()=>({onData(){},onExit(){},kill(){killed=true;}});
+  const p=s.claudeSetupToken({spawn,bin:'claude',signal:ac.signal});ac.abort();
+  await assert.rejects(p,/Cancelled/);assert(killed);
+});

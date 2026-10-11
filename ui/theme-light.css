@@ -976,3 +976,8 @@
 :where(body[data-theme="light"]) .setup-key-step span{color:#343e37}
 :where(body[data-theme="light"]) .setup-wizard h3 .setup-sub{color:#445149}
 :where(body[data-theme="light"]) .setup-step-text{color:#18201b}
+:where(body[data-theme="light"]) .job-wait-box{border:1px solid #7cc099;background:#cfe8d7}
+:where(body[data-theme="light"]) .job-wait-box strong{color:#123e24}
+:where(body[data-theme="light"]) .job-wait-box p{color:#121d16}
+:where(body[data-theme="light"]) .job-wait-code{color:#000000}
+:where(body[data-theme="light"]) .job-wait-pulse{background:#badec9}

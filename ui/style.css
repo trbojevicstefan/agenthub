@@ -2817,3 +2817,17 @@ body[data-theme="light"] .setup-wizard h3 .setup-sub{color:#5d6e64}
 .setup-actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .setup-step-text{font-size:13.5px;color:#d3ddd6;line-height:1.5}
 body[data-theme="light"] .setup-step-text{color:#2f3d35}
+
+/* A job waiting for the user (a sign-in in the browser), and its Cancel */
+.job-wait{display:flex;flex-direction:column;gap:10px;margin:4px 18px 10px}
+.job-wait-box{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px solid #5fd18f;border-radius:12px;background:#17301f}
+.job-wait-box strong{font-size:14px;color:#9ff0c0}
+.job-wait-box p{margin:3px 0 0;font-size:13px;line-height:1.45;color:#d7e6dc}
+.job-wait-code{font-family:var(--mono,monospace);font-size:18px;letter-spacing:.12em;color:#fff}
+.job-wait-pulse{flex:none;width:12px;height:12px;margin-top:4px;border-radius:50%;background:#5fd18f;box-shadow:0 0 0 0 #5fd18f88;animation:job-wait-pulse 1.4s infinite}
+@keyframes job-wait-pulse{0%{box-shadow:0 0 0 0 #5fd18f88}70%{box-shadow:0 0 0 10px #5fd18f00}100%{box-shadow:0 0 0 0 #5fd18f00}}
+.job-wait-actions{display:flex;gap:8px;flex-wrap:wrap}
+body[data-theme="light"] .job-wait-box{background:#e8f6ee;border-color:#2f9e5f}
+body[data-theme="light"] .job-wait-box strong{color:#1d7a46}
+body[data-theme="light"] .job-wait-box p{color:#2f3d35}
+body[data-theme="light"] .job-wait-code{color:#14231a}

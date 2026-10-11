@@ -136,11 +136,12 @@ async function apply({agent,host,provider:providerId,model,run,restart,signIn,pr
 // `claude setup-token` on this computer in a pseudo terminal of its own (it needs one), output kept in memory only:
 // Claude Code opens the browser here, the user signs in, and it prints a token that is valid for a year. Never through
 // Opaya's terminals, whose history is saved to disk.
-function claudeSetupToken({spawn,bin,args=['setup-token'],env,timeout=10*60*1000}){
+function claudeSetupToken({spawn,bin,args=['setup-token'],env,signal,timeout=10*60*1000}){
   return new Promise((resolve,reject)=>{
     let out='',settled=false;const finish=(error,value)=>{if(settled)return;settled=true;clearTimeout(timer);try{p.kill();}catch{}error?reject(error):resolve(value);};
     const p=spawn(bin,args,{name:'xterm-256color',cols:500,rows:40,env});
     const timer=setTimeout(()=>finish(new Error('The Claude sign-in was not finished within 10 minutes.')),timeout);
+    signal?.addEventListener('abort',()=>finish(new Error('Cancelled.')),{once:true});
     p.onData(d=>{out=(out+d).slice(-100000);});
     p.onExit(()=>{const m=CLAUDE_TOKEN.exec(out.replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g,'').replace(/\x1b\][^\x07]*\x07/g,''));
       m?finish(null,m[0]):finish(new Error(/not logged in|login|sign in/i.test(out)?'Claude Code did not finish the sign-in. Try again and sign in in the browser.':'Claude Code did not print a setup token.'));});

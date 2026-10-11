@@ -204,6 +204,8 @@ class Broker{
     // Hourly update checks, and fixing "too old" connection errors by updating automatically. Both on by default.
     if(input.updateChecks!==undefined)next.updateChecks=!!input.updateChecks;
     if(input.autoFix!==undefined)next.autoFix=!!input.autoFix;
+    // The browser sign-ins open in (an id from browsers.cjs, 'default', or '' to ask each time).
+    if(input.signInBrowser!==undefined)next.signInBrowser=/^[a-z]{1,20}$/.test(String(input.signInBrowser))?String(input.signInBrowser):'';
     // Agents on this computer may ask the Opaya Vault for a key (opaya-vault MCP); the user approves each one. On by default.
     if(input.vaultMcp!==undefined)next.vaultMcp=!!input.vaultMcp;
     // System notifications when Opaya is not in front (all on by default), Opaya's tips, connecting at start, the send key.

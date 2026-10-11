@@ -117,24 +117,44 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   const reachable=url=>fetch(url,{signal:AbortSignal.timeout(2000)}).then(()=>true,()=>false);
   const jobs=new Map(),library=new moves.SkillLibrary(root),origin=new (require('node:async_hooks').AsyncLocalStorage)();
   function publishJob(job){listener?.broadcast('job',job);}
-  function startJob({kind,title,detail,steps,route},work){
+  // cancellable: the job window offers Cancel. The work gets {signal, stop, undo}: stop(fn) runs at once on Cancel (end a
+  // terminal, kill a download), undo(fn) after the work stopped, newest first, to remove what it made.
+  const jobControls=new Map();
+  function startJob({kind,title,detail,steps,route,cancellable=false},work){
     const byOpaya=origin.getStore()==='opaya';
-    const job={id:randomUUID(),kind,title,detail,route,status:'running',startedAt:Date.now(),steps:steps.map(([key,label])=>({key,label,state:'pending'})),log:[],bytes:0,total:0,result:null,error:''};
-    jobs.set(job.id,job);if(jobs.size>20)jobs.delete(jobs.keys().next().value);
+    const controller=new AbortController(),stops=[],undos=[],ctl={signal:controller.signal,stop:fn=>stops.push(fn),undo:fn=>undos.push(fn)};
+    const job={id:randomUUID(),kind,title,detail,route,cancellable,status:'running',startedAt:Date.now(),steps:steps.map(([key,label])=>({key,label,state:'pending'})),log:[],bytes:0,total:0,result:null,error:''};
+    jobs.set(job.id,job);if(jobs.size>20)jobs.delete(jobs.keys().next().value);jobControls.set(job.id,{controller,stops});
     let timer=null;const flush=()=>{timer=null;publishJob(job);};
     const progress=e=>{
       if(e.step){const s=job.steps.find(x=>x.key===e.step);if(s&&e.state)s.state=e.state;}
+      // Waiting for the user (a sign-in in the browser): shown on its own in the job window until it is cleared.
+      if(e.waiting!==undefined){job.waiting=String(e.waiting||'').slice(0,300);job.waitCode=String(e.code||'').slice(0,20);}
       if(e.message)job.log.push({at:Date.now(),text:String(e.message).slice(0,600),state:e.state||''});if(job.log.length>300)job.log.splice(0,job.log.length-300);
       if(Number.isFinite(e.bytes))job.bytes=e.bytes;if(Number.isFinite(e.total)&&e.total>0)job.total=e.total;
-      if(e.message||e.state)flush();else if(!timer)timer=setTimeout(flush,250);
+      if(e.message||e.state||e.waiting!==undefined)flush();else if(!timer)timer=setTimeout(flush,250);
     };
     publishJob(job);
-    Promise.resolve().then(()=>work(progress)).then(result=>{job.status='done';job.result=result;job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='pending')s.state='skipped';job.log.push({at:Date.now(),text:'Done.',state:'done'});},
-      error=>{job.status='error';job.error=safeError(error);job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='active')s.state='error';job.log.push({at:Date.now(),text:job.error,state:'error'});
+    // Cancelled: what the work made is removed (its undo steps), and nothing goes to the Opaya Agent.
+    const cancelled=async()=>{
+      job.status='cancelled';job.waiting='';job.error='Cancelled.';for(const s of job.steps)if(s.state==='active')s.state='skipped';
+      job.log.push({at:Date.now(),text:undos.length?'Cancelled. Removing what was set up...':'Cancelled.',state:'warn'});publishJob(job);
+      for(const fn of undos.reverse()){try{const m=await fn();if(m)job.log.push({at:Date.now(),text:String(m).slice(0,300),state:'done'});}catch(e){job.log.push({at:Date.now(),text:`Could not undo: ${safeError(e)}`,state:'error'});}publishJob(job);}
+      if(undos.length)job.log.push({at:Date.now(),text:'Everything this job set up is removed.',state:'done'});
+      job.finishedAt=Date.now();
+    };
+    Promise.resolve().then(()=>work(progress,ctl)).then(result=>{job.status='done';job.waiting='';job.result=result;job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='pending')s.state='skipped';job.log.push({at:Date.now(),text:'Done.',state:'done'});},
+      error=>controller.signal.aborted?cancelled():(()=>{job.status='error';job.error=safeError(error);job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='active')s.state='error';job.log.push({at:Date.now(),text:job.error,state:'error'});
         // A job the user started that failed goes to the Opaya Agent (one it started itself, it follows with its jobs tool).
-        if(!byOpaya)actionFailed(job.title,job.error,`It ran as an Opaya job (job_id ${job.id}, ${kind}); its steps: ${job.steps.map(x=>`${x.label} ${x.state}`).join(', ')}. Read it with your jobs tool.`,{quiet:['install','setup'].includes(kind)});})
-      .finally(()=>{clearTimeout(timer);publishJob(job);emit();});
+        if(!byOpaya)actionFailed(job.title,job.error,`It ran as an Opaya job (job_id ${job.id}, ${kind}); its steps: ${job.steps.map(x=>`${x.label} ${x.state}`).join(', ')}. Read it with your jobs tool.`,{quiet:['install','setup'].includes(kind)});})())
+      .finally(()=>{clearTimeout(timer);jobControls.delete(job.id);publishJob(job);emit();});
     return job;
+  }
+  function cancelJob(id){
+    const c=jobControls.get(String(id||'')),job=jobs.get(String(id||''));if(!c||!job||job.status!=='running')throw new Error('This job is not running.');
+    if(!job.cancellable)throw new Error('This job cannot be cancelled.');
+    c.controller.abort();for(const fn of c.stops.splice(0))try{fn();}catch{}
+    return true;
   }
   // The pseudo agents behind "This computer" and a machine's own shell.
   const localShell=()=>shells.localShell(app.getPath('home'));
@@ -155,7 +175,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   // machine or in a container shows one, Opaya listens on that port here, opens the link in the browser, and passes the
   // browser's answer to Codex there. Terminals on this computer are left alone: Codex opens the browser itself.
   codexLogins=new (require('./codex-login.cjs').CodexLogins)({shell:require('./clone.cjs').shell,collect,
-    open:url=>electronShell?.openExternal?electronShell.openExternal(url):Promise.reject(new Error('No browser available from the session service.')),
+    open:url=>openSignIn(url,'ChatGPT sign-in'),
     notify:n=>{
       const text={open:`Finish it in your browser. Opaya passes the answer to Codex on ${n.name}.`,paste:`${n.error?`${n.error} `:''}Open the sign-in page, sign in, then paste the address the browser ends on (it starts with http://127.0.0.1:${n.port}/auth/callback).`,done:`Codex on ${n.name} is signed in.`,failed:`Codex on ${n.name} did not accept the sign-in (${n.status}). Start the sign-in again.`}[n.phase];
       notice({kind:'codex-login',level:n.phase==='failed'?'error':n.phase==='done'?'done':'info',title:n.phase==='done'?'Codex signed in':'Codex sign-in',text,phase:n.phase,state:n.state,url:n.url,port:n.port,machine:n.name,terminalId:n.terminalId});
@@ -268,6 +288,17 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       });
     },
     agentChannelOptions:async()=>agentSetup.CHANNELS,
+    // The browsers here for sign-ins, opening one in the chosen browser (remembered when asked), and the last again.
+    browsersList:async()=>({browsers:require('./browsers.cjs').list().map(({id,label})=>({id,label})),current:broker.data.settings?.signInBrowser||''}),
+    openInBrowser:async x=>{
+      const url=String(x.url||''),pick=String(x.browser||'default');let u;try{u=new URL(url);}catch{throw new Error('Not a web address.');}
+      if(!['http:','https:'].includes(u.protocol))throw new Error('Only web addresses open in a browser.');
+      if(pick==='default'){if(!electronShell?.openExternal)throw new Error('No browser available.');await electronShell.openExternal(url);}else require('./browsers.cjs').open(url,pick);
+      if(x.remember)await broker.saveSettings({signInBrowser:pick});
+      return true;
+    },
+    jobCancel:async x=>cancelJob(x.id),
+    signInAgain:async()=>{if(!lastSignIn)throw new Error('There is no sign-in waiting.');notice({kind:'signin-browser',level:'info',title:lastSignIn.label,text:'Choose the browser to open it in.',url:lastSignIn.url,code:lastSignIn.code});return true;},
     agentChannelPair:async x=>{
       const a=broker.agent(x.id),host=hostOf(a),args=agentSetup.pairArgs(String(x.channel||''),x.code);
       const out=await collect(require('./process.cjs').launch(a,management.cliArgs(a,args),host),{timeout:60000}).catch(e=>{throw new Error(`The pairing code was not accepted: ${safeError(e).slice(0,200)}`);});
@@ -277,9 +308,9 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     agentSetupModel:async x=>{
       const a=broker.agent(x.id),reuse=x.setup?.provider==='codex-login',p=agentSetup.PROVIDERS.find(q=>q.id===(reuse?'chatgpt':x.setup?.provider));if(!p)throw new Error('Choose a model provider.');
       if(!await approve(a,`Set up ${a.name} with ${p.label}?`,`Opaya ${reuse?'gives it the ChatGPT sign-in Codex has on this computer':setupHow(p)}, sets its model to ${x.setup.model||p.model}${a.provider==='openclaw'?' and restarts its gateway':''}, then connects it again.`))throw new Error('Setup cancelled.');
-      return startJob({kind:'setup',route:{from:'Opaya',fromWhere:p.label,to:a.name,toWhere:whereName(a),provider:a.provider},title:`Setting up ${a.name}`,detail:`${p.label} / ${x.setup.model||p.model}`,
-        steps:[['key','Give it the key'],['model','Set the model'],['connect','Connect']]},async progress=>{
-        const model=await setupAgentModel(a,x.setup,progress);
+      return startJob({kind:'setup',cancellable:true,route:{from:'Opaya',fromWhere:p.label,to:a.name,toWhere:whereName(a),provider:a.provider},title:`Setting up ${a.name}`,detail:`${p.label} / ${x.setup.model||p.model}`,
+        steps:[['key','Give it the key'],['model','Set the model'],['connect','Connect']]},async(progress,ctl)=>{
+        const model=await setupAgentModel(a,x.setup,progress,ctl);
         progress({step:'connect',state:'active',message:`Connecting ${a.name}`});
         if(broker.runtimeFor(a.id).status==='connected')broker.disconnect(a.id);
         await broker.connect(a.id);
@@ -540,18 +571,19 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     return agentSetup.choices({framework,found,codex,codexLogin,claudeHere:claudeHere(),vault:(opaya.secrets||[]).filter(k=>k.kept||k.global||k.stored?.length).map(k=>({id:k.id,name:k.name,mask:k.mask,endpointKey:k.endpoint?moves.endpointKey(k.endpoint):''})),opaya:{preset:d.config?.preset,model:d.config?.model,hasKey:d.hasKey}});};
   // Key into the agent's .env, model with its CLI, then a restart where the key and model need one (an OpenClaw
   // container or gateway; Hermes reads them when Opaya starts it again).
-  async function setupAgentModel(a,setup,progress){
+  async function setupAgentModel(a,setup,progress,ctl={}){
+    const live=()=>{if(ctl.signal?.aborted)throw new Error('Cancelled.');};
     const reuse=setup?.provider==='codex-login',p=agentSetup.PROVIDERS.find(x=>x.id===(reuse?'chatgpt':setup?.provider));if(!p)throw new Error('Choose a model provider.');
     if(!['hermes','openclaw'].includes(a.provider))throw new Error('Opaya sets up Hermes and OpenClaw this way.');
     const host=hostOf(a),box=agentSetup.containerOf(a);let signIn=null;
     if(p.login==='claude'){
       // Claude: a setup token from Claude Code on this computer (browser sign-in here), then into the agent.
-      progress({step:'key',state:'active',message:'Opening the Claude sign-in in your browser. Sign in there, then come back.'});
-      const token=await claudeToken();
+      progress({step:'key',state:'active',message:'Opening the Claude sign-in in your browser. Sign in there, then come back.',waiting:'Sign in to Claude in the browser window Claude Code opened, then come back.'});
+      const token=await claudeToken(ctl.signal);live();
       const s=await opaya.holdSecret(token,{name:p.env,source:'claude-setup-token'});s.kept=true;await opaya.saveSecrets();
       if(a.provider==='openclaw')await collect(require('./process.cjs').launch(a,management.cliArgs(a,agentSetup.CLAUDE_TOKEN_ARGS),host),{timeout:120000,input:token+'\n'});
       else await opaya.storeSecret({secret:s.id,agent_id:a.id,name:p.env},{approved:true});
-      progress({step:'key',state:'done',message:`Signed in with Claude. ${a.name} has its token (kept in your Vault as ${p.env}).`});
+      progress({step:'key',state:'done',waiting:'',message:`Signed in with Claude. ${a.name} has its token (kept in your Vault as ${p.env}).`});
     }else if(reuse){
       // OpenClaw on this computer takes over the ChatGPT sign-in Codex has here.
       if(a.provider!=='openclaw'||hostOf(a)||box)throw new Error('Only an OpenClaw on this computer can use the Codex sign-in that is here.');
@@ -561,11 +593,11 @@ async function start({app, safeStorage, shell: electronShell}, root) {
         progress({step:'key',state:'done',message:'OpenClaw uses the ChatGPT sign-in of Codex on this computer'});};
     }else if(p.login==='device'){
       progress({step:'key',state:'active',message:`${p.label} sign-in: Opaya opens the page and shows the code to enter there.`});
-      signIn=()=>deviceSignIn(a,host,p,progress);
+      signIn=()=>deviceSignIn(a,host,p,progress,ctl);
     }else if(p.login==='chatgpt'){
       // ChatGPT: the agent's own sign-in where it runs; Opaya opens it in the browser here and passes the answer back.
       progress({step:'key',state:'active',message:'ChatGPT sign-in: Opaya opens it in your browser once the agent is ready for it.'});
-      signIn=()=>chatgptSignIn(a,host,progress);
+      signIn=()=>chatgptSignIn(a,host,progress,ctl);
     }else{
       progress({step:'key',state:'active',message:`Giving ${a.name} the ${p.label} key (${p.env})`});
       const s=await setupSecret(setup.key,p);
@@ -575,48 +607,60 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     progress({step:'model',state:'active',message:`Setting its model: ${p.label} / ${setup.model||p.model}`});
     // Hermes over its gateway API (not ACP) reads the new model when its gateway starts again.
     const restart=a.provider==='hermes'?(a.protocol==='openai'&&a.command?()=>management.gatewayOperation(a,host,'restart'):null):()=>restartGateway(a,host);
-    const r=await agentSetup.apply({agent:a,host,provider:p.id,model:setup.model,restart,signIn,progress});
+    live();const r=await agentSetup.apply({agent:a,host,provider:p.id,model:setup.model,restart,signIn:signIn&&(async()=>{await signIn();live();}),progress});
     progress({step:'model',state:'done',message:`${r.label} / ${r.model}`});
     return r;
   }
   // `claude setup-token` on this computer, in memory only (agent-setup.cjs).
-  async function claudeToken(){
+  async function claudeToken(signal){
     const proc=require('./process.cjs'),env=proc.environment(),bin=proc.findExecutable('claude',env);
     if(!bin)throw new Error('Claude Code is not installed on this computer. Install it (Install agents > Claude Code), sign in once, then try again.');
     const l=proc.windowsLaunch(bin,['setup-token']);
-    return agentSetup.claudeSetupToken({spawn:require('node-pty').spawn,bin:l.command,args:l.args,env});
+    return agentSetup.claudeSetupToken({spawn:require('node-pty').spawn,bin:l.command,args:l.args,env,signal});
   }
   // The agent's ChatGPT sign-in in a terminal kept in the background. On a machine or in a container Opaya finds the
   // sign-in link in it, opens it in the browser here and passes the answer to the agent (codex-login.cjs); on this
   // computer the agent opens the browser itself. Waits for it to finish.
-  async function chatgptSignIn(a,host,progress){
+  async function chatgptSignIn(a,host,progress,ctl={}){
     const where=require('./clone.cjs').place({agent:a,host}),relay=!!(where.host||where.container);
     const command=management.cliCommand(a,agentSetup.chatgptLoginArgs(a,{relay}),{remote:!!host,windows:process.platform==='win32'});
     const view=await runInTerminal({owner:a.id,label:`${a.name}: ChatGPT sign-in`,key:`chatgpt_${Date.now().toString(36)}`,host,command:marked(a,command),where:relay?{host:where.host,container:where.container}:null,background:true});
-    progress({step:'key',message:'Sign in to ChatGPT in the browser window Opaya opened.'});
+    ctl.stop?.(()=>terminals.close(view.id));
+    progress({step:'key',message:'Waiting for your ChatGPT sign-in in the browser.',waiting:'Sign in to ChatGPT in your browser. Opaya asks which browser to use.'});
     const code=await waitForMark(view.id,0,15*60*1000,'ChatGPT sign-in');
     if(code!==0)throw new Error('The ChatGPT sign-in did not finish. Open Set up model and try again; sign in in the browser window that opens.');
-    progress({step:'key',state:'done',message:'Signed in with ChatGPT'});
+    progress({step:'key',state:'done',message:'Signed in with ChatGPT',waiting:''});
   }
   // A device-code sign-in in a terminal kept in the background: Opaya reads the page and the code it prints, opens the
   // page in the browser here and shows the code in the job (and a notice), then waits for the sign-in to finish.
-  async function deviceSignIn(a,host,p,progress){
+  async function deviceSignIn(a,host,p,progress,ctl={}){
     const command=management.cliCommand(a,agentSetup.deviceLoginArgs(a,p),{remote:!!host,windows:process.platform==='win32'});
     const view=await runInTerminal({owner:a.id,label:`${a.name}: ${p.label} sign-in`,key:`device_${Date.now().toString(36)}`,host,command:marked(a,command),background:true});
+    ctl.stop?.(()=>terminals.close(view.id));
     const end=Date.now()+15*60*1000;let shown='';
     for(;;){
       let v;try{v=terminals.attach(view.id);}catch{throw new Error(`The ${p.label} sign-in stopped.`);}
       const text=String(v.buffer||''),found=agentSetup.deviceCode(text.slice(-20000));
       if(found&&found.code!==shown){shown=found.code;
         progress({step:'key',message:`Enter the code ${found.code} on ${found.url} (Opaya opened it in your browser).`});
-        notice({kind:'device-code',level:'info',title:`${p.label} sign-in for ${a.name}`,text:`Enter the code ${found.code} on the page Opaya opened: ${found.url}`});
-        electronShell?.openExternal?.(found.url)?.catch?.(()=>{});}
+        progress({waiting:`Enter the code ${found.code} on ${p.label}'s page, in your browser.`,code:found.code});
+        openSignIn(found.url,`${p.label} sign-in for ${a.name}`,{code:found.code}).catch(()=>{});}
       const m=marks(v);if(m.length){if(Number(m.at(-1)[1])!==0)throw new Error(`The ${p.label} sign-in did not finish. Open Set up model and try again.`);break;}
       if(v.exited)throw new Error(`The ${p.label} sign-in stopped before it finished.`);
       if(Date.now()>end)throw new Error(`The ${p.label} sign-in was not finished within 15 minutes.`);
       await new Promise(r=>setTimeout(r,1500));
     }
-    progress({step:'key',state:'done',message:`Signed in with ${p.label}`});
+    progress({step:'key',state:'done',message:`Signed in with ${p.label}`,waiting:''});
+  }
+  // Sign-ins open in the browser the user picks: the remembered one, else Opaya asks (the account they want is often
+  // signed in in only one browser). lastSignIn lets them open it again from the job window.
+  let lastSignIn=null;
+  async function openSignIn(url,label,{code=''}={}){
+    lastSignIn={url,label,code};
+    const pick=broker.data.settings?.signInBrowser||'';
+    if(pick==='default'&&electronShell?.openExternal)return electronShell.openExternal(url);
+    if(pick&&pick!=='default'){try{return require('./browsers.cjs').open(url,pick);}catch{}}
+    notice({kind:'signin-browser',level:'info',title:label,text:code?`Enter the code ${code} on the page.`:'Choose the browser where you are signed in to the account you want to use.',url,code});
   }
   // Restart what has to load new keys or channels: an OpenClaw container (waiting for its gateway) or gateway; Hermes'
   // gateway, started when it was not running (an Opaya Hermes container chats over ACP and runs no gateway until then).
@@ -635,12 +679,12 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     }
   }
   // A program's output line by line into the job's log, without a terminal; resolves with its exit code.
-  function runLogged(host,command,progress,step,timeout=60*60*1000){
+  function runLogged(host,command,progress,step,timeout=60*60*1000,ctl={}){
     return new Promise((resolve,reject)=>{
       const child=require('./clone.cjs').shell({host,container:''},command);let buf='';
       const line=l=>{l=String(l).replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g,'').split('\r').pop().trim();if(l)progress({step,message:l.slice(0,300)});};
       const feed=d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){line(buf.slice(0,i));buf=buf.slice(i+1);}};
-      child.stdout.on('data',feed);child.stderr.on('data',feed);child.stdin?.end();
+      child.stdout.on('data',feed);child.stderr.on('data',feed);child.stdin?.end();ctl.stop?.(()=>child.kill());
       const t=setTimeout(()=>child.kill(),timeout);
       child.on('error',e=>{clearTimeout(t);reject(e);});child.on('close',code=>{clearTimeout(t);line(buf);resolve(code);});
     });
@@ -650,18 +694,27 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   async function installContainerSetup(host,x,p){
     const setup=x.setup,choice=agentSetup.PROVIDERS.find(q=>q.id===setup?.provider);if(!choice)throw new Error('Choose a model provider.');
     if(!await approve({name:'Opaya'},`Install ${p.framework.name} in a Docker container on ${host.name}?`,`Container ${p.container} (${p.image}), data in ${p.folder}. It restarts with the machine. Opaya then ${setupHow(choice)}, sets its model to ${setup.model||choice.model} and connects it. Nothing to type in a terminal.\n\nRuns on ${host.name}:\n\n${p.preview}`))throw new Error('Install cancelled.');
-    return startJob({kind:'install',route:{from:p.framework.name,fromWhere:`Docker / ${p.image}`,to:p.container,toWhere:host.name,toHostId:host.id,provider:p.connection.provider},title:`Installing ${p.framework.name} in Docker`,detail:`${host.name} / container ${p.container} / ${choice.label}`,
-      steps:[['install','Start the container'],['save','Add to Opaya'],['key','Give it the key'],['model','Set the model'],['connect','Connect']]},async progress=>{
+    return startJob({kind:'install',cancellable:true,route:{from:p.framework.name,fromWhere:`Docker / ${p.image}`,to:p.container,toWhere:host.name,toHostId:host.id,provider:p.connection.provider},title:`Installing ${p.framework.name} in Docker`,detail:`${host.name} / container ${p.container} / ${choice.label}`,
+      steps:[['install','Start the container'],['save','Add to Opaya'],['key','Give it the key'],['model','Set the model'],['connect','Connect']]},async(progress,ctl)=>{
+      const live=()=>{if(ctl.signal.aborted)throw new Error('Cancelled.');};
+      // Cancel removes what this install made: the container and its data, unless they were there before.
+      const clone=require('./clone.cjs'),c=quote(p.container),gateway=!!containers.PLANS[p.framework.id]?.gateway;
+      const dataDir=gateway?'':`"$HOME/${String(p.folder).replace(/^~\//,'')}"`;
+      const before=await clone.run({host,container:''},`docker inspect ${c} >/dev/null 2>&1 && echo container; ${dataDir?`[ -e ${dataDir} ] && echo folder;`:''} true`,30000).catch(()=>'container');
+      if(!/container/.test(before))ctl.undo(async()=>{
+        await clone.run({host,container:''},`docker rm -f ${c} >/dev/null 2>&1; ${gateway?`docker volume rm ${quote(p.container+'-data')} >/dev/null 2>&1;`:/folder/.test(before)?'':`rm -rf ${dataDir};`} true`,120000);
+        return `Removed container ${p.container} and its data from ${host.name}`;});
       progress({step:'install',state:'active',message:`Running on ${host.name}. The first download can take a few minutes.`});
-      const code=await runLogged(host,p.command,progress,'install');
+      const code=await runLogged(host,p.command,progress,'install',60*60*1000,ctl);live();
       if(code!==0)throw new Error(containers.EXIT[code]||`The install ended with exit code ${code}. See the steps above.`);
       progress({step:'install',state:'done',message:`Container ${p.container} runs`});
       progress({step:'save',state:'active',message:'Adding the agent to Opaya'});
       const agent=await broker.saveAgent({agent:{...p.connection,name:String(x.name||'').trim()?String(x.name).trim().slice(0,60):p.connection.name,hostId:host.id},importToken:!!p.importToken},{preapproved:!!p.importToken});
-      progress({step:'save',state:'done',message:`Added ${agent.name}`});
+      ctl.undo(async()=>{await broker.removeAgent(agent.id);emit();return `Removed ${agent.name} from Opaya`;});
+      progress({step:'save',state:'done',message:`Added ${agent.name}`});live();
       let model;
-      try{model=await setupAgentModel(broker.agent(agent.id),setup,progress);}
-      catch(e){throw new Error(`${agent.name} is installed and added, but its model is not set up yet: ${safeError(e)}. Open it and use Set up model to try again.`);}
+      try{model=await setupAgentModel(broker.agent(agent.id),setup,progress,ctl);}
+      catch(e){live();throw new Error(`${agent.name} is installed and added, but its model is not set up yet: ${safeError(e)}. Open it and use Set up model to try again.`);}
       progress({step:'connect',state:'active',message:`Connecting ${agent.name}`});
       await broker.connect(agent.id);
       progress({step:'connect',state:'done',message:`${agent.name} is ready (${model.label} / ${model.model})`});
