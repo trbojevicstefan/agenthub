@@ -292,6 +292,16 @@ class OpayaAgent{
   }
   // The Opaya Agent's own model key as a held secret under the name an agent reads it by (the setup wizard's "Same as
   // the Opaya Agent"), so it reaches the agent like any key: through storeSecret, never on a command line.
+  // The models the ChatGPT sign-in offers, from Codex on this computer (its own model/list for the signed-in account),
+  // with the one Codex uses by default. The app-server stays only when the Opaya Agent itself runs on Codex.
+  async codexModels(){
+    try{
+      const rpc=await this.ensureCodex(),r=await rpc.request('model/list',{limit:200},15000),list=r?.data||r?.models||r?.items||[];
+      const id=m=>typeof m==='string'?m:m?.model||m?.id||m?.slug;
+      const models=[...new Set(list.map(id).filter(m=>typeof m==='string'&&/^[\w.:@+\/-]{1,160}$/.test(m)))];
+      return {models,default:id(list.find(m=>m&&m.isDefault))||models[0]||''};
+    }finally{if(this.config.preset!=='codex')await this.closeCodex().catch(()=>{});}
+  }
   async holdModelKey(name){
     if(this.cli()||!this.vault.has(KEY))throw new Error('The Opaya Agent signs in with its own CLI, not an API key. Choose a key from the Vault or add one.');
     const s=await this.holdSecret(this.vault.get(KEY),{name,source:'opaya-model'});s.kept=true;await this.saveSecrets();return s;

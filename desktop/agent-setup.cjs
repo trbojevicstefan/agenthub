@@ -46,7 +46,7 @@ const PROVIDERS=[
 ];
 const MODEL=/^[\w.:@+\/-]{1,160}$/;
 const FRAMEWORKS=['hermes','openclaw'];
-const provider=id=>{const p=PROVIDERS.find(x=>x.id===id);if(!p)throw new Error('Choose one of the providers in the list.');return p;};
+const provider=id=>{if(id==='codex-login')id='chatgpt';const p=PROVIDERS.find(x=>x.id===id);if(!p)throw new Error('Choose one of the providers in the list.');return p;};
 const checkModel=(p,model)=>{const m=String(model||'').trim()||p.model;if(!m&&!p.model)return '';if(!MODEL.test(m))throw new Error('The model name has characters a model name does not use.');return m;};
 // OpenClaw's model reference: <provider>/<model> (a model of an aggregator keeps its own slashes).
 const openclawRef=(p,model)=>model.startsWith(`${p.openclaw}/`)?model:`${p.openclaw}/${model}`;
@@ -55,12 +55,17 @@ const openclawRef=(p,model)=>model.startsWith(`${p.openclaw}/`)?model:`${p.openc
 // vault: [{id, name, mask}] (the Opaya Vault); opaya: {preset, model, hasKey} (the Opaya Agent's model).
 // found: keys Opaya found on this computer and in other agents, not in the Vault yet ([{scan, item, name, mask, where}]).
 // framework: the agent being set up (hermes or openclaw); providers it cannot use are left out.
-function choices({vault=[],found=[],opaya=null,claudeHere=false,framework=''}={}){
+// codex: {models, default} from Codex on this computer, the real list for the ChatGPT sign-in.
+// codexLogin: Codex is signed in on this computer and the agent runs here too (its login can be reused).
+function choices({vault=[],found=[],opaya=null,claudeHere=false,framework='',codex=null,codexLogin=false}={}){
   const saved=[],fits=p=>!framework||!!p[framework],keyFor=name=>PROVIDERS.find(x=>!x.login&&fits(x)&&x.env===name);
   // The subscription the Opaya Agent itself uses comes first.
   const subscriptions=PROVIDERS.filter(p=>p.login&&fits(p)).map(p=>({id:p.id,label:p.label,detail:p.detail,model:p.model,models:p.models,login:p.login,
     recommended:opaya?.preset===(p.login==='chatgpt'?'codex':'claude'),
-    ...(p.login==='claude'&&!claudeHere?{unavailable:'Needs Claude Code on this computer (Install agents > Claude Code), signed in.'}:{})}));
+    ...(p.login==='claude'&&!claudeHere?{unavailable:'Needs Claude Code on this computer (Install agents > Claude Code), signed in.'}:{}),
+    ...(p.login==='chatgpt'&&codex?.models?.length?{models:codex.models,model:codex.default||codex.models[0],live:true}:{})}));
+  // OpenClaw on this computer can take over the Codex sign-in that is already here (openclaw migrate apply codex).
+  if(codexLogin&&framework==='openclaw'){const c=subscriptions.find(x=>x.id==='chatgpt');if(c)subscriptions.splice(subscriptions.indexOf(c),0,{...c,id:'codex-login',label:'Codex on this computer',detail:'Use the ChatGPT sign-in Codex already has here. Nothing to sign in.',login:'codex-login',recommended:true});}
   if(opaya?.hasKey&&PROVIDERS.some(p=>p.id===opaya.preset&&!p.login&&fits(p))){const p=provider(opaya.preset);saved.push({source:'opaya',provider:p.id,label:`Same as the Opaya Agent`,detail:`${p.label}${opaya.model?` / ${opaya.model}`:''}`,model:opaya.model&&MODEL.test(opaya.model)?opaya.model:p.model});}
   // A Vault key under another name counts when its endpoint says whose it is (API_KEY for https://openrouter.ai/...).
   for(const k of vault){const p=keyFor(k.name)||keyFor(k.endpointKey);if(p&&!saved.some(s=>s.source==='vault'&&s.provider===p.id))saved.push({source:'vault',secret:k.id,provider:p.id,label:`${p.label} key from your Vault`,detail:`${k.name} ${k.mask||''}`.trim(),model:p.model});}

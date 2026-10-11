@@ -96,3 +96,14 @@ test('the model behind a gateway route is read from the agent\'s CLI',{skip:proc
   assert.equal(await resolve({provider:'openclaw',protocol:'openai',command:oc,model:'anthropic/claude-sonnet-5-5'}),'','a real model needs no lookup');
   assert.equal(await resolve({provider:'deepseek',protocol:'openai',command:'',model:'deepseek-flash'}),'');
 });
+
+test('ChatGPT offers the models Codex lists for the account, and a local OpenClaw can reuse the Codex sign-in',()=>{
+  const codex={models:['gpt-6.1-sol','gpt-6-astra','gpt-6-luna'],default:'gpt-6.1-sol'};
+  const c=s.choices({framework:'openclaw',codex,codexLogin:true});
+  const chat=c.subscriptions.find(x=>x.id==='chatgpt');assert.deepEqual([chat.model,chat.models,chat.live],['gpt-6.1-sol',codex.models,true]);
+  assert.equal(c.subscriptions[0].id,'codex-login');assert.equal(c.subscriptions[0].login,'codex-login');
+  assert.deepEqual(s.modelSteps(claw,'codex-login','gpt-6.1-sol'),[['models','set','openai/gpt-6.1-sol']]);
+  // Without Codex here the usual list stays, marked as not live; Hermes never gets the reuse option.
+  assert.equal(s.choices({framework:'openclaw'}).subscriptions.find(x=>x.id==='chatgpt').live,undefined);
+  assert(!s.choices({framework:'hermes',codex,codexLogin:true}).subscriptions.some(x=>x.id==='codex-login'));
+});

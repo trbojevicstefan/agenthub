@@ -617,7 +617,7 @@
   // key, model, gateway, connection) and shows its progress in the job card: no terminal and nothing to type there.
   async function openSetupWizard({agent=null,install=null}){
     const name=agent?title(agent):install.name||install.label;
-    let c;try{c=await api.agentSetupChoices({framework:agent?agent.provider:install.id});}catch(e){toast(e.message,true);return;}
+    let c;try{c=await api.agentSetupChoices({framework:agent?agent.provider:install.id,id:agent?.id});}catch(e){toast(e.message,true);return;}
     const subs=c.subscriptions||[],byId=id=>c.providers.find(p=>p.id===id)||subs.find(p=>p.id===id),free=c.providers.filter(p=>p.free),paid=c.providers.filter(p=>!p.free);
     const subRec=subs.some(x=>x.recommended&&!x.unavailable);let n=0;const num=()=>`<b>${++n}</b>`;
     let pick=null;
@@ -635,18 +635,23 @@
         <div class="setup-key-step"><b>B</b><div><strong>Paste the key here</strong><span>Opaya keeps it in your Vault and gives it only to ${esc(name)}.</span></div></div>
         <input type="password" id="setup-value" class="setup-input" autocomplete="off" spellcheck="false" placeholder="Paste the key">
       </div>
-      <label class="field setup-model" id="setup-model-row" hidden><span>Model</span><input id="setup-model" list="setup-models" autocomplete="off" spellcheck="false"><datalist id="setup-models"></datalist><small class="field-help">The suggested one works with a new key. You can change it any time.</small></label>
+      <label class="field setup-model" id="setup-model-row" hidden><span>Model</span><select id="setup-model-pick" class="setup-input"></select><input id="setup-model" class="setup-input" autocomplete="off" spellcheck="false" placeholder="Model name" hidden><small class="field-help" id="setup-model-note"></small></label>
       <div class="modal-footer"><button type="button" class="secondary" id="setup-cancel">${install?'Back':'Cancel'}</button><button type="button" class="primary setup-go" id="setup-go" disabled>${install?`Install and set up ${esc(name)}`:`Set up ${esc(name)}`}</button></div></div>`,true);
     const root=$('.setup-wizard'),go=$('#setup-go'),keyBox=$('#setup-key'),value=$('#setup-value'),model=$('#setup-model');
-    const ready=()=>{go.disabled=!pick||(pick.source==='new'&&!value.value.trim())||!model.value.trim();};
+    const ready=()=>{go.disabled=!pick||(pick.source==='new'&&!value.value.trim())||(!model.value.trim()&&pick.provider!=='nous');};
     const choose=(button,next)=>{
       for(const b of root.querySelectorAll('.setup-card'))b.classList.toggle('selected',b===button);
       pick=next;const p=byId(next.provider);
       keyBox.hidden=next.source!=='new';$('#setup-login').hidden=next.source!=='login';
       const sub=subs.find(q=>q.id===next.provider);
-      if(next.source==='login')$('#setup-login-text').textContent=sub?.login==='device'?`Opaya opens ${sub.label}'s page and shows you a short code to enter there. Nothing else to copy.`:next.provider==='claude'?`Sign in with your Claude account there. Opaya then gives ${name} a token for your plan; you do not copy anything.`:`When ${name} is ready for it, sign in with your ChatGPT account there. Opaya passes the answer to ${name}${install?' in its container':''}; you do not copy anything.`;
+      if(next.source==='login')$('#setup-login-text').textContent=sub?.login==='codex-login'?`Codex on this computer is already signed in to ChatGPT: ${name} uses that sign-in. Nothing to do in the browser.`:sub?.login==='device'?`Opaya opens ${sub.label}'s page and shows you a short code to enter there. Nothing else to copy.`:next.provider==='claude'?`Sign in with your Claude account there. Opaya then gives ${name} a token for your plan; you do not copy anything.`:`When ${name} is ready for it, sign in with your ChatGPT account there. Opaya passes the answer to ${name}${install?' in its container':''}; you do not copy anything.`;
       if(next.source==='new'){$('#setup-key-title').textContent=`Get a ${p.label} key${p.free?` (${p.free.toLowerCase()})`:''}`;setTimeout(()=>value.focus(),50);}
-      $('#setup-model-row').hidden=false;model.value=next.model||p.model;$('#setup-models').innerHTML=(p.models||[]).map(m=>`<option value="${esc(m)}"></option>`).join('');
+      // The models to pick from: for ChatGPT the list Codex on this computer gets for the account; else the usual ones.
+      const list=[...new Set([next.model||p.model,...(sub?.models||p.models||[])].filter(Boolean))],pickBox=$('#setup-model-pick');
+      $('#setup-model-row').hidden=false;model.value=next.model||p.model||'';
+      pickBox.innerHTML=list.map(m=>`<option value="${esc(m)}" ${m===model.value?'selected':''}>${esc(m)}</option>`).join('')+'<option value="__other">Another model...</option>';
+      pickBox.hidden=!list.length;model.hidden=!!list.length;
+      $('#setup-model-note').textContent=sub?.live?'The models your ChatGPT account offers (as Codex on this computer lists them).':p.id==='nous'||sub?.id==='nous'?'Nous Portal picks its model; you can change it later.':'You can change it any time; after setup the agent shows its full list.';
       ready();
     };
     root.addEventListener('click',event=>{
@@ -656,6 +661,7 @@
       else if(fresh){const p=byId(fresh.dataset.setupNew);choose(fresh,{source:'new',provider:p.id,model:p.model});}
     });
     value.addEventListener('input',ready);model.addEventListener('input',ready);
+    $('#setup-model-pick').addEventListener('change',e=>{const v=e.target.value;if(v==='__other'){model.hidden=false;model.value='';model.focus();}else{model.hidden=true;model.value=v;}ready();});
     $('#setup-signup').onclick=()=>{const p=pick&&byId(pick.provider);if(p?.signup)action(()=>api.openLink({url:p.signup}));};
     $('#setup-cancel').onclick=()=>{if(install)confirmInstall(install.id,install.hostId,'docker');else closeModal();};
     go.onclick=()=>action(async()=>{
