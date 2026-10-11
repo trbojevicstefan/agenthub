@@ -1,3 +1,10 @@
+# Opaya 0.32.0 - Opaya sets up new Hermes and OpenClaw agents itself
+
+- **A setup wizard for new agents.** One question in big cards: which model the agent uses, and with which key. Keys you already have come first (the same as the Opaya Agent, or a key in your Vault), then free ones (Ollama Cloud, Groq, Gemini, OpenRouter, Mistral) with a button to the page where you get the key and a field to paste it. Open it from Manage > Model & skills > **Set up model**, or as the last step of **Install in Docker** for Hermes and OpenClaw.
+- **No terminals while Opaya sets an agent up.** Installing Hermes or OpenClaw in Docker with the wizard starts the container, gives the agent the key, sets its model, restarts and connects it by itself. You follow it in the job card, and when it is done Opaya shows that it is ready: start chatting, pick another model, add messaging channels or open its settings.
+- **Fixes happen in the background.** If the install or setup of a new agent fails, the Opaya Agent fixes it with its terminals in the background and asks you only for what it cannot do itself, through the wizard.
+- **Messaging channels** now also work with older Hermes versions.
+
 # Opaya 0.31.6 - Hermes and OpenClaw: their own backups, background updates, Repair and messaging channels
 
 - **Backups made by the agent itself.** A full backup (with keys and history) of OpenClaw now uses `openclaw backup create --verify`, and of Hermes `hermes backup`. Both copy their databases safely while the gateway runs, so the backup always opens. Restore with `openclaw backup restore` or `hermes import` (the .zip). A Hermes profile, a backup without keys or history, or an older version is still copied by Opaya, and Hermes' chat database then goes in as a safe snapshot instead of the live files.
