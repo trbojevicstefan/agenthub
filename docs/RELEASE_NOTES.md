@@ -1,4 +1,7 @@
-# Opaya 0.32.3 - sign in with the right browser, and cancel an install
+# Opaya 0.32.4 - sign in with the right browser, and cancel an install
+
+0.32.4 is 0.32.3 with a build fix, so it is also available for Windows.
+
 
 - **Choose the browser for a sign-in.** Before a sign-in opens (ChatGPT, Grok, GitHub, Nous Portal), Opaya asks which browser to use: the ones installed on this computer or your default one. Tick "Always use this browser" to skip the question next time, or copy the link instead. The Codex sign-in notice has Copy link too.
 - **Clear when Opaya waits for you.** The install window shows "Waiting for you" with what to do (and the code to enter) and "Open the sign-in again", so a sign-in that opened in the wrong browser can be finished in the right one.
