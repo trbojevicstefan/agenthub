@@ -1,3 +1,10 @@
+# Opaya 0.32.1 - sign in with your subscription, connect chat apps, and always see the model
+
+- **Sign in with your subscription** in the setup wizard: ChatGPT (Plus, Pro, Business) and Claude (Pro, Max) in your browser, plus Grok, GitHub Copilot (OpenClaw) and Nous Portal (Hermes), where Opaya opens the page and shows you the code to enter. Opaya passes the sign-in to the agent on your VPS or in its container; you copy nothing.
+- **Every key you already have**: keys in your Vault (also ones saved with their address), keys Opaya finds on this computer and keys your other agents have. The wizard only offers what the agent can use.
+- **Connect Telegram, Discord or Slack without a terminal**: Manage > Keys & tools > Messaging channels > Add a channel. Short steps with a button to the right page, and "Help me with this" if you want the Opaya Agent to walk you through it. Paste the bot token; Opaya turns the channel on and restarts the gateway, then you paste the code the bot sends you and you are connected.
+- **Always see the model**: the chat shows the model the agent really answers with (for example ollama-cloud/gpt-oss:120b instead of "openclaw"), for every kind of agent.
+
 # Opaya 0.32.0 - Opaya sets up new Hermes and OpenClaw agents itself
 
 - **A setup wizard for new agents.** One question in big cards: which model the agent uses, and with which key. Keys you already have come first (the same as the Opaya Agent, or a key in your Vault), then free ones (Ollama Cloud, Groq, Gemini, OpenRouter, Mistral) with a button to the page where you get the key and a field to paste it. Open it from Manage > Model & skills > **Set up model**, or as the last step of **Install in Docker** for Hermes and OpenClaw.
