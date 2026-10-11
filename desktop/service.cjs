@@ -14,6 +14,7 @@ const catalog = require('./catalog.cjs');
 const files = require('./files.cjs');
 const {OpayaAgent} = require('./opaya-agent.cjs');
 const skills = require('./skills.cjs');
+const management = require('./management.cjs');
 const projects = require('./projects.cjs');
 const {dockerExecContainerIndex,collect} = require('./process.cjs');
 const vps = require('./vps.cjs');
@@ -237,6 +238,17 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     },
     agentBackup:async x=>{const a=broker.agent(x.id);return backupJob(a,{keys:x.keys!==false,history:x.history!==false});},
     agentBackups:async x=>maintenance.listBackups(broker.agent(x.id),broker.data.settings),
+    // Hermes and OpenClaw: repair with their own tools, and their messaging channels (read here, added in a terminal).
+    agentRepair:async x=>{
+      const a=broker.agent(x.id),host=hostOf(a),c=management.repairCommand(a,{remote:!!host,windows:process.platform==='win32'});
+      if(!await approve(a,`${c.title} ${host?`on ${host.name}`:`on ${machineName()}`}?`,`${c.summary}\n\nRuns in a visible terminal:\n\n${c.command}`))throw new Error('Repair cancelled.');
+      return runInTerminal({owner:a.id,label:c.title,key:`repair_${a.id}`.slice(0,60),host,command:c.command});
+    },
+    agentChannels:async x=>{const a=broker.agent(x.id);return management.channels(a,hostOf(a));},
+    agentChannelSetup:async x=>{
+      const a=broker.agent(x.id),host=hostOf(a),command=management.channelSetupCommand(a,{remote:!!host,windows:process.platform==='win32'});
+      return runInTerminal({owner:a.id,label:`${a.name} channels`,key:`channels_${a.id}`.slice(0,60),host,command});
+    },
     backupRemove:async x=>maintenance.removeBackup(x.file,broker.data.settings),
     backupPath:async x=>x.folder?maintenance.backupDir(broker.data.settings):maintenance.insideBackups(x.file,broker.data.settings),
     agentUninstall:async x=>{

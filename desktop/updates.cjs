@@ -61,6 +61,13 @@ function classify(file,{windows=/^[A-Za-z]:[\\/]/.test(String(file||''))}={}){
   const method=hit(WHERE)||'other',via=method==='npm'?hit(VIA):'';
   return {method,via,label:label(method,via)};
 }
+// OpenClaw's managed updater can hand the work to a background helper and exit with 75 ("accepted, still running").
+// That is not a failure: wait for `openclaw update status --json` to stop reporting a running update (up to 15 minutes),
+// then fail only when it reports a failed or rolled-back run. Other exit codes stay what they are.
+const OC_BUSY='"(status|phase|state)" *: *"(running|in[-_]progress|pending|accepted|queued|staging|preparing|activating|draining|restarting|verifying|finalizing)"';
+const OC_BAD='"(status|outcome)" *: *"(failed|error|rolled[-_]back)"';
+const OC_UP=`oc_up(){ openclaw update --yes; c=$?; [ $c = 75 ] || return $c; say "OpenClaw accepted the update and finishes it in the background. Waiting for it (openclaw update status)."; k=0; st=; while [ $k -lt 90 ]; do sleep 10; k=$((k+1)); st=$(openclaw update status --json 2>/dev/null) || break; printf %s "$st" | grep -Eq '${OC_BUSY}' || break; done; openclaw update status 2>&1 | tail -n 25; if printf %s "$st" | grep -Eq '${OC_BAD}'; then say "The update did not finish. Repair it with: openclaw update repair --yes"; return 1; fi; if [ $k -ge 90 ]; then say "OpenClaw is still updating after 15 minutes. Check openclaw update status."; return 1; fi; return 0; }`;
+const OC_UP_WIN=`openclaw update --yes; if ($LASTEXITCODE -eq 75) { Write-Host '[opaya] OpenClaw accepted the update and finishes it in the background. Waiting for it (openclaw update status).'; $st=''; for ($k=0; $k -lt 90; $k++) { Start-Sleep 10; $st=(openclaw update status --json 2>$null | Out-String); if ($LASTEXITCODE -ne 0 -or $st -notmatch '${OC_BUSY}') { break } }; openclaw update status; if ($st -match '${OC_BAD}') { Write-Host '[opaya] The update did not finish. Repair it with: openclaw update repair --yes'; cmd /c exit 1 } elseif ($k -ge 90) { Write-Host '[opaya] OpenClaw is still updating after 15 minutes.'; cmd /c exit 1 } else { cmd /c exit 0 } }`;
 // ---- What each tool is and how each method updates it ------------------------------------------------------------
 // npm: package; cask / brew: known Homebrew names (the first is the default); self: the vendor's own updater, used for
 // the methods in `own`; installer: the vendor install script, which also updates; system: apt / dnf names.
@@ -69,7 +76,7 @@ const SPECS={
   claude:{name:'Claude Code',bin:'claude',npm:'@anthropic-ai/claude-code',self:'claude update',own:['native','installer'],cask:['claude-code','claude-code@latest'],system:{apt:'claude-code',dnf:'claude-code'},winget:'Anthropic.ClaudeCode',winSelf:'claude update'},
   codex:{name:'Codex CLI',bin:'codex',npm:'@openai/codex',cask:['codex'],brew:['codex'],own:['standalone'],installer:{posix:'curl -fsSL https://chatgpt.com/codex/install.sh | sh',windows:'irm https://chatgpt.com/codex/install.ps1 | iex'}},
   // OpenClaw's gateway keeps running the old code until it restarts.
-  openclaw:{name:'OpenClaw',bin:'openclaw',npm:'openclaw',self:'openclaw update --yes',own:['installer','other'],then:'openclaw gateway restart >/dev/null 2>&1 || true',winSelf:'openclaw update --yes'},
+  openclaw:{name:'OpenClaw',bin:'openclaw',npm:'openclaw',self:'oc_up',selfPlan:'openclaw update --yes (and waits while OpenClaw finishes it)',own:['installer','other'],then:'openclaw gateway restart >/dev/null 2>&1 || true',winSelf:OC_UP_WIN},
   opencode:{name:'OpenCode',bin:'opencode',npm:'opencode-ai',brew:['opencode'],self:'opencode upgrade',own:['installer'],scoop:'opencode',choco:'opencode',winSelf:'opencode upgrade'},
   dsh:{name:'DeepSeek Harness',bin:'dsh',npm:'@deepseek-ai/dsh'},
   goose:{name:'Goose',bin:'goose',brew:['block-goose-cli'],self:'goose update',own:['installer','other'],windows:false},
@@ -160,7 +167,7 @@ function posixScript(id,{how='auto'}={}){
   const s=SPECS[id];if(!s)throw new Error(`Opaya has no update for ${id}.`);
   if(how!=='auto'&&!methodsOf(id).includes(how))throw new Error(`${s.name} cannot be updated with ${how} here. It can be: ${methodsOf(id).join(', ')}.`);
   const cases=posixCases(id,s),text=cases.join(' ');
-  const helpers=[SAY,REAL,HOW,FIND,/npm_up/.test(text)&&NPM_UP,/pm_up/.test(text)&&PM_UP,/npx_up/.test(text)&&NPX_UP,/brew_do/.test(text)&&BREW].filter(Boolean);
+  const helpers=[SAY,REAL,HOW,FIND,/npm_up/.test(text)&&NPM_UP,/pm_up/.test(text)&&PM_UP,/npx_up/.test(text)&&NPX_UP,/oc_up/.test(text)&&OC_UP,/brew_do/.test(text)&&BREW].filter(Boolean);
   const ver=`$(${s.bin} --version 2>&1 | grep -m1 -E '[0-9]+\\.[0-9]+')`;
   // Not on PATH, but run through npx: that is its installation.
   const npxOnly=s.npm?`if [ "$m" = none ] && ls "$(npm config get cache 2>/dev/null || echo "$HOME/.npm")"/_npx/*/node_modules/${s.npm}/package.json >/dev/null 2>&1; then m=npx; fi`:'';
@@ -216,7 +223,7 @@ function script(id,{windows=false,how='auto'}={}){return windows?windowsScript(i
 // What the update runs for a method, in words for the approval: "brew upgrade --cask claude-code".
 function plan(id,method,{windows=false}={}){
   const s=SPECS[id];if(!s)return '';const pkg=s.npm;
-  const own=(s.own||[]).includes(method)?(windows?s.winSelf||s.installer?.windows:s.self||s.installer?.posix):'';
+  const own=(s.own||[]).includes(method)?(windows?s.winSelf&&(s.selfPlan||s.winSelf)||s.installer?.windows:s.selfPlan||s.self||s.installer?.posix):'';
   const byMethod={npm:pkg&&`npm install -g ${pkg}@latest (with the npm that owns it)`,npx:pkg&&`refresh the npx copy of ${pkg}`,bun:pkg&&`bun add -g ${pkg}@latest`,pnpm:pkg&&`pnpm add -g ${pkg}@latest`,yarn:pkg&&`yarn global add ${pkg}@latest`,
     volta:s.runtime?'volta install node@<same major>':pkg&&`volta install ${pkg}@latest`,cask:s.cask&&`brew upgrade --cask ${s.cask[0]}`,brew:s.brew&&`brew upgrade ${s.brew[0].replace(/[*[].*$/,'')}`,
     uv:s.uv&&(s.uvUp||`uv tool upgrade ${s.uv}`),pipx:s.pipx&&`pipx upgrade ${s.pipx}`,pip:s.pip&&`pip install --user -U ${s.pip}`,system:s.system&&(windows?'':`apt-get / dnf upgrade ${s.system.apt}`),

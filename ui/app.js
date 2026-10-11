@@ -608,6 +608,24 @@
     const run=async operation=>{restart.disabled=true;output.textContent=operation==='restart'?'Restarting gateway...':'Checking gateway status...';try{const result=await api.gateway({id:a.id,operation});output.textContent=result.output;}catch(e){output.textContent=e.message;}finally{restart.disabled=false;}};
     restart.onclick=()=>run('restart');await run('status');
   }
+  // Messaging channels of a Hermes or OpenClaw agent: what is set up, and its own setup in a terminal to add one.
+  async function openChannels(a){
+    const setup=a.provider==='openclaw'?'openclaw channels add':'hermes gateway setup';
+    modal('Messaging channels',`${title(a)} / ${location(a)}`,`<div id="channels-body"><p class="field-help">Reading its channels...</p></div><div class="modal-footer"><button class="secondary" id="channels-refresh">Refresh</button><button class="primary" id="channels-add" title="Runs ${esc(setup)} in a terminal">Add a channel</button></div>`);
+    const body=$('#channels-body'),refresh=$('#channels-refresh');
+    const load=async()=>{
+      refresh.disabled=true;body.innerHTML='<p class="field-help">Reading its channels...</p>';
+      try{
+        const r=await api.agentChannels({id:a.id}),list=r.channels||[],on=list.filter(c=>c.connected);
+        const rows=[...on,...list.filter(c=>!c.connected)].map(c=>`<div class="set-row"><span class="set-ico" aria-hidden="true">&#9993;</span><span class="set-text"><strong>${esc(c.name)}</strong>${c.detail?`<small>${esc(c.detail)}</small>`:''}</span><span class="set-val ${c.connected?'ok':''}">${c.connected?'Connected':'Not set up'}</span><span></span></div>`).join('');
+        body.innerHTML=`<p class="field-help">${on.length?`${plural(on.length,'channel')} set up.`:'No channel is set up yet.'} Add one with ${esc(title(a))}'s own setup (<code>${esc(r.setup||setup)}</code>): it asks for the bot token or pairing in a terminal. Restart its gateway afterwards if the channel does not start.</p>${rows?`<div class="set-card">${rows}</div>`:''}`;
+      }catch(e){body.innerHTML=`<p class="field-help">${esc(e.message)}</p>`;}
+      finally{refresh.disabled=false;}
+    };
+    refresh.onclick=load;
+    $('#channels-add').onclick=()=>action(async()=>{await api.agentChannelSetup({id:a.id});closeModal();toast('Finish the channel setup in the terminal.');});
+    await load();
+  }
   function openSettings(focus=''){
     // Settings is a page per topic, picked on the left; choosing an option redraws the page in place (same page, same
     // scroll, same filter) instead of reopening the dialog.
@@ -1618,7 +1636,7 @@
   document.addEventListener('keydown',event=>{if(event.target.id==='an-chat-filter'&&event.key==='Escape'&&anFilter){event.preventDefault();event.stopPropagation();anFilter='';const a=selected();if(a)renderAgentNav(a,'chat');}},true);
   // A chat's day group, as the sidebar and History list them.
   function dayLabel(iso){const t=new Date(iso).getTime(),today=new Date();today.setHours(0,0,0,0);const d=today.getTime(),day=864e5;return t>=d?'Today':t>=d-day?'Yesterday':t>=d-6*day?'This week':t>=d-29*day?'This month':'Older';}
-  Object.assign(AN_ICON,{keys:AN_ICON.access,vault:AN_ICON.access,mcp:anI('<path d="M9 7V3M15 7V3M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>'),machines:AN_ICON.machine,newVps:AN_ICON.plus,dockerize:anI('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/>'),backups:AN_ICON.projects,surface:AN_ICON.chat,connect:AN_ICON.power,library:anI('<path d="m12 3 2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>'),shareSkills:anI('<path d="M4 8h13l-3-3M20 16H7l3 3"/>')});
+  Object.assign(AN_ICON,{repair:AN_ICON.care,channels:AN_ICON.chat,keys:AN_ICON.access,vault:AN_ICON.access,mcp:anI('<path d="M9 7V3M15 7V3M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>'),machines:AN_ICON.machine,newVps:AN_ICON.plus,dockerize:anI('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/>'),backups:AN_ICON.projects,surface:AN_ICON.chat,connect:AN_ICON.power,library:anI('<path d="m12 3 2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>'),shareSkills:anI('<path d="M4 8h13l-3-3M20 16H7l3 3"/>')});
   // From general to specific; each action of the agent is in exactly one of them. hk: its key on the Manage screens.
   const AN_SECTIONS=[
     {key:'overview',name:'Overview',desc:'Everything about it at a glance.',icon:AN_ICON.overview},
@@ -1636,11 +1654,11 @@
     chat:[['chatWindow','Open in a window'],['export','Export this chat']],
     console:[['terminal','New CLI window'],['shell','New shell window'],['files','Files']],
     model:[['models','Model'],['effort','Reasoning'],['skills','Skills & commands'],['shareSkills','Share skills'],['library','Skills library']],
-    access:[['keys','API keys'],['vault','Opaya Vault'],['mcp','MCP servers'],['transfer','Share with another agent'],['gateway','Gateway'],['itrust','iTrust'],['browser','Opaya browser']],
+    access:[['keys','API keys'],['vault','Opaya Vault'],['mcp','MCP servers'],['transfer','Share with another agent'],['gateway','Gateway'],['channels','Messaging channels'],['itrust','iTrust'],['browser','Opaya browser']],
     machine:[['machines','Its machine in Machines'],['files','Files'],['terminal','CLI'],['shell','Shell'],['containerRestart','Restart container'],['containerLogs','Container logs']],
     deploy:[['clone','Clone'],['dockerize','Dockerize'],['redeploy','Redeploy'],['newVps','New VPS']],
     projects:[['projects','Add project']],
-    care:[['update','Update'],['backup','Back up'],['backups','Backups folder'],['fix','Check & fix'],['log','Connection log']],
+    care:[['update','Update'],['backup','Back up'],['backups','Backups folder'],['fix','Check & fix'],['repair','Repair'],['log','Connection log']],
     profile:[['rename','Name'],['icon','Icon'],['groupTags','Group & tags'],['pin','Pin to top'],['moveUp','Move up'],['moveDown','Move down'],['restart','Reconnect'],['clearError','Clear error'],['settings','Connection settings'],['surface','Allow chat again'],['copyCommand','Copy launch command'],['copyId','Copy agent ID']],
     danger:[['uninstall','Uninstall'],['remove','Remove connection']]};
   // Clones, backups, uninstalls and redeploys running for an agent.
@@ -1737,6 +1755,12 @@
     if(a.protocol!=='terminal')keyed.models={key:'models',icon:'&#9672;',label:'Choose model',run:()=>openModels()};
     if(Array.isArray(a.efforts)&&a.efforts.length)keyed.effort={key:'effort',icon:'&#9889;',label:`Reasoning effort: ${a.effort?EFFORT_LABELS[a.effort]||a.effort:'auto'}`,run:()=>openDefaultEffort(a)};
     if(['hermes','openclaw'].includes(a.provider))keyed.gateway={key:'gateway',icon:'&#9889;',label:'Gateway status',run:()=>openGateway()};
+    // Their own repair (doctor --fix, and OpenClaw's update repair) and messaging channels, with their CLI.
+    if(['hermes','openclaw'].includes(a.provider)&&a.command){
+      const name=a.provider==='openclaw'?'OpenClaw':'Hermes';
+      keyed.repair={key:'repair',icon:'&#10038;',label:`Repair ${name}`,run:()=>api.agentRepair({id:a.id})};
+      keyed.channels={key:'channels',icon:'&#9993;',label:'Messaging channels',run:()=>openChannels(a)};
+    }
     // The CLI when the agent has one; an API agent has only the shell (its own "shell" action), not a second copy of it.
     keyed.terminal={key:'terminal',icon:'&gt;_',label:`Open ${title(a)} CLI`,disabled:!hasCli(a),hint:hasCli(a)?'':'This connection has no native CLI.',run:()=>openTerminal({agentId:a.id,mode:'agent'})};
     keyed.fix={key:'fix',icon:'&#10038;',label:'Check & fix with Opaya Agent',run:()=>askOpayaToFix(a)};
@@ -1769,7 +1793,7 @@
     contentKind('overview manage command-center');
     const keyed=manageActions(a),cliKey=hasCli(a)?'terminal':'shell';
     manageKeyed=keyed;
-    const backupRows=backs?.backups?.length?`<div class="backup-list">${backs.backups.slice(0,4).map(b=>`<div class="backup-row"><span class="backup-file" title="${esc(b.file)}">${esc(whenText(b.createdAt))}</span><small>${esc(fmtSize(b.bytes))}${b.history===false?' / no history':''}${b.keys===false?' / no keys':''}</small><button type="button" class="text-button" data-action="backup-reveal" data-file="${esc(b.file)}">Show</button><button type="button" class="text-button danger-text" data-action="backup-delete" data-file="${esc(b.file)}" data-id="${esc(a.id)}">Delete</button></div>`).join('')}</div>`:'';
+    const backupRows=backs?.backups?.length?`<div class="backup-list">${backs.backups.slice(0,4).map(b=>`<div class="backup-row"><span class="backup-file" title="${esc(b.file)}">${esc(whenText(b.createdAt))}</span><small title="${esc(b.restore?`Restore with ${b.restore}`:'')}">${esc(fmtSize(b.bytes))}${b.native?` / ${b.native.split(' ')[0]==='hermes'?'Hermes':'OpenClaw'} backup`:''}${b.history===false?' / no history':''}${b.keys===false?' / no keys':''}</small><button type="button" class="text-button" data-action="backup-reveal" data-file="${esc(b.file)}">Show</button><button type="button" class="text-button danger-text" data-action="backup-delete" data-file="${esc(b.file)}" data-id="${esc(a.id)}">Delete</button></div>`).join('')}</div>`:'';
     const picker=sidebarHidden&&state.agents.length>1?`<nav class="manage-switch" aria-label="Agent to manage"><span>Agents</span>${state.agents.map(y=>`<button type="button" class="manage-pick ${y.id===a.id?'selected':''}" data-action="manage" data-id="${esc(y.id)}" title="${esc(title(y)+' / '+placeText(y)+' / '+status(y))}" ${y.id===a.id?'aria-current="page"':''}>${badge(y)}<span>${esc(title(y))}</span>${dot(y)}</button>`).join('')}</nav>`:'';
     const I=d=>`<svg viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`,circle='<circle cx="12" cy="12" r="8"/>';
     const ICON={chat:I('<path d="M4 5h16v11H9l-5 4z"/>'),fullChat:I('<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 9h16"/>'),console:I('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m7 10 3 2-3 2M13 15h4"/>'),terminal:I('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m7 10 3 2-3 2M13 15h4"/>'),shell:I('<path d="m5 7 5 5-5 5M12 17h7"/>'),files:I('<path d="M3 7h7l2 2h9v10H3z"/>'),history:I(circle+'<path d="M12 8v4l3 2"/>'),projects:I('<rect x="3" y="6" width="18" height="13" rx="2"/><path d="M3 10h18"/>'),models:I('<path d="M12 3 20 12l-8 9-8-9z"/>'),effort:I('<path d="M13 3 5 14h6l-1 7 8-11h-6z"/>'),skills:I('<path d="m12 3 2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>'),transfer:I('<path d="M4 8h13l-3-3M20 16H7l3 3"/>'),itrust:I('<path d="M12 3 20 6v6c0 5-4 8-8 9-4-1-8-4-8-9V6z"/>'),browser:I(circle+'<path d="M4 12h16M12 4c3 3 3 13 0 16-3-3-3-13 0-16"/>'),update:I('<path d="M20 12a8 8 0 1 1-3-6.2M20 4v5h-5"/>'),backup:I('<path d="M12 4v11M7 10l5 5 5-5M4 19h16"/>'),restart:I('<path d="M12 3v8M6.3 7.3a8 8 0 1 0 11.4 0"/>'),fix:I('<path d="m5 19 9-9M15 4l1.2 2.8L19 8l-2.8 1.2L15 12l-1.2-2.8L11 8l2.8-1.2z"/>'),log:I('<path d="M5 7h14M5 12h14M5 17h9"/>'),gateway:I('<path d="M13 3 5 14h6l-1 7 8-11h-6z"/>'),clone:I('<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/>'),redeploy:I('<path d="M4 12a8 8 0 0 1 14-5.3M20 4v5h-5M20 12a8 8 0 0 1-14 5.3M4 20v-5h5"/>'),containerRestart:I('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/>'),containerLogs:I('<path d="M5 7h14M5 12h14M5 17h9"/>'),rename:I('<path d="M4 20h4L19 9l-4-4L4 16z"/>'),icon:I(circle+'<path d="M9 10h.01M15 10h.01M8.5 14.5c2 2 5 2 7 0"/>'),groupTags:I('<path d="M3 12V4h8l10 10-8 8z"/><path d="M7.5 7.5h.01"/>'),pin:I('<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2-5.5-2.9-5.5 2.9 1-6.2L3 9.6l6.2-.9z"/>'),moveUp:I('<path d="M12 19V5M6 11l6-6 6 6"/>'),moveDown:I('<path d="M12 5v14M6 13l6 6 6-6"/>'),settings:I('<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>'),copyId:I('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4V4h11v1"/>'),copyCommand:I('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4V4h11v1"/>'),clearError:I(circle+'<path d="m9 9 6 6M15 9l-6 6"/>'),uninstall:I('<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'),remove:I('<path d="m6 6 12 12M18 6 6 18"/>')};
@@ -1834,7 +1858,8 @@
         card('Tools',[
           row('mcp','MCP servers','Tools such as GitHub, a browser or files',mcps.length?mcps.map(s=>s.name).join(', '):'None'),
           row('transfer','Share with another agent','Copy its skills, keys and MCP servers'),
-          row('gateway','Gateway','Status and restart')])],
+          row('gateway','Gateway','Status and restart'),
+          row('channels','Messaging channels','Telegram, Discord, Slack, WhatsApp and more')])],
         `<div class="mg-section">${keysPanel(a)}</div>`),
       machine:()=>sec('machine',pbtn('machines','Open in Machines'),[card('Where it runs',[
           row('machines','Machine','Opens the board of all machines',location(a)),
@@ -1864,6 +1889,7 @@
           row('backups','Backups folder','Open the folder on this computer')]),
         card('Health',[
           row('fix','Check & fix','The Opaya Agent finds and repairs problems'),
+          row('repair',a.provider==='openclaw'?'Repair OpenClaw':'Repair Hermes',a.provider==='openclaw'?'Its own repair: finishes a failed update (update repair), then doctor --fix':'Its own repair: hermes doctor --fix'),
           row('log','Connection log','What Opaya exchanged with it'),
           row('','Schedules','Messages Opaya sends it on a schedule, and its own cron jobs',String((state.schedules||[]).filter(x=>x.agentId===a.id).length||''),{act:'agent-schedules',id:a.id,icon:ICON.history})]),
         backupRows?`<section class="set-group"><h2>Saved backups</h2><div class="set-card set-list">${backupRows}</div></section>`:'']),

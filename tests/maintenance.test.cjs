@@ -60,6 +60,9 @@ test('managed CLI clones update their own package without replacing the containe
 async function unpack(file,dir){await fs.mkdir(dir,{recursive:true});execFileSync('tar',['-xzf',file,'-C',dir]);const out=[];const walk=async(d)=>{for(const e of await fs.readdir(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory())await walk(p);else out.push(path.relative(dir,p).split(path.sep).join('/'));}};await walk(dir);return out.sort();}
 test('a local backup copies the Hermes home without the installation, and leaves out history and keys on request',{skip},async t=>{
   const root=await temp(t),home=path.join(root,'hermes'),dest=path.join(root,'backups');
+  // A Hermes without `hermes backup` (an installed one would make its own .zip instead).
+  const old=process.env.HOME;process.env.HOME=root;t.after(()=>{process.env.HOME=old;});
+  await fs.mkdir(path.join(root,'.local','bin'),{recursive:true});await fs.writeFile(path.join(root,'.local','bin','hermes'),'#!/bin/sh\nexit 2\n',{mode:0o755});
   const files={'config.yaml':'model: x','.env':'KEY=secret','SOUL.md':'soul','skills/a/SKILL.md':'---\nname: a\n---','memories/USER.md':'me','state.db':'db','sessions/s.json':'{}','logs/x.log':'l','hermes-agent/run.py':'code','profiles/other/config.yaml':'o','cron/jobs.json':'[]'};
   for(const [f,c] of Object.entries(files)){await fs.mkdir(path.dirname(path.join(home,f)),{recursive:true});await fs.writeFile(path.join(home,f),c);}
   const agent={...hermes,hermesHome:home},steps=[];

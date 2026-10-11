@@ -293,11 +293,78 @@ async function members(where,spec,{keys,history}){
   }
   return found;
 }
-function producer(where,base,paths){
+// `snap`: a folder on the source holding SQLite snapshots (snap.files) that go into the archive under the same names
+// as the live databases they replace. Without `--` then, so the second -C is an option; members never start with -.
+function producer(where,base,paths,snap=null){
   // bsdtar still interprets a member named -C after --; make leading dashes unambiguous paths.
-  const members=paths.map(p=>p.startsWith('-')?`./${p}`:p);
-  if(isLocal(where)){const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-cf','-','-C',base,'--',...members],{windowsHide:true,stdio:['ignore','pipe','pipe']});}
-  return shell(where,`cd ${q(base)} && tar -cf - -- ${members.map(q).join(' ')}`,{compress:true});
+  const members=paths.map(p=>p.startsWith('-')?`./${p}`:p),extra=snap?['-C',snap.dir,...snap.files]:[];
+  if(isLocal(where)){const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-cf','-','-C',base,...(snap?[]:['--']),...members,...extra],{windowsHide:true,stdio:['ignore','pipe','pipe']});}
+  return shell(where,snap?`tar -cf - -C ${q(base)} ${members.map(q).join(' ')} ${extra.map(q).join(' ')}`:`cd ${q(base)} && tar -cf - -- ${members.map(q).join(' ')}`,{compress:true});
+}
+// ---- Backups made by the agent itself ------------------------------------------------------------------------------
+// OpenClaw and Hermes keep chats and state in SQLite databases that are written while the gateway runs; copying those
+// files can give a backup that does not open. Their own backup commands take consistent snapshots (SQLite's online
+// backup), so a full backup (with keys and history) uses them: `openclaw backup create --verify` (restore with
+// `openclaw backup restore`) and `hermes backup` (restore with `hermes import`). A Hermes profile is backed up by Opaya,
+// since `hermes backup` always takes the whole Hermes home with every profile.
+const posixPlace=where=>!(isLocal(where)&&process.platform==='win32');
+function nativeBackup(agent,where,{keys,history}){
+  if(!keys||!history||!posixPlace(where))return null;
+  const k=kindOf(agent),tmp='tmp=$(mktemp -d "${TMPDIR:-/tmp}/opaya-backup.XXXXXX") || exit 1',fail='{ rm -rf "$tmp"; exit 1; }';
+  if(k.framework==='openclaw'&&k.kind!=='container-profile')return {tool:'openclaw backup create --verify',ext:'.tar.gz',label:'OpenClaw',restore:'openclaw backup restore <archive> --target <new folder>',
+    script:[PATH_PREFIX,tmp,'if ! openclaw backup create --help >/dev/null 2>&1; then rm -rf "$tmp"; echo @@missing; exit 0; fi',
+      `openclaw backup create --verify --output "$tmp" >&2 || ${fail}`,
+      'f=$(ls "$tmp"/*.tar.gz 2>/dev/null | head -1); [ -n "$f" ] || { echo "OpenClaw did not write an archive." >&2; rm -rf "$tmp"; exit 1; }','printf "@@file %s\\n" "$f"'].join('\n')};
+  if(agent.provider==='hermes'&&k.kind!=='hermes-profile'&&k.kind!=='container-profile'&&!profileOf(agent)){
+    const home=agent.hermesHome?`HERMES_HOME=${q(agent.hermesHome)} `:'';
+    return {tool:'hermes backup',ext:'.zip',label:'Hermes',restore:'hermes import <archive>',
+      script:[PATH_PREFIX,tmp,`if ! ${home}hermes backup --help >/dev/null 2>&1; then rm -rf "$tmp"; echo @@missing; exit 0; fi`,
+        `${home}hermes backup -o "$tmp/hermes-backup.zip" >&2 || ${fail}`,'[ -s "$tmp/hermes-backup.zip" ] || { echo "Hermes did not write an archive." >&2; rm -rf "$tmp"; exit 1; }','printf "@@file %s\\n" "$tmp/hermes-backup.zip"'].join('\n')};
+  }
+  return null;
+}
+// Runs the agent's own backup where it runs, then copies the archive here. Returns null when its CLI has no backup
+// command (an older version): the caller then copies the files itself.
+async function backupNative({agent,where,native,dest,keys,history,machine,progress}){
+  progress({step:'select',state:'active',message:`${native.label} makes a consistent backup itself (${native.tool})`});
+  let out;
+  try{out=await run(where,native.script,2*60*60*1000);}
+  catch(error){throw new Error(`${native.tool} failed: ${String(error.message||error).trim().slice(0,600)}`);}
+  if(/^@@missing$/m.test(out)){progress({step:'select',message:`This ${native.label} has no ${native.tool.split(' --')[0]} yet, so Opaya copies its files.`});return null;}
+  const file=/^@@file (.+)$/m.exec(out)?.[1]?.trim();if(!file||!file.startsWith('/'))throw new Error(`${native.tool} did not say where it wrote the archive.`);
+  const tmp=path.posix.dirname(file),cleanup=()=>run(where,`rm -rf ${q(tmp)}`).catch(()=>{});
+  try{
+    const size=Number((await run(where,`wc -c < ${q(file)}`)).trim())||0;
+    progress({step:'select',state:'done',message:`${native.label} wrote a verified archive (${fmt(size)})`,total:size});
+    const folder=path.join(dest,slug(agent.name)||'agent');await fsp.mkdir(folder,{recursive:true,mode:0o700});
+    const name=`${slug(agent.name)||'agent'}-${stamp()}`,target=path.join(folder,name+native.ext),part=target+'.part';
+    progress({step:'copy',state:'active',message:`Copying it to ${target}`,bytes:0,total:size});
+    const child=shell(where,`cat ${q(file)}`);let err='',got=0,last=0;
+    child.stderr?.on('data',d=>{err=(err+d).slice(-2000);});
+    child.stdout.on('data',chunk=>{got+=chunk.length;const now=Date.now();if(now-last>200){last=now;progress({step:'copy',bytes:got,total:size});}});
+    const out2=fs.createWriteStream(part,{mode:0o600});
+    const exit=new Promise(resolve=>{child.on('error',e=>resolve(e.message));child.on('close',code=>resolve(code));});
+    const written=new Promise((resolve,reject)=>{out2.on('finish',resolve);out2.on('error',reject);});
+    child.stdout.pipe(out2);
+    try{const code=await exit;await written;if(code!==0)throw new Error(`Copying the archive failed: ${String(err||code).trim().slice(0,400)}`);if(size&&got!==size)throw new Error(`Copying the archive stopped after ${fmt(got)} of ${fmt(size)}.`);}
+    catch(error){await fsp.rm(part,{force:true});throw error;}
+    await fsp.rename(part,target);
+    progress({step:'copy',state:'done',message:`Saved ${fmt(got)}. Restore it with ${native.restore}.`,bytes:got,total:size});
+    const {id,name:agentName,provider,protocol,transport,command,args,cwd,hermesHome,endpoint,model,displayName,description,group,tags,clone}=agent;
+    const manifest={format:1,createdAt:new Date().toISOString(),agent:{id,name:agentName,provider,protocol,transport,command,args,cwd,hermesHome,endpoint,model,displayName,description,group,tags,clone},
+      source:{machine:where.host?where.host.name:machine||'This computer',container:where.container,kind:kindOf(agent).kind},contents:{native:native.tool,restore:native.restore,history:!!history,keys:!!keys},archive:path.basename(target),bytes:got};
+    await fsp.writeFile(target.slice(0,-native.ext.length)+'.json',JSON.stringify(manifest,null,2),{mode:0o600});
+    return {file:target,bytes:got,items:1,keys:!!keys,history:!!history,native:native.tool};
+  }finally{await cleanup();}
+}
+// Hermes' chat database, copied with SQLite's online backup (python3 where Hermes runs) instead of as live files.
+// Returns {dir, files} on the source, or null when there is nothing to snapshot or no python3 (then the files are copied).
+const SNAPSHOT_PY='import pathlib,sqlite3,sys\ns=sqlite3.connect(pathlib.Path(sys.argv[1]).as_uri()+"?mode=ro",uri=True,timeout=30)\nd=sqlite3.connect(sys.argv[2])\ns.backup(d)\nd.close()\ns.close()';
+async function hermesSnapshot(where,base){
+  if(!posixPlace(where))return null;
+  const script=[PATH_PREFIX,`cd ${q(base)} || exit 1`,'[ -f state.db ] || exit 0','command -v python3 >/dev/null 2>&1 || exit 0','tmp=$(mktemp -d "${TMPDIR:-/tmp}/opaya-snap.XXXXXX") || exit 0',
+    `if python3 -c ${q(SNAPSHOT_PY)} "$PWD/state.db" "$tmp/state.db" >&2; then printf "@@snap %s\\n" "$tmp"; else rm -rf "$tmp"; fi`].join('\n');
+  try{const dir=/^@@snap (.+)$/m.exec(await run(where,script,10*60*1000))?.[1]?.trim();return dir&&dir.startsWith('/')?{dir,files:['state.db']}:null;}catch{return null;}
 }
 const fmt=n=>n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
 // Streams the agent's data (this computer, SSH, or inside a container) into a .tar.gz on this computer, next to a
@@ -306,16 +373,28 @@ async function backup({agent,host,dest,keys=true,history=true,machine='',progres
   const where=place({agent,host:agent.transport==='ssh'?host:null});
   const at=where.host?where.host.name+(where.container?` / ${where.container}`:''):where.container?`container ${where.container}`:'this computer';
   progress({step:'source',state:'active',message:`Finding ${agent.name}'s data on ${at}`});
+  const native=nativeBackup(agent,where,{keys,history});
+  if(native){
+    progress({step:'source',state:'done',message:`${native.label} on ${at}`});
+    const done=await backupNative({agent,where,native,dest,keys,history,machine,progress});if(done)return done;
+  }
   const spec=await backupSpec(agent,where);
   progress({step:'source',state:'done',message:`${spec.label}: ${spec.base}`});
   progress({step:'select',state:'active',message:`Choosing files (${history?'with':'without'} chat history, ${keys?'with':'without'} API keys and logins)`});
-  const paths=await members(where,spec,{keys,history});if(!paths.length)throw new Error(`Nothing to back up in ${spec.base}.`);
+  let paths=await members(where,spec,{keys,history});if(!paths.length)throw new Error(`Nothing to back up in ${spec.base}.`);
+  // Hermes' chat database goes in as a snapshot, not as the live files the gateway is writing.
+  const snap=agent.provider==='hermes'&&history&&paths.includes('state.db')?await hermesSnapshot(where,spec.base):null;
+  if(snap){paths=paths.filter(p=>!/^state\.db(-wal|-shm)?$/.test(p));progress({step:'select',message:'Chat database copied with SQLite\'s online backup'});}
+  try{return await backupFiles({agent,where,spec,paths,snap,dest,keys,history,machine,progress});}
+  finally{if(snap)await run(where,`rm -rf ${q(snap.dir)}`).catch(()=>{});}
+}
+async function backupFiles({agent,where,spec,paths,snap,dest,keys,history,machine,progress}){
   const size=await measure(where,spec.base,paths);
   progress({step:'select',state:'done',message:`${paths.length} item${paths.length===1?'':'s'}: ${paths.slice(0,12).join(', ')}${paths.length>12?', ...':''} (${size.files} files, ${fmt(size.bytes)})`,total:size.bytes});
   const folder=path.join(dest,slug(agent.name)||'agent');await fsp.mkdir(folder,{recursive:true,mode:0o700});
   const name=`${slug(agent.name)||'agent'}-${stamp()}`,file=path.join(folder,`${name}.tar.gz`),part=file+'.part';
   progress({step:'copy',state:'active',message:`Writing ${file}`,bytes:0,total:size.bytes});
-  const child=producer(where,spec.base,paths);let err='',sent=0,last=0;
+  const child=producer(where,spec.base,paths,snap);let err='',sent=0,last=0;
   child.stderr?.on('data',d=>{err=(err+d).slice(-2000);});
   child.stdout.on('data',chunk=>{sent+=chunk.length;const now=Date.now();if(now-last>200){last=now;progress({step:'copy',bytes:sent,total:size.bytes});}});
   const out=fs.createWriteStream(part,{mode:0o600}),gzip=zlib.createGzip({level:6});
@@ -330,19 +409,20 @@ async function backup({agent,host,dest,keys=true,history=true,machine='',progres
   progress({step:'copy',state:'done',message:`Saved ${fmt(bytes)} (${fmt(sent)} before compression)`,bytes:sent,total:Math.max(size.bytes,sent)});
   const {id,name:agentName,provider,protocol,transport,command,args,cwd,hermesHome,endpoint,model,displayName,description,group,tags,clone}=agent;
   const manifest={format:1,createdAt:new Date().toISOString(),agent:{id,name:agentName,provider,protocol,transport,command,args,cwd,hermesHome,endpoint,model,displayName,description,group,tags,clone},
-    source:{machine:where.host?where.host.name:machine||'This computer',container:where.container,base:spec.base,kind:kindOf(agent).kind},contents:{items:paths,history:!!history,keys:!!keys},archive:path.basename(file),bytes};
+    source:{machine:where.host?where.host.name:machine||'This computer',container:where.container,base:spec.base,kind:kindOf(agent).kind},contents:{items:snap?[...paths,...snap.files]:paths,history:!!history,keys:!!keys},archive:path.basename(file),bytes};
   await fsp.writeFile(file.replace(/\.tar\.gz$/,'.json'),JSON.stringify(manifest,null,2),{mode:0o600});
   return {file,bytes,items:paths.length,keys:!!keys,history:!!history};
 }
-// Backups kept for an agent, newest first.
+// Backups kept for an agent, newest first: Opaya's .tar.gz and Hermes' own .zip (hermes backup).
+const ARCHIVE=/\.(tar\.gz|zip)$/;
 async function listBackups(agent,settings){
   const folder=path.join(backupDir(settings),slug(agent.name)||'agent');
   let names=[];try{names=await fsp.readdir(folder);}catch{return {folder,backups:[]};}
   const backups=[];
-  for(const n of names.filter(n=>n.endsWith('.tar.gz'))){
+  for(const n of names.filter(n=>ARCHIVE.test(n))){
     const file=path.join(folder,n);let st;try{st=await fsp.stat(file);}catch{continue;}
-    const manifest=await fsp.readFile(file.replace(/\.tar\.gz$/,'.json'),'utf8').then(JSON.parse).catch(()=>null);
-    backups.push({file,name:n,bytes:st.size,createdAt:manifest?.createdAt||st.mtime.toISOString(),keys:manifest?.contents?.keys,history:manifest?.contents?.history});
+    const manifest=await fsp.readFile(file.replace(ARCHIVE,'.json'),'utf8').then(JSON.parse).catch(()=>null);
+    backups.push({file,name:n,bytes:st.size,createdAt:manifest?.createdAt||st.mtime.toISOString(),keys:manifest?.contents?.keys,history:manifest?.contents?.history,native:manifest?.contents?.native||'',restore:manifest?.contents?.restore||''});
   }
   return {folder,backups:backups.sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,50)};
 }
@@ -353,8 +433,8 @@ function insideBackups(file,settings){
   return p;
 }
 async function removeBackup(file,settings){
-  const p=insideBackups(file,settings);if(!p.endsWith('.tar.gz'))throw new Error('Choose a backup archive.');
-  await fsp.rm(p,{force:true});await fsp.rm(p.replace(/\.tar\.gz$/,'.json'),{force:true});return true;
+  const p=insideBackups(file,settings);if(!ARCHIVE.test(p))throw new Error('Choose a backup archive.');
+  await fsp.rm(p,{force:true});await fsp.rm(p.replace(ARCHIVE,'.json'),{force:true});return true;
 }
 // What the UI may offer for an agent, without touching the machine.
 function capabilities(agent){
