@@ -1,3 +1,10 @@
+# Opaya 0.31.6 - Hermes and OpenClaw: their own backups, background updates, Repair and messaging channels
+
+- **Backups made by the agent itself.** A full backup (with keys and history) of OpenClaw now uses `openclaw backup create --verify`, and of Hermes `hermes backup`. Both copy their databases safely while the gateway runs, so the backup always opens. Restore with `openclaw backup restore` or `hermes import` (the .zip). A Hermes profile, a backup without keys or history, or an older version is still copied by Opaya, and Hermes' chat database then goes in as a safe snapshot instead of the live files.
+- **OpenClaw updates that finish in the background** are no longer reported as failed. When OpenClaw says the update is accepted and still running, Opaya waits for it (up to 15 minutes) and reports a failure only when OpenClaw does.
+- **Repair** (Manage > Updates & backups > Health): OpenClaw shows its last update, finishes or rolls back an update that did not complete (`openclaw update repair`) and runs `openclaw doctor --fix`; Hermes runs `hermes doctor --fix`. In a terminal you can see, after your approval.
+- **Messaging channels** (Manage > Keys & tools): which channels (Telegram, Discord, Slack, WhatsApp...) Hermes or OpenClaw has set up, and **Add a channel**, which opens its own setup in a terminal.
+
 # Opaya 0.31.5 - sign in instead of an error, and agent installs that work everywhere
 
 - **The Opaya Agent opens the sign-in for you.** When Codex CLI or Claude Code is not signed in, or its login expired or was revoked (for example "OAuth access token is invalid"), Opaya no longer shows the error. It opens the sign-in in your browser (`claude auth login`, `codex login`) in a visible terminal, waits until the new login really works, and connects the Opaya Agent again. This happens in the setup guide, when Test in Model settings finds an expired login, and in the chat, where a calm "Sign in" card replaces the error.
