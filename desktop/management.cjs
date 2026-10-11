@@ -99,15 +99,18 @@ function parseHermesChannels(text){
   }
   return out;
 }
-const CHANNEL_LIST={openclaw:['channels','list','--json'],hermes:['status','--full']};
+// Older Hermes has no `status --full` (argparse: "unrecognized arguments"); its plain status shows every section.
+const CHANNEL_LIST={openclaw:[['channels','list','--json']],hermes:[['status','--full'],['status']]};
 // The agent's messaging channels, read with its CLI where it runs. Read-only.
-async function channels(agent,host){
-  const args=cliArgs(agent,CHANNEL_LIST[agent.provider]);
-  let out;
-  try{out=await collect(launch(agent,args,host),{timeout:60000,maxBytes:1024*1024});}
-  catch(error){if(!error?.stdout)throw new Error(`Could not read its channels: ${String(error.message||error).slice(0,300)}`);out=error.stdout;}
-  const list=(agent.provider==='openclaw'?parseOpenclawChannels:parseHermesChannels)(out);
-  if(!list)throw new Error(agent.provider==='openclaw'?'This OpenClaw did not list its channels (openclaw channels list --json). Update it, or open its CLI.':'This Hermes did not report its messaging platforms (hermes status --full). Update it, or open its CLI.');
-  return {channels:list,setup:CHANNEL_SETUP[agent.provider].join(' ')};
+async function channels(agent,host,{run=(args)=>collect(launch(agent,args,host),{timeout:60000,maxBytes:1024*1024})}={}){
+  const parse=agent.provider==='openclaw'?parseOpenclawChannels:parseHermesChannels;let failure='';
+  for(const tail of CHANNEL_LIST[agent.provider]||[]){
+    let out;
+    try{out=await run(cliArgs(agent,tail));}
+    catch(error){if(!error?.stdout){failure=String(error.message||error);continue;}out=error.stdout;}
+    const list=parse(out);if(list)return {channels:list,setup:CHANNEL_SETUP[agent.provider].join(' ')};
+  }
+  if(failure&&!/unrecognized arguments|invalid choice|^usage:/im.test(failure))throw new Error(`Could not read its channels: ${failure.slice(0,300)}`);
+  throw new Error(agent.provider==='openclaw'?'This OpenClaw did not list its channels (openclaw channels list --json). Update it, or open its CLI.':'This Hermes did not report its messaging platforms (hermes status). Update it, or open its CLI.');
 }
 module.exports={gatewayArgs,gatewayOperation,cliArgs,cliCommand,repairCommand,channelSetupCommand,parseOpenclawChannels,parseHermesChannels,channels};

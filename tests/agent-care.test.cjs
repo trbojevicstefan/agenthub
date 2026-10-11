@@ -134,3 +134,12 @@ test('messaging channels are read from openclaw channels list --json and hermes 
   assert.deepEqual(management.parseHermesChannels(status),[{id:'telegram',name:'Telegram',connected:true,detail:'configured (home: 123)'},{id:'slack',name:'Slack',connected:false,detail:'not configured'}]);
   assert.equal(management.parseHermesChannels('Hermes Agent v0.1'),null);
 });
+
+test('an older Hermes without status --full is read with its plain status',async()=>{
+  const calls=[],status='◆ Messaging Platforms\n  Telegram      ✓ configured\n';
+  const run=async args=>{calls.push(args.join(' '));if(args.includes('--full'))throw Object.assign(new Error('usage: hermes [-h] [--version]\nhermes: error: unrecognized arguments: --full'),{stdout:''});return status;};
+  const r=await management.channels({...hermes,command:'docker',args:['exec','-i','tuco','hermes','acp']},null,{run});
+  assert.deepEqual(calls,['exec -i tuco hermes status --full','exec -i tuco hermes status']);
+  assert.deepEqual(r.channels.map(c=>c.name),['Telegram']);
+  await assert.rejects(()=>management.channels(hermes,null,{run:async()=>{throw new Error('usage: hermes [-h]');}}),/did not report its messaging platforms/);
+});

@@ -15,8 +15,9 @@ const files = require('./files.cjs');
 const {OpayaAgent} = require('./opaya-agent.cjs');
 const skills = require('./skills.cjs');
 const management = require('./management.cjs');
+const agentSetup = require('./agent-setup.cjs');
 const projects = require('./projects.cjs');
-const {dockerExecContainerIndex,collect} = require('./process.cjs');
+const {dockerExecContainerIndex,collect,quote} = require('./process.cjs');
 const vps = require('./vps.cjs');
 const moves = require('./transfer.cjs');
 const {condense} = require('./condense.cjs');
@@ -131,7 +132,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     Promise.resolve().then(()=>work(progress)).then(result=>{job.status='done';job.result=result;job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='pending')s.state='skipped';job.log.push({at:Date.now(),text:'Done.',state:'done'});},
       error=>{job.status='error';job.error=safeError(error);job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='active')s.state='error';job.log.push({at:Date.now(),text:job.error,state:'error'});
         // A job the user started that failed goes to the Opaya Agent (one it started itself, it follows with its jobs tool).
-        if(!byOpaya)actionFailed(job.title,job.error,`It ran as an Opaya job (job_id ${job.id}, ${kind}); its steps: ${job.steps.map(x=>`${x.label} ${x.state}`).join(', ')}. Read it with your jobs tool.`);})
+        if(!byOpaya)actionFailed(job.title,job.error,`It ran as an Opaya job (job_id ${job.id}, ${kind}); its steps: ${job.steps.map(x=>`${x.label} ${x.state}`).join(', ')}. Read it with your jobs tool.`,{quiet:['install','setup'].includes(kind)});})
       .finally(()=>{clearTimeout(timer);publishJob(job);emit();});
     return job;
   }
@@ -142,12 +143,12 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   const sessionAgent=s=>shells.sessionAgent(s,{broker,home:app.getPath('home')});
   // owner: whose screen the terminal belongs to (an agent's id, 'opaya' for the Opaya Agent); none: the screen in front.
   // where: where the command runs ({host, container}) when that is not just the machine (a docker exec in it).
-  async function runInTerminal({label,key,host,command,owner,where}){
+  async function runInTerminal({label,key,host,command,owner,where,background=false}){
     const pseudo={id:`svc_${key}_${host?host.id:'local'}`.slice(0,80),name:label,provider:'custom',transport:host?'ssh':'local',hostId:host?.id||'',command:'',args:[],cwd:host?'':app.getPath('home'),ephemeral:true,run:host?command:''};
     const reused=terminals.hasLive(pseudo.id,'shell'),view=terminals.open(pseudo,host,'shell',{cols:110,rows:30});
     if(!host||reused)terminals.write(view.id,command+'\r');
     if(where)codexWhere.set(view.id,{host:where.host||null,container:where.container||''});
-    listener?.broadcast('terminal',{type:'opened',id:view.id,...(owner?{owner}:{})});emit();return view;
+    listener?.broadcast('terminal',{type:'opened',id:view.id,...(owner?{owner}:{}),...(background?{background:true}:{})});emit();return view;
   }
   // ---- Codex sign-in on a machine or in a container (codex-login.cjs) -------------------------------------------------
   // `codex login` there prints a sign-in link whose answer goes to 127.0.0.1 where Codex runs. When a terminal on a
@@ -245,6 +246,21 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       return runInTerminal({owner:a.id,label:c.title,key:`repair_${a.id}`.slice(0,60),host,command:c.command});
     },
     agentChannels:async x=>{const a=broker.agent(x.id);return management.channels(a,hostOf(a));},
+    // Opaya's setup wizard: what it can use, and setting up an agent that is already added (from its Manage page).
+    agentSetupChoices:async()=>setupChoices(),
+    agentSetupModel:async x=>{
+      const a=broker.agent(x.id),p=agentSetup.PROVIDERS.find(q=>q.id===x.setup?.provider);if(!p)throw new Error('Choose a model provider.');
+      if(!await approve(a,`Set up ${a.name} with ${p.label}?`,`Opaya gives it your ${p.label} key (${p.env}), sets its model to ${x.setup.model||p.model}${a.provider==='openclaw'?' and restarts its gateway':''}, then connects it again.`))throw new Error('Setup cancelled.');
+      return startJob({kind:'setup',route:{from:'Opaya',fromWhere:p.label,to:a.name,toWhere:whereName(a),provider:a.provider},title:`Setting up ${a.name}`,detail:`${p.label} / ${x.setup.model||p.model}`,
+        steps:[['key','Give it the key'],['model','Set the model'],['connect','Connect']]},async progress=>{
+        const model=await setupAgentModel(a,x.setup,progress);
+        progress({step:'connect',state:'active',message:`Connecting ${a.name}`});
+        if(broker.runtimeFor(a.id).status==='connected')broker.disconnect(a.id);
+        await broker.connect(a.id);
+        progress({step:'connect',state:'done',message:`${a.name} is ready (${model.label} / ${model.model})`});
+        return {agent:{id:a.id,name:a.name},model,ready:true};
+      });
+    },
     agentChannelSetup:async x=>{
       const a=broker.agent(x.id),host=hostOf(a),command=management.channelSetupCommand(a,{remote:!!host,windows:process.platform==='win32'});
       return runInTerminal({owner:a.id,label:`${a.name} channels`,key:`channels_${a.id}`.slice(0,60),host,command});
@@ -363,14 +379,19 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   // Something the user started in Opaya failed (a job, a Docker action, giving a key, an install in a terminal): the
   // Opaya Agent gets it with what Opaya knows, the same way agent errors reach it. Cancellations are not failures.
   const actionReported=new Map();
-  function actionFailed(title,error,context=''){
+  // quiet: a new agent's install or setup failed. The Opaya Agent fixes it with terminals in the background (they do not
+  // open over the screen), and asks the user only for what it cannot do itself, in Opaya's setup wizard.
+  let opayaQuiet=false;
+  function actionFailed(title,error,context='',{quiet=false}={}){
     const text=String(error||'');
     if(stopping||broker.data.settings?.autoFix===false||/cancel|declined|not approved|stopped by the user/i.test(text))return;
     const key=`${title}|${text.slice(0,120)}`;if(actionReported.has(key)&&Date.now()-actionReported.get(key)<30*60*1000)return;actionReported.set(key,Date.now());
     const run=handoffs.then(async()=>{
       const o=opaya;if(!o?.configured())return;
       if(!await idle(o,5*60*1000))return;
+      if(quiet){opayaQuiet=true;context+=' This is the setup of a new agent: work in the background and do not ask me to type anything in a terminal. If it needs a model key or a choice from me, tell me to open the agent, then Manage > Model & skills > Set up model (Opaya\'s setup wizard), in one short sentence.';}
       o.begin(`Something I did in Opaya failed: ${title}: "${text.slice(0,1500)}". ${context} Find the real cause with your tools (jobs, read_terminal, read_app_logs, agent_diagnostics, docker, run_diagnostic), fix it and finish what I was doing when you can do it safely. Tell me only what I must do myself.`);
+      if(quiet){await idle(o,60*60*1000);opayaQuiet=false;}
     });handoffs=run.catch(()=>{});
   }
   async function autoFix(a,error){
@@ -460,8 +481,73 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   function agentJob(a,c){const host=hostOf(a),k=maintenance.kindOf(a),tool=k.kind==='docker'||k.kind==='npx'?'':c.tool||'';return {host,tool,name:tool?updates.SPECS[tool]?.name||a.name:`${a.name} (${k.label})`,command:c.command,before:tool?toolItem(host,tool):null,how:tool?toolItem(host,tool)?.how||'':k.label,plan:c.summary};}
   // An agent installed as a Docker container on a machine: the script runs in a visible terminal (pull, start, install,
   // then an interactive sign-in), and when it ends Opaya adds the container as an agent and connects it.
+  // ---- Opaya's own setup of a new Hermes or OpenClaw (agent-setup.cjs) -----------------------------------------------
+  // The key the setup wizard picked, as a secret Opaya holds: one from the Vault, the Opaya Agent's model key, or a new
+  // one (kept in the Vault, like a key added there).
+  async function setupSecret(sel,p){
+    if(sel?.source==='vault')return opaya.secretEntry(String(sel.secret||''));
+    if(sel?.source==='opaya')return opaya.holdModelKey(p.env);
+    if(sel?.source==='new'){const r=await opaya.holdFromUser({name:p.env,value:String(sel.value||'')});return opaya.secretEntry(r.id);}
+    throw new Error('Choose which key to use.');
+  }
+  const setupChoices=()=>{const d=opaya.describe();return agentSetup.choices({vault:(opaya.secrets||[]).filter(k=>k.kept||k.global||k.stored?.length).map(k=>({id:k.id,name:k.name,mask:k.mask})),opaya:{preset:d.config?.preset,model:d.config?.model,hasKey:d.hasKey}});};
+  // Key into the agent's .env, model with its CLI, then a restart where the key and model need one (an OpenClaw
+  // container or gateway; Hermes reads them when Opaya starts it again).
+  async function setupAgentModel(a,setup,progress){
+    const p=agentSetup.PROVIDERS.find(x=>x.id===setup?.provider);if(!p)throw new Error('Choose a model provider.');
+    if(!['hermes','openclaw'].includes(a.provider))throw new Error('Opaya sets up Hermes and OpenClaw this way.');
+    const host=hostOf(a),box=agentSetup.containerOf(a);
+    progress({step:'key',state:'active',message:`Giving ${a.name} the ${p.label} key (${p.env})`});
+    const s=await setupSecret(setup.key,p);
+    await opaya.storeSecret({secret:s.id,agent_id:a.id,name:p.env},{approved:true});
+    progress({step:'key',state:'done',message:`${p.env} saved where ${a.name} reads keys`});
+    progress({step:'model',state:'active',message:`Setting its model: ${p.label} / ${setup.model||p.model}`});
+    let port='';try{port=new URL(a.endpoint).port;}catch{}
+    const wait=/^\d+$/.test(port)?`; i=0; while [ $i -lt 60 ]; do curl -fsS http://127.0.0.1:${port}/healthz >/dev/null 2>&1 && break; i=$((i+1)); sleep 1; done`:'';
+    // Hermes over its gateway API (not ACP) reads the new model when its gateway starts again.
+    const restart=a.provider==='hermes'?(a.protocol==='openai'&&a.command?()=>management.gatewayOperation(a,host,'restart'):null):box?()=>require('./clone.cjs').run({host,container:''},`docker restart ${quote(box)} >/dev/null${wait}`,180000):()=>management.gatewayOperation(a,host,'restart');
+    const r=await agentSetup.apply({agent:a,host,provider:p.id,model:setup.model,restart,progress});
+    progress({step:'model',state:'done',message:`${r.label} / ${r.model}`});
+    return r;
+  }
+  // A program's output line by line into the job's log, without a terminal; resolves with its exit code.
+  function runLogged(host,command,progress,step,timeout=60*60*1000){
+    return new Promise((resolve,reject)=>{
+      const child=require('./clone.cjs').shell({host,container:''},command);let buf='';
+      const line=l=>{l=String(l).replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g,'').split('\r').pop().trim();if(l)progress({step,message:l.slice(0,300)});};
+      const feed=d=>{buf+=d;let i;while((i=buf.indexOf('\n'))>=0){line(buf.slice(0,i));buf=buf.slice(i+1);}};
+      child.stdout.on('data',feed);child.stderr.on('data',feed);child.stdin?.end();
+      const t=setTimeout(()=>child.kill(),timeout);
+      child.on('error',e=>{clearTimeout(t);reject(e);});child.on('close',code=>{clearTimeout(t);line(buf);resolve(code);});
+    });
+  }
+  // Hermes and OpenClaw in Docker with the setup wizard's choice: the container, the key and the model, all by Opaya,
+  // with no terminal and nothing to type. Progress is the job's steps and log.
+  async function installContainerSetup(host,x,p){
+    const setup=x.setup,choice=agentSetup.PROVIDERS.find(q=>q.id===setup?.provider);if(!choice)throw new Error('Choose a model provider.');
+    if(!await approve({name:'Opaya'},`Install ${p.framework.name} in a Docker container on ${host.name}?`,`Container ${p.container} (${p.image}), data in ${p.folder}. It restarts with the machine. Opaya then gives it your ${choice.label} key (${choice.env}), sets its model to ${setup.model||choice.model} and connects it. Nothing to type in a terminal.\n\nRuns on ${host.name}:\n\n${p.preview}`))throw new Error('Install cancelled.');
+    return startJob({kind:'install',route:{from:p.framework.name,fromWhere:`Docker / ${p.image}`,to:p.container,toWhere:host.name,toHostId:host.id,provider:p.connection.provider},title:`Installing ${p.framework.name} in Docker`,detail:`${host.name} / container ${p.container} / ${choice.label}`,
+      steps:[['install','Start the container'],['save','Add to Opaya'],['key','Give it the key'],['model','Set the model'],['connect','Connect']]},async progress=>{
+      progress({step:'install',state:'active',message:`Running on ${host.name}. The first download can take a few minutes.`});
+      const code=await runLogged(host,p.command,progress,'install');
+      if(code!==0)throw new Error(containers.EXIT[code]||`The install ended with exit code ${code}. See the steps above.`);
+      progress({step:'install',state:'done',message:`Container ${p.container} runs`});
+      progress({step:'save',state:'active',message:'Adding the agent to Opaya'});
+      const agent=await broker.saveAgent({agent:{...p.connection,name:String(x.name||'').trim()?String(x.name).trim().slice(0,60):p.connection.name,hostId:host.id},importToken:!!p.importToken},{preapproved:!!p.importToken});
+      progress({step:'save',state:'done',message:`Added ${agent.name}`});
+      let model;
+      try{model=await setupAgentModel(broker.agent(agent.id),setup,progress);}
+      catch(e){throw new Error(`${agent.name} is installed and added, but its model is not set up yet: ${safeError(e)}. Open it and use Set up model to try again.`);}
+      progress({step:'connect',state:'active',message:`Connecting ${agent.name}`});
+      await broker.connect(agent.id);
+      progress({step:'connect',state:'done',message:`${agent.name} is ready (${model.label} / ${model.model})`});
+      versions.cache.clear();checkMachine(host).then(emit).catch(()=>{});
+      return {agent:{id:agent.id,name:agent.name},model,ready:true};
+    });
+  }
   async function installContainer(host,x){
     if(!host)throw new Error('Docker installs are for machines added in Machines. On this computer use the regular install.');
+    if(x.setup&&['hermes','openclaw'].includes(String(x.id||'')))return installContainerSetup(host,x,containers.plan(String(x.id),{name:x.name,signIn:false}));
     const p=containers.plan(String(x.id||''),{name:x.name});
     if(broker.data.agents.some(a=>a.hostId===host.id&&a.command==='docker'&&a.args?.includes(p.container)))throw new Error(`${host.name} already has an agent in container ${p.container}. Choose another name.`);
     if(!await approve({name:'Opaya'},`Install ${p.framework.name} in a Docker container on ${host.name}?`,`Container ${p.container} (${p.image}), data in ${p.folder}. It restarts with the machine. Afterwards you sign in, and Opaya adds it as an agent${p.importToken?' and imports its gateway token into the vault':''}.\n\nRuns in a visible terminal:\n\n${p.preview}`))throw new Error('Install cancelled.');
@@ -736,7 +822,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       return jobs.length;
     }
   };
-  opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal:x=>runInTerminal({...x,owner:'opaya'}),trusted:()=>!!broker.data.settings?.itrustOpaya||setupTrust});
+  opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal:x=>runInTerminal({...x,owner:'opaya',background:opayaQuiet}),trusted:()=>!!broker.data.settings?.itrustOpaya||setupTrust});
   opaya.askSecret = askSecret;
   // Claude Code as the Opaya Agent's model reaches the Opaya tools through this bridge; its token can only list and call them.
   opaya.builtinInstall = async (id,{update=false}={})=>{const ids=builtinIds(id);if(!ids.length)return null;const {job,done}=builtinJob(ids,{update});const r=await done;return {job_id:job.id,...r};};

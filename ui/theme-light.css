@@ -964,3 +964,13 @@
 :where(body[data-theme="light"]) .an-foot{border-top:1px solid #d9dee2}
 :where(body[data-theme="light"]) .inline-notice.signin-notice{border-color:#aed5c1;background:#dfeae3}
 :where(body[data-theme="light"]) .inline-notice.signin-notice>span{color:#1b5e3b}
+:where(body[data-theme="light"]) .setup-lead{color:#232a25}
+:where(body[data-theme="light"]) .setup-wizard h3 b,:where(body[data-theme="light"]) .setup-key-step b{background:#c5e0d1;color:#1a5933}
+:where(body[data-theme="light"]) .setup-card{border:1px solid #c5d0cb;background:#dee5e1}
+:where(body[data-theme="light"]) .setup-card:hover{border-color:#7cc099;background:#d7e2dc}
+:where(body[data-theme="light"]) .setup-card.selected{border-color:#7cc099;background:#cce3d6}
+:where(body[data-theme="light"]) .setup-card span{color:#343e37}
+:where(body[data-theme="light"]) .setup-card em{background:#badeca;color:#000000}
+:where(body[data-theme="light"]) .setup-more summary{color:#343e37}
+:where(body[data-theme="light"]) .setup-key{border:1px solid #c5d0cb;background:#e3e9e6}
+:where(body[data-theme="light"]) .setup-key-step span{color:#343e37}

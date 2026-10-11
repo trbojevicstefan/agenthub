@@ -608,6 +608,68 @@
     const run=async operation=>{restart.disabled=true;output.textContent=operation==='restart'?'Restarting gateway...':'Checking gateway status...';try{const result=await api.gateway({id:a.id,operation});output.textContent=result.output;}catch(e){output.textContent=e.message;}finally{restart.disabled=false;}};
     restart.onclick=()=>run('restart');await run('status');
   }
+  // ---- Opaya's setup wizard for a new Hermes or OpenClaw --------------------------------------------------------------
+  // One question, in big plain cards: which model it thinks with, and with which key. A key the user already has comes
+  // first; without one, a free key (Ollama Cloud) is a minute away. Opaya then does everything else itself (container,
+  // key, model, gateway, connection) and shows its progress in the job card: no terminal and nothing to type there.
+  async function openSetupWizard({agent=null,install=null}){
+    const name=agent?title(agent):install.name||install.label;
+    let c;try{c=await api.agentSetupChoices();}catch(e){toast(e.message,true);return;}
+    const byId=id=>c.providers.find(p=>p.id===id),free=c.providers.filter(p=>p.free),paid=c.providers.filter(p=>!p.free);
+    let pick=null;
+    const card=(attrs,head,text,tag='')=>`<button type="button" class="setup-card" ${attrs}>${tag?`<em>${esc(tag)}</em>`:''}<strong>${esc(head)}</strong><span>${esc(text)}</span></button>`;
+    modal(`Set up ${name}`,install?`${install.label} in Docker on ${install.host}`:`${location(agent)}`,`<div class="setup-wizard">
+      <p class="setup-lead">Choose the model ${esc(name)} thinks with. Opaya does the rest by itself: ${install?'the container, ':''}the key, the model and the connection. Nothing to type in a terminal.</p>
+      ${c.saved.length?`<h3><b>1</b> Use a key you already have</h3><div class="setup-cards">${c.saved.map((x,i)=>card(`data-setup-saved="${i}"`,x.label,x.detail,i===0?'Recommended':'')).join('')}</div><h3><b>2</b> Or get a free key</h3>`:'<h3><b>1</b> Get a free key: it takes a minute</h3>'}
+      <div class="setup-cards">${free.map(p=>card(`data-setup-new="${esc(p.id)}"`,p.label,p.free,p.id==='ollama-cloud'&&!c.saved.length?'Recommended':'')).join('')}</div>
+      <details class="setup-more"><summary>Other providers (paid key)</summary><div class="setup-cards">${paid.map(p=>card(`data-setup-new="${esc(p.id)}"`,p.label,p.env)).join('')}</div></details>
+      <div class="setup-key" id="setup-key" hidden>
+        <div class="setup-key-step"><b>A</b><div><strong id="setup-key-title">Get a key</strong><span>Opens the provider's page. Sign in, create a key and copy it.</span></div><button type="button" class="secondary" id="setup-signup">Open the page</button></div>
+        <div class="setup-key-step"><b>B</b><div><strong>Paste the key here</strong><span>Opaya keeps it in your Vault and gives it only to ${esc(name)}.</span></div></div>
+        <input type="password" id="setup-value" class="setup-input" autocomplete="off" spellcheck="false" placeholder="Paste the key">
+      </div>
+      <label class="field setup-model" id="setup-model-row" hidden><span>Model</span><input id="setup-model" list="setup-models" autocomplete="off" spellcheck="false"><datalist id="setup-models"></datalist><small class="field-help">The suggested one works with a new key. You can change it any time.</small></label>
+      <div class="modal-footer"><button type="button" class="secondary" id="setup-cancel">${install?'Back':'Cancel'}</button><button type="button" class="primary setup-go" id="setup-go" disabled>${install?`Install and set up ${esc(name)}`:`Set up ${esc(name)}`}</button></div></div>`,true);
+    const root=$('.setup-wizard'),go=$('#setup-go'),keyBox=$('#setup-key'),value=$('#setup-value'),model=$('#setup-model');
+    const ready=()=>{go.disabled=!pick||(pick.source==='new'&&!value.value.trim())||!model.value.trim();};
+    const choose=(button,next)=>{
+      for(const b of root.querySelectorAll('.setup-card'))b.classList.toggle('selected',b===button);
+      pick=next;const p=byId(next.provider);
+      keyBox.hidden=next.source!=='new';if(next.source==='new'){$('#setup-key-title').textContent=`Get a ${p.label} key${p.free?` (${p.free.toLowerCase()})`:''}`;setTimeout(()=>value.focus(),50);}
+      $('#setup-model-row').hidden=false;model.value=next.model||p.model;$('#setup-models').innerHTML=(p.models||[]).map(m=>`<option value="${esc(m)}"></option>`).join('');
+      ready();
+    };
+    root.addEventListener('click',event=>{
+      const saved=event.target.closest('[data-setup-saved]'),fresh=event.target.closest('[data-setup-new]');
+      if(saved){const x=c.saved[Number(saved.dataset.setupSaved)];choose(saved,{source:x.source,secret:x.secret,provider:x.provider,model:x.model});}
+      else if(fresh){const p=byId(fresh.dataset.setupNew);choose(fresh,{source:'new',provider:p.id,model:p.model});}
+    });
+    value.addEventListener('input',ready);model.addEventListener('input',ready);
+    $('#setup-signup').onclick=()=>{const p=pick&&byId(pick.provider);if(p?.signup)action(()=>api.openLink({url:p.signup}));};
+    $('#setup-cancel').onclick=()=>{if(install)confirmInstall(install.id,install.hostId,'docker');else closeModal();};
+    go.onclick=()=>action(async()=>{
+      const setup={provider:pick.provider,model:model.value.trim(),key:pick.source==='new'?{source:'new',value:value.value.trim()}:pick.source==='vault'?{source:'vault',secret:pick.secret}:{source:'opaya'}};
+      go.disabled=true;
+      try{
+        if(install){const job=await api.installFramework({id:install.id,hostId:install.hostId,runtime:'docker',name:install.name,setup});if(job){closeModal();toast(`Installing ${install.label} on ${install.host}. Opaya sets it up and tells you when it is ready.`);}}
+        else{await api.agentSetupModel({id:agent.id,setup});closeModal();toast(`Setting up ${name}. Opaya tells you when it is ready.`);}
+      }finally{go.disabled=false;}
+    });
+  }
+  // After Opaya set an agent up: it is ready, and the few things a person may want next, in plain words.
+  function openAgentReady(r){
+    const a=state.agents.find(x=>x.id===r.agent?.id);if(!a)return;
+    modal(`${title(a)} is ready`,`${r.model?.label||''}${r.model?.model?` / ${r.model.model}`:''}`,`<div class="setup-wizard">
+      <p class="setup-lead">Opaya installed it, gave it the key and connected it. Want to change anything? You can also do it later in Manage.</p>
+      <div class="setup-cards">
+        <button type="button" class="setup-card selected" data-ready="chat"><strong>Start chatting</strong><span>Say hi to ${esc(title(a))}</span></button>
+        <button type="button" class="setup-card" data-ready="model"><strong>Another model</strong><span>Pick a different model or key</span></button>
+        ${['hermes','openclaw'].includes(a.provider)?`<button type="button" class="setup-card" data-ready="channels"><strong>Messaging channels</strong><span>Reach it from Telegram, Discord, Slack...</span></button>`:''}
+        <button type="button" class="setup-card" data-ready="manage"><strong>All settings</strong><span>Skills, keys, backups and more</span></button>
+      </div></div>`,true);
+    $('.setup-wizard').addEventListener('click',event=>{const b=event.target.closest('[data-ready]');if(!b)return;const k=b.dataset.ready;closeModal();
+      if(k==='chat')action(()=>selectAgent(a.id,'chat'));else if(k==='model')openSetupWizard({agent:a});else if(k==='channels')openChannels(a);else openManage(a.id,'model');});
+  }
   // Messaging channels of a Hermes or OpenClaw agent: what is set up, and its own setup in a terminal to add one.
   async function openChannels(a){
     const setup=a.provider==='openclaw'?'openclaw channels add':'hermes gateway setup';
@@ -1065,6 +1127,8 @@
     // pane and the keyboard from someone typing in another terminal: it waits in a tab. Typing in the chat box or a form
     // keeps the keyboard there.
     if(event.type==='opened'){
+      // The Opaya Agent fixing a new agent's setup works in the background: its terminals wait in the list, closed.
+      if(event.background){if(!terminalViews.get(event.id))action(()=>openTerminal({terminalId:event.id,background:true,focus:false,ctx:event.owner}));return;}
       // A terminal opened for another screen (the Opaya Agent's command while you look at Hermes) stays on that screen.
       if(event.owner!==undefined&&event.owner!==termCtx()){const view=terminalViews.get(event.id),who=event.owner==='opaya'?'The Opaya Agent':title(state.agents.find(x=>x.id===event.owner)||{name:'An agent'});
         if(!view)action(()=>openTerminal({terminalId:event.id,background:true,focus:false,ctx:event.owner}));else{view.ctx=event.owner;view.attention=true;}
@@ -1636,7 +1700,7 @@
   document.addEventListener('keydown',event=>{if(event.target.id==='an-chat-filter'&&event.key==='Escape'&&anFilter){event.preventDefault();event.stopPropagation();anFilter='';const a=selected();if(a)renderAgentNav(a,'chat');}},true);
   // A chat's day group, as the sidebar and History list them.
   function dayLabel(iso){const t=new Date(iso).getTime(),today=new Date();today.setHours(0,0,0,0);const d=today.getTime(),day=864e5;return t>=d?'Today':t>=d-day?'Yesterday':t>=d-6*day?'This week':t>=d-29*day?'This month':'Older';}
-  Object.assign(AN_ICON,{repair:AN_ICON.care,channels:AN_ICON.chat,keys:AN_ICON.access,vault:AN_ICON.access,mcp:anI('<path d="M9 7V3M15 7V3M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>'),machines:AN_ICON.machine,newVps:AN_ICON.plus,dockerize:anI('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/>'),backups:AN_ICON.projects,surface:AN_ICON.chat,connect:AN_ICON.power,library:anI('<path d="m12 3 2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>'),shareSkills:anI('<path d="M4 8h13l-3-3M20 16H7l3 3"/>')});
+  Object.assign(AN_ICON,{setup:AN_ICON.model,repair:AN_ICON.care,channels:AN_ICON.chat,keys:AN_ICON.access,vault:AN_ICON.access,mcp:anI('<path d="M9 7V3M15 7V3M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>'),machines:AN_ICON.machine,newVps:AN_ICON.plus,dockerize:anI('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/>'),backups:AN_ICON.projects,surface:AN_ICON.chat,connect:AN_ICON.power,library:anI('<path d="m12 3 2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>'),shareSkills:anI('<path d="M4 8h13l-3-3M20 16H7l3 3"/>')});
   // From general to specific; each action of the agent is in exactly one of them. hk: its key on the Manage screens.
   const AN_SECTIONS=[
     {key:'overview',name:'Overview',desc:'Everything about it at a glance.',icon:AN_ICON.overview},
@@ -1653,7 +1717,7 @@
   const AN_SUB={
     chat:[['chatWindow','Open in a window'],['export','Export this chat']],
     console:[['terminal','New CLI window'],['shell','New shell window'],['files','Files']],
-    model:[['models','Model'],['effort','Reasoning'],['skills','Skills & commands'],['shareSkills','Share skills'],['library','Skills library']],
+    model:[['setup','Set up model'],['models','Model'],['effort','Reasoning'],['skills','Skills & commands'],['shareSkills','Share skills'],['library','Skills library']],
     access:[['keys','API keys'],['vault','Opaya Vault'],['mcp','MCP servers'],['transfer','Share with another agent'],['gateway','Gateway'],['channels','Messaging channels'],['itrust','iTrust'],['browser','Opaya browser']],
     machine:[['machines','Its machine in Machines'],['files','Files'],['terminal','CLI'],['shell','Shell'],['containerRestart','Restart container'],['containerLogs','Container logs']],
     deploy:[['clone','Clone'],['dockerize','Dockerize'],['redeploy','Redeploy'],['newVps','New VPS']],
@@ -1760,6 +1824,7 @@
       const name=a.provider==='openclaw'?'OpenClaw':'Hermes';
       keyed.repair={key:'repair',icon:'&#10038;',label:`Repair ${name}`,run:()=>api.agentRepair({id:a.id})};
       keyed.channels={key:'channels',icon:'&#9993;',label:'Messaging channels',run:()=>openChannels(a)};
+      keyed.setup={key:'setup',icon:'&#9672;',label:'Set up model',run:()=>openSetupWizard({agent:a})};
     }
     // The CLI when the agent has one; an API agent has only the shell (its own "shell" action), not a second copy of it.
     keyed.terminal={key:'terminal',icon:'&gt;_',label:`Open ${title(a)} CLI`,disabled:!hasCli(a),hint:hasCli(a)?'':'This connection has no native CLI.',run:()=>openTerminal({agentId:a.id,mode:'agent'})};
@@ -1843,6 +1908,7 @@
       <div class="ov-actions ov-manage-actions" aria-label="Management actions">${[['update','Update',AN_ICON.care,'Newest version, the way it was installed'],['clone','Clone',AN_ICON.deploy,'Copy it to another machine or Docker'],['backup','Back up',dkIcon('pull'),'Save a copy on this computer'],['settings','Connection settings',AN_ICON.profile,'How Opaya reaches it'],['machines','Open machine',AN_ICON.machine,'Its machine: agents, Docker, versions']].map(([k,label,icon,sub])=>keyed[k]?`<button type="button" class="ov-qa" data-action="manage-run" data-key="${k}" ${keyed[k].disabled?'disabled':''} title="${esc(keyed[k].disabled?keyed[k].hint||'Unavailable for this agent':keyed[k].label||label)}"><span class="ov-qa-ico" aria-hidden="true">${icon}</span><span class="ov-qa-text"><strong>${esc(label)}</strong><small>${esc(keyed[k].disabled?`Not available: ${keyed[k].hint||'not for this agent'}`:sub)}</small></span></button>`:'').join('')}</div>`;
     const sections={
       model:()=>sec('model','',[card('Model',[
+          row('setup','Set up model','Opaya gives it a key and a model: one you have, or a free one'),
           row('models','Model','The model it answers with',modelText(a.activeModel||a.model)||'Its own setting'),
           row('effort','Reasoning','How long it thinks before answering',a.effort?EFFORT_LABELS[a.effort]||a.effort:'Auto')],'A chat can use its own model and reasoning: pick them under the message box.'),
         card('Skills',[
@@ -3135,7 +3201,7 @@
       modal(`Install ${f.name} in Docker`,`On ${host.name}`,`<form id="docker-install-form"><label class="field"><span>Name</span><input name="name" value="${esc(f.id.replace(/-cli$/,''))}" maxlength="40" required pattern="[A-Za-z0-9][A-Za-z0-9 _-]*"></label><p class="field-help">${f.id==='openclaw'?`The container is called opaya-&lt;name&gt; and runs the official OpenClaw image with its gateway. Its data stays in the Docker volume opaya-&lt;name&gt;-data on ${esc(host.name)}, and the gateway listens only on that server's 127.0.0.1 (Opaya reaches it through SSH). After the install you finish OpenClaw's onboarding in the terminal, then Opaya imports the gateway token, adds the agent and connects.`:`The container is called opaya-&lt;name&gt; and keeps its data in ~/${f.id==='hermes'?'opaya-hermes':'opaya-agents'}/&lt;name&gt; on ${esc(host.name)}. It restarts with the server. After the install you sign in in the terminal, then Opaya adds it as an agent and connects.`}</p>
         ${checked&&!docker?`<div class="inline-notice error-notice"><span>!</span><div><strong>Docker is not installed on ${esc(host.name)}</strong><p>Install it first, then come back.</p><button type="button" class="text-button" data-action="install-framework" data-id="docker" data-host="${esc(hostId)}">Install Docker there</button></div></div>`:''}
         <div class="modal-footer">${docs}<div><button type="button" class="secondary" data-action="install-runtime" data-id="${esc(f.id)}" data-host="${esc(hostId)}" data-runtime="">Back</button><button type="submit" class="primary">Install in Docker</button></div></div></form>`);
-      $('#docker-install-form').addEventListener('submit',event=>{event.preventDefault();const name=event.target.elements.name.value.trim();action(async()=>{const job=await api.installFramework({id:f.id,hostId,runtime:'docker',name});if(job){closeModal();toast(`Installing ${f.name} in Docker on ${host.name}. Sign in in the terminal when it asks.`);}});});
+      $('#docker-install-form').addEventListener('submit',event=>{event.preventDefault();const name=event.target.elements.name.value.trim();if(['hermes','openclaw'].includes(f.id)){openSetupWizard({install:{id:f.id,hostId,name,label:f.name,host:host.name}});return;}action(async()=>{const job=await api.installFramework({id:f.id,hostId,runtime:'docker',name});if(job){closeModal();toast(`Installing ${f.name} in Docker on ${host.name}. Sign in in the terminal when it asks.`);}});});
       return;
     }
     const command=host?f.remoteCommand:f.localCommand;
@@ -4030,6 +4096,7 @@
     // The guide shows its own progress, and continues by itself when the free model is ready.
     if(j.kind==='signin'){if(j.status==='done')signInStarted='';if(opayaView)refresh().then(()=>renderOpaya()).catch(()=>{});}
     if(guide){if(j.kind==='free-model'&&j.status==='done'&&guide.step==='free'){guide.step='goals';refresh().then(()=>renderOpaya());}if(opayaView&&(j.kind==='guide'||j.kind==='free-model'))renderOpaya();}
+    if(prev?.status==='running'&&j.status==='done'&&j.result?.ready)setTimeout(()=>openAgentReady(j.result),300);
     if(prev?.status==='running'&&j.status!=='running'){
       if(j.status==='done'){const r=j.result||{},bits=[r.copied&&`Copied: ${r.copied.join(', ')}`,r.skills&&`${r.skills.length} skill${r.skills.length===1?'':'s'}`,r.keys&&`${r.keys.length} API key${r.keys.length===1?'':'s'}`,r.mcp&&`MCP: ${r.mcp.join(', ')}`,r.token&&'API token',r.file&&`saved as ${r.file}`,r.after?.removed&&'connection removed'].filter(Boolean);if(j.kind==='backup'||j.kind==='uninstall'){backupLists.clear();installInfo.clear();}
         toast(`${j.title.replace(/^Cloning/,'Cloned').replace(/^Redeploying/,'Redeployed').replace(/^Transferring/,'Transferred').replace(/^Installing skills/,'Installed skills').replace(/^Installing /,'Installed ').replace(/^Setting up/,'Set up').replace(/^Adding skills/,'Added skills').replace(/^Backing up/,'Backed up').replace(/^Uninstalling/,'Uninstalled')}. ${bits.join(', ')}${bits.length?'.':''}`);if(j.kind!=='library')skillCache.clear();refresh();if(j.kind==='library'&&$('#library-body'))drawLibrary?.();if(j.kind==='free-model'){overview=false;playgroundView=false;opayaView=true;refresh().then(()=>{render();saveView();$('#message-input')?.focus();});}if(j.kind==='condense'&&j.result?.conversationId)refresh().then(()=>openEssence(j.result.conversationId));if(j.kind==='project-bring'&&j.result)refresh().then(()=>openBringReview(j.result));if(j.kind==='project-remote'&&j.result?.dir)refresh().then(()=>{projectsExpanded.add(j.result.projectId);toggleProjects(true);const c=(state.projects||[]).find(x=>x.id===j.result.projectId);if(c&&j.result.agentId)startProjectChat(c,j.result.agentId);});}
