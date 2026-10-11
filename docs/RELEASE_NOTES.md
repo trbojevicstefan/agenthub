@@ -1,3 +1,9 @@
+# Opaya 0.32.3 - sign in with the right browser, and cancel an install
+
+- **Choose the browser for a sign-in.** Before a sign-in opens (ChatGPT, Grok, GitHub, Nous Portal), Opaya asks which browser to use: the ones installed on this computer or your default one. Tick "Always use this browser" to skip the question next time, or copy the link instead. The Codex sign-in notice has Copy link too.
+- **Clear when Opaya waits for you.** The install window shows "Waiting for you" with what to do (and the code to enter) and "Open the sign-in again", so a sign-in that opened in the wrong browser can be finished in the right one.
+- **Cancel install.** Stops the install and removes what it set up: the agent in Opaya, its container and its data. Nothing that was there before is removed.
+
 # Opaya 0.32.2 - the real ChatGPT models in the setup wizard
 
 - **Pick from your ChatGPT models.** When you set an agent up with ChatGPT, the wizard lists the models your account offers, as Codex on this computer reports them, with Codex's default first, instead of a model name typed in for you. "Another model..." still takes any name.
