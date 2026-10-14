@@ -263,3 +263,7 @@ See [compatibility](docs/COMPATIBILITY.md), [security](docs/SECURITY.md) and [ar
 Each release includes `SHA256SUMS`, which the in-app updater verifies.
 
 CI does not test your private VPS accounts or installed provider versions. No sample agents or credentials are ever added to a real workspace.
+
+## Cord AI team connection
+
+Share an existing agent with your Cord team: in Cord choose **Connect Agent → OPAYA**, copy the prompt, then open **Home → Connect to Cord AI** in OPAYA. Select the agent and connect. Existing Vault credentials, MCP and native approvals stay in OPAYA. The CLI is `npm run cord:connect -- --server URL --pair CODE --runtime opaya --opaya-agent ID`. See [setup and controls](docs/CORD_BRIDGE.md).

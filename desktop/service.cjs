@@ -51,7 +51,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   if (process.platform !== 'win32') await fs.rm(endpoint(root),{force:true});
   const machine = {hostname:require('node:os').hostname(), home:require('node:os').homedir()};
   const toolState = {machines:{}, checking:false, notified:''}; // update checks, filled in the background
-  function snapshot() { const base=broker.snapshot(); return {...base, agents:base.agents.map(a=>({...a,install:maintenance.capabilities(a),vision:visionOf(a)})), toolUpdates:{machines:toolState.machines,checking:toolState.checking}, machine, opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, visionModels:VISION_MODELS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true}}; }
+  function snapshot() { const base=broker.snapshot(); return {...base, agents:base.agents.map(a=>({...a,install:maintenance.capabilities(a),vision:visionOf(a)})), toolUpdates:{machines:toolState.machines,checking:toolState.checking}, machine, opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, visionModels:VISION_MODELS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true, cordBridgeVersion:2}}; }
   const emit = () => listener?.broadcast('state', snapshot());
   async function approve(agent, title, detail) {
     const socket = [...(listener?.clients || [])].at(-1);
@@ -1051,7 +1051,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     removeAgent:async x=>{const a=broker.agent(x.id); if(!await approve(a,'Remove this agent connection?','Deletes its saved connection and local chat transcripts, not the agent installation.'))return false;terminals.closeAgent(a.id);await broker.removeAgent(a.id);return true;},
     discover:x=>broker.discover(x), connect:x=>broker.connect(x.id), disconnect:x=>broker.disconnect(x.id), clearError:x=>broker.clearError(x.id),
     select:x=>broker.select(x.id), newConversation:x=>broker.newConversation(x.agentId,x.projectId||'',{activate:x.activate!==false}), selectConversation:x=>broker.selectConversation(x.id),
-    send:x=>broker.send(x), stop:x=>broker.stop(x.id), saveDraft:x=>broker.saveDraft(x), saveView:x=>broker.saveView(x),
+    send:x=>broker.send(x), stop:x=>{if(x.conversationId&&broker.turns.get(x.id)?.conversationId!==x.conversationId)return false;return broker.stop(x.id);}, saveDraft:x=>broker.saveDraft(x), saveView:x=>broker.saveView(x),
     transcript:async x=>{const c=broker.data.conversations.find(c=>c.id===schema.id(x.id));if(!c)throw new Error('Conversation not found.');return {conversation:c,agent:broker.agent(c.agentId),messages:broker.histories.get(c.id)||await broker.store.transcript(c.id)};},
     terminalOpen:async x=>{
       const source=x.sourceId?terminals.attach(schema.id(x.sourceId)):null;

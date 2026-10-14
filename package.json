@@ -21,7 +21,8 @@
     "dist:linux": "electron-builder --linux AppImage --publish never",
     "smoke": "electron . --smoke-test",
     "smoke:restart": "node scripts/smoke-restart.cjs",
-    "start:safe": "electron . --safe-graphics"
+    "start:safe": "electron . --safe-graphics",
+    "cord:connect": "node scripts/cord/runner.cjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "0.11.0",
@@ -56,7 +57,8 @@
       "build/tray.png",
       "build/tray@2x.png",
       "scripts/native-smoke.cjs",
-      "scripts/native-features.cjs"
+      "scripts/native-features.cjs",
+      "scripts/cord/**/*"
     ],
     "asar": true,
     "asarUnpack": [

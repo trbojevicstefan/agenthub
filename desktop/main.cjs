@@ -262,6 +262,7 @@ if(hostMode){
       // value to the session service, only for those requests, and never becomes an "Allow always" rule.
       const secretRequests=new Set(),answerApproval=handlers.approvalAnswer;client.on('approval',request=>{if(request?.kind==='secret')secretRequests.add(request.id);});
       handlers.approvalAnswer=async x=>{if(!secretRequests.has(x.id))return answerApproval(x);const pending=pendingApprovals.get(x.id);secretRequests.delete(x.id);if(!pending)return false;pendingApprovals.delete(x.id);const value=x.choice==='once'&&Date.now()<=pending.expires&&typeof x.value==='string'?x.value:'';client.answer(x.id,!!value,value||undefined);return !!value;};
+      handlers.cordConnect=async input=>{const snapshot=await client.call('snapshot');return require('./cord.cjs').connect(input,{root:app.getPath('userData'),agents:snapshot.agents});};
       for(const [method,handler]of Object.entries(handlers))ipcMain.handle(`hub:${method}`,async(event,input)=>{
         if(!trusted(event))throw new Error('Untrusted desktop caller.');
         try{return {ok:true,data:await handler(input||{})};}catch(error){return {ok:false,error:safeError(error)};}
