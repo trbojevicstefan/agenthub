@@ -167,6 +167,8 @@ if(hostMode){
       for(const method of ['scheduleSave','scheduleRemove','scheduleRun','tokenRemove'])handlers[method]=input=>client.call(method,input,60000);
       handlers.agentCron=input=>client.call('agentCron',input,60000);handlers.agentCronDo=input=>client.call('agentCronDo',input,150000);
       for(const method of ['opayaHoldSecret','opayaForgetSecret','agentGiveSecret','opayaGiveAll','vaultGiveAgent','agentKeys','agentWeb'])handlers[method]=input=>client.call(method,input);
+      // A new key value is written again for every agent that had it, over SSH and in containers.
+      handlers.opayaUpdateSecret=input=>client.call('opayaUpdateSecret',input,5*60*1000);
       // Vault import: reading agents on other machines can take a while. The file comes from Opaya's own picker (hidden
       // files shown, since .env files are hidden) or a file dropped on the Vault.
       handlers.vaultImportScan=input=>client.call('vaultImportScan',input,2*60*1000);

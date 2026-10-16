@@ -910,6 +910,32 @@ class OpayaAgent{
     }
     this.emit();return {restored,skipped,total:keys.length};
   }
+  // A new value for a key in the Vault (a rotated or expired key): the same entry, name and reference, and with
+  // propagate the new value is written again for every agent that had it (and every agent, for a key given to all).
+  async updateSecret({id,value,endpoint,propagate=true}={}){
+    const s=this.secretEntry(id);value=String(value??'').trim();
+    if(!value)throw new Error('Paste the new value.');if(value.length>12000||value.includes('\0'))throw new Error('A secret can be up to 12000 characters.');
+    if(value===this.secretValue(s,true))throw new Error('That is the value it already has.');
+    await this.vault.set(s.key,JSON.stringify(value),this.vault.available());this.secretCache.set(s.key,value);
+    s.mask=secrets.mask(value);s.updatedAt=new Date().toISOString();if(typeof endpoint==='string'&&endpoint.trim())s.endpoint=endpoint.trim();
+    await this.saveSecrets();
+    const updated=[],skipped=[];
+    if(propagate){
+      const b=this.broker,ids=new Set(s.stored.map(x=>x.agentId).filter(Boolean));
+      if(s.global)for(const a of b.data.agents)if(keyKindOf(a))ids.add(a.id);
+      for(const agentId of ids){
+        if(agentId==='opaya'){try{await this.storeSecret({secret:s.id,agent_id:'opaya'},{approved:true});updated.push({agent:'Opaya Agent',agentId:'',name:'model API key',where:'Opaya vault'});}catch(error){skipped.push({agent:'Opaya Agent',reason:String(error?.message||error).slice(0,200)});}continue;}
+        let agent;try{agent=b.agent(agentId);}catch{skipped.push({agent:s.stored.find(x=>x.agentId===agentId)?.agentName||agentId,reason:'no longer in Opaya'});continue;}
+        // The name it was saved under there (a Codex login is recorded as "Codex login": its key name is the Vault's).
+        const rec=s.stored.filter(x=>x.agentId===agentId).at(-1)?.name||'',name=/^[A-Za-z_][A-Za-z0-9_]*$/.test(rec)?rec:s.name;
+        try{const r=await this.storeSecret({secret:s.id,agent_id:agent.id,name,...(s.global?{into:'agent_config'}:{})},{approved:true});updated.push({agent:agent.name,agentId:agent.id,name:r.name||name,file:r.file||'',where:r.where,next:r.next});}
+        catch(error){skipped.push({agent:agent.name,reason:String(error?.message||error).slice(0,200)});}
+      }
+      for(const u of updated)if(u.agentId)this.tellAgent?.(u.agentId,`The value of ${u.name} was updated in ${u.where||'its config'}. Reload it before your next request that needs it.`);
+    }
+    this.emit();
+    return {id:s.id,name:s.name,mask:s.mask,updated:updated.map(({agentId,...x})=>x),skipped};
+  }
   // A key already in the Opaya Vault, given to one agent.
   async giveHeldToAgent({id,agentId}={}){
     const s=this.secretEntry(id),agent=this.broker.agent(schema.id(agentId));

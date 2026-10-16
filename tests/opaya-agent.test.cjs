@@ -539,3 +539,19 @@ test('chat secrets are forgotten with their chat, vault keys on request, and bot
   await agent.forgetSecret(b.id);assert.deepEqual(agent.describe().secrets.map(s=>s.id),['S3']);
   await assert.rejects(()=>agent.tool('store_secret',{secret:a.id,agent_id:'opaya'}),/holds no secret S1/);
 });
+test('a Vault key gets a new value and is written again for the agents that had it',async t=>{
+  const home=await temp(t),hermesHome=path.join(home,'.hermes');await fs.mkdir(hermesHome,{recursive:true});await fs.writeFile(path.join(hermesHome,'.env'),'OTHER=1\n');
+  const {agent,broker}=await fixture(t,[],{userHome:home});
+  const hermes=await broker.saveAgent({agent:{name:'Hermes',provider:'hermes',protocol:'acp',transport:'local',command:'hermes',args:['acp'],hermesHome}},{preapproved:true});
+  const held=await agent.holdFromUser({name:'OPENROUTER_API_KEY',value:ROUTER_KEY});
+  await agent.giveHeldToAgent({id:held.id,agentId:hermes.id});
+  await assert.rejects(()=>agent.updateSecret({id:held.id,value:ROUTER_KEY}),/already has/);
+  const fresh='sk-or-v1-'+'f'.repeat(48);
+  const r=await agent.updateSecret({id:held.id,value:fresh});
+  assert.equal(r.id,held.id);assert.deepEqual(r.updated.map(u=>u.agent),['Hermes']);assert.deepEqual(r.skipped,[]);
+  assert.equal(await fs.readFile(path.join(hermesHome,'.env'),'utf8'),`OTHER=1\nOPENROUTER_API_KEY=${fresh}\n`);
+  assert.equal(agent.secretValue(agent.secretEntry(held.id)),fresh);
+  assert(!JSON.stringify(r).includes(fresh.slice(9)));
+  const only=await agent.updateSecret({id:held.id,value:fresh.replace(/f/g,'e'),propagate:false});
+  assert.deepEqual(only.updated,[]);assert.match(await fs.readFile(path.join(hermesHome,'.env'),'utf8'),/ffff/);
+});

@@ -1015,3 +1015,6 @@
 :where(body[data-theme="light"]) .onb-body>p{color:#28332d}
 :where(body[data-theme="light"]) .onb-more{color:#45544d}
 :where(body[data-theme="light"]) .onb-next>p{color:#28332d}
+:where(body[data-theme="light"]) .vk-update{border:1px solid #aec7b7;background:#dde7e2}
+:where(body[data-theme="light"]) .vk-update>p{color:#28332d}
+:where(body[data-theme="light"]) button.mg-has-key:hover{border-color:#8ab298}

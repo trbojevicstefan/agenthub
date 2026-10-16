@@ -1,3 +1,8 @@
+# Opaya 0.34.1 - update API keys
+
+- **Update a key in the Vault.** Each key has an Update button: paste the new value (after you rotated or renewed it). It keeps its name and reference, and "Also update it in..." writes the new value where every agent that had it reads it (all agents for a key given to every agent, and the Opaya Agent's own model key), then tells the connected ones. Agents it could not update are listed.
+- **Update a key an agent has.** In an agent's Keys & tools, click one of the keys it has to give it a new value; Opaya keeps it in the Vault and writes it where that agent reads it.
+
 # Opaya 0.34.0 - a clear start, updates without terminals, and a real skills manager
 
 - **A first start in three steps.** Home shows one step at a time: give Opaya a brain (an AI model), find the agents you already have, then install your first agent here or on a server (or add a server first). Done steps fold into one line. The model setup now defaults to what this computer has: Codex CLI, then Claude Code, otherwise a free key. When Discover finds nothing, it offers the next step right there.

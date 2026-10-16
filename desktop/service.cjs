@@ -1378,6 +1378,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   actions.opayaGiveAll = async x=>{const r=await opaya.giveToAll({id:x.id});emit();return r;};
   actions.agentGiveSecret = async x=>{const r=await opaya.giveToAgent({agentId:x.agentId,name:x.name,value:x.value,endpoint:x.endpoint});emit();return r;};
   actions.opayaForgetSecret = x=>opaya.forgetSecret(String(x.id||''));
+  actions.opayaUpdateSecret = async x=>{const r=await opaya.updateSecret({id:String(x.id||''),value:x.value,endpoint:x.endpoint,propagate:x.propagate!==false});emit();return r;};
   // Import into the vault from a file the user chose, pasted text or the tools on this computer. Only the user starts
   // these (never the Opaya Agent's tools): a scan returns names and masks, a commit holds the picked values.
   actions.vaultImportScan = x=>opaya.vaultImportScan({file:x.file,text:x.text,tools:!!x.tools});
@@ -1395,6 +1396,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     agentGiveSecret:x=>`Give ${x.name||'a key'} to ${nameOf(x.agentId)}`,
     vaultGiveAgent:x=>`Give a vault key to ${nameOf(x.agentId)}`,
     opayaGiveAll:()=>'Give a key to every agent',
+    opayaUpdateSecret:()=>'Update a key in the Vault',
     mcpInstall:x=>`Add the ${x.id} MCP server`,
     installFramework:x=>`Install ${x.id} on ${hostName(x.hostId)}`,
     agentBackup:x=>`Back up ${nameOf(x.id)}`,

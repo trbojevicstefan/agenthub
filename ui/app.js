@@ -78,11 +78,11 @@
   // Opaya's own question dialog, styled like the app (never the system box): a title, what will happen, and a button
   // named for the action, red when it removes something. With `input` it asks for text and returns it (or null).
   const ACTION_WORD=/^(Remove|Delete|Uninstall|Forget|Stop|End|Close|Discard|Replace|Overwrite|Install|Restart|Reconnect|Turn|Give|Migrate|Clone|Update|Import|Reset|Clear|Disconnect|Run|Send|Apply|Merge|Push|Pull|Leave)\b/i;
-  function opayaAsk({title:t='',text='',ok='',cancel='Cancel',danger,input=null,placeholder=''}={}){
+  function opayaAsk({title:t='',text='',ok='',cancel='Cancel',danger,input=null,placeholder='',secret=false}={}){
     return new Promise(resolve=>{
       const word=ACTION_WORD.exec(t)?.[1],label=ok||(word?word[0].toUpperCase()+word.slice(1).toLowerCase():'OK'),red=danger??/^(remove|delete|uninstall|forget|stop|end|discard|overwrite|clear|reset)/i.test(word||'');
       const d=document.createElement('dialog');d.className='opaya-ask';
-      d.innerHTML=`<form method="dialog"><h2>${esc(t)}</h2>${text?`<p>${esc(text).replace(/\n/g,'<br>')}</p>`:''}${input!==null?`<input name="value" value="${esc(input)}" placeholder="${esc(placeholder)}" autocomplete="off" spellcheck="false">`:''}<footer><button type="button" class="secondary" value="cancel">${esc(cancel)}</button><button type="submit" class="primary ${red?'danger-button':''}" value="ok">${esc(label)}</button></footer></form>`;
+      d.innerHTML=`<form method="dialog"><h2>${esc(t)}</h2>${text?`<p>${esc(text).replace(/\n/g,'<br>')}</p>`:''}${input!==null?`<input name="value" ${secret?'type="password"':''} value="${esc(input)}" placeholder="${esc(placeholder)}" autocomplete="off" spellcheck="false">`:''}<footer><button type="button" class="secondary" value="cancel">${esc(cancel)}</button><button type="submit" class="primary ${red?'danger-button':''}" value="ok">${esc(label)}</button></footer></form>`;
       document.body.append(d);let done=false;const finish=v=>{if(done)return;done=true;d.close();d.remove();resolve(v);};
       d.querySelector('[value="cancel"]').addEventListener('click',()=>finish(input!==null?null:false));
       d.addEventListener('cancel',e=>{e.preventDefault();finish(input!==null?null:false);});
@@ -1292,6 +1292,10 @@
     if(name==='opaya-new'){action(async()=>{await api.opayaNewSession();opayaCount=-1;$('#message-input')?.focus();});return;}
     if(name==='opaya-delete-session'){const o=opaya();action(async()=>{if(!await ask('Delete this chat with the Opaya Agent?'))return;await api.opayaDeleteSession({id:o.sessionId});opayaCount=-1;});return;}
     if(name==='discover-tab'||name==='discover-host'){discover(id||undefined);return;}
+    // A key an agent has, given a new value: kept in the Vault and written where that agent reads it.
+    if(name==='agent-key-update'){const ag=state.agents.find(x=>x.id===id),key=button.dataset.name;if(!ag||!key)return;
+      opayaAsk({title:`Update ${key}`,text:`A new value for ${key} in ${title(ag)}. Opaya keeps it in the Vault and writes it where ${title(ag)} reads it; the value is never shown.`,input:'',secret:true,placeholder:'Paste the new key',ok:'Update key'}).then(value=>{if(!value)return;
+        action(async()=>{const r=await api.agentGiveSecret({agentId:ag.id,name:key,value});keyLists.delete(ag.id);await refresh();render();toast(`${r.name} updated for ${title(ag)}${r.file?` in ${r.file}`:''}.${r.next?` ${r.next}`:''}`);});});return;}
     if(name==='discover-install'){if(button.dataset.host){confirmInstall(button.dataset.fw,button.dataset.host);return;}action(async()=>{const r=await api.installFramework({id:button.dataset.fw,hostId:button.dataset.host||undefined});closeModal();if(r?.kind==='toolchain'){onJob(r);toast('Opaya is installing it from the official download.');return;}toast('Installing in Terminal. Discover again when it finishes.');});return;}
     if(name==='clone-install'){action(async()=>{await api.installFramework({id:'hermes',hostId:button.dataset.host||undefined});toast('Installing Hermes in Terminal. Clone again when it finishes.');});return;}
     if(name==='itrust-agent'){const a=state.agents.find(x=>x.id===id);if(a)toggleAgentTrust(a);return;}
@@ -1779,7 +1783,7 @@
       <div class="mg-keys"><div class="mg-vault"><h3>Opaya Vault <small>${held.length}</small></h3>${held.length?`<div class="mg-key-list">${held.map(chip).join('')}</div>`:'<p class="field-help">No keys yet. <button type="button" class="text-button" data-action="vault">Add or import keys in the Vault</button></p>'}</div>
       <div class="mg-flow" aria-hidden="true"><i></i><i></i><i></i></div>
       <div class="mg-give"><h3>Give to</h3>${target(a,true)}<div class="mg-key-others">${others.map(x=>target(x)).join('')}</div></div>
-      <div class="mg-has"><h3>${esc(title(a))} has <small>${has?.keys?.length??''}</small></h3>${!has?'<p class="field-help">Reading its keys...</p>':has.keys.length?`<div class="mg-has-list">${has.keys.map(k=>`<span class="mg-has-key" title="${esc(k.where||'')}"><span class="mg-key-glyph small" aria-hidden="true">${KEY_SVG}</span>${esc(k.name)}</span>`).join('')}</div>`:`<p class="field-help">${has.error?esc(has.error):has.kind?'No keys yet.':'Opaya does not know where this agent reads keys.'}</p>`}</div></div>`;
+      <div class="mg-has"><h3>${esc(title(a))} has <small>${has?.keys?.length??''}</small></h3>${!has?'<p class="field-help">Reading its keys...</p>':has.keys.length?`<div class="mg-has-list">${has.keys.map(k=>`<button type="button" class="mg-has-key" data-action="agent-key-update" data-id="${esc(a.id)}" data-name="${esc(k.name)}" title="${esc(`${k.where?`${k.where}. `:''}Click to give it a new value`)}"><span class="mg-key-glyph small" aria-hidden="true">${KEY_SVG}</span>${esc(k.name)}</button>`).join('')}</div>`:`<p class="field-help">${has.error?esc(has.error):has.kind?'No keys yet.':'Opaya does not know where this agent reads keys.'}</p>`}</div></div>`;
   }
   // A project's git state from projectInfo: git is {branch: "main...origin/main [ahead 2]", changes: [porcelain lines]}
   // (or null outside a repository); a remote copy's info has branch, dirty and unpushed already.
@@ -2856,7 +2860,7 @@
   const keyHolders=k=>{const ids=new Set();for(const x of k.stored||[]){const a=x.agentId?state.agents.find(y=>y.id===x.agentId):state.agents.find(y=>y.name===x.agent);if(a)ids.add(a.id);}return ids;};
   const KEY_SVG='<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3M19 4l2 2"/></svg>';
   function openVault({chat=false,panel=''}={}){
-    Object.assign(vault,{chat,panel,open:'',scan:null,paste:false,filter:'',fresh:new Set()});
+    Object.assign(vault,{chat,panel,open:'',edit:'',scan:null,paste:false,filter:'',fresh:new Set()});
     modal('Opaya Vault','Your API keys, tokens and passwords, kept by Opaya and given to the agents you choose. Values are never shown here or sent into a chat.',`${libTabs('keys')}<div id="vault" class="vault"></div>`,true);
     const box=$('#vault');drawVault();
     box.addEventListener('click',vaultClick);box.addEventListener('input',vaultInput);box.addEventListener('change',vaultInput);
@@ -2875,7 +2879,8 @@
         <span class="vk-icon">${KEY_SVG}</span>
         <div class="vk-main"><div class="vk-title"><strong>${esc(k.name)}</strong><code>${esc(k.mask)}</code>${k.global?'<em class="vault-badge" title="Given to every agent that reads keys">all agents</em>':''}</div>
           <div class="vk-who">${who.length?`<span class="vk-avatars">${who.map(a=>`<span title="${esc(title(a))} has it">${badge(a)}</span>`).join('')}</span><small>${esc(who.map(a=>title(a)).join(', '))}</small>`:'<small>Not given to any agent yet</small>'}${k.endpoint?`<small class="vk-endpoint">Endpoint ${esc(k.endpoint)}</small>`:''}</div></div>
-        <div class="vk-actions">${vault.chat?'<button type="button" class="secondary small" data-vault="insert" title="Put its reference into your message to the Opaya Agent">Insert</button>':''}${targets.length?`<button type="button" class="secondary small" data-vault="give-open" aria-expanded="${open}">Give to&#8230;</button>`:''}<button type="button" class="icon-button vk-forget" data-vault="forget" title="Forget ${esc(k.name)}" aria-label="Forget ${esc(k.name)}">&#10005;</button></div>
+        <div class="vk-actions">${vault.chat?'<button type="button" class="secondary small" data-vault="insert" title="Put its reference into your message to the Opaya Agent">Insert</button>':''}${targets.length?`<button type="button" class="secondary small" data-vault="give-open" aria-expanded="${open}">Give to&#8230;</button>`:''}<button type="button" class="secondary small" data-vault="update-open" aria-expanded="${vault.edit===k.id}" title="Paste a new value for ${esc(k.name)}">Update</button><button type="button" class="icon-button vk-forget" data-vault="forget" title="Forget ${esc(k.name)}" aria-label="Forget ${esc(k.name)}">&#10005;</button></div>
+        ${vault.edit===k.id?`<form class="vk-update" data-vault-form="update" data-id="${esc(k.id)}"><p>A new value for <strong>${esc(k.name)}</strong> (now <code>${esc(k.mask)}</code>), for example after you rotated it. It keeps its name and reference.</p><div class="vk-update-row"><input name="value" type="password" autocomplete="off" spellcheck="false" maxlength="12000" placeholder="Paste the new key" required aria-label="New value"><button type="submit" class="primary">Update key</button><button type="button" class="secondary" data-vault="update-open">Cancel</button></div>${who.length||k.global?`<label class="check-row"><input type="checkbox" name="propagate" checked> Also update it in ${k.global?'every agent that reads keys':esc(who.map(a=>title(a)).join(', '))} <small>Opaya writes the new value where each one reads it and tells the connected ones.</small></label>`:''}</form>`:''}
         ${open?`<div class="vk-give" role="group" aria-label="Give ${esc(k.name)} to"><p>Opaya writes it where each agent reads keys and tells it the name, never the value.</p><div class="vk-agents">${targets.map(a=>{const h=has.has(a.id);return `<button type="button" class="vk-agent ${h?'has':''}" data-vault="give" data-agent="${esc(a.id)}" title="${esc(h?`${title(a)} has it. Click to save it again.`:`Give ${k.name} to ${title(a)}`)}">${badge(a)}<span><strong>${esc(title(a))}</strong><small>${h?'&#10003; Has it':esc(placeText(a))}</small></span></button>`;}).join('')}<button type="button" class="vk-agent all" data-vault="all" title="Write it into every agent that reads keys"><span class="vk-all-icon" aria-hidden="true">&#8734;</span><span><strong>Every agent</strong><small>Now and each that reads keys</small></span></button></div></div>`:''}
       </article>`;};
     const empty=!held.length&&!vault.panel?`<div class="vault-empty"><span class="vault-empty-icon">${KEY_SVG}</span><h3>The vault is empty</h3><p>Add a key, or import the ones you already have: from a .env or any text file, or from the tools and agents on this computer.</p><div><button type="button" class="primary" data-vault="panel" data-panel="import">Import keys</button><button type="button" class="secondary" data-vault="panel" data-panel="add">+ Add a key</button></div></div>`:'';
@@ -3110,6 +3115,10 @@
     if(f.dataset.vaultForm==='restore'){const password=f.elements.password.value,file=vault.restoreFile;if(!file)return;const b=f.querySelector('[type=submit]');b.disabled=true;
       action(async()=>{try{const r=await api.vaultBackupRestore({file,password});f.elements.password.value='';vault.restoreFile='';vault.panel='';vault.fresh=new Set(r.restored.map(x=>x.name));await refresh();drawVault();
         toast(r.restored.length?`Restored ${plural(r.restored.length,'key')}${r.skipped.length?`; ${r.skipped.length} already in the Vault`:''}. Give them to your agents with Give to.`:`Nothing to restore: all ${plural(r.total,'key')} are already in the Vault.`);}finally{b.disabled=false;}});return;}
+    if(f.dataset.vaultForm==='update'){const value=f.elements.value.value.trim(),propagate=f.elements.propagate?f.elements.propagate.checked:false,b=f.querySelector('[type=submit]');if(!value)return;b.disabled=true;b.textContent='Updating...';
+      action(async()=>{let r;try{r=await api.opayaUpdateSecret({id:f.dataset.id,value,propagate});}catch(error){b.disabled=false;b.textContent='Update key';throw error;}
+        f.elements.value.value='';vault.edit='';vault.fresh=new Set([r.name]);await refresh();drawVault();
+        toast(`${r.name} updated (${r.mask}).${r.updated.length?` Also updated in ${r.updated.map(x=>x.agent).join(', ')}.`:''}${r.skipped.length?` Not updated: ${r.skipped.map(x=>`${x.agent} (${x.reason})`).join(', ')}.`:''}`,!!r.skipped.length);});return;}
     if(f.id!=='vault-form')return;
     const value=f.elements.value.value,name=f.elements.name.value.trim(),endpoint=endpointOf(f),giveTo=vault.giveTo,agents=[...f.querySelectorAll('[name="agent"]:checked')].map(i=>i.value);
     if(giveTo==='some'&&!agents.length){toast('Choose the agents, or keep it in the Vault.',true);return;}
@@ -3142,6 +3151,7 @@
     if(!k)return;
     if(what==='insert'){closeModal();vaultInsert(k.reference);return;}
     if(what==='give-open'){vault.open=vault.open===k.id?'':k.id;drawVault();return;}
+    if(what==='update-open'){vault.edit=vault.edit===k.id?'':k.id;drawVault();if(vault.edit)$('.vk-update [name=value]')?.focus();return;}
     if(what==='all'){action(()=>giveAll(k.id,{back:true}));return;}
     if(what==='give'){const agentId=b.dataset.agent;b.disabled=true;b.classList.add('busy');
       action(async()=>{try{const r=await api.vaultGiveAgent({id:k.id,agentId});await refresh();drawVault();toast(`${r.name} saved for ${r.agent}${r.file?` in ${r.file}`:''}. Send the note from its chat so it knows.`);}finally{b.disabled=false;b.classList.remove('busy');}});return;}
