@@ -15,3 +15,14 @@ Chat transcripts, drafts and terminal scrollback are stored locally in plaintext
 Normal UI close retains the session process. **Stop all sessions and exit** explicitly terminates local work, with confirmation. Remote tmux is detached rather than deleted. No autonomous LAN scanning, remote software installation, automatic trust-on-first-use or blind task resubmission is performed.
 
 The first Windows release is unsigned. Inspect the repository's immutable build tag, SHA-256 checksums and Actions results. Do not disable system security controls to run it. Code signing and authenticated auto-update are future release requirements, not capabilities claimed by this preview.
+
+## Feedback and error reports
+
+Feedback (the chat icon in the top bar) is sent only when the user sends it. Error sharing is off by default; when the
+user turns it on (Settings > Machines > Feedback and errors, or in the feedback window), Opaya sends the errors it runs
+into. Before anything leaves the computer, `desktop/feedback.cjs` removes keys, tokens and passwords (the same detection
+as the Vault, plus every value Opaya holds), the home folder, the user name, saved machine names and addresses, IP and
+e-mail addresses. Chat text is never included. Reports wait in `feedback/outbox.json` in Opaya's folder until the
+collector (`collector/`, a Cloudflare Worker) accepts them; the collector files them as issues in a private GitHub
+repository and is the only place that holds the GitHub token. The feedback window lists what was sent and what waits,
+and can delete collected errors.

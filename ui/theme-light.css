@@ -1018,3 +1018,13 @@
 :where(body[data-theme="light"]) .vk-update{border:1px solid #aec7b7;background:#dde7e2}
 :where(body[data-theme="light"]) .vk-update>p{color:#28332d}
 :where(body[data-theme="light"]) button.mg-has-key:hover{border-color:#8ab298}
+:where(body[data-theme="light"]) .fb-kind{border:1px solid #c2c8cc;background:#dae0e2}
+:where(body[data-theme="light"]) .fb-kind.selected{background:#c7dbcf;border-color:#8ab298;color:#07130c}
+:where(body[data-theme="light"]) .fb-share{border:1px solid #c3d1ca;background:#dfe7e3}
+:where(body[data-theme="light"]) .fb-share small{color:#42514a}
+:where(body[data-theme="light"]) .fb-sent summary{color:#2c3e33}
+:where(body[data-theme="light"]) .fb-list li{border:1px solid #cbd5d1}
+:where(body[data-theme="light"]) .fb-list small{color:#42514a}
+:where(body[data-theme="light"]) .fb-list em{color:#4b5e53}
+:where(body[data-theme="light"]) .fb-tag{background:#cfd9d5;color:#2c3e33}
+:where(body[data-theme="light"]) .fb-tag.error{background:#d9c9c5;color:#401d12}

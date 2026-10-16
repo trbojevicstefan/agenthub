@@ -799,6 +799,36 @@
     try{data=await api.agentMemory({id:a.id});if(!$('#mem-body'))return;draw();}
     catch(err){body.innerHTML=`<p class="setup-lead">Could not read ${esc(title(a))}'s memory.</p><p class="field-help">${esc(err.message)}</p><div class="modal-footer"><span></span><div><button type="button" class="secondary" id="mem-retry">Try again</button></div></div>`;$('#mem-retry').onclick=()=>openMemory(a,focus);}
   }
+  // Feedback: what to fix or add, sent to the Opaya team. With "Share errors" on, Opaya also sends the errors it runs
+  // into, cleaned of keys, paths, names and addresses, so they can be fixed without anyone having to report them.
+  async function openFeedback(kind='bug'){
+    const where=opayaView?'Opaya Agent':overview?'Home':manageId?'Manage':selected()?'Agent':'';
+    modal('Send feedback','Tell us what broke, what is confusing or what you want next. Every message is read and goes straight into the list of fixes.',`<form id="fb-form" class="fb"><div class="fb-kinds" role="radiogroup" aria-label="Kind">${[['bug','Something is broken'],['idea','An idea or wish'],['praise','Something I like'],['other','Other']].map(([k,l])=>`<label class="fb-kind ${k===kind?'selected':''}"><input type="radio" name="kind" value="${k}" ${k===kind?'checked':''}>${l}</label>`).join('')}</div>
+      <label class="field"><span>Your message</span><textarea name="message" rows="7" maxlength="4000" required placeholder="What happened, what you expected, and what you were doing. The more concrete, the faster it gets fixed."></textarea></label>
+      <label class="field"><span>Contact <em>optional, if you want an answer</em></span><input name="contact" maxlength="200" autocomplete="email" placeholder="E-mail, Discord or GitHub name"></label>
+      <label class="check-row"><input type="checkbox" name="diagnostics" checked> Add the recent errors Opaya saw <small>Cleaned first: no keys, passwords, file paths, user or machine names, addresses or chat text.</small></label>
+      <div class="fb-share"><label class="switch-row"><input type="checkbox" id="fb-share" ${state.settings?.shareErrors?'checked':''}><span class="switch" aria-hidden="true"></span><span><strong>Share errors automatically</strong> <small>When something fails in Opaya (an install, a connection, the Opaya Agent), the error is sent the same cleaned way, so we can fix it even if nobody reports it. You can turn it off any time in Settings.</small></span></label></div>
+      <details class="fb-sent" id="fb-sent"><summary>What Opaya has sent and is waiting to send</summary><div id="fb-sent-list"><p class="field-help">Reading...</p></div></details>
+      <div class="modal-footer"><span id="fb-status"></span><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="submit" class="primary">Send feedback</button></div></div></form>`);
+    const f=$('#fb-form');
+    f.addEventListener('change',e=>{if(e.target.name==='kind'){f.querySelectorAll('.fb-kind').forEach(l=>l.classList.toggle('selected',l.querySelector('input').checked));}});
+    $('#fb-share').onchange=e=>action(async()=>{await api.saveSettings({shareErrors:e.target.checked});await refresh();toast(e.target.checked?'Thank you. Opaya now shares its errors, cleaned of anything personal.':'Opaya no longer shares errors.');});
+    const loadSent=async()=>{const box=$('#fb-sent-list');if(!box)return;try{const st=await api.feedbackState();
+      $('#fb-status').textContent=st.waiting?`${st.waiting} waiting to be sent${st.lastError?` (${st.lastError})`:''}`:'';
+      box.innerHTML=st.recent.length?`<ul class="fb-list">${st.recent.map(x=>`<li><span class="fb-tag ${x.type}">${x.type==='error'?`Error${x.count>1?` ×${x.count}`:''}`:esc(x.kind||'feedback')}</span><div><strong>${esc(x.title||x.message.slice(0,80))}</strong>${x.title?`<small>${esc(x.message)}</small>`:''}</div><em>${x.state==='sent'?'sent':'waiting'}</em></li>`).join('')}</ul><button type="button" class="text-button" id="fb-clear">Delete the collected errors</button>`:'<p class="field-help">Nothing yet.</p>';
+      $('#fb-clear')&&($('#fb-clear').onclick=()=>action(async()=>{await api.feedbackClear();await loadSent();toast('Collected errors deleted.');}));}catch(e){box.innerHTML=`<p class="field-help">${esc(e.message)}</p>`;}};
+    $('#fb-sent').addEventListener('toggle',()=>{if($('#fb-sent').open)loadSent();});
+    f.addEventListener('submit',e=>{e.preventDefault();const b=f.querySelector('[type=submit]');b.disabled=true;b.textContent='Sending...';
+      action(async()=>{try{const r=await api.feedbackSend({message:f.elements.message.value,kind:f.elements.kind.value,contact:f.elements.contact.value,diagnostics:f.elements.diagnostics.checked,where});
+        delete $('#app-dialog').dataset.typed;closeModal();toast(r.sent?'Thank you! Your feedback is in.':'Thank you! Your feedback is saved and goes out as soon as Opaya can reach the feedback service.');}
+        finally{b.disabled=false;b.textContent='Send feedback';}});});
+    f.elements.message.focus();
+  }
+  // Errors in this window, when the user shares errors.
+  const reportedUi=new Set();
+  const reportUi=(title,message,stack)=>{if(!state?.settings?.shareErrors)return;const k=`${title}|${message}`.slice(0,300);if(reportedUi.has(k)||reportedUi.size>50)return;reportedUi.add(k);api.reportClientError?.({title,message:String(message||'').slice(0,1500),stack:String(stack||'').slice(0,1500)}).catch(()=>{});};
+  window.addEventListener('error',e=>reportUi('Interface error',e.message,e.error?.stack));
+  window.addEventListener('unhandledrejection',e=>reportUi('Interface promise error',e.reason?.message||String(e.reason||''),e.reason?.stack));
   function openCordConnect(){
     const agents=state.agents.filter(a=>['claude','codex','acp','openai'].includes(a.protocol));
     if(!agents.length){toast('Add a chat agent to OPAYA first.',true);return;}
@@ -829,7 +859,8 @@
       <section data-page="keys"><h3>Opaya Vault</h3><p class="settings-copy">${plural(vaultKeys().length,'key')} kept, ${state.secureStorage===false?'in memory until Opaya closes':'encrypted by your OS'}. Give them to one agent or to all of them, or import the ones you have from a .env file or your tools.</p><div class="settings-buttons"><button class="secondary" data-action="vault">Open Opaya Vault</button><button class="secondary" data-action="vault-import">Import keys</button><button class="secondary" data-action="vault-backup">Back up</button></div></section>
       <section data-page="keys"><h3>Skills and MCP servers</h3><p class="settings-copy">Global skills kept by Opaya, and ${(state.mcpServers||[]).length} saved MCP server${(state.mcpServers||[]).length===1?'':'s'} (GitHub, a browser, a database) that Opaya passes to your agents.</p><div class="settings-buttons"><button class="secondary" data-action="library">Skills library</button><button class="secondary" data-action="mcp-manage">MCP servers</button></div></section>
       <section data-page="machines"><h3>Machines</h3><p class="settings-copy">This computer is <strong>${esc(localName())}</strong>${state.hosts.length?`, with ${state.hosts.length} server${state.hosts.length===1?'':'s'}`:''}. Backups go to <code>${esc(st.backupDir||'Opaya Backups in your home folder')}</code>.</p><div class="settings-buttons"><button class="secondary" data-action="hosts">Open Machines</button><button class="secondary" data-action="local-machine">Name and backup folder</button></div></section>
-      <section data-page="machines"><h3>Data and privacy</h3><p class="settings-copy">No account and no telemetry. Chats, transcripts and settings stay in Opaya's folder on this computer; API keys and tokens are encrypted with the OS keychain${state.secureStorage===false?' <strong>(not available here)</strong>':''}.</p><button class="secondary" data-action="open-data-folder">Open Opaya's folder</button></section>
+      <section data-page="machines"><h3>Data and privacy</h3><p class="settings-copy">No account, and nothing is sent unless you choose it. Chats, transcripts and settings stay in Opaya's folder on this computer; API keys and tokens are encrypted with the OS keychain${state.secureStorage===false?' <strong>(not available here)</strong>':''}.</p><button class="secondary" data-action="open-data-folder">Open Opaya's folder</button></section>
+      <section data-page="machines"><h3>Feedback and errors</h3><p class="settings-copy">Help make Opaya better: send feedback with the chat icon at the top right. With error sharing on, Opaya also sends the errors it runs into, cleaned of keys, passwords, file paths, user and machine names, addresses and chat text.</p>${toggle('shareErrors','Share errors with the Opaya team','off by default',false)}<div class="settings-buttons"><button class="secondary" data-action="feedback">Send feedback</button></div></section>
       <section data-page="shortcuts"><h3>Keyboard shortcuts</h3><div class="shortcut-grid">${[[`${cmd}K`,'Find anything'],[state.platform==='darwin'?'\u2325Left':'Alt+Left','Back to the previous screen'],[`${cmd}1 to 9`,'Open agent 1 to 9'],[`${cmd}N`,'New chat'],[`${cmd}\``,'Show or hide the terminal'],[`${cmd}B`,'Show or hide the sidebar'],[`${cmd}Shift+M`,'Manage the agent'],[`${cmd}Shift+H`,'Chat history'],[`${cmd}Shift+P`,'Projects'],[`${cmd}+ / ${cmd}-`,'Terminal text size'],[`${cmd}Shift+Arrow`,'Focus terminal pane'],[`${cmd}Shift+[ / ]`,'Previous / next terminal pane'],[`${cmd}Shift+Enter`,'Maximize / restore terminal pane'],['Arrow keys on a separator','Resize terminal panes'],['Right-click','Menus for agents, terminal windows and chats']].map(([k,t])=>`<span><kbd>${esc(k)}</kbd>${esc(t)}</span>`).join('')}</div></section>
       <section data-page="about"><h3>Updates</h3><p class="settings-copy">Installed: ${version}. ${update.status==='available'?`Version ${esc(update.latest?.version||'')} is ready to download.`:'Opaya checks GitHub for new versions.'}</p><button class="secondary" data-action="updates">${update.status==='available'?'Update now':'Check for updates'}</button></section>
       <section class="about" data-page="about"><h3>About</h3><p class="settings-copy">${version}. One place. All your agents.</p><div class="settings-buttons"><button class="text-button" data-action="open-link" data-external="1" data-url="https://github.com/trbojevicstefan/agenthub/blob/main/docs/RELEASE_NOTES.md">What's new &#8599;</button><button class="text-button" data-action="open-link" data-external="1" data-url="https://github.com/trbojevicstefan/agenthub">GitHub &#8599;</button><button class="text-button" data-action="open-link" data-external="1" data-url="https://opaya.dev">opaya.dev &#8599;</button></div></section>
@@ -1302,6 +1333,7 @@
     if(name==='opaya-itrust'){action(async()=>{const on=!state.settings?.itrustOpaya;if(on&&!await ask('Turn on iTrust for the Opaya Agent?\n\nIt will install, connect and change things without asking each time. Removing connections or machines still asks.'))return;await api.saveSettings({itrustOpaya:on});await refresh();toast(on?'iTrust is on for the Opaya Agent.':'iTrust is off for the Opaya Agent.');});return;}
     if(name==='browser-open'||name==='browser-toggle'){const p=$('#browser-panel');if(name==='browser-toggle'&&!p.hidden){p.hidden=true;$('#browser-toggle')?.classList.remove('selected');return;}showBrowser();$('#browser-toggle')?.classList.add('selected');$('#browser-url').focus();return;}
     if(name==='projects-toggle'){toggleProjects();return;}
+    if(name==='feedback'){openFeedback();return;}
     if(name==='project-focus'){projectsExpanded.add(id);toggleProjects(true);return;}
     if(name==='mcp-manage'){openMcpManager();return;}
     if(name==='library'){openLibrary();return;}
@@ -4048,8 +4080,9 @@
     const web=document.createElement('button');web.id='browser-toggle';web.type='button';web.className='icon-button projects-toggle';web.dataset.action='browser-toggle';web.title='Opaya browser';web.setAttribute('aria-label','Opaya browser');web.innerHTML='<span class="globe-glyph" aria-hidden="true"></span>';
     web.classList.toggle('selected',!$('#browser-panel').hidden);
     // One group at the right end, after the view's own actions.
+    const talk=document.createElement('button');talk.id='feedback-toggle';talk.type='button';talk.className='icon-button projects-toggle';talk.dataset.action='feedback';talk.title='Feedback: tell us what to fix or add';talk.setAttribute('aria-label','Send feedback');talk.innerHTML='<svg class="feedback-glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/></svg>';
     const tools=document.createElement('div');tools.className='topbar-tools';
-    tools.append(web,button);bar.append(tools);
+    tools.append(talk,web,button);bar.append(tools);
   }
   async function startProjectChat(p,agentId){
     await api.newConversation({agentId,projectId:p.id});agentModes.set(agentId,'chat');overview=false;opayaView=false;playgroundView=false;await refresh();$('#message-input')?.focus();

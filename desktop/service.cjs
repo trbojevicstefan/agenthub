@@ -36,7 +36,7 @@ const toolchain = require('./toolchain.cjs');
 const {visionOf, SUPPORTED:VISION_MODELS} = require('./vision.cjs');
 const pasting = require('./clipboard.cjs');
 async function start({app, safeStorage, shell: electronShell}, root) {
-  let broker, terminals, listener, opaya, stopping = false, setupTrust = false, codexLogins = null;
+  let broker, terminals, listener, opaya, feedback = null, stopping = false, setupTrust = false, codexLogins = null;
   const codexWhere = new Map(), codexChecks = new Map(), codexSeen = new Set(); // codex-login.cjs: where a terminal's command runs; pending screen reads
   const startedAt = new Date().toISOString(), approvals = new Map();
   const descriptor = path.join(root, 'session-service.json');
@@ -453,6 +453,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   }
   // Any error that is not "too old": hand it to the Opaya Agent with a first diagnosis.
   function report(a,error,phase){
+    feedback?.record({source:`agent:${a.provider||'custom'}`,title:`${a.provider||'agent'} over ${a.protocol} ${PHASE[phase]||PHASE.connect}`,message:String(error||'')}).catch(()=>{});
     if(stopping||broker.data.settings?.autoFix===false)return;
     const kind=diagnostics.classify(error,a),key=`${a.id}|${kind.id}`;
     if(reported.has(key)&&Date.now()-reported.get(key)<30*60*1000)return;
@@ -467,6 +468,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   let opayaQuiet=false;
   function actionFailed(title,error,context='',{quiet=false}={}){
     const text=String(error||'');
+    feedback?.record({source:'action',title,message:text,context}).catch(()=>{});
     if(stopping||broker.data.settings?.autoFix===false||/cancel|declined|not approved|stopped by the user/i.test(text))return;
     const key=`${title}|${text.slice(0,120)}`;if(actionReported.has(key)&&Date.now()-actionReported.get(key)<30*60*1000)return;actionReported.set(key,Date.now());
     const run=handoffs.then(async()=>{
@@ -1077,6 +1079,11 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   };
   opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal:x=>runInTerminal({...x,owner:'opaya',background:opayaQuiet}),trusted:()=>!!broker.data.settings?.itrustOpaya||setupTrust});
   opaya.askSecret = askSecret;
+  // Feedback and (opt-in) error reports to Opaya's collector (feedback.cjs, collector/).
+  feedback=new (require('./feedback.cjs').Feedback)({root,version:app.getVersion?.()||'',endpoint:require('../package.json').opayaFeedbackUrl||process.env.OPAYA_FEEDBACK_URL||'',settings:()=>broker.data.settings||{},
+    held:()=>opaya?.heldValues?.()||[],machines:()=>(broker.data.hosts||[]).flatMap(h=>[h.name,h.hostname,h.alias,h.username]).filter(x=>x&&String(x).length>2)});
+  await feedback.init().catch(()=>{});setTimeout(()=>feedback.flush().catch(()=>{}),60*1000).unref?.();setInterval(()=>feedback.flush().catch(()=>{}),60*60*1000).unref?.();
+  opaya.onError=(error,preset)=>{feedback.record({source:'opaya-agent',title:`Opaya Agent on ${preset||'its model'}`,message:error}).catch(()=>{});};
   // Claude Code as the Opaya Agent's model reaches the Opaya tools through this bridge; its token can only list and call them.
   opaya.builtinInstall = async (id,{update=false}={})=>{const ids=builtinIds(id);if(!ids.length)return null;const {job,done}=builtinJob(ids,{update});const r=await done;return {job_id:job.id,...r};};
   opaya.toolBridge = {command:process.execPath, args:[path.join(__dirname,'opaya-tools-mcp.cjs')], env:{ELECTRON_RUN_AS_NODE:'1',OPAYA_TOOLS_ENDPOINT:endpoint(root),OPAYA_TOOLS_TOKEN:toolsToken}};
@@ -1330,6 +1337,11 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       return startJob({kind:'library',route:{from:'Skills library',fromWhere:'Opaya',to:targets.length===1?targets[0].name:`${targets.length} agents`,toWhere:targets.map(a=>a.name).join(', ').slice(0,60),provider:targets[0].provider},title:'Installing skills',detail:`${x.names==='all'?'All library skills':[].concat(x.names).length+' skill(s)'} to ${targets.map(a=>a.name).join(', ')}`,steps:[['copy','Copy to agents']]},progress=>library.installTo({agents:targets.map(a=>({agent:a,host:a.transport==='ssh'?broker.host(a.hostId):null})),names:x.names==='all'?'all':[].concat(x.names||[]).map(String),progress}));
     },
     libraryRemove:x=>library.remove(String(x.name||'')), libraryAddFolder:x=>library.addFolder(String(x.path||'')),
+    // Feedback from the chat icon in the top bar, and the errors Opaya collects when "Share errors" is on.
+    feedbackState:async()=>feedback?feedback.describe():{configured:false,sharing:false,waiting:0,recent:[]},
+    feedbackSend:async x=>{if(!feedback)throw new Error('Feedback is not ready yet.');return feedback.submit({message:x.message,kind:x.kind,contact:x.contact,diagnostics:!!x.diagnostics,where:x.where});},
+    feedbackClear:async()=>feedback?.clear(),
+    reportClientError:async x=>{await feedback?.record({source:'ui',title:String(x.title||'Interface error').slice(0,200),message:String(x.message||''),context:String(x.stack||'').slice(0,1500)});return true;},
     jobs:async()=>[...jobs.values()], jobDismiss:async x=>jobs.delete(String(x.id||'')),
     opayaToolList:async()=>require('./opaya-agent.cjs').TOOLS.map(t=>({name:t.function.name,description:t.function.description,parameters:t.function.parameters})),
     opayaToolCall:async x=>opaya.bridgeCall(String(x?.name||''),x?.args),
@@ -1407,7 +1419,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   };
   const token = randomBytes(32).toString('hex');
   listener = server({token,snapshot,scopes:()=>new Map([[browserToken,new Set(['browserTool'])],[toolsToken,new Set(['opayaToolList','opayaToolCall'])],[vaultToken,new Set(['vaultTool'])]]),
-    dispatch:async (method,input)=>{if(!Object.hasOwn(actions,method))throw new Error('Unsupported desktop action.');try{return await actions[method](input||{});}catch(error){const text=safeError(error);if(REPORTED[method])actionFailed(REPORTED[method](input||{}),text);throw new Error(text);}},
+    dispatch:async (method,input)=>{if(!Object.hasOwn(actions,method))throw new Error('Unsupported desktop action.');try{return await actions[method](input||{});}catch(error){const text=safeError(error);if(REPORTED[method])actionFailed(REPORTED[method](input||{}),text);else if(!/^(feedback|reportClientError)/.test(method))feedback?.record({source:`action:${method}`,title:method,message:text}).catch(()=>{});throw new Error(text);}},
     onApproval:(socket,message)=>{const a=approvals.get(message.id);if(a?.socket===socket)a.finish(message.allow===true,message.value);},
     onDetach:socket=>{for(const a of approvals.values())if(a.socket===socket)a.finish(false);}
   });

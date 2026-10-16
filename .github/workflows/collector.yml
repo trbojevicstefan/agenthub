@@ -1,0 +1,29 @@
+name: Feedback collector
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['collector/**']
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.repository == 'trbojevicstefan/agenthub' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check secrets
+        id: check
+        env:
+          CF: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: if [ -n "$CF" ]; then echo "ready=1" >> "$GITHUB_OUTPUT"; else echo "::notice::Add CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID and COLLECTOR_GITHUB_TOKEN to deploy the collector."; fi
+      - name: Deploy
+        if: steps.check.outputs.ready == '1'
+        working-directory: collector
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          COLLECTOR_GITHUB_TOKEN: ${{ secrets.COLLECTOR_GITHUB_TOKEN }}
+        run: |
+          npx --yes wrangler@3 deploy
+          printf '%s' "$COLLECTOR_GITHUB_TOKEN" | npx --yes wrangler@3 secret put GITHUB_TOKEN

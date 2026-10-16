@@ -1,0 +1,13 @@
+name = "opaya-collector"
+main = "worker.mjs"
+compatibility_date = "2025-06-01"
+
+[vars]
+# The private repository the reports go to, as owner/name.
+GITHUB_REPO = "trbojevicstefan/opaya-feedback"
+
+# Optional: remembers which issue each error fingerprint has (saves a GitHub search per error).
+# Create it with: npx wrangler kv namespace create FINGERPRINTS   and paste the id here.
+# [[kv_namespaces]]
+# binding = "FINGERPRINTS"
+# id = "..."

@@ -1,3 +1,10 @@
+# Opaya 0.35.0 - feedback, and error sharing that helps fix Opaya
+
+- **Feedback.** A chat icon at the top right, next to the browser and projects: say what is broken, an idea, or what you like, optionally with a contact and the recent errors Opaya saw.
+- **Share errors (opt-in).** Turn it on in the feedback window or in Settings > Machines > Feedback and errors. When something fails in Opaya (an install, a connection, an update, the Opaya Agent, the interface), the error is sent to the Opaya team so it can be fixed even if nobody reports it. Before anything leaves your computer, Opaya removes keys, tokens and passwords, your home folder, user and machine names, IP and e-mail addresses; chat text is never sent. The same error is grouped and counted instead of sent again and again.
+- **Nothing gets lost.** Reports wait in an outbox until they are delivered. The feedback window shows what was sent and what waits, and can delete collected errors.
+- **One place for all reports.** The new collector (`collector/`, a small Cloudflare Worker) files every report as an issue in a private GitHub repository: feedback by kind, errors grouped by fingerprint with counts, and an error that returns after its fix reopens its issue as a regression.
+
 # Opaya 0.34.2 - the Opaya Agent runs on Claude Code on Windows
 
 - **Fixed "spawn ENAMETOOLONG".** With Claude Code as its model, the Opaya Agent passed its instructions (about 34 KB) on the command line, which is longer than Windows allows. They now go in a file (`--append-system-prompt-file`), so the command line stays short on every system. A Claude Code too old for that option gets them at the top of the request instead.

@@ -208,6 +208,9 @@ class Broker{
     if(input.signInBrowser!==undefined)next.signInBrowser=/^[a-z]{1,20}$/.test(String(input.signInBrowser))?String(input.signInBrowser):'';
     // Agents on this computer may ask the Opaya Vault for a key (opaya-vault MCP); the user approves each one. On by default.
     if(input.vaultMcp!==undefined)next.vaultMcp=!!input.vaultMcp;
+    // Errors go to Opaya's collector only when the user turns this on (off by default); an own collector URL for testing.
+    if(input.shareErrors!==undefined)next.shareErrors=!!input.shareErrors;
+    if(input.feedbackUrl!==undefined){const u=String(input.feedbackUrl||'').trim();if(u&&!/^https:\/\/[^\s]{4,300}$/.test(u)&&!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(u))throw new Error('Use an https:// address for the feedback service.');next.feedbackUrl=u;}
     // System notifications when Opaya is not in front (all on by default), Opaya's tips, connecting at start, the send key.
     for(const key of ['notifyReplies','notifyApprovals','notifyJobs','notifySound','tips','autoConnect'])if(input[key]!==undefined)next[key]=!!input[key];
     if(input.sendKey!==undefined){if(!['enter','mod-enter'].includes(input.sendKey))throw new Error('Choose Enter or Ctrl+Enter to send.');next.sendKey=input.sendKey;}

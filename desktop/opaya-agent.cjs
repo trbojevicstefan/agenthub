@@ -457,7 +457,7 @@ class OpayaAgent{
       }
     }catch(error){
       const e=this.cli()&&!this.controller.signal.aborted?asSignIn(this.config.preset,error):error;if(e?.signIn){this.signIn=e.signIn;if(e.signIn==='codex')await this.closeCodex().catch(()=>{});}
-      reply.error=this.controller.signal.aborted?'Stopped.':secrets.shieldOutput(String(e.message||e),this.heldValues()).slice(0,600);this.error=reply.error;}
+      reply.error=this.controller.signal.aborted?'Stopped.':secrets.shieldOutput(String(e.message||e),this.heldValues()).slice(0,600);this.error=reply.error;if(!this.controller.signal.aborted)try{this.onError?.(this.error,this.config.preset);}catch{}}
     finally{
       // Internal tool turns stay in history for context; the chat shows one reply per request.
       this.messages.push({...reply,summary:true});
