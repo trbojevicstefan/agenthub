@@ -8,7 +8,7 @@ function fakeClaude(script){
   const spawn=(agent,args,host,options)=>{
     const child=new EventEmitter();child.stdout=new PassThrough();child.stderr=new PassThrough();child.stdin=new PassThrough();child.exitCode=null;child.kill=()=>{};
     let prompt='';child.stdin.on('data',d=>{prompt+=d;});
-    child.stdin.on('end',async()=>{spawns.push({agent,args,options,prompt});const lines=await script({args,prompt});for(const l of lines)child.stdout.write(JSON.stringify(l)+'\n');child.stdout.end();setImmediate(()=>{child.exitCode=0;child.emit('close',0);});});
+    child.stdin.on('end',async()=>{spawns.push({agent,args,options,prompt});const lines=await script({args,prompt}),fail=lines.find(l=>l.__exit);for(const l of lines)if(!l.__exit)child.stdout.write(JSON.stringify(l)+'\n');if(fail)child.stderr.write(fail.__stderr||'');child.stdout.end();setImmediate(()=>{child.exitCode=fail?fail.__exit:0;child.emit('close',child.exitCode);});});
     return child;
   };
   return {spawns,spawn};
@@ -36,7 +36,10 @@ test('Claude Code can be the Opaya Agent\'s model: it reaches the Opaya tools th
   const reply=agent.describe().messages.at(-1);assert.equal(reply.content,'You have 0 agents. (What do I have?)');assert.deepEqual(reply.activity,['Using get workspace']);
   const run=fake.spawns.at(-1);
   assert.equal(run.agent.command,'claude');assert.equal(run.options.cwd,agent.home);
-  for(const flag of ['--strict-mcp-config','--mcp-config','--append-system-prompt'])assert(run.args.includes(flag),flag);
+  for(const flag of ['--strict-mcp-config','--mcp-config','--append-system-prompt-file'])assert(run.args.includes(flag),flag);
+  assert.equal(run.args.includes('--append-system-prompt'),false,'the instructions are not on the command line (Windows limit)');
+  assert.match(require('node:fs').readFileSync(run.args[run.args.indexOf('--append-system-prompt-file')+1],'utf8'),/You are the Opaya Agent/);
+  assert(run.args.join(' ').length<4000,'the command line stays short');
   assert.equal(run.args[run.args.indexOf('--allowedTools')+1],'mcp__opaya');
   for(const tool of ['Bash','Edit','Write','WebFetch'])assert(run.args.slice(run.args.indexOf('--disallowedTools')).includes(tool),`${tool} is off`);
   assert.equal(run.prompt,'What do I have?','the request goes through stdin, not the command line');
@@ -89,4 +92,17 @@ test('API keys: a wrong key is explained, services without a model list still co
   mode='no-list';const r=await agent.test({preset:'anthropic',apiKey:'sk-ant'});
   assert.equal(r.ok,true);assert.deepEqual(r.models,['claude-sonnet-5','claude-opus-5-5','claude-haiku-4-5']);
   assert.equal(calls.at(-1).url,'https://api.anthropic.com/v1/chat/completions');assert.equal(calls.at(-1).headers['x-api-key'],'sk-ant');
+});
+test('a Claude Code without --append-system-prompt-file gets the instructions at the top of the request',async t=>{
+  const {agent,fake}=await fixture(t,async({args})=>{
+    if(args.includes('json'))return [{type:'result',is_error:false,result:'OK'}];
+    if(args.includes('--append-system-prompt-file'))return [{__exit:1,__stderr:"error: unknown option '--append-system-prompt-file'"}];
+    return [{type:'assistant',message:{content:[{type:'text',text:'Hi'}]}},{type:'result',is_error:false,result:'done'}];
+  });
+  await agent.saveConfig({preset:'claude',model:''});
+  agent.begin('Hello');await settle(agent);
+  assert.equal(agent.describe().messages.at(-1).content,'Hi');
+  const last=fake.spawns.at(-1);assert.equal(last.args.includes('--append-system-prompt-file'),false);
+  assert.match(last.prompt,/^<opaya-instructions>\nYou are the Opaya Agent[\s\S]*<\/opaya-instructions>\n\nHello$/);
+  agent.begin('Again');await settle(agent);assert.equal(fake.spawns.filter(x=>x.args.includes('--append-system-prompt-file')).length,1,'tried once, then remembered');
 });

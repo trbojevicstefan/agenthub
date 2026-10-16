@@ -1,3 +1,7 @@
+# Opaya 0.34.2 - the Opaya Agent runs on Claude Code on Windows
+
+- **Fixed "spawn ENAMETOOLONG".** With Claude Code as its model, the Opaya Agent passed its instructions (about 34 KB) on the command line, which is longer than Windows allows. They now go in a file (`--append-system-prompt-file`), so the command line stays short on every system. A Claude Code too old for that option gets them at the top of the request instead.
+
 # Opaya 0.34.1 - update API keys
 
 - **Update a key in the Vault.** Each key has an Update button: paste the new value (after you rotated or renewed it). It keeps its name and reference, and "Also update it in..." writes the new value where every agent that had it reads it (all agents for a key given to every agent, and the Opaya Agent's own model key), then tells the connected ones. Agents it could not update are listed.

@@ -561,9 +561,21 @@ class OpayaAgent{
     if(!this.toolBridge)throw new Error('The Opaya tools are not available. Restart Opaya.');
     const config=path.join(this.home,'mcp.json');
     await atomicJson(config,{mcpServers:{opaya:{type:'stdio',command:this.toolBridge.command,args:this.toolBridge.args,env:this.toolBridge.env}}});
-    const args=['-p','--output-format','stream-json','--verbose','--mcp-config',config,'--strict-mcp-config','--allowedTools','mcp__opaya',
-      '--disallowedTools','Bash','Edit','Write','MultiEdit','NotebookEdit','WebFetch','WebSearch','Task','--append-system-prompt',this.system(),
-      ...(this.claudeSessionId?['--resume',this.claudeSessionId]:[]),...(this.config.model?['--model',this.config.model]:[])];
+    // The instructions go in a file: on the command line they pass Windows' 32,767-character limit (spawn
+    // ENAMETOOLONG). A Claude Code too old for --append-system-prompt-file gets them at the top of the request instead.
+    const instructions=path.join(this.home,'opaya-instructions.md'),system=this.system();
+    await fs.writeFile(`${instructions}.tmp`,system,'utf8');await fs.rename(`${instructions}.tmp`,instructions);
+    const base=['-p','--output-format','stream-json','--verbose','--mcp-config',config,'--strict-mcp-config','--allowedTools','mcp__opaya',
+      '--disallowedTools','Bash','Edit','Write','MultiEdit','NotebookEdit','WebFetch','WebSearch','Task'];
+    const tail=[...(this.claudeSessionId?['--resume',this.claudeSessionId]:[]),...(this.config.model?['--model',this.config.model]:[])];
+    try{await this.claudeTurn([...base,...(this.claudeNoPromptFile?[]:['--append-system-prompt-file',instructions]),...tail],this.claudeNoPromptFile?`<opaya-instructions>\n${system}\n</opaya-instructions>\n\n${text}`:text,reply);}
+    catch(error){
+      if(this.claudeNoPromptFile||!/unknown option.*append-system-prompt-file|append-system-prompt-file.*(unknown|not recognized)/i.test(String(error?.message||'')))throw error;
+      this.claudeNoPromptFile=true;
+      await this.claudeTurn([...base,...tail],`<opaya-instructions>\n${system}\n</opaya-instructions>\n\n${text}`,reply);
+    }
+  }
+  async claudeTurn(args,text,reply){
     const child=this.claudeSpawn(args);this.claudeChild=child;
     await new Promise((resolve,reject)=>{
       let buffer='',stderr='',done=false,resultError='',seen=false;
