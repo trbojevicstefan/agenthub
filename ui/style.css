@@ -2831,3 +2831,24 @@ body[data-theme="light"] .job-wait-box{background:#e8f6ee;border-color:#2f9e5f}
 body[data-theme="light"] .job-wait-box strong{color:#1d7a46}
 body[data-theme="light"] .job-wait-box p{color:#2f3d35}
 body[data-theme="light"] .job-wait-code{color:#14231a}
+.mem-wizard{min-width:0}
+.mem-layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:20px;min-width:0}
+.mem-nav{display:flex;flex-direction:column;gap:6px;min-width:0}
+.mem-tab{justify-content:flex-start;text-align:left;gap:11px;padding:10px 12px;border:1px solid #333d3a;background:#1d2422;border-radius:9px;min-width:0}
+.mem-tab>span:first-child{font-size:16px;color:#9fd4b2;width:20px;flex:none;text-align:center}
+.mem-tab>span:last-child{display:flex;flex-direction:column;min-width:0}
+.mem-tab strong{font-size:13px;font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mem-tab small{font-size:10.5px;color:#8a9f95}
+.mem-tab.active{background:#24382c;border-color:#5b8a6b}
+.mem-tab.small{padding:7px 10px}.mem-tab.small strong{font-size:12px;font-weight:500}
+.mem-notes{margin-top:12px;display:flex;flex-direction:column;gap:5px}
+.mem-notes h4{margin:0 0 4px;font-size:12px;color:#bdcfc6}.mem-notes h4 small{color:#7c9787;font-weight:400}
+.mem-editor{display:flex;flex-direction:column;min-width:0}
+.mem-editor h3{font-size:18px;margin-bottom:6px}
+.mem-hint{font-size:13px;line-height:1.6;color:#b8c7bf;margin-bottom:8px}
+.mem-where{margin:0 0 10px}.mem-where code{font-size:10.5px;color:#9fb7a6}.mem-where em{font-style:normal;color:#7c9787}
+.mem-editor textarea{width:100%;min-height:300px;font:12.5px/1.7 "Cascadia Code","SFMono-Regular",Consolas,monospace;resize:vertical;background:#141917;border-color:#3c4b41}
+.mem-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.mem-editor .modal-footer{margin-top:14px;padding-top:14px}
+.mem-copy{margin-bottom:12px;padding:4px 14px}
+@media (max-width:760px){.mem-layout{grid-template-columns:1fr}}

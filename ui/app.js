@@ -749,6 +749,48 @@
     $('#channels-add').onclick=()=>openChannelWizard(a);
     await load();
   }
+  // Memory & personality: the agent's own files (SOUL.md, MEMORY.md, USER.md, CLAUDE.md, AGENTS.md...), where it runs.
+  const MEMORY_FRAMEWORKS=['hermes','openclaw','claude','codex','opencode','dsh','goose'];
+  const hasMemory=a=>MEMORY_FRAMEWORKS.includes(a.install?.framework);
+  async function openMemory(a,focus='personality'){
+    modal('Memory & personality',`${title(a)} / ${location(a)}`,`<div id="mem-body" class="mem-wizard"><p class="setup-lead">Reading ${esc(title(a))}'s memory...</p></div>`,true);
+    const body=$('#mem-body');let data=null,current=focus,note='';
+    const kindIcon={personality:'&#10022;',identity:'&#9786;',user:'&#9673;',memory:'&#9707;',instructions:'&#9776;',tools:'&#9874;'};
+    const draw=()=>{
+      const e=data.entries.find(x=>x.id===current)||data.entries[0];current=e.id;
+      const tabs=data.entries.map(x=>`<button type="button" class="mem-tab ${!note&&x.id===current?'active':''}" data-mem="${esc(x.id)}"><span aria-hidden="true">${kindIcon[x.kind]||'&#9679;'}</span><span><strong>${esc(x.label)}</strong><small>${x.exists?x.content.trim()?`${plural(x.content.trim().split('\n').length,'line')}`:'Empty':'Not written yet'}</small></span></button>`).join('');
+      const notes=data.notesDir?`<div class="mem-notes"><h4>Notes <small>${esc(data.notesDir)}/</small></h4>${data.notes.length?data.notes.map(n=>`<button type="button" class="mem-tab small ${note===n.name?'active':''}" data-note="${esc(n.name)}"><span aria-hidden="true">&#9998;</span><span><strong>${esc(n.name)}</strong></span></button>`).join(''):'<p class="field-help">No notes yet.</p>'}<button type="button" class="text-button" id="mem-note-new">+ New note for today</button></div>`:'';
+      const where=data.root?`${data.root}/${note?`${data.notesDir}/${note}`:e.file}`:note?`${data.notesDir}/${note}`:e.file;
+      const others=state.agents.filter(b=>b.id!==a.id&&hasMemory(b));
+      const editor=note?`<div class="mem-editor"><h3>${esc(note)}</h3><p class="field-help mem-where"><code>${esc(where)}</code></p><textarea id="mem-text" spellcheck="true" rows="18" placeholder="Reading..."></textarea><div class="modal-footer"><span>Saved where ${esc(title(a))} runs. The previous version is kept as .opaya-bak.</span><div><button type="button" class="primary" id="mem-save">Save note</button></div></div></div>`
+        :`<div class="mem-editor"><h3>${esc(e.label)}</h3><p class="mem-hint">${esc(e.hint)}</p><p class="field-help mem-where"><code>${esc(where)}</code>${e.block?' <em>(marked section)</em>':''}</p>${e.tooBig?'<p class="field-help">This file is larger than 512 KB. Open it in Files to edit it.</p>':`<textarea id="mem-text" spellcheck="true" rows="16" placeholder="${esc(e.template)}">${esc(e.content)}</textarea>`}
+          <div class="mem-actions">${!e.content.trim()&&e.template?'<button type="button" class="secondary" id="mem-template">Start from an example</button>':''}<button type="button" class="secondary" id="mem-ask">Write it with the Opaya Agent</button>${['personality','user'].includes(e.kind)&&others.length?'<button type="button" class="secondary" id="mem-copy">Use for other agents...</button>':''}</div>
+          <div class="modal-footer"><span>${esc(title(a))} reads this at the start of a session; a running chat sees it after a new chat. The previous version is kept as .opaya-bak.</span><div><button type="button" class="primary" id="mem-save" ${e.tooBig?'disabled':''}>Save</button></div></div></div>`;
+      body.innerHTML=`<div class="mem-layout"><nav class="mem-nav">${tabs}${notes}</nav>${editor}</div>`;
+      body.querySelectorAll('[data-mem]').forEach(btn=>btn.onclick=()=>{if(dirty()&&!confirm('Leave without saving?'))return;note='';current=btn.dataset.mem;draw();});
+      body.querySelectorAll('[data-note]').forEach(btn=>btn.onclick=()=>{if(dirty()&&!confirm('Leave without saving?'))return;openNote(btn.dataset.note);});
+      $('#mem-note-new')&&($('#mem-note-new').onclick=()=>{const d=new Date(),name=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}.md`;if(data.notes.some(n=>n.name===name))return openNote(name);data.notes.unshift({name,size:0});note=name;draw();$('#mem-text').value=`# ${name.replace(/\.md$/,'')}\n\n- `;$('#mem-text').placeholder='';});
+      const text=$('#mem-text');if(text)text.dataset.saved=text.value;
+      $('#mem-template')&&($('#mem-template').onclick=()=>{text.value=e.template;text.focus();});
+      $('#mem-ask')&&($('#mem-ask').onclick=()=>action(async()=>{await api.opayaSend({text:`Help me write ${title(a)}'s ${e.label.toLowerCase()} (agent_id ${a.id}, ${a.provider} on ${location(a)}). It lives in ${where}. Ask me a few short questions, then write it in that file where the agent runs, keep anything already there that still fits, and show me the result.`});closeModal();overview=false;opayaView=true;playgroundView=false;manageId='';render();saveView();}));
+      $('#mem-copy')&&($('#mem-copy').onclick=()=>copyTo(e,text.value,others));
+      $('#mem-save').onclick=()=>action(async()=>{const btn=$('#mem-save');btn.disabled=true;try{
+        if(note){await api.agentMemoryNoteSave({id:a.id,name:note,content:text.value});}
+        else{await api.agentMemorySave({id:a.id,entry:e.id,content:text.value});e.content=text.value;e.exists=true;}
+        text.dataset.saved=text.value;delete $('#app-dialog').dataset.typed;toast('Saved.');draw();}finally{btn.disabled=false;}});
+    };
+    const dirty=()=>{const t=$('#mem-text');return t&&t.value!==t.dataset.saved;};
+    const openNote=async name=>{note=name;draw();const t=$('#mem-text');try{const r=await api.agentMemoryNote({id:a.id,name});t.value=r.content;t.dataset.saved=r.content;t.placeholder='';}catch(err){t.placeholder=err.message;}};
+    const copyTo=(e,content,others)=>{
+      const rows=others.map(b=>`<label class="check-row"><input type="checkbox" value="${esc(b.id)}" checked /> ${esc(title(b))} <small>${esc(location(b))}</small></label>`).join('');
+      modal(`Use this ${e.kind==='user'?'"about you"':'personality'} for other agents`,`From ${title(a)}`,`<p class="field-help">Each agent gets it in its own file: SOUL.md for Hermes and OpenClaw, a marked section of CLAUDE.md or AGENTS.md for the others. What else they have stays.</p><div class="set-card mem-copy">${rows}</div><div id="mem-copy-result"></div><div class="modal-footer"><button type="button" class="secondary" id="mem-copy-back">Back</button><div><button type="button" class="primary" id="mem-copy-go">Copy</button></div></div>`);
+      $('#mem-copy-back').onclick=()=>openMemory(a,e.id);
+      $('#mem-copy-go').onclick=()=>action(async()=>{const to=[...document.querySelectorAll('.mem-copy input:checked')].map(x=>x.value);if(!to.length)return;const btn=$('#mem-copy-go');btn.disabled=true;
+        try{const r=await api.agentMemoryCopy({from:a.id,entry:e.id,content,to});$('#mem-copy-result').innerHTML=`<div class="set-card">${r.results.map(x=>`<div class="set-row"><span class="set-text"><strong>${esc(x.name)}</strong><small>${esc(x.ok?x.file:x.error)}</small></span><span class="set-val ${x.ok?'ok':'warn'}">${x.ok?'Done':'Failed'}</span></div>`).join('')}</div>`;toast(r.results.every(x=>x.ok)?'Copied.':'Some agents could not be updated.',!r.results.every(x=>x.ok));}finally{btn.disabled=false;}});
+    };
+    try{data=await api.agentMemory({id:a.id});if(!$('#mem-body'))return;draw();}
+    catch(err){body.innerHTML=`<p class="setup-lead">Could not read ${esc(title(a))}'s memory.</p><p class="field-help">${esc(err.message)}</p><div class="modal-footer"><span></span><div><button type="button" class="secondary" id="mem-retry">Try again</button></div></div>`;$('#mem-retry').onclick=()=>openMemory(a,focus);}
+  }
   function openCordConnect(){
     const agents=state.agents.filter(a=>['claude','codex','acp','openai'].includes(a.protocol));
     if(!agents.length){toast('Add a chat agent to OPAYA first.',true);return;}
@@ -1770,11 +1812,11 @@
   document.addEventListener('keydown',event=>{if(event.target.id==='an-chat-filter'&&event.key==='Escape'&&anFilter){event.preventDefault();event.stopPropagation();anFilter='';const a=selected();if(a)renderAgentNav(a,'chat');}},true);
   // A chat's day group, as the sidebar and History list them.
   function dayLabel(iso){const t=new Date(iso).getTime(),today=new Date();today.setHours(0,0,0,0);const d=today.getTime(),day=864e5;return t>=d?'Today':t>=d-day?'Yesterday':t>=d-6*day?'This week':t>=d-29*day?'This month':'Older';}
-  Object.assign(AN_ICON,{setup:AN_ICON.model,repair:AN_ICON.care,channels:AN_ICON.chat,keys:AN_ICON.access,vault:AN_ICON.access,mcp:anI('<path d="M9 7V3M15 7V3M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>'),machines:AN_ICON.machine,newVps:AN_ICON.plus,dockerize:anI('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/>'),backups:AN_ICON.projects,surface:AN_ICON.chat,connect:AN_ICON.power,library:anI('<path d="m12 3 2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>'),shareSkills:anI('<path d="M4 8h13l-3-3M20 16H7l3 3"/>')});
+  Object.assign(AN_ICON,{soul:anI('<path d="m12 3 2.2 5.6L20 9l-4.4 3.8L17 19l-5-3-5 3 1.4-6.2L4 9l5.8-.4z"/>'),memory:anI('<path d="M9 4a3 3 0 0 0-3 3 3 3 0 0 0-2 5 3 3 0 0 0 2 5 3 3 0 0 0 6 0V7a3 3 0 0 0-3-3zM15 4a3 3 0 0 1 3 3 3 3 0 0 1 2 5 3 3 0 0 1-2 5 3 3 0 0 1-6 0"/>'),aboutYou:anI('<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>'),setup:AN_ICON.model,repair:AN_ICON.care,channels:AN_ICON.chat,keys:AN_ICON.access,vault:AN_ICON.access,mcp:anI('<path d="M9 7V3M15 7V3M6 7h12v4a6 6 0 0 1-12 0z"/><path d="M12 17v4"/>'),machines:AN_ICON.machine,newVps:AN_ICON.plus,dockerize:anI('<path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12 4 7.5"/>'),backups:AN_ICON.projects,surface:AN_ICON.chat,connect:AN_ICON.power,library:anI('<path d="m12 3 2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/>'),shareSkills:anI('<path d="M4 8h13l-3-3M20 16H7l3 3"/>')});
   // From general to specific; each action of the agent is in exactly one of them. hk: its key on the Manage screens.
   const AN_SECTIONS=[
     {key:'overview',name:'Overview',desc:'Everything about it at a glance.',icon:AN_ICON.overview},
-    {key:'model',name:'Model & skills',desc:'What it answers with and what it can do.',icon:AN_ICON.model,hk:'Q'},
+    {key:'model',name:'Model, skills & memory',desc:'What it answers with, what it can do, and who it is.',icon:AN_ICON.model,hk:'Q'},
     {key:'access',name:'Keys & tools',desc:'API keys, MCP servers and what it may do without asking.',icon:AN_ICON.access,hk:'W'},
     {key:'machine',name:'Machine & Docker',desc:'Where it runs: files, terminals and its container.',icon:AN_ICON.machine,hk:'E'},
     {key:'deploy',name:'Deploy & clone',desc:'Copy it to another machine or into Docker.',icon:AN_ICON.deploy,hk:'R'},
@@ -1787,7 +1829,7 @@
   const AN_SUB={
     chat:[['chatWindow','Open in a window'],['export','Export this chat']],
     console:[['terminal','New CLI window'],['shell','New shell window'],['files','Files']],
-    model:[['setup','Set up model'],['models','Model'],['effort','Reasoning'],['skills','Skills & commands'],['shareSkills','Share skills'],['library','Skills library']],
+    model:[['setup','Set up model'],['models','Model'],['effort','Reasoning'],['skills','Skills & commands'],['shareSkills','Share skills'],['library','Skills library'],['soul','Personality'],['memory','Memory'],['aboutYou','About you']],
     access:[['keys','API keys'],['vault','Opaya Vault'],['mcp','MCP servers'],['transfer','Share with another agent'],['gateway','Gateway'],['channels','Messaging channels'],['itrust','iTrust'],['browser','Opaya browser']],
     machine:[['machines','Its machine in Machines'],['files','Files'],['terminal','CLI'],['shell','Shell'],['containerRestart','Restart container'],['containerLogs','Container logs']],
     deploy:[['clone','Clone'],['dockerize','Dockerize'],['redeploy','Redeploy'],['newVps','New VPS']],
@@ -1896,6 +1938,7 @@
       keyed.channels={key:'channels',icon:'&#9993;',label:'Messaging channels',run:()=>openChannels(a)};
       keyed.setup={key:'setup',icon:'&#9672;',label:'Set up model',run:()=>openSetupWizard({agent:a})};
     }
+    if(hasMemory(a)){keyed.soul={key:'soul',icon:'&#10022;',label:'Personality',run:()=>openMemory(a,'personality')};keyed.memory={key:'memory',icon:'&#9707;',label:'Memory',run:()=>openMemory(a,a.install?.framework==='hermes'||a.install?.framework==='openclaw'?'memory':'instructions')};keyed.aboutYou={key:'aboutYou',icon:'&#9673;',label:'About you',run:()=>openMemory(a,'user')};}
     // The CLI when the agent has one; an API agent has only the shell (its own "shell" action), not a second copy of it.
     keyed.terminal={key:'terminal',icon:'&gt;_',label:`Open ${title(a)} CLI`,disabled:!hasCli(a),hint:hasCli(a)?'':'This connection has no native CLI.',run:()=>openTerminal({agentId:a.id,mode:'agent'})};
     keyed.fix={key:'fix',icon:'&#10038;',label:'Check & fix with Opaya Agent',run:()=>askOpayaToFix(a)};
@@ -1984,7 +2027,11 @@
         card('Skills',[
           row('skills','Skills & commands','What it can do; install new skills',skillList?skillList.supported===false?'Not readable':`${skillList.skills?.length||0} skills${a.commands?.length?`, ${a.commands.length} commands`:''}`:'Reading...'),
           row('shareSkills','Share skills','Copy its skills to another agent, here or on another machine'),
-          row('library','Skills library','Opaya\'s own skills, to install on any agent')])]),
+          row('library','Skills library','Opaya\'s own skills, to install on any agent')]),
+        hasMemory(a)?card('Memory & personality',[
+          row('soul','Personality','Who it is and how it talks (SOUL.md or its own instructions)'),
+          row('memory','Memory','What it remembers between sessions'),
+          row('aboutYou','About you','What it knows about you')]):'']),
       access:()=>sec('access',pbtn('vault','Open Vault'),[card('Keys',[
           row('keys','API keys','Keys it can use, by name only',keysVal,{tone:keyList&&!keyList.keys.length?'warn':''}),
           row('vault','Opaya Vault','Every key you keep in Opaya; import them from a .env or your tools',(()=>{const all=vaultKeys(),mine=all.filter(k=>keyHolders(k).has(a.id)).length;return all.length?`${plural(all.length,'key')}${mine?` / ${mine} given to ${title(a)}`:''}`:'Empty';})())]),

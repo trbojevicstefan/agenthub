@@ -1,3 +1,13 @@
+# Opaya 0.33.0 - memory and personality for every agent, and Cord AI
+
+- **Memory & personality.** Every agent Opaya manages now has Personality, Memory and About you under Manage > Model, skills & memory. Opaya edits the files the agent itself reads, where it runs (this computer, a VPS or Docker):
+  - Hermes: `SOUL.md`, `memories/MEMORY.md`, `memories/USER.md`.
+  - OpenClaw: `SOUL.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md`, `AGENTS.md`, `TOOLS.md`, and its daily notes in `memory/`.
+  - Claude Code (`CLAUDE.md`), Codex, OpenCode and DeepSeek Harness (`AGENTS.md`), Goose (`.goosehints`). These have no personality file of their own, so Opaya keeps the personality and "about you" in a marked section of that file, which they read every session.
+- **Start from an example, or write it with the Opaya Agent.** An empty file gets a short example; the Opaya Agent can ask you a few questions and write it.
+- **One personality for many agents.** "Use for other agents" copies a personality or "about you" to the agents you pick, each in its own file. Every save keeps the previous version as `.opaya-bak`.
+- **Cord AI.** Home > Connect to Cord AI shares an Opaya agent with your Cord team: paste the prompt from Cord (Connect Agent > OPAYA), pick the agent, connect. Its keys, tools and approvals stay in Opaya. See [Cord bridge](CORD_BRIDGE.md).
+
 # Opaya 0.32.5 - sign-ins that finish, and every option your agent offers
 
 - **Sign-in that goes through.** Some agents wait for the browser on the IPv6 localhost (`::1`) while the browser or Opaya used `127.0.0.1`, so the ChatGPT sign-in stopped at the last step. Opaya now listens on both and forwards the sign-in to whichever address the agent uses.

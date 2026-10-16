@@ -51,6 +51,14 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   if (process.platform !== 'win32') await fs.rm(endpoint(root),{force:true});
   const machine = {hostname:require('node:os').hostname(), home:require('node:os').homedir()};
   const toolState = {machines:{}, checking:false, notified:''}; // update checks, filled in the background
+  // Where an agent's memory files are: this computer (read with fs, also on Windows) or a shell where it runs.
+  async function memoryIo(a){
+    const mem=require('./agent-memory.cjs'),clone=require('./clone.cjs'),proc=require('./process.cjs'),framework=maintenance.frameworkOf(a);
+    if(!mem.supported(framework))throw new Error(`Opaya knows where Hermes, OpenClaw, Claude Code, Codex, OpenCode, DeepSeek Harness and Goose keep their memory. ${a.name} is not one of them.`);
+    const where=clone.place({agent:a,host:a.transport==='ssh'?broker.host(a.hostId):null}),local=clone.isLocal(where);
+    const run=(script,input='')=>proc.collect(clone.shell(where,script),{timeout:45000,maxBytes:8*1024*1024,input});
+    return {framework,io:await mem.ioFor(framework,a,{local,where,run})};
+  }
   function snapshot() { const base=broker.snapshot(); return {...base, agents:base.agents.map(a=>({...a,install:maintenance.capabilities(a),vision:visionOf(a)})), toolUpdates:{machines:toolState.machines,checking:toolState.checking}, machine, opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, visionModels:VISION_MODELS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true, cordBridgeVersion:2}}; }
   const emit = () => listener?.broadcast('state', snapshot());
   async function approve(agent, title, detail) {
@@ -1126,6 +1134,25 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       const out=await require('./process.cjs').collect(clone.shell(where,`f=${f}; if [ -f "$f" ]; then s=$(wc -c < "$f" | tr -d ' '); echo "SIZE $s"; ${stat?'':'if [ "$s" -le 26214400 ]; then base64 < "$f" | tr -d "\\n"; fi;'} else echo MISSING; fi`),{timeout:stat?15000:120000,maxBytes:36*1024*1024});
       const text=String(out||'');if(/^MISSING/.test(text))return {exists:false};const m=/^SIZE (\d+)\n?([\s\S]*)$/.exec(text);if(!m)return {exists:false};
       if(stat)return {exists:true,size:Number(m[1]),path:p};if(Number(m[1])>25*1024*1024)throw new Error('The file is larger than 25 MB.');return {exists:true,size:Number(m[1]),path:p,data:m[2].trim()};
+    },
+    // Memory and personality (SOUL.md, MEMORY.md, USER.md, CLAUDE.md, AGENTS.md...) in the files the agent itself reads,
+    // where it runs (agent-memory.cjs).
+    agentMemory:async x=>{const {framework,io}=await memoryIo(broker.agent(x.id));return require('./agent-memory.cjs').read(framework,io);},
+    agentMemorySave:async x=>{const {framework,io}=await memoryIo(broker.agent(x.id));return require('./agent-memory.cjs').write(framework,io,String(x.entry||''),x.content);},
+    agentMemoryNote:async x=>{const {framework,io}=await memoryIo(broker.agent(x.id));return require('./agent-memory.cjs').readNote(framework,io,x.name);},
+    agentMemoryNoteSave:async x=>{const {framework,io}=await memoryIo(broker.agent(x.id));return require('./agent-memory.cjs').writeNote(framework,io,x.name,x.content);},
+    // The same personality or "about you" for other agents, each in its own file for that.
+    agentMemoryCopy:async x=>{
+      const mem=require('./agent-memory.cjs'),src=await memoryIo(broker.agent(x.from)),entry=mem.spec(src.framework)?.entries.find(e=>e.id===x.entry);
+      if(!entry||!['personality','user'].includes(entry.kind))throw new Error('Only the personality and "about you" can be copied.');
+      const content=typeof x.content==='string'?x.content:(await mem.read(src.framework,src.io)).entries.find(e=>e.id===entry.id).content;
+      const results=[];
+      for(const id of (Array.isArray(x.to)?x.to:[]).slice(0,50)){
+        const a=broker.agent(id);
+        try{const dst=await memoryIo(a),target=mem.entryOfKind(dst.framework,entry.kind);if(!target)throw new Error('It has no place for this.');const r=await mem.write(dst.framework,dst.io,target.id,content);results.push({id:a.id,name:a.name,ok:true,file:r.file});}
+        catch(error){results.push({id:a.id,name:a.name,ok:false,error:String(error?.message||error).slice(0,300)});}
+      }
+      return {results};
     },
     tokenRemove:async x=>{await broker.removeToken(schema.id(x.id));emit();return true;},
     scheduleSave:async x=>{const r=await broker.saveSchedule(x);emit();return r;},scheduleRemove:async x=>{await broker.removeSchedule(x.id);emit();return true;},

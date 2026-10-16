@@ -4,7 +4,7 @@
 
 Opaya is a local-first desktop app for your own AI agents: **Hermes, Claude Code, Codex, OpenClaw**, and any other CLI or OpenAI-compatible API. It works with agents on this computer, on your VPS machines over SSH, and in Docker containers. Chat with them, watch their terminals, give them a browser, and share skills and tools between them, all from one window. Opaya needs no hosted account, collects no telemetry and sends nothing through a third-party relay.
 
-**Current version: 0.32.5.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
+**Current version: 0.33.0.** See [what's new](docs/RELEASE_NOTES.md) and the [roadmap](docs/ROADMAP.md).
 
 ## Download
 
@@ -267,3 +267,7 @@ CI does not test your private VPS accounts or installed provider versions. No sa
 ## Cord AI team connection
 
 Share an existing agent with your Cord team: in Cord choose **Connect Agent → OPAYA**, copy the prompt, then open **Home → Connect to Cord AI** in OPAYA. Select the agent and connect. Existing Vault credentials, MCP and native approvals stay in OPAYA. The CLI is `npm run cord:connect -- --server URL --pair CODE --runtime opaya --opaya-agent ID`. See [setup and controls](docs/CORD_BRIDGE.md).
+
+## Memory and personality
+
+Manage > Model, skills & memory > Personality, Memory and About you edit the files each agent reads itself, where it runs: Hermes `SOUL.md` and `memories/`, the OpenClaw workspace (`SOUL.md`, `IDENTITY.md`, `USER.md`, `MEMORY.md`, `AGENTS.md`, `TOOLS.md`, `memory/`), and the instruction file of Claude Code, Codex, OpenCode, DeepSeek Harness and Goose, where Opaya keeps the personality in a marked section. A save keeps the previous version as `.opaya-bak`.

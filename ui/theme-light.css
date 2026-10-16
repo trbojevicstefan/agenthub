@@ -981,3 +981,13 @@
 :where(body[data-theme="light"]) .job-wait-box p{color:#121d16}
 :where(body[data-theme="light"]) .job-wait-code{color:#000000}
 :where(body[data-theme="light"]) .job-wait-pulse{background:#badec9}
+:where(body[data-theme="light"]) .mem-tab{border:1px solid #c8d1ce;background:#dbe2e0}
+:where(body[data-theme="light"]) .mem-tab>span:first-child{color:#1f452d}
+:where(body[data-theme="light"]) .mem-tab small{color:#45544d}
+:where(body[data-theme="light"]) .mem-tab.active{background:#c7dbcf;border-color:#8ab298}
+:where(body[data-theme="light"]) .mem-notes h4{color:#233029}
+:where(body[data-theme="light"]) .mem-notes h4 small{color:#4b5e53}
+:where(body[data-theme="light"]) .mem-hint{color:#28332d}
+:where(body[data-theme="light"]) .mem-where code{color:#344539}
+:where(body[data-theme="light"]) .mem-where em{color:#4b5e53}
+:where(body[data-theme="light"]) .mem-editor textarea{background:#e6ebe9;border-color:#bbc9c0}
