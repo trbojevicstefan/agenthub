@@ -155,6 +155,62 @@ async function transferKeys({source,sourceHost,target,targetHost,keys='all',vaul
   progress({step:'keys',state:'done',message:`Copied ${go.length} key${go.length===1?'':'s'} to ${target.name} (${into}): ${go.map(p=>p.name).join(', ')}${skipped.length?`. Not copied: ${skipped.map(p=>`${p.name} (${p.why})`).join(', ')}`:''}. Reconnect ${target.name} so it loads them.`});
   return {keys:go.map(p=>p.name),skipped:skipped.map(({name,why})=>({name,why})),into};
 }
+// ---- Managing an agent's own skills: create, read, edit, remove ---------------------------------------------------
+const SKILL_NAME=/^[a-z0-9][a-z0-9._-]{0,63}$/;
+const writeAt=(where,file,content)=>isLocal(where)?fs.mkdir(path.dirname(file),{recursive:true}).then(()=>fs.writeFile(file,content,'utf8')):collect(shell(where,`mkdir -p ${quote(path.posix.dirname(file))} && cat > ${quote(file)}`),{timeout:30000,input:content});
+const readAt=(where,file)=>isLocal(where)?fs.readFile(file,'utf8'):collect(shell(where,`cat ${quote(file)}`),{timeout:30000,maxBytes:2*1024*1024});
+// A skill of the agent by name, with its SKILL.md on its machine. Bundled skills (no folder) are not editable.
+async function ownSkill(agent,host,name){
+  const r=await listSkills(agent,host),s=r.skills.find(x=>x.name===name);
+  if(!s)throw new Error(`${agent.name} has no skill "${name}".`);if(!s.path)throw new Error(`"${name}" comes with ${agent.name} and cannot be changed here.`);
+  return {skill:s,where:place({agent,host})};
+}
+function skillText({name,description='',body=''}){
+  const d=String(description).replace(/[\r\n]+/g,' ').trim().slice(0,400);
+  return `---\nname: ${name}\ndescription: ${d.includes(':')||d.startsWith('"')?JSON.stringify(d):d}\n---\n\n${String(body||'').trim()||`# ${name}\n\nWhen to use this skill and the steps to follow.`}\n`;
+}
+async function createSkill({agent,host,name,description,body,content}){
+  const n=String(name||'').trim().toLowerCase();if(!SKILL_NAME.test(n))throw new Error('Use a short name: lowercase letters, numbers and dashes, like release-notes.');
+  const existing=await listSkills(agent,host);if(existing.skills.some(s=>s.name===n))throw new Error(`${agent.name} already has a skill "${n}".`);
+  const t=await skillsHome(agent,host),file=joinFor(t.where,t.dir,n,'SKILL.md');
+  await writeAt(t.where,file,typeof content==='string'&&content.trim()?content:skillText({name:n,description,body}));
+  return {name:n,path:file};
+}
+async function readSkill({agent,host,name}){const {skill,where}=await ownSkill(agent,host,name);return {name,path:skill.path,content:String(await readAt(where,skill.path))};}
+async function saveSkill({agent,host,name,content}){
+  const text=String(content||'');if(!text.trim())throw new Error('A skill needs a SKILL.md.');if(Buffer.byteLength(text)>512*1024)throw new Error('That is more than 512 KB.');
+  const {skill,where}=await ownSkill(agent,host,name);await writeAt(where,skill.path,text);return {name,path:skill.path};
+}
+// Removed skills are moved to ~/.opaya-removed-skills/<time>/ on the agent's machine, never deleted outright.
+async function removeSkills({agent,host,names}){
+  const r=await listSkills(agent,host),want=new Set([].concat(names||[]).map(String)),where=place({agent,host});
+  const list=r.skills.filter(s=>want.has(s.name));const stamp=new Date().toISOString().replace(/[:.]/g,'-').slice(0,19),removed=[],skipped=[];
+  for(const s of list){
+    if(!s.path){skipped.push({name:s.name,why:'comes with the agent'});continue;}
+    const dir=parentOf(where,s.path),base=baseOf(where,dir);
+    // Only a skill's own folder, inside a skills folder: never a skills root or a home folder.
+    if(!dir.replace(/\\/g,'/').includes('/skills/')||!base||base==='skills'){skipped.push({name:s.name,why:'not in a skills folder'});continue;}
+    if(isLocal(where)){const bin=path.join(os.homedir(),'.opaya-removed-skills',stamp);await fs.mkdir(bin,{recursive:true});await fs.rename(dir,path.join(bin,base)).catch(async()=>{await fs.cp(dir,path.join(bin,base),{recursive:true});await fs.rm(dir,{recursive:true,force:true});});}
+    else await run(where,`b="$HOME/.opaya-removed-skills/${stamp}"; mkdir -p "$b" && mv ${quote(dir)} "$b/"`);
+    removed.push(s.name);
+  }
+  for(const n of want)if(!list.some(s=>s.name===n))skipped.push({name:n,why:'not found'});
+  return {removed,skipped,bin:isLocal(where)?path.join(os.homedir(),'.opaya-removed-skills',stamp):`~/.opaya-removed-skills/${stamp}`};
+}
+// The same skills to several agents at once.
+async function shareSkills({source,sourceHost,targets,names,progress=()=>{}}){
+  progress({step:'source',state:'active',message:`Reading ${source.name}'s skills`});
+  const skills=await pickSkills(source,sourceHost,names);
+  progress({step:'source',state:'done',message:`${skills.length} skill${skills.length===1?'':'s'}: ${skills.map(s=>s.name).join(', ')}`});
+  const from=place({agent:source,host:sourceHost}),done=[],failed=[];
+  for(const {agent,host,step} of targets){
+    progress({step,state:'active',message:`Copying to ${agent.name}`});
+    try{const t=await skillsHome(agent,host);await copySkillFolders({skills,from,to:t.where,dest:t.dir,progress:e=>progress({...e,step})});done.push(agent.name);progress({step,state:'done',message:`${agent.name}: ${t.dir}`});}
+    catch(e){failed.push({name:agent.name,error:String(e?.message||e).slice(0,300)});progress({step,state:'error',message:`${agent.name}: ${String(e?.message||e).slice(0,300)}`});}
+  }
+  if(!done.length)throw new Error(`No agent got the skills: ${failed.map(f=>`${f.name} (${f.error})`).join('; ')}`);
+  return {skills:skills.map(s=>s.name),agents:done,failed};
+}
 // ---- Global skills library ------------------------------------------------------------------------------------
 class SkillLibrary{
   constructor(root){this.dir=path.join(root,'skills-library');}
@@ -192,4 +248,4 @@ class SkillLibrary{
     await fs.rm(dir,{recursive:true,force:true});return true;
   }
 }
-module.exports={transferSkills,transferKeys,transferEnv:transferKeys,envKeys,readKeys,planKeys,keyKind,endpointKey,parseEnv,envValueOf,skillsHome,SkillLibrary};
+module.exports={createSkill,readSkill,saveSkill,removeSkills,shareSkills,skillText,transferSkills,transferKeys,transferEnv:transferKeys,envKeys,readKeys,planKeys,keyKind,endpointKey,parseEnv,envValueOf,skillsHome,SkillLibrary};

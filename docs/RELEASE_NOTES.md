@@ -1,3 +1,10 @@
+# Opaya 0.34.0 - a clear start, updates without terminals, and a real skills manager
+
+- **A first start in three steps.** Home shows one step at a time: give Opaya a brain (an AI model), find the agents you already have, then install your first agent here or on a server (or add a server first). Done steps fold into one line. The model setup now defaults to what this computer has: Codex CLI, then Claude Code, otherwise a free key. When Discover finds nothing, it offers the next step right there.
+- **Updates in a wizard, not in terminals.** Updating tools and agents (Git, Python, Node.js, Homebrew, the agents themselves) is one job with a step per update and a progress window. The commands run in the background. If an update asks for your password or a yes/no, the window asks you and types it in. Afterwards Opaya checks the versions; what failed goes to the Opaya Agent, which fixes it in the background, and is checked again.
+- **Setup guide in the background.** Installing tools during the setup guide no longer shows a terminal; a password or question is asked in the guide.
+- **Skills manager.** The skills window is big now: the list on the left, the skill on the right. Read and edit a SKILL.md, create a new skill (or let the Opaya Agent write it), remove skills (they are moved to `~/.opaya-removed-skills`, not deleted), and select many to share with several agents at once, add to the library or remove. OpenCode and DeepSeek Harness skills are supported too.
+
 # Opaya 0.33.0 - memory and personality for every agent, and Cord AI
 
 - **Memory & personality.** Every agent Opaya manages now has Personality, Memory and About you under Manage > Model, skills & memory. Opaya edits the files the agent itself reads, where it runs (this computer, a VPS or Docker):

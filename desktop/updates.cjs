@@ -279,4 +279,11 @@ function versionsCheck({windows=false}={}){
   return `sh -c ${quote([TOOL_PATH,REAL,HOW,
     `for c in ${DIAG.join(' ')}; do p=$(command -v "$c" 2>/dev/null); if [ -z "$p" ]; then echo "$c: not installed"; continue; fi; r=$(real "$p"); how "$r"; [ "$m" = other ] && how "$p"; case $c in ssh|tmux) a=-V;; *) a=--version;; esac; n=$("$c" $a 2>&1 </dev/null | head -1); printf '%s: %s (%s%s, %s%s)\\n' "$c" "$n" "$m" "\${v:+ via $v}" "$p" "$([ "$r" = "$p" ] || printf ' -> %s' "$r")"; done`].join('\n'))}`;
 }
-module.exports={tail,versionsCheck,handoffPrompt,TOOL_PATH,WHERE,VIA,LABELS,SPECS,HOW,REAL,PS_HOW,label,classify,methodsOf,script,posixScript,windowsScript,plan,report,verdict};
+// A question an update stopped at (its last line, nothing printed after it): a password, or yes/no.
+function promptOf(line){
+  const l=String(line||'').trim();if(!l||l.length>300)return null;
+  if(/(\[sudo\] password for [^:]+|^password|password for [^:]+|passphrase[^:]*|enter (your )?password)\s*:\s*$/i.test(l))return {kind:'password'};
+  if(/(\[y\/n\]|\[Y\/n\]|\[y\/N\]|\(y\/n\)|\(yes\/no(\/\[fingerprint\])?\)|\[\s*y\s*\]\s*\/\s*n|\(Y\/n\))\s*[?:]?\s*$/i.test(l))return {kind:'confirm'};
+  return null;
+}
+module.exports={promptOf,tail,versionsCheck,handoffPrompt,TOOL_PATH,WHERE,VIA,LABELS,SPECS,HOW,REAL,PS_HOW,label,classify,methodsOf,script,posixScript,windowsScript,plan,report,verdict};

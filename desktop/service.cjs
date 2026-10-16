@@ -127,7 +127,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   function publishJob(job){listener?.broadcast('job',job);}
   // cancellable: the job window offers Cancel. The work gets {signal, stop, undo}: stop(fn) runs at once on Cancel (end a
   // terminal, kill a download), undo(fn) after the work stopped, newest first, to remove what it made.
-  const jobControls=new Map();
+  const jobControls=new Map(),jobInputs=new Map();
   function startJob({kind,title,detail,steps,route,cancellable=false},work){
     const byOpaya=origin.getStore()==='opaya';
     const controller=new AbortController(),stops=[],undos=[],ctl={signal:controller.signal,stop:fn=>stops.push(fn),undo:fn=>undos.push(fn)};
@@ -138,6 +138,8 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       if(e.step){const s=job.steps.find(x=>x.key===e.step);if(s&&e.state)s.state=e.state;}
       // Waiting for the user (a sign-in in the browser): shown on its own in the job window until it is cleared.
       if(e.waiting!==undefined){job.waiting=String(e.waiting||'').slice(0,300);job.waitCode=String(e.code||'').slice(0,20);}
+      // A question the job waits on (a password, yes/no): asked in the job window, the answer goes to e.input.send.
+      if(e.input!==undefined){if(e.input){job.input={kind:e.input.kind==='password'?'password':'confirm',prompt:String(e.input.prompt||'').slice(0,200)};jobInputs.set(job.id,e.input.send);}else{job.input=null;jobInputs.delete(job.id);}}
       if(e.message)job.log.push({at:Date.now(),text:String(e.message).slice(0,600),state:e.state||''});if(job.log.length>300)job.log.splice(0,job.log.length-300);
       if(Number.isFinite(e.bytes))job.bytes=e.bytes;if(Number.isFinite(e.total)&&e.total>0)job.total=e.total;
       if(e.message||e.state||e.waiting!==undefined)flush();else if(!timer)timer=setTimeout(flush,250);
@@ -154,8 +156,8 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     Promise.resolve().then(()=>work(progress,ctl)).then(result=>{job.status='done';job.waiting='';job.result=result;job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='pending')s.state='skipped';job.log.push({at:Date.now(),text:'Done.',state:'done'});},
       error=>controller.signal.aborted?cancelled():(()=>{job.status='error';job.error=safeError(error);job.finishedAt=Date.now();for(const s of job.steps)if(s.state==='active')s.state='error';job.log.push({at:Date.now(),text:job.error,state:'error'});
         // A job the user started that failed goes to the Opaya Agent (one it started itself, it follows with its jobs tool).
-        if(!byOpaya)actionFailed(job.title,job.error,`It ran as an Opaya job (job_id ${job.id}, ${kind}); its steps: ${job.steps.map(x=>`${x.label} ${x.state}`).join(', ')}. Read it with your jobs tool.`,{quiet:['install','setup'].includes(kind)});})())
-      .finally(()=>{clearTimeout(timer);jobControls.delete(job.id);publishJob(job);emit();});
+        if(!byOpaya&&!error?.handled)actionFailed(job.title,job.error,`It ran as an Opaya job (job_id ${job.id}, ${kind}); its steps: ${job.steps.map(x=>`${x.label} ${x.state}`).join(', ')}. Read it with your jobs tool.`,{quiet:['install','setup'].includes(kind)});})())
+      .finally(()=>{clearTimeout(timer);jobControls.delete(job.id);jobInputs.delete(job.id);job.input=null;publishJob(job);emit();});
     return job;
   }
   function cancelJob(id){
@@ -221,9 +223,10 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   const MARK=/\[opaya\] finished with exit code (\d+)/g;
   const marks=view=>[...String(view.buffer||'').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g,'').matchAll(MARK)];
   const markCount=id=>{try{return marks(terminals.attach(id)).length;}catch{return 0;}};
-  async function waitForMark(id,before,timeout=45*60*1000,what='uninstall'){
+  async function waitForMark(id,before,timeout=45*60*1000,what='uninstall',tick=null){
     const end=Date.now()+timeout;
     for(;;){
+      try{tick?.();}catch{}
       let view;try{view=terminals.attach(id);}catch{throw new Error(`The ${what} terminal was closed before it finished.`);}
       const found=marks(view);
       if(found.length>before)return Number(found.at(-1)[1]);
@@ -252,8 +255,8 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     // Opaya Agent finishes it (runBatch).
     agentUpdate:async x=>{
       const a=broker.agent(x.id),host=hostOf(a),c=maintenance.updateCommand(a,{remote:!!host}),j=agentJob(a,c);
-      if(!await approve(a,`${c.title} ${host?`on ${host.name}`:`on ${machineName()}`}?`,`${c.summary}${j.how?`\n\nInstalled with: ${j.how}.`:''}\n\nRuns in a visible terminal:\n\n${c.preview}\n\nAfterwards: ${c.after} If it fails, the Opaya Agent finishes it.`))throw new Error('Update cancelled.');
-      runBatch([j]).catch(()=>{});return true;
+      if(!await approve(a,`${c.title} ${host?`on ${host.name}`:`on ${machineName()}`}?`,`${c.summary}${j.how?`\n\nInstalled with: ${j.how}.`:''}\n\nOpaya runs it in the background and shows the progress. If it asks for a password, Opaya asks you. Afterwards: ${c.after} If it fails, the Opaya Agent finishes it.`))throw new Error('Update cancelled.');
+      return runBatch([j],{title:`Updating ${a.name}`});
     },
     // Updates every installation once per machine (and every container), after one approval for the whole list.
     agentUpdateAll:async()=>{
@@ -261,9 +264,8 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       for(const a of broker.data.agents){let c;try{c=maintenance.updateCommand(a,{remote:a.transport==='ssh'});}catch{continue;}const key=`${a.transport==='ssh'?a.hostId:'local'}|${c.command}`;if(!seen.has(key))seen.set(key,{a,c});}
       if(!seen.size)throw new Error('None of your agents has an update Opaya can run.');
       const list=[...seen.values()],jobs=list.map(({a,c})=>agentJob(a,c));
-      if(!await approve({name:'Opaya'},`Update ${list.length} installation${list.length===1?'':'s'}?`,list.map(({a,c},i)=>`${c.title} on ${whereName(a)} (${a.name}${jobs[i].how?`, ${jobs[i].how}`:''})`).join('\n')+'\n\nThey run one after another in each machine\'s "Updates" terminal. Whatever fails or does not take effect goes to the Opaya Agent to finish.'))throw new Error('Update cancelled.');
-      runBatch(jobs).catch(()=>{});
-      return list.length;
+      if(!await approve({name:'Opaya'},`Update ${list.length} installation${list.length===1?'':'s'}?`,list.map(({a,c},i)=>`${c.title} on ${whereName(a)} (${a.name}${jobs[i].how?`, ${jobs[i].how}`:''})`).join('\n')+'\n\nOpaya runs them one after another on each machine, in the background, and shows the progress. Whatever fails or does not take effect goes to the Opaya Agent to finish.'))throw new Error('Update cancelled.');
+      return runBatch(jobs,{title:`Updating ${list.length} installation${list.length===1?'':'s'}`});
     },
     agentBackup:async x=>{const a=broker.agent(x.id);return backupJob(a,{keys:x.keys!==false,history:x.history!==false});},
     agentBackups:async x=>maintenance.listBackups(broker.agent(x.id),broker.data.settings),
@@ -305,6 +307,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       if(x.remember)await broker.saveSettings({signInBrowser:pick});
       return true;
     },
+    jobInput:async x=>{const send=jobInputs.get(String(x.id||''));if(!send)throw new Error('This job is not waiting for an answer.');jobInputs.delete(String(x.id||''));send(typeof x.value==='string'?x.value.slice(0,500):'');return true;},
     jobCancel:async x=>cancelJob(x.id),
     signInAgain:async()=>{if(!lastSignIn)throw new Error('There is no sign-in waiting.');notice({kind:'signin-browser',level:'info',title:lastSignIn.label,text:'Choose the browser to open it in.',url:lastSignIn.url,code:lastSignIn.code});return true;},
     agentChannelPair:async x=>{
@@ -397,11 +400,26 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   const hourly=()=>{if(broker.data.settings?.updateChecks!==false)checkAll().catch(()=>{});};
   setTimeout(hourly,2*60*1000);setInterval(hourly,60*60*1000);
   function notice(n){listener?.broadcast('notice',{id:randomUUID(),at:Date.now(),...n});}
-  // Runs a marked update in a visible terminal and waits for its end line: {code, output (what it printed), terminal}.
-  async function runUpdate({host,label,key,command,timeout=20*60*1000,owner}){
+  // Runs a marked update in a terminal and waits for its end line: {code, output (what it printed), terminal}. With
+  // progress (a job's), the terminal stays in the background: what it prints goes to the job window line by line, and a
+  // password or yes/no question is asked there (job input) and typed into the terminal.
+  async function runUpdate({host,label,key,command,timeout=20*60*1000,owner,progress,step}){
     const end=!host&&process.platform==='win32'?'; Write-Host "[opaya] finished with exit code $(if ($?) { 0 } else { 1 })"':'; echo "[opaya] finished with exit code $?"';
-    const view=await runInTerminal({label,key,host,command:command+end,owner}),before=markCount(view.id);
-    const code=await waitForMark(view.id,before,timeout,'update');
+    const view=await runInTerminal({label,key,host,command:command+end,owner,background:!!progress}),before=markCount(view.id);
+    let shown=0,asked='',quietSince=Date.now(),lastLen=0;
+    const tick=progress?()=>{
+      // Only what the update printed: after its "[opaya] Updating" line, never the command the shell echoed.
+      const text=markedOutput(view.id,before),all=text.split('\n').map(l=>l.trim()).filter(Boolean),start=all.findIndex(l=>/^\[opaya\] Updating /.test(l)),lines=start<0?[]:all.slice(start+1);
+      for(const line of lines.slice(shown,shown+20))if(!/^\[opaya\]|finished with exit code/.test(line))progress({step,message:line.slice(0,300)});
+      shown=Math.max(shown,lines.length);
+      if(text.length!==lastLen){lastLen=text.length;quietSince=Date.now();}
+      const last=lines.at(-1)||'',prompt=updates.promptOf?.(last);
+      if(prompt&&Date.now()-quietSince>1500&&asked!==last){asked=last;
+        progress({step,waiting:prompt.kind==='password'?`${label}: ${last.slice(0,160)}`:`${label} asks: ${last.slice(0,200)}`,input:{kind:prompt.kind,prompt:last.slice(0,200),send:value=>{terminals.write(view.id,String(value??'')+'\r');progress({step,waiting:'',input:null,message:prompt.kind==='password'?'Password sent.':`Answered: ${String(value).slice(0,40)}`});}}});
+      }
+    }:null;
+    const code=await waitForMark(view.id,before,timeout,'update',tick);
+    if(asked&&progress)progress({step,waiting:'',input:null});
     return {code,output:markedOutput(view.id,before),terminal:view.id};
   }
   // Agent errors go to the Opaya Agent. A connection that fails because something is too old is updated first and
@@ -470,10 +488,10 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     let c;
     try{c=dep?{...catalog.command(dep,{remote,update:true}),title:`Update ${dep==='node'?'Node.js':'Python'}`}:maintenance.updateCommand(a,{remote});}
     catch(e){return escalate(a,error,`Opaya could not update it automatically: ${safeError(e)}`);}
-    notice({level:'info',kind:'fixing',title:`Updating ${dep?(dep==='node'?'Node.js':'Python'):a.name} automatically`,text:`${a.name} did not connect: ${error}. ${c.title||'The update'} runs in the terminal; Opaya reconnects when it finishes.`,agentId:a.id});
+    notice({level:'info',kind:'fixing',title:`Updating ${dep?(dep==='node'?'Node.js':'Python'):a.name} automatically`,text:`${a.name} did not connect: ${error}. ${c.title||'The update'} runs in the background; Opaya reconnects when it finishes.`,agentId:a.id});
     // Agents that share an installation (Hermes profiles) fail together; they share one update run.
     const runKey=`${host?.id||'local'}|${c.command}`;
-    if(!inFlight.has(runKey))inFlight.set(runKey,onMachine(host,()=>runUpdate({host,label:`${c.title||'Update'} (auto-fix)`,key:`autofix_${a.id}`.slice(0,60),command:c.command,owner:a.id})).finally(()=>setTimeout(()=>inFlight.delete(runKey),60000)));
+    if(!inFlight.has(runKey))inFlight.set(runKey,onMachine(host,()=>runUpdate({host,label:`${c.title||'Update'} (auto-fix)`,key:`autofix_${a.id}`.slice(0,60),command:c.command,owner:a.id,progress:()=>{}})).finally(()=>setTimeout(()=>inFlight.delete(runKey),60000)));
     let code;
     try{code=(await inFlight.get(runKey)).code;}
     catch(e){return escalate(a,error,`The automatic update did not finish: ${safeError(e)}`);}
@@ -497,15 +515,20 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     const before=toolItem(host,id),windows=!host&&process.platform==='win32';
     return {host,tool:id,name:c.framework.name,command:c.command,before,how:before?.how||'',path:before?.path||'',plan:updates.plan(id,before?.method,{windows})||(id==='homebrew'?'brew update && brew upgrade':''),builtin:!host&&before?.method==='opaya'&&builtinHere(id)};
   }
-  async function runJob(j){
+  async function runJob(j,progress,step){
     if(j.builtin){const {done}=builtinJob([j.tool],{update:true}),r=await done;return {code:r.error?1:0,output:r.error||`Installed ${Object.values(r.installed||{}).join(' ')} with Opaya's installer.`};}
     // Agent names come from the user: only plain characters reach the echo.
     const windows=!j.host&&process.platform==='win32',name=String(j.name).replace(/[^\w .()+-]/g,'').slice(0,80),head=windows?`Write-Host '[opaya] Updating ${name}'; `:`echo '[opaya] Updating ${name}'; `;
-    return runUpdate({host:j.host,label:'Updates',key:'updates',command:head+j.command});
+    return runUpdate({host:j.host,label:`Update ${name}`,key:'updates',command:head+j.command,progress,step});
   }
-  async function runMachine(list){
+  async function runMachine(list,progress=()=>{}){
     const host=list[0].host,out=[];
-    for(const j of list){let r;try{r=await runJob(j);}catch(e){r={error:safeError(e)};}out.push({...j,...r});}
+    for(const j of list){
+      progress({step:j.step,state:'active',message:`Updating ${j.name}${j.how?` (installed with ${j.how})`:''}`});
+      let r;try{r=await runJob(j,progress,j.step);}catch(e){r={error:safeError(e)};}
+      progress({step:j.step,state:r.code===0&&!r.error?'done':'warn',message:r.code===0&&!r.error?`${j.name}: finished, checking the version`:`${j.name}: ${r.error||`ended with exit code ${r.code}`}`});
+      out.push({...j,...r});
+    }
     versions.cache.clear();let report=null;try{report=await checkMachine(host);emit();}catch{}
     const fresh=report&&!report.error?report.items||[]:null;
     return out.map(x=>{
@@ -514,33 +537,57 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       return {...x,...v,how:ran.label||x.how,path:after?.path||ran.path||x.path,installed:x.before?.installed||ran.before||'',after:after?.installed||ran.after||'',latest:after?.latest||x.before?.latest||'',machine:host?host.name:machineName(),machineId:host?.id||''};
     });
   }
-  async function runBatch(jobs){
-    const groups=new Map();for(const j of jobs){const k=machineKey(j.host);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(j);}
-    const results=(await Promise.all([...groups.values()].map(list=>onMachine(list[0].host,()=>runMachine(list))))).flat();
-    const failed=results.filter(r=>!r.ok),done=results.filter(r=>r.ok);
-    if(done.length&&!failed.length)notice({level:'done',kind:'updated',title:`${done.length===1?`${done[0].name} is`:`${done.length} updates are`} done`,text:done.map(r=>`${r.name}${r.after?` ${r.after}`:''} on ${r.machine}`).join(', ')});
-    if(failed.length){const run=handoffs.then(()=>finishUpdates(failed,done));handoffs=run.catch(()=>{});}
-    return results;
+  // Every update the user starts is one job with a step per tool: the commands run in background terminals, the job
+  // window shows what they print and asks there for a password or a yes/no. Afterwards the versions are checked; what
+  // failed or did not take effect goes to the Opaya Agent in the background (its terminals stay hidden), then is checked
+  // again. The job ends done, or with what is still not updated.
+  function runBatch(jobs,{title}={}){
+    const byOpaya=origin.getStore()==='opaya',machines=[...new Set(jobs.map(j=>j.host?j.host.name:machineName()))];
+    jobs.forEach((j,i)=>{j.step=`u${i}`;});
+    const steps=[...jobs.map(j=>[j.step,`${j.name}${machines.length>1?` on ${j.host?j.host.name:machineName()}`:''}`]),['check','Check the new versions'],['fix','Opaya Agent fixes what is left']];
+    return startJob({kind:'update',title:title||(jobs.length===1?`Updating ${jobs[0].name}`:`Installing ${jobs.length} updates`),detail:machines.join(', '),steps,route:{from:jobs.length===1?jobs[0].name:`${jobs.length} updates`,fromWhere:jobs.length===1?jobs[0].how||'':jobs.map(j=>j.name).join(', ').slice(0,60),to:machines.length===1?machines[0]:`${machines.length} machines`,toWhere:'Updates',provider:'update'}},async progress=>{
+      const groups=new Map();for(const j of jobs){const k=machineKey(j.host);if(!groups.has(k))groups.set(k,[]);groups.get(k).push(j);}
+      const results=(await Promise.all([...groups.values()].map(list=>onMachine(list[0].host,()=>runMachine(list,progress))))).flat();
+      progress({step:'check',state:'active',message:'Checking the versions'});
+      for(const r of results)progress({step:r.step,state:r.ok?'done':'error',message:r.ok?`${r.name}${r.after?` ${r.after}`:''}: up to date`:`${r.name}: ${r.reason}`});
+      let failed=results.filter(r=>!r.ok);const done=results.filter(r=>r.ok);
+      progress({step:'check',state:failed.length?'warn':'done',message:failed.length?`${failed.length} not updated yet`:'Everything is up to date'});
+      if(!failed.length){progress({step:'fix',state:'skipped'});notice({level:'done',kind:'updated',title:`${done.length===1?`${done[0].name} is`:`${done.length} updates are`} done`,text:done.map(r=>`${r.name}${r.after?` ${r.after}`:''} on ${r.machine}`).join(', ')});return {updated:done.map(r=>r.name),failed:[]};}
+      if(byOpaya){progress({step:'fix',state:'skipped',message:'The Opaya Agent started these updates and finishes what is left itself.'});}
+      else failed=await finishUpdates(failed,done,progress);
+      if(failed.length)throw Object.assign(new Error(`Not updated: ${failed.map(f=>`${f.name} on ${f.machine} (${f.reason})`).join('; ')}`),{handled:true});
+      return {updated:results.map(r=>r.name),failed:[]};
+    });
   }
-  // The Opaya Agent finishes what failed; the terminal output it gets has every secret hidden.
-  async function finishUpdates(failed,done){
-    if(stopping)return;
-    const o=opaya,n=failed.length,title=`${n} update${n===1?'':'s'} did not finish`;
+  // The Opaya Agent finishes what failed, in the background; the terminal output it gets has every secret hidden. What it
+  // fixed is checked again; returns what is still not updated.
+  async function finishUpdates(failed,done,progress=()=>{}){
+    if(stopping)return failed;
+    const o=opaya,n=failed.length;
     const held=o?.heldValues?.()||[],items=failed.map(f=>({...f,output:secrets.shieldOutput(updates.tail(f.output),held)}));
-    const list=failed.map(f=>`${f.name} on ${f.machine}: ${f.reason}`).join('\n')+(done.length?`\n\nDone: ${done.map(r=>r.name).join(', ')}.`:'');
-    const prompt=updates.handoffPrompt(items);
-    if(broker.data.settings?.autoFix===false){notice({level:'error',kind:'update-failed',title,text:`${list}\n\nAutomatic fixing is off in Settings, so the Opaya Agent did not take over.`,...(o?.configured()?{prompt}:{})});return;}
-    if(!o?.configured()){notice({level:'error',kind:'update-failed',title,text:`${list}\n\nConnect a model for the Opaya Agent and it finishes updates that fail.`});return;}
-    let detail;
+    const prompt=updates.handoffPrompt(items)+' Work in the background: do not ask me to type anything in a terminal. If you need a password or a choice from me, ask me in one short sentence.';
+    if(broker.data.settings?.autoFix===false){progress({step:'fix',state:'skipped',message:'Automatic fixing is off in Settings, so the Opaya Agent did not take over.'});return failed;}
+    if(!o?.configured()){progress({step:'fix',state:'skipped',message:'Connect a model for the Opaya Agent and it finishes updates that fail.'});return failed;}
+    progress({step:'fix',state:'active',message:`The Opaya Agent is finishing ${n} update${n===1?'':'s'}: ${failed.map(f=>f.name).join(', ')}`});
     try{
       if(!await idle(o,5*60*1000))throw new Error('it stayed busy with another request');
-      o.begin(prompt);
-      notice({level:'info',kind:'opaya',title:`The Opaya Agent is finishing ${n} update${n===1?'':'s'}`,text:failed.map(f=>`${f.name} on ${f.machine}`).join(', ')});
-      await idle(o,30*60*1000);
-      if(!o.error)return;
-      detail=`The Opaya Agent could not finish them: ${o.error}`;
-    }catch(e){detail=`The Opaya Agent could not take them: ${safeError(e)}`;}
-    notice({level:'error',kind:'update-failed',title,text:`${list}\n\n${detail}`,prompt});
+      opayaQuiet=true;
+      try{o.begin(prompt);await idle(o,30*60*1000);}finally{opayaQuiet=false;}
+      if(o.error)progress({message:`The Opaya Agent stopped: ${o.error}`,state:'warn'});
+    }catch(e){progress({step:'fix',state:'error',message:`The Opaya Agent could not take them: ${safeError(e)}`});return failed;}
+    // Checked again: what the Opaya Agent fixed is now up to date.
+    versions.cache.clear();const left=[];
+    for(const host of [...new Map(failed.map(f=>[machineKey(f.host),f.host])).values()]){
+      let items=null;try{const r=await checkMachine(host);items=r&&!r.error?r.items||[]:null;emit();}catch{}
+      for(const f of failed.filter(x=>machineKey(x.host)===machineKey(host))){
+        if(!f.tool){progress({step:f.step,state:'warn',message:`${f.name}: the Opaya Agent worked on it; it has no version Opaya can check.`});continue;}
+        const after=items?items.find(i=>i.id===f.tool):null,ok=after?!after.outdated&&!after.missing:false;
+        progress({step:f.step,state:ok?'done':'error',message:ok?`${f.name}${after.installed?` ${after.installed}`:''}: fixed by the Opaya Agent`:`${f.name}: still not updated`});
+        if(!ok)left.push(f);
+      }
+    }
+    progress({step:'fix',state:left.length?'error':'done',message:left.length?`${left.length} still not updated. Ask the Opaya Agent for the details.`:'The Opaya Agent fixed everything.'});
+    return left;
   }
   // An agent's installation as an update job; containers are checked by their exit code only.
   function agentJob(a,c){const host=hostOf(a),k=maintenance.kindOf(a),tool=k.kind==='docker'||k.kind==='npx'?'':c.tool||'';return {host,tool,name:tool?updates.SPECS[tool]?.name||a.name:`${a.name} (${k.label})`,command:c.command,before:tool?toolItem(host,tool):null,how:tool?toolItem(host,tool)?.how||'':k.label,plan:c.summary};}
@@ -881,16 +928,24 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   // Run one marked command in the setup terminal and wait for its end line. Password and question prompts are passed
   // on to the guide so it can tell the person what to do.
   async function setupRun(step,command,progress,{timeout=45*60*1000}={}){
-    const view=await runInTerminal({owner:'opaya',label:'Opaya setup',key:'setup',host:null,command:guide.marked(step.id,guide.withPath(command,{windows:windowsHere}),{windows:windowsHere})});
-    const end=Date.now()+timeout;let hinted='';
+    // In a background terminal: a password or a question is asked in the guide (job input) and typed into it.
+    const view=await runInTerminal({owner:'opaya',label:'Opaya setup',key:'setup',host:null,background:true,command:guide.marked(step.id,guide.withPath(command,{windows:windowsHere}),{windows:windowsHere})});
+    const end=Date.now()+timeout;let asked=false,sentAt=0,sentLen=-1,prevLen=-1;
+    const clear=()=>progress({step:step.id,waiting:'',input:null});
     for(;;){
       await new Promise(r=>setTimeout(r,1200));
       let v;try{v=terminals.attach(view.id);}catch{throw new Error('The setup terminal was closed.');}
-      const code=guide.markOf(v.buffer,step.id);if(code!==null)return code;
+      const code=guide.markOf(v.buffer,step.id);if(code!==null){if(asked)clear();return code;}
       if(v.exited)throw new Error('The setup terminal ended.');
-      const p=require('./opaya-agent.cjs').promptState(v.buffer),hint=p.password?'password':p.question?'question':'';
-      if(hint&&hint!==hinted){progress({step:step.id,state:'warn',message:hint==='password'?'The terminal below asks for your computer password (the one you log in with). Click into it, type it (it stays invisible) and press Enter.':'The terminal below asks a question. Usually pressing Enter picks the safe default.'});}
-      hinted=hint;
+      const len=String(v.buffer||'').length,p=require('./opaya-agent.cjs').promptState(v.buffer),hint=p.password?'password':p.question?'question':'';
+      // Asked once per prompt; after an answer, only a new prompt (more output) is asked again.
+      const still=len===prevLen;prevLen=len;
+      const lastLine=require('./opaya-agent.cjs').stripAnsi(String(v.buffer||'').slice(-400)).split(/\r?\n/).filter(l=>l.trim()).pop()||'';
+      if(hint&&still&&!asked&&!(sentAt&&(Date.now()-sentAt<2500||len===sentLen))){asked=true;
+        progress({step:step.id,waiting:hint==='password'?`${step.title} needs your computer password (the one you log in with).`:`${step.title} asks: ${lastLine.trim().slice(0,160)}`,input:{kind:hint==='password'?'password':'confirm',prompt:hint==='password'?'Password':'Continue?',send:value=>{
+          terminals.write(view.id,(hint==='password'?String(value??''):String(value)==='n'?'n':'')+'\r');asked=false;sentAt=Date.now();try{sentLen=String(terminals.attach(view.id).buffer||'').length;}catch{}
+          progress({step:step.id,waiting:'',input:null,message:hint==='password'?'Password sent.':'Answered.'});}}});
+      }else if(!hint&&asked){asked=false;clear();}
       if(Date.now()>end)throw new Error(`${step.title} did not finish within ${Math.round(timeout/60000)} minutes.`);
     }
   }
@@ -1015,10 +1070,9 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       const ids=Array.isArray(x.ids)?x.ids.map(String):x.id==='outdated'?(toolState.machines[machineKey(host)]?.items||[]).filter(i=>i.outdated).map(i=>i.id):[String(x.id||'')];
       const jobs=[...new Set(ids)].slice(0,40).map(id=>{try{return toolJob(host,id,catalog.command(id,{remote:!!host,update:true}));}catch{return null;}}).filter(Boolean);
       if(!jobs.length)throw new Error('Nothing to update here.');
-      const lines=jobs.map(j=>`${j.name} (${j.how||'detected when it runs'}): ${j.builtin?"Opaya's built-in installer":j.plan}`).join('\n');
-      if(!await approve({name:'Opaya'},jobs.length===1?`Update ${jobs[0].name} on ${where}?`:`Install ${jobs.length} updates on ${where}?`,`${lines}\n\nEach update finds how the tool is installed and updates that copy, one after another in the "Updates" terminal. Opaya checks the versions afterwards; whatever fails or does not take effect goes to the Opaya Agent to finish.`))throw new Error('Update cancelled.');
-      runBatch(jobs).catch(()=>{});
-      return jobs.length;
+      const lines=jobs.map(j=>`${j.name}${j.before?.installed&&j.before?.latest?` ${j.before.installed} → ${j.before.latest}`:''}${j.how?` (${j.how})`:''}`).join('\n');
+      if(!await approve({name:'Opaya'},jobs.length===1?`Update ${jobs[0].name} on ${where}?`:`Install ${jobs.length} updates on ${where}?`,`${lines}\n\nOpaya finds how each one is installed and updates that copy in the background, with the progress in a window. If one asks for a password, Opaya asks you there. Afterwards it checks the versions; whatever fails goes to the Opaya Agent, which fixes it in the background.`))throw new Error('Update cancelled.');
+      return runBatch(jobs,{title:jobs.length===1?`Updating ${jobs[0].name}`:`Installing ${jobs.length} updates on ${where}`});
     }
   };
   opaya = new OpayaAgent({root,vault:broker.vault,broker,terminals,approve,emit,runInTerminal:x=>runInTerminal({...x,owner:'opaya',background:opayaQuiet}),trusted:()=>!!broker.data.settings?.itrustOpaya||setupTrust});
@@ -1283,6 +1337,22 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     mcpSave:x=>broker.saveMcpServer(x), mcpRemove:x=>broker.removeMcpServer(x.id), agentMcp:x=>broker.setAgentMcp(x), agentSkills:x=>broker.skills(x.id),
     // One-click MCP servers: Opaya's catalog (no secrets in it) and installing one with the key typed in a masked field.
     mcpCatalog:async()=>mcp.catalog(), mcpInstall:x=>broker.installMcp({id:x.id,secret:typeof x.secret==='string'&&x.secret?x.secret:x.vaultKey?opaya.secretValue(opaya.secretEntry(String(x.vaultKey))):'',folder:typeof x.folder==='string'?x.folder:'',agents:x.agents==='all'?'all':[].concat(x.agents||[]).map(String)}),
+    // An agent's own skills: create, read and edit a SKILL.md, remove (moved aside, after approval), and share several
+    // skills with several agents in one job.
+    agentSkillCreate:async x=>{const a=broker.agent(x.agentId),r=await moves.createSkill({agent:a,host:hostOf(a),name:x.name,description:x.description,body:x.body,content:x.content});return r;},
+    agentSkillRead:async x=>{const a=broker.agent(x.agentId);return moves.readSkill({agent:a,host:hostOf(a),name:String(x.name||'')});},
+    agentSkillSave:async x=>{const a=broker.agent(x.agentId);return moves.saveSkill({agent:a,host:hostOf(a),name:String(x.name||''),content:x.content});},
+    agentSkillRemove:async x=>{
+      const a=broker.agent(x.agentId),names=[...new Set([].concat(x.names||[]).map(String))].slice(0,200);if(!names.length)throw new Error('Choose skills to remove.');
+      if(!await approve(a,`Remove ${names.length===1?`the skill ${names[0]}`:`${names.length} skills`} from ${a.name}?`,`${names.join(', ')}\n\nOpaya moves ${names.length===1?'it':'them'} to ~/.opaya-removed-skills on ${whereName(a)}, so ${names.length===1?'it':'they'} can be brought back. New conversations no longer load ${names.length===1?'it':'them'}.`))throw new Error('Not removed.');
+      return moves.removeSkills({agent:a,host:hostOf(a),names});
+    },
+    skillsShare:async x=>{
+      const src=broker.agent(x.sourceId),targets=[...new Set([].concat(x.targetIds||[]).map(String))].filter(id=>id!==src.id).map(id=>broker.agent(id));if(!targets.length)throw new Error('Choose agents to share with.');
+      const names=x.names==='all'?'all':[].concat(x.names||[]).map(String);if(names!=='all'&&!names.length)throw new Error('Choose skills to share.');
+      const list=targets.map((a,i)=>({agent:a,host:hostOf(a),step:`t${i}`}));
+      return startJob({kind:'transfer',route:{from:src.name,fromWhere:whereName(src),to:targets.length===1?targets[0].name:`${targets.length} agents`,toWhere:targets.map(a=>a.name).join(', ').slice(0,60),provider:src.provider},title:`Sharing ${names==='all'?'all skills':`${names.length} skill${names.length===1?'':'s'}`}`,detail:`From ${src.name} to ${targets.map(a=>a.name).join(', ')}`,steps:[['source','Read skills'],...list.map(t=>[t.step,t.agent.name])]},progress=>moves.shareSkills({source:src,sourceHost:hostOf(src),targets:list,names,progress}));
+    },
     // Hermes and OpenClaw skills: browse the hub or install one with the agent's CLI in a visible terminal.
     skillAction:async x=>{
       const a=broker.agent(x.agentId),host=a.transport==='ssh'?broker.host(a.hostId):null;

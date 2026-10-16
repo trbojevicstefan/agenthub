@@ -17,7 +17,13 @@ function skillDirs(agent,{remote=false}={}){
     case 'codex':return [remote?'~/.codex/skills':path.join(os.homedir(),'.codex','skills'),cwd&&(remote?`${cwd}/.codex/skills`:path.join(cwd,'.codex','skills'))].filter(Boolean);
     // Managed skills, the workspace's skills and the shared ~/.agents/skills (all loaded by OpenClaw).
     case 'openclaw':return [...(remote?['~/.openclaw/skills','~/.openclaw/workspace/skills','~/.agents/skills']:[path.join(os.homedir(),'.openclaw','skills'),path.join(os.homedir(),'.openclaw','workspace','skills'),path.join(os.homedir(),'.agents','skills')]),cwd&&(remote?`${cwd}/skills`:path.join(cwd,'skills'))].filter(Boolean);
-    default:return [];
+    default:{
+      // OpenCode and DeepSeek Harness run as custom ACP agents: known by their program.
+      const f=require('./maintenance.cjs').frameworkOf(agent),home=(...p)=>remote?`~/${p.join('/')}`:path.join(os.homedir(),...p);
+      if(f==='opencode')return [home('.config','opencode','skills'),cwd&&(remote?`${cwd}/.opencode/skills`:path.join(cwd,'.opencode','skills'))].filter(Boolean);
+      if(f==='dsh')return [home('.dsh','skills'),home('.agents','skills')];
+      return [];
+    }
   }
 }
 function frontMatter(text){

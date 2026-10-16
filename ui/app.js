@@ -208,12 +208,19 @@
       ${group('Machines and files',[b('hosts',I.machine,'Machines','This computer and your servers'),b('docker-manager','box','Docker manager','Containers and images on your machines','data-id="local"'),b('new-vps',I.plus,'New VPS','Set up a new server with its own SSH key'),b('local-terminal',I.terminal,'Local terminal','A shell on this computer'),b('files-local',I.projects,'Files','Browse files on this computer'),b('settings',I.settings,'Settings','Theme, notifications, terminal and more')])}
     </section>`;
   }
-  // No agents yet: Home opens with the three ways to start instead of controls that have nothing to act on.
+  // No agents yet: Home shows the start in three steps, one at a time. 1 the Opaya Agent gets a model (it does the rest
+  // and fixes what breaks), 2 Opaya looks for agents already here and on your servers, 3 when there are none, install
+  // one here or on a server (or add a server first). Done steps fold into one line.
   function getStarted(){
-    const card=(act,icon,t,sub,extra='')=>`<button type="button" class="ws-start-card" data-action="${act}">${extra}<span class="ws-start-ico" aria-hidden="true">${icon}</span><strong>${t}</strong><small>${sub}</small></button>`;
-    return `<section class="ws-start" aria-label="Get started"><h2>Bring in your first agent</h2><p>Opaya brings the AI agents you use (Hermes, Claude Code, Codex, OpenClaw and others) into one place, on this computer and on your servers. Choose how to start:</p>
-      <div class="ws-start-cards">${card('discover',dkIcon('inspect'),'Find agents on this computer','Already use Claude Code, Codex or Hermes? Opaya looks for them, and you choose which to connect.','<em class="ws-start-tag">Recommended</em>')}${card('install-catalog',dkIcon('pull'),'Install an agent','One click installs Hermes, Claude Code, Codex, OpenClaw and more, here or on a server.')}${card('opaya',AN_ICON.chat,'Ask the Opaya Agent','Say what you want; it sets things up step by step and asks before every change.')}</div>
-      <p class="ws-start-more">Or: <button type="button" class="text-button" data-action="add">add a connection by hand</button> &#183; <button type="button" class="text-button" data-action="new-vps">connect a server (VPS)</button> &#183; <button type="button" class="text-button" data-action="vault-import">import your API keys</button></p></section>`;
+    const o=opaya(),brain=!!o.configured,looked=tipsSeen.has('onb:discovered'),hosts=state.hosts||[];
+    const current=!brain?1:!looked?2:3;
+    const step=(n,t,doneText,body)=>{const done=n<current,on=n===current;return `<li class="onb-step ${done?'done':on?'on':'next'}"><span class="onb-n" aria-hidden="true">${done?'&#10003;':n}</span><div class="onb-body"><strong>${t}</strong>${done?`<small>${doneText}</small>`:on?body:''}</div></li>`;};
+    const big=(act,t,sub,extra='',cls='primary')=>`<button type="button" class="onb-btn ${cls}" data-action="${act}" ${extra}><strong>${t}</strong>${sub?`<small>${sub}</small>`:''}</button>`;
+    const s1=`<p>Opaya's own assistant needs an AI model. With it, Opaya installs, connects and fixes your agents by itself.</p><div class="onb-actions">${big('guide-open','Set me up','Use ChatGPT, Claude, a key or a free model. Opaya guides you.')}${big('opaya-config','I have a model or key','Pick it and connect.','', 'secondary')}</div><p class="onb-more"><button type="button" class="text-button" data-action="opaya-free">Start free with a local model</button></p>`;
+    const s2=`<p>Opaya looks for Claude Code, Codex, Hermes, OpenClaw and others${hosts.length?` on this computer and on ${esc(hosts.length===1?hosts[0].name:`your ${hosts.length} servers`)}`:' on this computer'}. Nothing is installed or changed.</p><div class="onb-actions">${big('discover','Find my agents','A read-only check. You choose what to connect.')}${hosts.length?hosts.slice(0,3).map(h=>big('discover-host',`Look on ${esc(h.name)}`,'Over SSH',`data-id="${esc(h.id)}"`,'secondary')).join(''):''}</div>`;
+    const s3=`<p>${looked?'No agents were found yet.':''} Install one: Opaya does it in the background and sets up its model.</p><div class="onb-actions">${big('install-catalog','Install an agent on this computer','Hermes, Claude Code, Codex, OpenClaw and more.')}${hosts.length?hosts.slice(0,2).map(h=>big('install-catalog',`Install on ${esc(h.name)}`,'Your server, over SSH',`data-host="${esc(h.id)}"`,'secondary')).join(''):big('hosts','Add a server','A VPS or any machine with SSH. Then install there.','','secondary')}</div><p class="onb-more">${!hosts.length?'<button type="button" class="text-button" data-action="new-vps">Set up a new VPS</button> &#183; ':''}<button type="button" class="text-button" data-action="discover">Look again</button> &#183; <button type="button" class="text-button" data-action="add">Add a connection by hand</button></p>`;
+    return `<section class="ws-start onb" aria-label="Get started"><h2>Let's get you started</h2><p>Three steps. Opaya does the work; you only choose.</p>
+      <ol class="onb-steps">${step(1,'Give Opaya a brain',`Connected: ${esc(opayaModelLabel(o))}`,s1)}${step(2,'Find the agents you already have',looked?'Looked on this computer':'',s2)}${step(3,'Install your first agent','',s3)}</ol></section>`;
   }
   function renderOverview() {
     topbar('Home');
@@ -375,7 +382,7 @@
   }
   function modal(title,subtitle,body,wide=false) {
     returnFocus=document.activeElement;
-    $('#modal-root').innerHTML=`<dialog class="modal ${wide?'wide':''}" id="app-dialog"><div class="modal-header"><div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div><button class="icon-button" data-action="modal-close" aria-label="Close dialog">&#10005;</button></div><div class="modal-body">${body}</div></dialog>`;
+    $('#modal-root').innerHTML=`<dialog class="modal ${wide?'wide':''} ${wide==='xl'?'xl':''}" id="app-dialog"><div class="modal-header"><div><h2>${esc(title)}</h2><p>${esc(subtitle)}</p></div><button class="icon-button" data-action="modal-close" aria-label="Close dialog">&#10005;</button></div><div class="modal-body">${body}</div></dialog>`;
     const d=$('#app-dialog');d.addEventListener('cancel',event=>{if(modalBusy)event.preventDefault();else closeModal();});d.showModal();
     // A click on the dimmed page around the dialog closes it, like Esc. While it works, or once something was typed into
     // it, the dialog only nudges, so a stray click never throws away a key or a form.
@@ -397,6 +404,7 @@
     modalBusy=true;
     try{
       const result=await api.discover({hostId,extraHome});modalBusy=false;
+      if(!tipsSeen.has('onb:discovered')){tipsSeen.add('onb:discovered');saveView();if(overview)setTimeout(()=>{if(overview&&!state.agents.length)renderOverview();},0);}
       const items=result.agents||[];window.__discovered=items;
       const fresh=items.map((a,i)=>({a,i})).filter(x=>!x.a.existingId),added=items.map((a,i)=>({a,i})).filter(x=>x.a.existingId);
       // Frameworks from the catalog that were not found on this machine.
@@ -404,7 +412,7 @@
       const missing=(state.frameworks||[]).filter(f=>f.kind==='agent'&&!f.runtime&&(host?f.remote:f.local)&&!found.has(f.provider==='custom'?f.command:f.provider)&&!found.has(f.id)&&!toolFor(host?.id,f.id));
       const row=({a,i})=>`<div class="discovery-row">${badge(a)}<div><strong>${esc(a.name)}</strong><p>${esc(a.detail)}</p><div class="discovery-meta">${meta(a)}</div><code>${esc(a.hermesHome||a.endpoint||a.command)}</code></div><span class="discovery-state">${esc(a.readiness)}</span><button class="${a.existingId?'subtle':'primary'}" data-action="discovered-add" data-index="${i}">${a.existingId?'Open':'Add'}</button></div>`;
       modal('Discover agents',result.scope||(host?`Agents on ${host.name}`:'Agents on this computer'),`${tabs}
-        <section class="discover-group"><h3><span class="discover-dot new"></span>Found, not in Opaya yet <small>${fresh.length}</small></h3>${fresh.length?`<div class="discovery-results">${fresh.map(row).join('')}</div>`:`<p class="field-help">${added.length?'Every agent found here is already in Opaya.':'No agents found in the standard locations. Your agent may be in a custom folder, a container or WSL: add it manually.'}</p>`}</section>
+        <section class="discover-group"><h3><span class="discover-dot new"></span>Found, not in Opaya yet <small>${fresh.length}</small></h3>${fresh.length?`<div class="discovery-results">${fresh.map(row).join('')}</div>`:added.length?'<p class="field-help">Every agent found here is already in Opaya.</p>':`<div class="onb-next"><p><strong>No agents ${host?`on ${esc(host.name)}`:'on this computer'} yet.</strong> Next: install one, Opaya does it in the background.</p><div class="onb-actions"><button type="button" class="onb-btn primary" data-action="install-catalog" data-host="${esc(host?.id||'')}"><strong>Install an agent ${host?`on ${esc(host.name)}`:'here'}</strong><small>Hermes, Claude Code, Codex, OpenClaw and more</small></button>${!host&&!state.hosts.length?'<button type="button" class="onb-btn secondary" data-action="hosts"><strong>Add a server</strong><small>A VPS or any machine with SSH</small></button>':''}</div><p class="field-help">Using an agent in a custom folder, a container or WSL? <button type="button" class="text-button" data-action="manual">Add it by hand</button>.</p></div>`}</section>
         ${missing.length?`<section class="discover-group"><h3><span class="discover-dot missing"></span>Not installed ${host?`on ${esc(host.name)}`:'here'} <small>${missing.length}</small></h3><div class="discover-missing">${missing.map(f=>`<div class="missing-card">${badge({provider:f.provider,avatar:f.provider==='custom'&&LIB_ICONS.has(f.icon)?'lib:'+f.icon:''})}<div><strong>${esc(f.name)}</strong><small>${esc(f.description)}</small></div><button type="button" class="secondary small" data-action="discover-install" data-fw="${esc(f.id)}" data-host="${esc(host?.id||'')}">Install</button></div>`).join('')}</div></section>`:''}
         ${added.length?`<details class="discover-group discover-added"><summary><span class="discover-dot added"></span>Already in Opaya <small>${added.length}</small></summary><div class="discovery-results">${added.map(row).join('')}</div></details>`:''}
         ${result.warnings?.length?`<details class="discovery-warnings"><summary>Discovery notes (${result.warnings.length})</summary>${result.warnings.map(w=>`<p>${esc(w)}</p>`).join('')}</details>`:''}
@@ -1275,7 +1283,7 @@
     if(name==='tool-check'){action(async()=>{button.disabled=true;button.textContent='Checking...';await api.toolCheckAll();await refresh();openToolUpdates();});return;}
     if(name==='tool-update'||name==='tool-update-selected'){
       const ids=name==='tool-update-selected'?[...(button.closest('.tool-machine')?.querySelectorAll('input.tool-pick:checked')||[])].map(x=>x.dataset.id):null;if(ids&&!ids.length)return;
-      action(async()=>{const n=await api.toolUpdate(ids?{ids,hostId:button.dataset.host||undefined}:{id,hostId:button.dataset.host||undefined});if(n){closeModal();toast(`${n===1?'Update':`${n} updates`} running in the Updates terminal below. Opaya checks the versions afterwards; if one does not take, the Opaya Agent finishes it.`);}});return;}
+      action(async()=>{const job=await api.toolUpdate(ids?{ids,hostId:button.dataset.host||undefined}:{id,hostId:button.dataset.host||undefined});if(job){closeModal();showJob(job);}});return;}
     if(name==='dock-move'){moveDock(button.dataset.pane);return;}
     if(name==='new-vps'){openNewVps();return;}
     if(name==='job-restore'){const running=[...jobs.values()].filter(j=>j.status==='running');if(!jobs.has(jobShown))jobShown=(running[0]||[...jobs.values()].at(-1))?.id||'';jobMinimized=false;renderJobs();return;}
@@ -1283,7 +1291,7 @@
     if(name==='opaya-session'){action(async()=>{await api.opayaSelectSession({id});opayaCount=-1;});return;}
     if(name==='opaya-new'){action(async()=>{await api.opayaNewSession();opayaCount=-1;$('#message-input')?.focus();});return;}
     if(name==='opaya-delete-session'){const o=opaya();action(async()=>{if(!await ask('Delete this chat with the Opaya Agent?'))return;await api.opayaDeleteSession({id:o.sessionId});opayaCount=-1;});return;}
-    if(name==='discover-tab'){discover(id||undefined);return;}
+    if(name==='discover-tab'||name==='discover-host'){discover(id||undefined);return;}
     if(name==='discover-install'){if(button.dataset.host){confirmInstall(button.dataset.fw,button.dataset.host);return;}action(async()=>{const r=await api.installFramework({id:button.dataset.fw,hostId:button.dataset.host||undefined});closeModal();if(r?.kind==='toolchain'){onJob(r);toast('Opaya is installing it from the official download.');return;}toast('Installing in Terminal. Discover again when it finishes.');});return;}
     if(name==='clone-install'){action(async()=>{await api.installFramework({id:'hermes',hostId:button.dataset.host||undefined});toast('Installing Hermes in Terminal. Clone again when it finishes.');});return;}
     if(name==='itrust-agent'){const a=state.agents.find(x=>x.id===id);if(a)toggleAgentTrust(a);return;}
@@ -1593,10 +1601,12 @@
   }
   async function loadBackups(a){try{backupLists.set(a.id,await api.agentBackups({id:a.id}));}catch(e){backupLists.set(a.id,{error:e.message,backups:[]});}if(manageId===a.id)render();return backupLists.get(a.id);}
   async function updateAgent(a){
-    const started=await api.agentUpdate({id:a.id});if(!started)return;
-    toast(`Updating in the terminal below. Reconnect ${title(a)} when it finishes.`);installInfo.delete(a.id);
+    const job=await api.agentUpdate({id:a.id});if(!job)return;
+    showJob(job);installInfo.delete(a.id);
   }
-  async function updateAll(){const n=await api.agentUpdateAll();if(n)toast(`${n} update${n===1?'':'s'} started in the terminal. Reconnect your agents when they finish.`);installInfo.clear();}
+  async function updateAll(){const job=await api.agentUpdateAll();if(job)showJob(job);installInfo.clear();}
+  // An update (or any job an action returned) in the job window, in front.
+  function showJob(job){if(!job?.id)return;if(!jobs.has(job.id))jobs.set(job.id,job);jobShown=job.id;jobMinimized=false;renderJobs();}
   async function openBackup(a){
     const folder=state.settings?.backupDir||'';
     modal('Back up to this computer',`${title(a)} / ${location(a)}`,`<form id="backup-form" class="maintenance-form"><p class="field-help">Copies ${esc(title(a))}'s own data (${a.provider==='hermes'?'config, memory, skills, SOUL.md, cron jobs':'settings, instructions, skills'}) into a .tar.gz on ${esc(localName())}. The installation itself is not copied: install it again and restore these files.</p>
@@ -2698,7 +2708,9 @@
     const j=jobs.get(guide.jobId);if(!j)return '<p class="guide-scan"><span class="status-dot working"></span> Starting...</p>';
     const last=[...(j.log||[])].reverse().find(l=>l.text&&l.text!=='Done.');const warn=last?.state==='warn';
     const steps=`<ol class="guide-plan live">${j.steps.map((s,i)=>`<li class="${s.state||'pending'}"><span class="guide-n">${s.state==='done'?'&#10003;':s.state==='error'?'!':i+1}</span><div><strong>${esc(s.label)}</strong>${s.state==='active'?`<small>${esc((j.log||[]).filter(l=>l.text).at(-1)?.text||'Working...')}</small>`:''}</div>${s.state==='active'?'<span class="status-dot working"></span>':''}</li>`).join('')}</ol>`;
-    if(j.status==='running')return `${warn?`<div class="guide-callout">&#9888; ${esc(last.text)}</div>`:''}${steps}<p class="field-help">You can watch every step in the <strong>Opaya setup</strong> terminal below.</p>`;
+    // A password or a question from the setup: asked right here, typed into its background terminal.
+    const ask=j.input?`<div class="guide-callout guide-ask"><strong>${esc(j.waiting||'The setup needs you.')}</strong>${j.input.kind==='password'?`<form class="job-input" data-guide-input="1"><input type="password" id="guide-input-value" autocomplete="off" placeholder="Your computer password" aria-label="Password" /><button type="submit" class="primary">Continue</button></form><small class="job-input-note">Typed straight into the setup, never saved or shown.</small>`:`<div class="guide-actions"><button type="button" class="primary" data-guide-answer="y">Yes, continue</button><button type="button" class="secondary" data-guide-answer="n">No</button></div>`}</div>`:'';
+    if(j.status==='running')return `${ask}${warn&&!ask?`<div class="guide-callout">&#9888; ${esc(last.text)}</div>`:''}${steps}<p class="field-help">Opaya does this in the background. You can keep using the app.</p>`;
     if(j.status==='error')return `${steps}<div class="inline-notice error-notice">${esc(j.error)}</div><div class="guide-actions"><button type="button" class="primary" data-guide="start">Try again</button>${opaya().configured?'<button type="button" class="secondary" data-guide="ask-fix">Ask the Opaya Agent to fix it</button>':''}<button type="button" class="secondary" data-guide="script">Continue without AI</button></div>`;
     if(j.result?.handoff)return `${steps}<p><strong>I have a brain now.</strong> The Opaya Agent is finishing the setup: installing the rest, checking versions and fixing problems. Follow along below.</p><div class="guide-actions"><button type="button" class="primary" data-guide="close">Watch the Opaya Agent</button></div>`;
     return `${steps}<p><strong>Your computer is ready.</strong>${opaya().configured?'':' When you get an AI account or key, come back here to connect it.'}</p><div class="guide-actions"><button type="button" class="primary" data-guide="projects">Start a project</button>${state.agents.length?`<button type="button" class="secondary" data-guide="chat">Chat with ${esc(title(state.agents[0]))}</button>`:''}<button type="button" class="secondary" data-guide="close">Close the guide</button></div>`;
@@ -2791,7 +2803,9 @@
       $('#message-form').addEventListener('submit',event=>{event.preventDefault();sendOpaya();});
       $('#opaya-secret').addEventListener('click',()=>openVault({chat:true}));
       $('#opaya-sessions').addEventListener('change',event=>action(async()=>{await api.opayaSelectSession({id:event.target.value});opayaCount=-1;}));
-      $('#opaya-messages').addEventListener('click',event=>{const b=event.target.closest('[data-guide]');if(b&&guide&&!b.disabled)guideClick(b);});
+      $('#opaya-messages').addEventListener('click',event=>{const b=event.target.closest('[data-guide]');if(b&&guide&&!b.disabled)guideClick(b);
+        const ans=event.target.closest('[data-guide-answer]');if(ans&&guide?.jobId)action(()=>api.jobInput({id:guide.jobId,value:ans.dataset.guideAnswer}));});
+      $('#opaya-messages').addEventListener('submit',event=>{if(!event.target.matches('[data-guide-input]'))return;event.preventDefault();const f=$('#guide-input-value');if(!f||!guide?.jobId)return;const value=f.value;f.value='';action(()=>api.jobInput({id:guide.jobId,value}));});
       $('#opaya-messages').addEventListener('submit',event=>{const f=event.target.closest('[data-guide-form]');if(f&&guide){event.preventDefault();guideKeySubmit(f);}});
       enter($('#content'));opayaCount=-1;
     }
@@ -3196,7 +3210,9 @@
     const f=$('#free-form');f.onsubmit=event=>{event.preventDefault();const model=f.querySelector('[name="model"]:checked')?.value;action(async()=>{await api.opayaFreeSetup({model});closeModal();});};
   }
   function openOpayaConfig(){
-    const o=opaya(),presets=o.presets||{},c=o.config||{},current=Object.hasOwn(presets,c.preset)?c.preset:'codex';
+    // The default is what this computer already has: Codex CLI, then Claude Code; with neither, a free key (Google).
+    const local=state.toolUpdates?.machines?.local?.items||[],has=id=>!!local.find(i=>i.id===id&&i.installed);
+    const o=opaya(),presets=o.presets||{},c=o.config||{},fallback=has('codex')?'codex':has('claude')?'claude':local.length&&presets.google?'google':'codex',current=Object.hasOwn(presets,c.preset)?c.preset:fallback;
     const initial=presets[current]||{},models=[...new Set([...(initial.models||[]),c.model].filter(Boolean))];
     modal('Opaya Agent model','Run through Codex CLI or Claude Code on this computer, or connect an OpenAI-compatible provider. Models are selected from provider results.',`<form id="opaya-config-form"><div class="preset-grid">${Object.entries(presets).map(([id,p])=>`<label class="preset-option"><input type="radio" name="preset" value="${esc(id)}" ${id===current?'checked':''}><span><strong>${esc(p.label)}${p.free?` <em class="preset-free">${esc(p.free)}</em>`:''}</strong><small>${esc(p.kind==='codex'||p.kind==='claude'?'Signed-in CLI / no API key':p.baseUrl||'Any /v1 endpoint')}</small>${p.signup?`<a href="#" class="preset-signup" data-action="open-link" data-external="1" data-url="${esc(p.signup)}">Get a free key &#8599;</a>`:''}</span></label>`).join('')}</div><p class="field-help">No account? <button type="button" class="text-button" data-action="opaya-free">Start free with a local model</button>: Opaya installs everything.</p><div class="form-grid"><label class="field" data-opaya-http><span>API base URL</span><input name="baseUrl" value="${esc(c.baseUrl||initial.baseUrl||'')}" placeholder="https://.../v1"></label><label class="field"><span>Model</span><select name="model"><option value="">${current==='codex'?'Use Codex CLI default':'Test connection to load models'}</option>${models.map(m=>`<option value="${esc(m)}" ${m===c.model?'selected':''}>${esc(m)}</option>`).join('')}</select></label></div><label class="field" data-opaya-key><span>API key ${o.hasKey?'<em>stored securely</em>':''}</span><input name="apiKey" type="password" autocomplete="new-password" placeholder="${o.hasKey?'Leave empty to keep the saved key':'Not needed for local providers'}"></label><label class="check-row" data-opaya-key><input type="checkbox" name="remember" ${state.secureStorage?'checked':''}> Remember key with OS encryption <small>${state.secureStorage?'Protected by your OS keychain':'Unavailable here: the key stays in memory only'}</small></label><div class="opaya-boundary"><strong>Safety boundary</strong><p>The Opaya Agent works through Opaya's tools for installs, onboarding, connections, machines and diagnostics, and runs commands in terminals you can watch. With iTrust on it does this without asking; turn iTrust off to approve every change and command. Removing connections or machines always asks. API tokens are never sent to it. Chat and notes live in <code>${esc(o.home||'opaya-agent')}</code>.</p></div><p id="opaya-test-result" class="field-help"></p><div class="modal-footer"><div>${o.hasKey?'<button type="button" class="danger-text" data-action="opaya-forget-key">Forget saved key</button>':''}</div><div><button type="button" class="secondary" id="opaya-test">Test &amp; load models</button><button type="submit" class="primary">Save</button></div></div></form>`,true);
     const form=$('#opaya-config-form');
@@ -3665,40 +3681,85 @@
   document.addEventListener('change',async event=>{const box=event.target,key=box.dataset?.setting;if(!key)return;const on=box.checked;
     if(on&&key==='itrustAll'&&!await ask('Turn on iTrust for all agents?\n\nEvery agent\'s tool requests will be approved automatically.')){box.checked=false;return;}
     action(async()=>{await api.saveSettings({[key]:on});await refresh();});});
-  async function openSkills(id){
+  // Skills: a big window with the agent's skills on the left (filter, select many) and the chosen skill on the right
+  // (read and edit its SKILL.md, use it, remove it, share it). Several at once: share with many agents, add to the
+  // library, remove. New skill writes a SKILL.md into the agent's skills folder. Commands and MCP servers have tabs.
+  async function openSkills(id,tab='skills'){
     const a=state.agents.find(x=>x.id===id);if(!a)return;
-    modal('Skills, tools & MCP',`${title(a)} / ${labels[a.provider]||a.provider}${a.agentVersion?` ${a.agentVersion}`:''}`,`<div id="skills-body"><p class="field-help">Loading skills...</p></div>`,true);
+    modal('Skills, commands & MCP',`${title(a)} / ${labels[a.provider]||a.provider}${a.agentVersion?` ${a.agentVersion}`:''} / ${location(a)}`,`<div id="skills-body" class="sk"><p class="field-help">Loading skills...</p></div>`,'xl');
+    const picked=new Set();let pane={kind:'none'},q='',r=null;
+    const others=()=>state.agents.filter(x=>x.id!==a.id);
+    const skillRow=s=>`<div class="sk-row ${pane.name===s.name&&pane.kind!=='new'?'active':''}" data-sk="${esc(s.name)}"><input type="checkbox" class="sk-pick" data-pick="${esc(s.name)}" ${picked.has(s.name)?'checked':''} ${s.path?'':'disabled title="Comes with the agent"'} aria-label="Select ${esc(s.name)}"><div class="sk-row-text"><strong>/${esc(s.name)}</strong>${s.category?`<em>${esc(s.category)}</em>`:''}${s.path?'':'<em class="sk-builtin">built in</em>'}<p>${esc(s.description||'No description.')}</p></div></div>`;
+    const paneHtml=()=>{
+      if(pane.kind==='new')return `<div class="sk-pane-in"><h3>New skill</h3><p class="mem-hint">A skill is a folder with a SKILL.md: when to use it and the steps. ${esc(title(a))} loads it in new conversations.</p>
+        <label class="field"><span>Name</span><input id="sk-new-name" placeholder="release-notes" autocomplete="off" spellcheck="false" /></label>
+        <label class="field"><span>When to use it</span><input id="sk-new-desc" placeholder="Write release notes from the git log" /></label>
+        <label class="field"><span>Instructions</span><textarea id="sk-new-body" rows="12" placeholder="# Steps&#10;1. ...&#10;2. ..."></textarea></label>
+        <div class="mem-actions"><button type="button" class="primary" id="sk-create">Create skill</button><button type="button" class="secondary" id="sk-new-ai">Write it with the Opaya Agent</button></div></div>`;
+      if(pane.kind==='share'){const names=[...picked];return `<div class="sk-pane-in"><h3>Share ${names.length===1?`/${esc(names[0])}`:`${names.length} skills`}</h3><p class="mem-hint">Each agent gets a copy in its own skills folder. A skill with the same name there is replaced.</p>
+        <div class="sk-share-names">${names.map(n=>`<code>/${esc(n)}</code>`).join(' ')}</div>
+        ${others().length?`<div class="set-card sk-share"><label class="check-row"><input type="checkbox" id="sk-share-all" /> <strong>All agents</strong></label>${others().map(x=>`<label class="check-row"><input type="checkbox" class="sk-share-to" value="${esc(x.id)}" /> ${esc(title(x))} <small>${esc(location(x))}</small></label>`).join('')}</div><div class="mem-actions"><button type="button" class="primary" id="sk-share-go">Share</button><button type="button" class="secondary" id="sk-share-lib">Add to skills library instead</button></div>`:'<p class="field-help">Add another agent first.</p>'}</div>`;}
+      if(pane.kind==='skill'){const s=r.skills.find(x=>x.name===pane.name);if(!s)return '';
+        return `<div class="sk-pane-in"><div class="sk-pane-head"><div><h3>/${esc(s.name)}</h3>${s.category?`<em>${esc(s.category)}</em>`:''}</div><div><button type="button" class="primary small" data-skill-use="${esc(s.name)}">Use in chat</button></div></div>
+          <p class="mem-hint">${esc(s.description||'No description.')}</p>${s.path?`<p class="field-help mem-where"><code>${esc(s.path)}</code></p>`:'<p class="field-help">This skill comes with the agent: it can be used, not edited or removed here.</p>'}
+          ${s.path?`<textarea id="sk-edit" rows="18" spellcheck="false" placeholder="Reading SKILL.md...">${pane.content!=null?esc(pane.content):''}</textarea>
+          <div class="mem-actions"><button type="button" class="primary" id="sk-save" ${pane.content==null?'disabled':''}>Save</button><button type="button" class="secondary" id="sk-share-one">Share with agents...</button><button type="button" class="secondary danger-text" id="sk-remove-one">Remove</button></div>`:''}</div>`;}
+      return `<div class="sk-pane-in sk-empty"><h3>${r.skills.length?'Pick a skill':'No skills yet'}</h3><p class="mem-hint">${r.skills.length?'Click a skill to read or edit it. Tick several to share, add to the library or remove them together.':`Create one, install one${['hermes','openclaw'].includes(a.provider)?' from the hub':''}, or copy them from another agent or the skills library.`}</p><div class="mem-actions"><button type="button" class="primary" id="sk-new-2">+ New skill</button><button type="button" class="secondary" data-action="library">Skills library</button></div></div>`;
+    };
+    const tabsHtml=t=>`<div class="sk-tabs" role="tablist">${[['skills',`Skills <small>${r?.skills.length||0}</small>`],['commands',`Commands <small>${(a.commands||[]).length}</small>`],['mcp',`MCP servers <small>${(state.mcpServers||[]).length}</small>`]].map(([k,l])=>`<button type="button" role="tab" class="sk-tab ${t===k?'active':''}" data-sk-tab="${k}">${l}</button>`).join('')}</div>`;
     const draw=async(force=false)=>{
-      let r;try{r=await loadSkills(id,force);}catch(error){r={skills:[],dirs:[],supported:true,error:error.message};}
+      if(!r||force){try{r=await loadSkills(id,force);}catch(error){r={skills:[],dirs:[],supported:true,error:error.message};}}
       const body=$('#skills-body');if(!body)return;const live=state.agents.find(x=>x.id===id)||a;
-      const q=($('#skills-search')?.value||'').toLowerCase();
-      const list=r.skills.filter(s=>`${s.name} ${s.description} ${s.category}`.toLowerCase().includes(q));
-      const commands=live.commands||[];
-      body.innerHTML=`<section class="skills-section"><div class="skills-head"><h3>Skills <small>${r.skills.length}</small></h3><div><input id="skills-search" class="skills-search" placeholder="Filter skills..." aria-label="Filter skills" value="${esc(q)}"><button class="text-button" id="skills-refresh">Refresh</button></div></div>
-        ${r.error?`<div class="message-error">${esc(r.error)}</div>`:''}
-        ${!r.supported?'<p class="field-help">Opaya does not know where this agent keeps skills.</p>':list.length?`<div class="skill-list">${list.slice(0,200).map(s=>`<div class="skill-row"><div><strong>/${esc(s.name)}</strong>${s.category?`<em>${esc(s.category)}</em>`:''}<p>${esc(s.description||'No description.')}</p></div><button class="secondary small" data-skill-use="${esc(s.name)}">Use</button></div>`).join('')}</div>`:`<p class="field-help">${r.skills.length?'No skills match this filter.':'No skills installed yet.'}</p>`}
-        ${r.dirs?.length?`<p class="field-help">Skill folders: ${r.dirs.map(d=>`<code>${esc(d)}</code>`).join(', ')}. Each skill is a folder with a SKILL.md.${a.transport!=='ssh'?' <button class="text-button" id="skills-open-folder">Open folder</button>':''}</p>`:''}
-        <div class="skill-move"><button class="secondary small" data-action="transfer" data-id="${esc(a.id)}">&#8644; Share with another agent</button><button class="secondary small" id="skills-to-library" ${r.skills.length?'':'disabled'}>Add to skills library</button><button class="text-button" data-action="library">Skills library</button></div>
-        ${a.provider==='hermes'?`<div class="skill-install"><input id="skill-id" placeholder="official/security/1password or https://.../SKILL.md" aria-label="Skill id or link"><button class="primary" id="skill-install">Install</button><button class="secondary" id="skill-browse">Browse Hermes hub</button></div>`:a.provider==='openclaw'?`<div class="skill-install"><input id="skill-id" placeholder="@owner/skill, skills-sh:owner/repo/skill or git:owner/repo" aria-label="ClawHub skill"><button class="primary" id="skill-install">Install</button><button class="secondary" id="skill-browse">Search ClawHub</button></div>`:''}
-      </section>
-      <section class="skills-section"><div class="skills-head"><h3>Commands <small>${commands.length}</small></h3></div>
-        ${commands.length?`<div class="skill-list">${commands.map(c=>`<div class="skill-row"><div><strong>/${esc(c.name)}</strong><p>${esc(c.description||'')}${c.hint?` <em>${esc(c.hint)}</em>`:''}</p></div><button class="secondary small" data-skill-use="${esc(c.name)}">Use</button></div>`).join('')}</div>`:`<p class="field-help">${a.protocol==='acp'?'The agent announces its commands after its first session. Send a message or refresh models.':'Type / in the message box to use skills.'}</p>`}
-        ${a.protocol==='acp'&&a.provider==='hermes'?`<p class="field-help">Tools: <button class="text-button" id="skills-tools" ${live.status!=='connected'||live.busy?'disabled':''}>Ask Hermes for its tool list (/tools)</button></p>`:''}
-      </section>
-      <section class="skills-section"><div class="skills-head"><h3>MCP servers <small>${(state.mcpServers||[]).length}</small></h3><button class="secondary small" data-action="mcp-manage">Manage MCP servers</button></div>
-        <p class="field-help">${esc(mcpSupport(a))}</p>
-        ${(state.mcpServers||[]).length?`<div class="skill-list">${state.mcpServers.map(s=>`<label class="skill-row mcp-row"><div><strong>${esc(s.name)}</strong><em>${esc(s.type)}</em><p>${esc(s.type==='stdio'?`${s.command} ${s.args.join(' ')}`:s.url)}${s.note?` / ${esc(s.note)}`:''}</p></div><input type="checkbox" data-mcp-toggle="${esc(s.id)}" ${usesMcp(s,a)?'checked':''} ${mcpPassed(a)?'':'disabled'} aria-label="Use ${esc(s.name)} with ${esc(title(a))}"></label>`).join('')}</div>`:'<p class="field-help">No MCP servers yet. Add one to give your agents tools such as GitHub, a browser or a database.</p>'}
-      </section>`;
-      const search=$('#skills-search');search.addEventListener('input',()=>draw());if(q){search.focus();search.setSelectionRange(q.length,q.length);}
-      $('#skills-refresh').onclick=()=>draw(true);
-      $('#skills-to-library')&&($('#skills-to-library').onclick=()=>openLibraryImport(a,r.skills));
+      for(const n of [...picked])if(!r.skills.some(s=>s.name===n&&s.path))picked.delete(n);
+      if(tab==='commands'){const commands=live.commands||[];
+        body.innerHTML=`${tabsHtml(tab)}<div class="sk-single">${commands.length?`<div class="skill-list">${commands.map(c=>`<div class="skill-row"><div><strong>/${esc(c.name)}</strong><p>${esc(c.description||'')}${c.hint?` <em>${esc(c.hint)}</em>`:''}</p></div><button class="secondary small" data-skill-use="${esc(c.name)}">Use</button></div>`).join('')}</div>`:`<p class="field-help">${a.protocol==='acp'?'The agent announces its commands after its first session. Send a message or refresh models.':'Type / in the message box to use skills.'}</p>`}
+          ${a.protocol==='acp'&&a.provider==='hermes'?`<p class="field-help">Tools: <button class="text-button" id="skills-tools" ${live.status!=='connected'||live.busy?'disabled':''}>Ask Hermes for its tool list (/tools)</button></p>`:''}</div>`;
+      }else if(tab==='mcp'){
+        body.innerHTML=`${tabsHtml(tab)}<div class="sk-single"><div class="skills-head"><p class="field-help">${esc(mcpSupport(a))}</p><button class="secondary small" data-action="mcp-manage">Manage MCP servers</button></div>
+          ${(state.mcpServers||[]).length?`<div class="skill-list">${state.mcpServers.map(s=>`<label class="skill-row mcp-row"><div><strong>${esc(s.name)}</strong><em>${esc(s.type)}</em><p>${esc(s.type==='stdio'?`${s.command} ${s.args.join(' ')}`:s.url)}${s.note?` / ${esc(s.note)}`:''}</p></div><input type="checkbox" data-mcp-toggle="${esc(s.id)}" ${usesMcp(s,a)?'checked':''} ${mcpPassed(a)?'':'disabled'} aria-label="Use ${esc(s.name)} with ${esc(title(a))}"></label>`).join('')}</div>`:'<p class="field-help">No MCP servers yet. Add one to give your agents tools such as GitHub, a browser or a database.</p>'}</div>`;
+      }else{
+        const list=r.skills.filter(s=>`${s.name} ${s.description} ${s.category}`.toLowerCase().includes(q.toLowerCase())),own=list.filter(s=>s.path);
+        const bulk=picked.size?`<div class="sk-bulk"><strong>${picked.size} selected</strong><button type="button" class="primary small" id="sk-bulk-share">Share with agents...</button><button type="button" class="secondary small" id="sk-bulk-lib">Add to library</button><button type="button" class="secondary small danger-text" id="sk-bulk-remove">Remove</button><button type="button" class="text-button" id="sk-bulk-clear">Clear</button></div>`:'';
+        body.innerHTML=`${tabsHtml(tab)}${r.error?`<div class="message-error">${esc(r.error)}</div>`:''}
+          ${!r.supported?'<p class="field-help">Opaya does not know where this agent keeps skills.</p>':`<div class="sk-toolbar"><input id="skills-search" class="skills-search" placeholder="Filter skills..." aria-label="Filter skills" value="${esc(q)}"><label class="check-row sk-all"><input type="checkbox" id="sk-all" ${own.length&&own.every(s=>picked.has(s.name))?'checked':''} ${own.length?'':'disabled'} /> Select all</label><span class="sk-grow"></span><button type="button" class="primary small" id="sk-new">+ New skill</button><button type="button" class="secondary small" id="skills-refresh">Refresh</button></div>${bulk}
+          <div class="sk-split"><div class="sk-list">${list.length?list.slice(0,400).map(skillRow).join(''):`<p class="field-help">${r.skills.length?'No skills match this filter.':'No skills installed yet.'}</p>`}</div><div class="sk-pane">${paneHtml()}</div></div>`}
+          ${a.provider==='hermes'?`<div class="skill-install"><input id="skill-id" placeholder="Install from the hub: official/security/1password or https://.../SKILL.md" aria-label="Skill id or link"><button class="primary" id="skill-install">Install</button><button class="secondary" id="skill-browse">Browse Hermes hub</button></div>`:a.provider==='openclaw'?`<div class="skill-install"><input id="skill-id" placeholder="Install from ClawHub: @owner/skill, skills-sh:owner/repo/skill or git:owner/repo" aria-label="ClawHub skill"><button class="primary" id="skill-install">Install</button><button class="secondary" id="skill-browse">Search ClawHub</button></div>`:''}
+          ${r.dirs?.length?`<p class="field-help sk-dirs">Skill folders: ${r.dirs.map(d=>`<code>${esc(d)}</code>`).join(', ')}${a.transport!=='ssh'&&a.command!=='docker'?' <button class="text-button" id="skills-open-folder">Open folder</button>':''}</p>`:''}`;}
+      wire(body,live);
+    };
+    const remove=names=>action(async()=>{const res=await api.agentSkillRemove({agentId:a.id,names});skillCache.delete(a.id);for(const n of res.removed)picked.delete(n);if(res.removed.includes(pane.name))pane={kind:'none'};await draw(true);toast(`${res.removed.length?`Removed ${res.removed.length===1?`/${res.removed[0]}`:`${res.removed.length} skills`}. Kept in ${res.bin}.`:'Nothing removed.'}${res.skipped.length?` Not removed: ${res.skipped.map(x=>`${x.name} (${x.why})`).join(', ')}.`:''}`,!res.removed.length);});
+    const openSkill=async name=>{pane={kind:'skill',name,content:null};await draw();const s=r.skills.find(x=>x.name===name);if(!s?.path)return;
+      try{const c=await api.agentSkillRead({agentId:a.id,name});if(pane.name!==name)return;pane.content=c.content;await draw();}catch(e){toast(e.message,true);}};
+    function wire(body,live){
+      for(const t of body.querySelectorAll('[data-sk-tab]'))t.onclick=()=>{tab=t.dataset.skTab;draw();};
       for(const b of body.querySelectorAll('[data-skill-use]'))b.onclick=()=>useCommand(a,b.dataset.skillUse);
       for(const c of body.querySelectorAll('[data-mcp-toggle]'))c.onchange=()=>action(async()=>{await api.agentMcp({agentId:a.id,serverId:c.dataset.mcpToggle,enabled:c.checked});await refresh();toast(a.protocol==='acp'?'Saved. Start a new conversation to use it.':'Saved.');});
+      $('#skills-tools')&&($('#skills-tools').onclick=()=>action(async()=>{closeModal();await api.send({agentId:a.id,conversationId:currentConversation()?.agentId===a.id?currentConversation().id:'',text:'/tools'});}));
+      if(tab!=='skills')return;
+      const search=$('#skills-search');if(search){search.oninput=()=>{q=search.value;draw().then(()=>{const s2=$('#skills-search');if(s2){s2.focus();s2.setSelectionRange(q.length,q.length);}});};}
+      $('#skills-refresh')&&($('#skills-refresh').onclick=()=>draw(true));
+      for(const row of body.querySelectorAll('[data-sk]'))row.onclick=e=>{if(e.target.closest('.sk-pick'))return;openSkill(row.dataset.sk);};
+      for(const c of body.querySelectorAll('[data-pick]'))c.onchange=()=>{c.checked?picked.add(c.dataset.pick):picked.delete(c.dataset.pick);if(pane.kind==='share'&&!picked.size)pane={kind:'none'};draw();};
+      $('#sk-all')&&($('#sk-all').onchange=e=>{const own=r.skills.filter(s=>s.path&&`${s.name} ${s.description} ${s.category}`.toLowerCase().includes(q.toLowerCase()));for(const s of own)e.target.checked?picked.add(s.name):picked.delete(s.name);draw();});
+      const newSkill=()=>{pane={kind:'new'};draw().then(()=>$('#sk-new-name')?.focus());};
+      $('#sk-new')&&($('#sk-new').onclick=newSkill);$('#sk-new-2')&&($('#sk-new-2').onclick=newSkill);
+      $('#sk-bulk-clear')&&($('#sk-bulk-clear').onclick=()=>{picked.clear();if(pane.kind==='share')pane={kind:'none'};draw();});
+      $('#sk-bulk-share')&&($('#sk-bulk-share').onclick=()=>{pane={kind:'share'};draw();});
+      $('#sk-bulk-lib')&&($('#sk-bulk-lib').onclick=()=>action(async()=>{const job=await api.libraryImport({agentId:a.id,names:[...picked]});showJob(job);}));
+      $('#sk-bulk-remove')&&($('#sk-bulk-remove').onclick=()=>remove([...picked]));
+      $('#sk-remove-one')&&($('#sk-remove-one').onclick=()=>remove([pane.name]));
+      $('#sk-share-one')&&($('#sk-share-one').onclick=()=>{picked.clear();picked.add(pane.name);pane={kind:'share'};draw();});
+      $('#sk-share-all')&&($('#sk-share-all').onchange=e=>{for(const c of body.querySelectorAll('.sk-share-to'))c.checked=e.target.checked;});
+      $('#sk-share-go')&&($('#sk-share-go').onclick=()=>action(async()=>{const targetIds=[...body.querySelectorAll('.sk-share-to:checked')].map(c=>c.value);if(!targetIds.length){toast('Choose agents to share with.',true);return;}const job=await api.skillsShare({sourceId:a.id,names:[...picked],targetIds});for(const t of targetIds)skillCache.delete(t);picked.clear();pane={kind:'none'};await draw();showJob(job);}));
+      $('#sk-share-lib')&&($('#sk-share-lib').onclick=()=>action(async()=>{const job=await api.libraryImport({agentId:a.id,names:[...picked]});showJob(job);}));
+      const edit=$('#sk-edit');if(edit)edit.oninput=()=>{pane.content=edit.value;};
+      $('#sk-save')&&($('#sk-save').onclick=()=>action(async()=>{await api.agentSkillSave({agentId:a.id,name:pane.name,content:$('#sk-edit').value});skillCache.delete(a.id);toast('Saved. New conversations use it.');const keep=pane;await draw(true);pane=keep;}));
+      $('#sk-create')&&($('#sk-create').onclick=()=>action(async()=>{const name=$('#sk-new-name').value.trim(),description=$('#sk-new-desc').value.trim(),bodyText=$('#sk-new-body').value;if(!name){toast('Give the skill a name.',true);return;}const res=await api.agentSkillCreate({agentId:a.id,name,description,body:bodyText});skillCache.delete(a.id);await draw(true);await openSkill(res.name);toast(`/${res.name} created. New conversations load it.`);}));
+      $('#sk-new-ai')&&($('#sk-new-ai').onclick=()=>action(async()=>{const name=$('#sk-new-name').value.trim(),what=$('#sk-new-desc').value.trim();await api.opayaSend({text:`Create a new skill for ${title(a)} (agent_id ${a.id}, ${a.provider} on ${location(a)})${name?` named ${name}`:''}${what?`: ${what}`:''}. Ask me a few short questions first. Write it as a folder with a SKILL.md (front matter with name and description, then clear steps) in its skills folder${r.dirs?.[0]?` (${r.dirs[0]})`:''}, where the agent runs, then tell me it is ready.`});closeModal();overview=false;opayaView=true;playgroundView=false;manageId='';render();saveView();}));
       $('#skills-open-folder')&&($('#skills-open-folder').onclick=()=>{closeModal();openFiles({agentId:a.id,path:r.dirs[0],label:`${title(a)} / skills`});});
       $('#skill-install')&&($('#skill-install').onclick=()=>action(async()=>{const skill=$('#skill-id').value.trim();if(!skill)return;await api.skillAction({agentId:a.id,action:'install',skill});skillCache.delete(a.id);toast('Installing in Terminal. Refresh when it finishes.');}));
       $('#skill-browse')&&($('#skill-browse').onclick=()=>action(()=>api.skillAction({agentId:a.id,action:'browse'})));
-      $('#skills-tools')&&($('#skills-tools').onclick=()=>action(async()=>{closeModal();await api.send({agentId:a.id,conversationId:currentConversation()?.agentId===a.id?currentConversation().id:'',text:'/tools'});}));
-    };
+    }
     await draw();
   }
   function openMcpManager(editId=''){
@@ -4251,6 +4312,7 @@
     document.body.classList.toggle('job-open',!!j&&!jobMinimized);
     if(!j||jobMinimized){win?.remove();return;}
     if(!win){win=document.createElement('section');win.id='job-window';win.className='job-window';win.setAttribute('role','dialog');win.setAttribute('aria-label',j.title);document.body.append(win);
+      win.addEventListener('submit',event=>{if(!event.target.matches('[data-job-form]'))return;event.preventDefault();const job=jobs.get(jobShown),f=$('#job-input-value',win);if(!job||!f)return;const value=f.value;f.value='';action(()=>api.jobInput({id:job.id,value}));});
       win.addEventListener('click',event=>{const b=event.target.closest('[data-job]');if(!b)return;const act=b.dataset.job,job=jobs.get(jobShown);
         if(act==='min'){jobMinimized=true;renderJobs();}
         else if(act==='close'){if(job?.status==='running'){jobMinimized=true;}else{api.jobDismiss({id:jobShown}).catch(()=>{});jobs.delete(jobShown);jobShown=[...jobs.values()].find(x=>x.status==='running')?.id||'';}renderJobs();}
@@ -4259,6 +4321,7 @@
         else if(act==='gh-login'&&job?.route?.hostId){action(()=>api.projectRemoteGithubLogin({hostId:job.route.hostId}));}
         else if(act==='reveal'&&job?.result?.file){action(()=>api.revealBackup({file:job.result.file}));}
         else if(act==='signin-again'){action(()=>api.signInAgain());}
+        else if((act==='input-yes'||act==='input-no')&&job){action(()=>api.jobInput({id:job.id,value:act==='input-yes'?'y':'n'}));}
         else if(act==='cancel'&&job){opayaAsk({title:job.kind==='install'?'Cancel this install?':'Cancel this setup?',text:job.kind==='install'?'Opaya stops it and removes what it set up: the container, its data and the agent in Opaya.':'Opaya stops it. What was already changed stays.',ok:job.kind==='install'?'Cancel and remove':'Cancel setup',cancel:'Keep going',danger:job.kind==='install'}).then(ok=>{if(ok)action(()=>api.jobCancel({id:job.id}));});}
         else if(act==='copy'){action(()=>api.clipboardWrite({text:job.log.map(l=>`${new Date(l.at).toLocaleTimeString()} ${l.text}`).join('\n')}));toast('Log copied.');}
       });}
@@ -4300,7 +4363,10 @@
     const footer=part('.job-foot',foot);footer.hidden=!foot;
     // Waiting for the user: one clear box above the steps, with what to do and the way to open it again. A job that can
     // be stopped says what Cancel removes.
-    const waitHtml=j.status==='running'&&(j.waiting||j.cancellable)?`${j.waiting?`<div class="job-wait-box"><span class="job-wait-pulse" aria-hidden="true"></span><div><strong>Waiting for you</strong><p>${esc(j.waiting)}</p>${j.waitCode?`<p class="job-wait-code">${esc(j.waitCode)}</p>`:''}</div></div><div class="job-wait-actions"><button type="button" class="primary" data-job="signin-again">Open the sign-in again</button>`:'<div class="job-wait-actions">'}${j.cancellable?`<button type="button" class="secondary" data-job="cancel" title="Stops it and removes what it set up">${j.kind==='install'?'Cancel install':'Cancel'}</button>`:''}</div>`:'';
+    // A question the job waits on (an update's password, a yes/no): answered here, typed into its background terminal.
+    const ask=j.input?.kind==='password'?`<form class="job-input" data-job-form="1"><input type="password" id="job-input-value" autocomplete="off" placeholder="Your computer password" aria-label="Password" /><button type="submit" class="primary">Continue</button></form><small class="job-input-note">Typed straight into the update, never saved or shown.</small>`
+      :j.input?`<div class="job-wait-actions"><button type="button" class="primary" data-job="input-yes">Yes</button><button type="button" class="secondary" data-job="input-no">No</button></div>`:'';
+    const waitHtml=j.status==='running'&&(j.waiting||j.cancellable)?`${j.waiting?`<div class="job-wait-box"><span class="job-wait-pulse" aria-hidden="true"></span><div><strong>${j.input?.kind==='password'?'Needs your password':j.input?'Needs your answer':'Waiting for you'}</strong><p>${esc(j.waiting)}</p>${j.waitCode?`<p class="job-wait-code">${esc(j.waitCode)}</p>`:''}</div></div>${ask}<div class="job-wait-actions">${j.input?'':'<button type="button" class="primary" data-job="signin-again">Open the sign-in again</button>'}`:'<div class="job-wait-actions">'}${j.cancellable?`<button type="button" class="secondary" data-job="cancel" title="Stops it and removes what it set up">${j.kind==='install'?'Cancel install':'Cancel'}</button>`:''}</div>`:'';
     const waitEl=part('.job-wait',waitHtml);waitEl.hidden=!waitHtml;waitEl.classList.toggle('waiting',!!j.waiting);
   }
   api.onJob?.(onJob);
