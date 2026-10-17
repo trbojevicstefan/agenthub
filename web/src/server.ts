@@ -3,6 +3,7 @@ import { secureHeaders } from "hono/secure-headers";
 import type { Auth } from "./auth.js";
 import type { Config } from "./config.js";
 import type { Database } from "./db.js";
+import { entitlementsFor, type Signer } from "./entitlements.js";
 import { pageRoutes } from "./pages/routes.js";
 
 export type Session = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;
@@ -12,6 +13,7 @@ export interface AppDeps {
   config: Config;
   auth: Auth;
   db: Database;
+  signer: Signer;
 }
 
 // A desktop session (made by the device flow) reaches only these paths. So a desktop app cannot create an account or
@@ -48,12 +50,23 @@ const CSP = {
 };
 
 export function createApp(deps: AppDeps) {
-  const { config, auth } = deps;
+  const { config, auth, db, signer } = deps;
   const app = new Hono<Env>();
   app.use("*", secureHeaders({ contentSecurityPolicy: CSP, strictTransportSecurity: false, referrerPolicy: "strict-origin-when-cross-origin" }));
   app.use("*", sessions(auth));
   app.get("/api/health", c => c.json({ ok: true, production: config.production }));
   app.on(["GET", "POST"], "/api/auth/*", c => auth.handler(c.req.raw));
+  // The public keys that check entitlement tokens.
+  app.get("/.well-known/jwks.json", c => c.json(signer.jwks, 200, { "cache-control": "public, max-age=3600" }));
+  // The signed entitlements of the session's organization. The desktop app calls this at start and every 24 hours.
+  app.get("/api/entitlements", async c => {
+    const session = c.get("session");
+    if (!session) return c.json({ code: "UNAUTHORIZED", message: "Sign in first." }, 401);
+    const organizationId = (session.session.activeOrganizationId as string | null | undefined) || (await auth.personalOrganization(session.user.id));
+    const entitlements = await entitlementsFor(db, organizationId);
+    const { token, expiresAt } = await signer.sign({ userId: session.user.id, organizationId }, entitlements);
+    return c.json({ token, expiresAt, ...entitlements, account: { email: session.user.email, name: session.user.name } }, 200, { "cache-control": "no-store" });
+  });
   pageRoutes(app, deps);
   return app;
 }

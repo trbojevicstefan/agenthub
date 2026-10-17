@@ -1,9 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createApp } from "../src/server.js";
 import { Browser, linkIn, setup } from "./helpers.js";
 
-async function signedIn(env: Awaited<ReturnType<typeof setup>>, app: ReturnType<typeof createApp>, email = "ana@example.com") {
+async function signedIn(env: Awaited<ReturnType<typeof setup>>, app: Awaited<ReturnType<typeof setup>>["app"], email = "ana@example.com") {
   const browser = new Browser(r => app.fetch(r));
   await browser.fetch("/api/auth/sign-up/email", { json: { email, password: "correct horse battery", name: "Ana" } });
   const link = new URL(linkIn(env.mails.at(-1)));
@@ -14,7 +13,7 @@ async function signedIn(env: Awaited<ReturnType<typeof setup>>, app: ReturnType<
 test("the desktop signs in with the device flow and gets a desktop session", async t => {
   const env = await setup();
   t.after(env.close);
-  const app = createApp(env);
+  const app = env.app;
   const desktop = new Browser(r => app.fetch(r), "198.51.100.20");
   let response = await desktop.fetch("/api/auth/device/code", { json: { client_id: "somebody-else" } });
   assert.equal(response.status, 400, "only known clients");
@@ -65,7 +64,7 @@ test("the desktop signs in with the device flow and gets a desktop session", asy
 test("a denied or expired device code gives no token", async t => {
   const env = await setup();
   t.after(env.close);
-  const app = createApp(env);
+  const app = env.app;
   const desktop = new Browser(r => app.fetch(r));
   const code = (await (await desktop.fetch("/api/auth/device/code", { json: { client_id: "opaya-desktop" } })).json()) as { device_code: string; user_code: string };
   const web = await signedIn(env, app);

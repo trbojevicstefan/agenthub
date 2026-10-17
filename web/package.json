@@ -15,7 +15,8 @@
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "stripe:setup": "tsx scripts/stripe-setup.ts",
-    "dev:memory": "tsx scripts/dev-server.ts"
+    "dev:memory": "tsx scripts/dev-server.ts",
+    "entitlements:key": "tsx scripts/entitlements-key.ts"
   },
   "dependencies": {
     "@better-auth/core": "1.7.7",

@@ -22,6 +22,8 @@ Do these steps one time, as a Google Cloud administrator.
    | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | The Google OAuth client. Redirect URI: `https://app.opaya.dev/api/auth/callback/google` |
 
    The GitHub and Google secrets are optional. Without them, the login page does not show that login method.
+
+   For `ENTITLEMENTS_PRIVATE_KEY`, run `npm run entitlements:key --workspace web -- --desktop` one time. It prints the private key for Secret Manager and adds the public key to `desktop/account-keys.json`. Commit that file, so the desktop app can check entitlement tokens offline from its first start.
 4. Create the backup bucket, for example `opaya-prod-backups`, in the same region as the VPS. Set these on the bucket:
    - uniform bucket-level access;
    - a lifecycle rule that deletes objects older than 35 days;

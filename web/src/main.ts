@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { createAuth } from "./auth.js";
 import { loadConfig } from "./config.js";
 import { postgres } from "./db.js";
+import { createSigner } from "./entitlements.js";
 import { consoleMailer, resendMailer } from "./mail.js";
 import { migrate } from "./migrate.js";
 import { createApp } from "./server.js";
@@ -12,7 +13,8 @@ const mailer = config.secrets.RESEND_API_KEY ? resendMailer({ apiKey: config.sec
 const auth = createAuth({ config, db, mailer });
 const changes = await migrate(auth, db);
 if (changes.created.length || changes.added.length) console.log(`Database updated. New tables: ${changes.created.join(", ") || "none"}. New columns in: ${changes.added.join(", ") || "none"}.`);
-const app = createApp({ config, auth, db });
+const signer = await createSigner(config.secrets.ENTITLEMENTS_PRIVATE_KEY!, config.baseURL);
+const app = createApp({ config, auth, db, signer });
 const server = serve({ fetch: app.fetch, port: config.port, hostname: "0.0.0.0" }, info => {
   console.log(`Opaya web listens on port ${info.port} for ${config.baseURL}.`);
 });

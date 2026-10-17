@@ -4,6 +4,7 @@ import { PGliteDialect } from "kysely-pglite-dialect";
 import { createAuth } from "../src/auth.js";
 import type { Config } from "../src/config.js";
 import { createDatabase } from "../src/db.js";
+import { createSigner, newKey } from "../src/entitlements.js";
 import type { Email } from "../src/mail.js";
 import { migrate } from "../src/migrate.js";
 import { createApp } from "../src/server.js";
@@ -30,8 +31,9 @@ export async function setup({ rateLimit = false, secrets = {} }: { rateLimit?: b
   const stripe = fakeStripe();
   const auth = createAuth({ config, db, mailer: async m => void mails.push(m), stripe: stripe.client, rateLimit });
   await migrate(auth, db);
-  const app = createApp({ config, auth, db });
-  return { pglite, db, mails, config, auth, stripe, app, close: () => db.destroy() };
+  const signer = await createSigner(JSON.stringify(await newKey("test-key")), config.baseURL);
+  const app = createApp({ config, auth, db, signer });
+  return { pglite, db, mails, config, auth, stripe, signer, app, close: () => db.destroy() };
 }
 
 // A browser for tests: keeps cookies, sends the Origin header like a real browser does, and talks to `handle`.
