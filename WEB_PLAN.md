@@ -1,6 +1,6 @@
 # Opaya Web App, Accounts and Plans
 
-Status: approved design. Not implemented.
+Status: Phase 1 steps 1–6 are built (17 October 2026). Steps 7 and 8 need the VPS, Google Cloud and Stripe accounts: follow `deploy/README.md`. Phase 2 is not built yet.
 
 Source baseline: version `0.35.0`, commit `d5c4547`, 17 October 2026.
 
@@ -325,6 +325,30 @@ Phase 2:
 - The Stripe tests run in test mode with `stripe listen`.
 - Desktop sign-in is tested by hand on Windows, macOS arm64, macOS x64 and Linux AppImage.
 - A packaging test checks that no `web/` dependency is in the Electron build.
+
+## Phase 1 Result
+
+Built and tested:
+
+- `web/`: the server (Hono, better-auth, Stripe), the pages, the entitlements and 26 tests. The tests run better-auth against PGlite (Postgres in WebAssembly) and Stripe through a fake client with real webhook signatures.
+- `deploy/`: the Compose file, the image, the backups and the runbook (`deploy/README.md`).
+- `desktop/account.cjs`, Settings > Account, the status-bar item, the host limit and `tests/account.test.cjs`. `web/test/desktop-account.test.ts` runs the desktop code against the web server.
+
+Changes from the design:
+
+| Design | Built | Reason |
+| --- | --- | --- |
+| A better-auth `hooks.before` refuses desktop sessions. | A Hono middleware refuses them, for every route. | The user hook runs before the bearer plugin reads the token. The middleware also covers routes outside `/api/auth`. |
+| Desktop sessions can call `/api/auth/device/*`. | Only `/device/code` and `/device/token`. | A desktop token must not approve another device code. |
+| Stripe `priceId` and `annualDiscountPriceId`. | Stripe lookup keys (`opaya_pro_month` and others). | Test mode and live mode use the same code. `npm run stripe:setup` makes the prices. |
+| The better-auth CLI migrates the tables. | The server runs the better-auth migration planner at start, and `npm run migrate` runs it by hand. | No CLI dependency in the image. |
+| The desktop build always has accounts. | `package.json` `opayaAccountUrl` turns accounts on. It is empty now. | Every push to `main` publishes a desktop build. The limit must not reach users before `app.opaya.dev` is live. |
+| Pages call better-auth directly. | Page forms go through `auth.handler`. | The better-auth rate limits apply only there. |
+
+Open items that are now closed:
+
+- **Trial with no card:** the Stripe plugin passes `payment_method_collection` and `subscription_data.trial_settings` from `getCheckoutSessionParams` to Checkout (checked in the plugin source and in `web/test/billing.test.ts`). Check it one time in Stripe test mode.
+- **Desktop session mark:** the session-create hook sees the `/device/token` path (`web/test/device.test.ts`).
 
 ## Open Items
 
