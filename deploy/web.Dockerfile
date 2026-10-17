@@ -18,7 +18,9 @@ COPY web/package.json web/
 RUN npm ci --workspace web --include-workspace-root=false --omit=dev --ignore-scripts --no-audit --no-fund \
  && npm cache clean --force
 COPY --from=build /src/web/dist web/dist
-COPY ui/assets/opaya-logo.png ui/assets/opaya-logo.png
+# The web app serves ui/ and talks to runtimes with desktop/wire.cjs.
+COPY desktop desktop
+COPY ui ui
 WORKDIR /app/web
 # A fixed user ID, so the key file on the host can belong to this user only (see deploy/README.md).
 USER 10001:10001

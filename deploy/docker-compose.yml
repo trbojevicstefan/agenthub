@@ -38,11 +38,20 @@ services:
       OPAYA_BACKUP_BUCKET: ${OPAYA_BACKUP_BUCKET:-}
       # Stripe Tax on Checkout. See deploy/README.md before you turn it on.
       STRIPE_AUTOMATIC_TAX: ${STRIPE_AUTOMATIC_TAX:-false}
+      # The web app (Phase 2): the users' folders, the launcher's socket and the Cloud KMS key for user secrets.
+      OPAYA_USERS_DIR: /users
+      OPAYA_LAUNCHER_DIR: /run/opaya-launcher
+      OPAYA_KMS_KEY: ${OPAYA_KMS_KEY:-}
     secrets:
       - gcp_key
+    volumes:
+      - /var/lib/opaya/users:/users
+      - launcher:/run/opaya-launcher
     depends_on:
       postgres:
         condition: service_healthy
+      launcher:
+        condition: service_started
     read_only: true
     tmpfs:
       - /tmp
@@ -58,6 +67,38 @@ services:
     networks:
       - edge
       - data
+
+  # The only process with the Docker socket. It starts and stops the runtime containers, one per active user, with
+  # fixed options (web/src/launcher.ts). No network: it talks only to Docker and to the web server's socket.
+  launcher:
+    image: opaya-web:latest
+    command: ["node", "dist/launcher-main.js"]
+    user: "0:0"
+    restart: unless-stopped
+    network_mode: none
+    read_only: true
+    environment:
+      OPAYA_USERS_HOST_DIR: /var/lib/opaya/users
+      OPAYA_RUNTIME_IMAGE: opaya-runtime:latest
+      OPAYA_LAUNCHER_DIR: /run/opaya-launcher
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - launcher:/run/opaya-launcher
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+
+  # Builds the runtime image only: docker compose --profile build build runtime-image
+  runtime-image:
+    build:
+      context: ..
+      dockerfile: deploy/runtime.Dockerfile
+    image: opaya-runtime:latest
+    profiles:
+      - build
 
   postgres:
     image: postgres:18-alpine
@@ -91,6 +132,7 @@ networks:
     internal: true
 
 volumes:
+  launcher: {}
   caddy_data: {}
   caddy_config: {}
   postgres_data: {}

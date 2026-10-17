@@ -1,3 +1,4 @@
+# Build context for deploy/web.Dockerfile and deploy/runtime.Dockerfile (the repository root).
 **/node_modules
 .git
 release
@@ -6,9 +7,7 @@ build
 collector
 docs
 tests
-scripts
-ui
-!ui/assets/opaya-logo.png
-desktop
+scripts/*
+!scripts/probe.py
 web/dist
 **/.env

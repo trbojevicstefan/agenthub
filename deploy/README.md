@@ -109,6 +109,30 @@ From that version, a signed-out desktop app has the Free limit of 1 new remote m
 
 To test a development server first, start the desktop app with `OPAYA_ACCOUNT_URL=http://localhost:3000` (http is allowed only for `localhost`).
 
+## 7. The web app (Phase 2)
+
+The web app runs one runtime container for each active user. The launcher starts and stops them; it is the only process with the Docker socket.
+
+1. Create a Cloud KMS key ring and key, for example `projects/opaya-prod/locations/europe-west3/keyRings/opaya/cryptoKeys/user-secrets`. Give the service account `roles/cloudkms.cryptoKeyEncrypterDecrypter` on this key only. Add `OPAYA_KMS_KEY=<the key name>` to `deploy/.env`.
+2. Create the users' folder. It belongs to the user `10001`, like the web and runtime containers:
+
+   ```sh
+   install -d -m 0700 -o 10001 -g 10001 /var/lib/opaya/users
+   ```
+
+3. Build the runtime image: `docker compose --profile build build runtime-image`.
+4. The launcher creates the network `opaya-runtime` (subnet `172.31.250.0/24`, no traffic between containers) when it starts the first runtime. Block private addresses from it, so a runtime reaches only the internet:
+
+   ```sh
+   iptables -I DOCKER-USER -s 172.31.250.0/24 -d 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,100.64.0.0/10 -j DROP
+   iptables -I DOCKER-USER -s 172.31.250.0/24 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+   ```
+
+   Make the rules permanent (for example with `iptables-persistent`). A runtime has no route to Postgres, the web server or the launcher: those are on other networks.
+5. Restart: `docker compose up -d --build`. When the web server starts, it stops runtimes that an older web server started.
+
+Users' machines must allow SSH from the VPS IP address. The web app shows that address.
+
 ## Rules
 
 - Do not put a secret in this repository, in `docker-compose.yml`, in `.env` or in an image. Only the two files in `/etc/opaya` are on the VPS.

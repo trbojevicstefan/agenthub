@@ -15,6 +15,8 @@ delete process.env.OPAYA_VAULT_TOKEN; // not passed on to ssh
 const app={getVersion:()=>require('../package.json').version,getPath:name=>name==='home'?os.homedir():root,exit:code=>process.exit(code),on:()=>{}};
 async function main(){
   if(!/^[a-f0-9]{64}$/.test(token))throw new Error('OPAYA_VAULT_TOKEN is missing.');
+  // HOME (ssh keys, known_hosts) is on the user's volume; the root file system is read-only.
+  require('node:fs').mkdirSync(os.homedir(),{recursive:true,mode:0o700});
   const vault=new (require('./remote-vault.cjs').RemoteVault)({address:path.join(root,'vault.sock'),token});
   await require('./service.cjs').start({app,safeStorage:null,shell:null},root,{vault,...(Number.isInteger(hostLimit)&&hostLimit>=0?{hostLimit}:{})});
 }

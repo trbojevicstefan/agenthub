@@ -15,11 +15,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      # Only the web workspace: no Electron download and no native rebuild.
-      - run: npm ci --workspace web --include-workspace-root=false --ignore-scripts --no-audit --no-fund
+      # No install scripts: no Electron download and no native rebuild. The desktop packages are there for the tests
+      # that start the web runtime (desktop/runtime.cjs).
+      - run: npm ci --ignore-scripts --no-audit --no-fund
       - run: npm run typecheck --workspace web
       - run: npm test --workspace web
       - run: npm run build --workspace web
       - run: npm audit --workspace web --omit=dev --audit-level=high
-      # The production image, built the same way as on the VPS (deploy/docker-compose.yml).
+      # The production images, built the same way as on the VPS (deploy/docker-compose.yml), and the Compose file.
       - run: docker build -f deploy/web.Dockerfile -t opaya-web:ci .
+      - run: docker build -f deploy/runtime.Dockerfile -t opaya-runtime:ci .
+      - run: GCP_PROJECT=opaya-ci docker compose -f deploy/docker-compose.yml config --quiet
