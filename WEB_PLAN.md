@@ -1,6 +1,6 @@
 # Opaya Web App, Accounts and Plans
 
-Status: Phase 1 steps 1–6 are built (17 October 2026). Steps 7 and 8 need the VPS, Google Cloud and Stripe accounts: follow `deploy/README.md`. Phase 2 is not built yet.
+Status: built on 17 October 2026, except the steps that need the VPS, Google Cloud and Stripe accounts (Phase 1 steps 7 and 8, and the Phase 2 deploy): follow `deploy/README.md`. See [Phase 1 Result](#phase-1-result) and [Phase 2 Result](#phase-2-result).
 
 Source baseline: version `0.35.0`, commit `d5c4547`, 17 October 2026.
 
@@ -350,13 +350,41 @@ Open items that are now closed:
 - **Trial with no card:** the Stripe plugin passes `payment_method_collection` and `subscription_data.trial_settings` from `getCheckoutSessionParams` to Checkout (checked in the plugin source and in `web/test/billing.test.ts`). Check it one time in Stripe test mode.
 - **Desktop session mark:** the session-create hook sees the `/device/token` path (`web/test/device.test.ts`).
 
+## Phase 2 Result
+
+Built and tested:
+
+- Step 1: `web/src/secret-store.ts` (Cloud KMS envelope encryption) and `desktop/remote-vault.cjs`, served by `web/src/runtime/vault-socket.ts`.
+- Step 2: `desktop/runtime.cjs` runs the session service under plain Node; `desktop/runtime-guard.cjs` lets only `ssh` start.
+- Step 3: `web/src/launcher.ts`, `web/src/runtime/manager.ts`, `deploy/runtime.Dockerfile` and the Compose services.
+- Step 4: `ui/web-transport.js`, `web/src/runtime/relay.ts` and `/app` (`web/src/runtime/app.ts`).
+- Steps 5 and 6: the web SSH key (`web/src/ssh-key.ts`), **Allow web access** in the desktop app, and the web interface changes.
+- Step 7: sync (`desktop/sync.cjs`, `web/src/sync.ts`, [SYNC_PLAN.md](SYNC_PLAN.md)).
+- The feature table: Web Push notifications (`web/src/push.ts`, `ui/web-sw.js`) and Vault import from an uploaded file.
+
+The tests start real runtimes as local processes (`web/src/runtime/process-launcher.ts`), so the relay, the manager, the Vault socket, the web SSH key and sync are tested end to end without Docker. The CI job builds both images.
+
+Changes from the design:
+
+| Design | Built | Reason |
+| --- | --- | --- |
+| `Vault.get()` becomes async at its 8 call sites. | The server store is async; `Vault.get()` stays synchronous. A runtime loads its user's secrets at start and writes each change to the server first. | About 15 code paths read secrets synchronously (redaction of output, MCP configs, model headers). An async change there has a high risk for the desktop app. |
+| The snapshot has `platform: "web"`. | The snapshot has `runtime: "web"` or `"desktop"`. | The interface already uses `platform` for the operating system. |
+| The launcher accepts start and stop. | It also answers status and list. | The web server stops runtimes with old Vault tokens after a restart. |
+| Desktop sessions reach four paths. | Also `/api/web-ssh-key`, `/api/sync` and `/api/sync/secrets`. | **Allow web access** and sync run in the desktop app. |
+| Local agents sync as "Desktop only" entries. | Local agents do not sync. | v1 scope. |
+| MCP servers sync. | They do not sync. | Each computer must trust a server's program; a background sync cannot ask. |
+| — | A new agent from the web app asks for approval in the desktop app. | Synced records must not run new programs on the user's machines without approval. |
+| An approval with no window is denied. | With browser notifications on, it waits for a tab (up to 10 minutes). | A web user can answer from the notification. |
+
 ## Open Items
 
+- **Test mode checks:** run the acceptance tests of sections 3 and 4 in Stripe test mode, and build and start both images on the VPS.
 - **Trial with no card:** check in Stripe test mode that the plugin keeps `payment_method_collection` and `trial_settings` from `getCheckoutSessionParams`. If it does not, add a small custom checkout endpoint for the trial.
 - **Google Cloud key file:** the organization policy `iam.disableServiceAccountKeyCreation` can block the service account key. An admin must then allow an exception for this project.
 - **Tax:** the US company is the seller, so it must handle US sales tax and EU VAT. Stripe Tax (`automatic_tax`) calculates the tax, but the company must register where it has to.
 - **Desktop session mark:** check that the session-create hook can see that `/device/token` created the session.
-- **Schedules on the web:** an idle container stops, so its schedules stop too. Before Phase 2, choose between a container that stays on while schedules exist and a scheduler in the web server that starts the container.
+- **Schedules on the web (decided):** a runtime with an enabled schedule does not stop when idle (`web/src/runtime/manager.ts`). A scheduler in the web server can replace this later, if many idle runtimes stay on only for schedules.
 
 ## Defaults to Confirm
 

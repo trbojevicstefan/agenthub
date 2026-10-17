@@ -264,6 +264,15 @@ Each release includes `SHA256SUMS`, which the in-app updater verifies.
 
 CI does not test your private VPS accounts or installed provider versions. No sample agents or credentials are ever added to a real workspace.
 
+## Web app and accounts
+
+The `web/` workspace is the server for `app.opaya.dev`: accounts (better-auth), Stripe plans, the desktop sign-in, signed entitlements, sync, and the web app, which runs this repository's interface and session service for each user in a container. The desktop app works without an account; accounts turn on when `package.json` `opayaAccountUrl` is set.
+
+- **Design:** [WEB_PLAN.md](WEB_PLAN.md) and [SYNC_PLAN.md](SYNC_PLAN.md).
+- **Run it:** `npm run dev:memory --workspace web` starts the server with Postgres in memory; with `OPAYA_USERS_DIR=/tmp/opaya-users DEV_PLAN=pro`, the web app at `/app/` runs runtimes as local processes. To try the desktop sign-in against it, start the desktop app with `OPAYA_ACCOUNT_URL=http://localhost:3000`.
+- **Test it:** `npm test --workspace web` and `npm run typecheck --workspace web`.
+- **Deploy it:** [deploy/README.md](deploy/README.md).
+
 ## Cord AI team connection
 
 Share an existing agent with your Cord team: in Cord choose **Connect Agent → OPAYA**, copy the prompt, then open **Home → Connect to Cord AI** in OPAYA. Select the agent and connect. Existing Vault credentials, MCP and native approvals stay in OPAYA. The CLI is `npm run cord:connect -- --server URL --pair CODE --runtime opaya --opaya-agent ID`. See [setup and controls](docs/CORD_BRIDGE.md).
