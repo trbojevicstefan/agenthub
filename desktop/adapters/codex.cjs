@@ -37,7 +37,7 @@ function elicitationContent(schema){
   return out;
 }
 class CodexAdapter{
-  constructor({agent,host,approve,spawnAgent=launch,trusted=()=>false,mcpServers=()=>[],onChange=()=>{}}){this.trusted=trusted;this.mcpServers=mcpServers;this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.onChange=onChange;this.threads=new Map();this.threadModels=new Map();this.modelInfo=new Map();this.defaultModel='';this.active=null;}
+  constructor({agent,host,approve,spawnAgent=launch,trusted=()=>false,mcpServers=()=>[],onChange=()=>{}}){this.trusted=trusted;this.mcpServers=mcpServers;this.agent=agent;this.host=host;this.approve=approve;this.spawnAgent=spawnAgent;this.onChange=onChange;this.threads=new Map();this.threadModels=new Map();this.modelInfo=new Map();this.defaultModel='';this.active=null;this.stale=new Set();this.starts=new Map();}
   // Reasoning effort levels of the agent's model as model/list reports them (read in the background on connect).
   // The model Codex answers with: the last thread's, else the one it is set to, else its default.
   get currentModel(){return this.lastModel||this.agent.model||this.defaultModel||'';}
@@ -45,7 +45,7 @@ class CodexAdapter{
   async connect(){
     this.rpc=new Rpc(this.spawnAgent(codexLaunch(this.agent),[...this.agent.args,...SHELL_ENV,...codexMcpArgs(this.agent,this.mcpServers()||[]),'app-server'],this.host),{jsonrpc:false,onRequest:async(method,params)=>{
       if(['item/commandExecution/requestApproval','item/fileChange/requestApproval'].includes(method)){
-        if(!this.active||params.threadId!==this.active.threadId||(this.active.turnId&&params.turnId!==this.active.turnId)||this.active.signal.aborted)return {decision:'decline'};
+        if(!this.active||params.threadId!==this.active.threadId||(this.active.turnId&&params.turnId!==this.active.turnId)||this.stale.has(params.turnId)||this.active.signal.aborted)return {decision:'decline'};
         const pending=this.active;
         if(this.trusted()){pending.onEvent?.({type:'activity',text:`iTrust approved: ${method.includes('fileChange')?'file changes':'command'}`});return {decision:'accept'};}
         const accepted=await this.approve(this.agent,method.includes('fileChange')?'Approve file changes?':'Approve command?',JSON.stringify(params,null,2).slice(0,5000));
@@ -77,9 +77,14 @@ class CodexAdapter{
     this.listModels().then(()=>this.onChange(),()=>{});
     return {description:'Codex app server connected; existing CLI login retained'};
   }
+  // Turns stopped here (Stop, time-out) that Codex may still be running: their late events are dropped.
+  retire(turnId){if(!turnId)return;this.stale.add(turnId);if(this.stale.size>64)this.stale.delete(this.stale.values().next().value);}
   notification(method,p){
     const a=this.active;if(!a||p.threadId!==a.threadId)return;
-    if(method==='turn/started')a.turnId=p.turn?.id;
+    // Events of another turn in this thread, such as one stopped before Codex gave its ID, never reach this one.
+    const turnId=p.turnId||p.turn?.id;
+    if(turnId&&(this.stale.has(turnId)||a.turnId&&turnId!==a.turnId))return;
+    if(method==='turn/started')a.turnId=turnId;
     if(method==='item/agentMessage/delta'){a.deltaItems.add(p.itemId||'unknown');a.onEvent({type:'text',text:p.delta||''});}
     if(method==='item/started'&&p.item?.type!=='agentMessage')a.onEvent({type:'activity',text:`Codex: ${p.item?.type||'working'}`});
     if(method==='item/completed'&&p.item?.type==='agentMessage'&&!a.deltaItems.has(p.item.id||'unknown')&&p.item.text)a.onEvent({type:'text',text:p.item.text});
@@ -111,25 +116,32 @@ class CodexAdapter{
     const where=linked.length?await attach.locate(this.agent,this.host,linked,ctx.conversation.id,{signal:ctx.signal,onEvent:ctx.onEvent,spawn:this.spawnAgent}):new Map();
     if(ctx.signal.aborted)throw new Error('Cancelled.');
     const input=[{type:'text',text:items.length?attach.compose(ctx.text,items,i=>images.includes(i)?'':where.get(i)||''):ctx.text},...images.map(i=>({type:'localImage',path:where.get(i)}))];
+    // A turn stopped before Codex answered turn/start: that answer (with the ID to interrupt it) comes first.
+    await this.starts.get(threadId);
     return new Promise((resolve,reject)=>{
-      let done=false;
-      const finish=(error,value)=>{if(done)return;done=true;clearTimeout(timer);ctx.signal.removeEventListener('abort',cancel);this.active=null;error?reject(error):resolve(value);};
+      let done=false,cancelled=false;
+      const finish=(error,value)=>{if(done)return;done=true;clearTimeout(timer);ctx.signal.removeEventListener('abort',cancel);if(this.active===turn)this.active=null;error?reject(error):resolve(value);};
       const timer=setTimeout(()=>{cancel();finish(new Error('Codex turn timed out. Check Terminal before retrying.'));},10*60*1000);
       const cancel=()=>{
-        const turnId=this.active?.turnId;
-        if(turnId)this.rpc.request('turn/interrupt',{threadId,turnId},10000).catch(()=>{});
+        cancelled=true;this.retire(turn.turnId);
+        if(turn.turnId)this.rpc.request('turn/interrupt',{threadId,turnId:turn.turnId},10000).catch(()=>{});
         finish(new Error('Cancelled. The interrupt was requested; verify remote task status before retrying.'));
       };
-      this.active={...ctx,threadId,resolve:v=>finish(null,v),reject:e=>finish(e),deltaItems:new Set()};
+      const turn=this.active={...ctx,threadId,resolve:v=>finish(null,v),reject:e=>finish(e),deltaItems:new Set()};
       ctx.signal.addEventListener('abort',cancel,{once:true});
       if(ctx.signal.aborted){cancel();return;}
-      const start=params=>this.rpc.request('turn/start',params,60000).then(result=>{if(!done&&this.active?.threadId===threadId)this.active.turnId=result.turn?.id;},e=>{
+      const start=params=>this.rpc.request('turn/start',params,60000).then(result=>{
+        const id=result.turn?.id;
+        if(!done){turn.turnId=id||turn.turnId;return;}
+        // Stopped before this answer: interrupt the turn now that its ID is known.
+        if(cancelled&&id){this.retire(id);this.rpc.request('turn/interrupt',{threadId,turnId:id},10000).catch(()=>{});}
+      },e=>{
         // A level the model refuses: answer without it rather than fail the turn.
         if(!params.effort||done||!/effort|reasoning/i.test(String(e?.message||'')))return finish(e);
         ctx.onEvent({type:'activity',text:`Codex did not take ${params.effort} reasoning effort (${String(e.message).slice(0,160)}), so it answers with its own.`});
         const {effort:_,...rest}=params;return start(rest);
       });
-      start({threadId,input,...(model?{model}:{}),...(effort?{effort}:{})});
+      this.starts.set(threadId,start({threadId,input,...(model?{model}:{}),...(effort?{effort}:{})}));
     });
   }
   close(){this.rpc?.close();}

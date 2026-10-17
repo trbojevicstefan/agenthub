@@ -118,6 +118,36 @@ test('ACP opens a chat again with the new MCP servers when Opaya gives the brows
   assert.equal(load.length,1);assert.equal(load[0].params.sessionId,'acp-1');assert.deepEqual(load[0].params.mcpServers.map(s=>s.name),['opaya-vault','opaya-browser']);
   a.close();
 });
+test('Codex: Stop before turn/start answers interrupts that turn, and its late events stay out of the next turn',async()=>{
+  // The first turn/start is answered only after Stop. Its turn then sends events that must not reach the next turn.
+  const late=c=>{if(c.answered)return;c.answered=true;const old={threadId:'thread-1',turnId:'turn-1'};
+    c.reply(c.first,{turn:{id:'turn-1'}});c.send({method:'turn/started',params:{threadId:'thread-1',turn:{id:'turn-1'}}});
+    c.send({method:'item/agentMessage/delta',params:{...old,itemId:'old',delta:'OLD TURN OUTPUT'}});c.send({method:'turn/completed',params:{threadId:'thread-1',turn:{id:'turn-1',status:'completed'}}});};
+  const child=childMock((m,c)=>{
+    if(m.method==='initialize')c.reply(m,{});if(m.method==='model/list')c.reply(m,{data:[]});
+    if(m.method==='thread/start')c.reply(m,{thread:{id:'thread-1'}});
+    if(m.method==='turn/start'){
+      if(!c.first){c.first=m;return;}
+      late(c);c.reply(m,{turn:{id:'turn-2'}});
+      c.send({method:'item/agentMessage/delta',params:{threadId:'thread-1',turnId:'turn-1',itemId:'old',delta:'LATE OLD OUTPUT'}});
+      c.send({method:'turn/started',params:{threadId:'thread-1',turn:{id:'turn-2'}}});
+      c.send({method:'item/agentMessage/delta',params:{threadId:'thread-1',turnId:'turn-2',itemId:'new',delta:'New answer'}});
+      c.send({method:'turn/completed',params:{threadId:'thread-1',turn:{id:'turn-2',status:'completed'}}});
+    }
+  });
+  const a=new CodexAdapter({agent:{args:[],cwd:path.resolve('.')},approve:async()=>false,spawnAgent:()=>child});await a.connect();
+  const stop=new AbortController(),first=a.run(context({signal:stop.signal}));
+  for(let i=0;i<50&&!child.first;i++)await tick();
+  stop.abort();await assert.rejects(first,/Cancelled/);
+  const events=[],second=a.run(context({onEvent:e=>events.push(e)}));
+  for(let i=0;i<5;i++)await tick();
+  late(child);
+  assert.equal((await second).externalSessionId,'thread-1');
+  assert.equal(events.filter(e=>e.type==='text').map(e=>e.text).join(''),'New answer');
+  for(let i=0;i<5;i++)await tick();
+  assert.deepEqual(child.frames.filter(f=>f.method==='turn/interrupt').map(f=>f.params),[{threadId:'thread-1',turnId:'turn-1'}]);
+  a.close();
+});
 test('Codex: an Opaya MCP tool call is accepted, another asks first, a form gets allowing answers (no "user rejected")',async()=>{
   const {elicitationContent}=require('../desktop/adapters/codex.cjs');
   let asked=0;const child=childMock((m,c)=>{if(m.method==='initialize')c.reply(m,{});if(m.method==='model/list')c.reply(m,{data:[]});});

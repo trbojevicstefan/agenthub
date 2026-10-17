@@ -214,6 +214,13 @@ Reuse it only when that directory matches the conversation.
 
 ### F10 — P2: Early Codex cancellation permits stale turn events
 
+- [x] Fixed on 2026-10-17 by interrupting a stopped turn when its ID arrives and by checking turn IDs on notifications.
+
+A turn stopped before `turn/start` returns is interrupted as soon as Codex gives its ID.
+The next turn in that thread starts only after that answer.
+Notifications and approval requests from a stopped turn, or from any other turn ID, no longer reach the active turn.
+A regression test covers a delayed start response, late events from the stopped turn, and the interrupt request.
+
 Locations: [desktop/adapters/codex.cjs:113–123](desktop/adapters/codex.cjs#L113-L123) and [desktop/adapters/codex.cjs:78–87](desktop/adapters/codex.cjs#L78-L87).
 
 Stop can occur before `turn/start` returns its turn ID.
