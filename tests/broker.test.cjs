@@ -78,6 +78,17 @@ test('a schedule moved to another agent gets a chat with that agent',async t=>{
   const moved=await b.scheduleConversation(b.data.schedules[0]);
   assert.equal(moved.agentId,two.id);assert.notEqual(moved.id,first.id);assert.equal(b.data.schedules[0].conversationId,moved.id);
 });
+test('the Opaya Agent keeps its terminal layout across a restart',async t=>{
+  const {b,root}=await fixture(t),layout=require('../ui/terminal-layout.js');
+  const a=await b.saveAgent({agent:apiAgent('Layout fixture',8642)});
+  const ws=ctx=>({ctx,tree:layout.preset(['t1','t2']),active:'t2',visible:true,dock:'right'});
+  await b.saveView({terminalWorkspaces:[ws('opaya'),ws(a.id),ws('removed_agent')]});
+  assert.deepEqual(b.data.view.terminalWorkspaces.map(w=>w.ctx),['opaya',a.id]);
+  await b.close();
+  const next=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>false});
+  await next.init();t.after(()=>next.close());
+  assert.deepEqual(next.snapshot().view.terminalWorkspaces.find(w=>w.ctx==='opaya'),ws('opaya'));
+});
 test('broker persists separate agents and never sends tokens to the renderer',async t=>{const {b,root}=await fixture(t);const a=await b.saveAgent({agent:apiAgent('Research',8642),token:'gateway-supersecret'});assert.equal(b.snapshot().agents[0].hasToken,true);assert(!JSON.stringify(b.snapshot()).includes('gateway-supersecret'));assert(!String(await fs.readFile(path.join(root,'workspace.json'))).includes('gateway-supersecret'));await b.connect(a.id);assert.equal(b.snapshot().agents[0].status,'connected');});
 test('broker rejects duplicate connections but accepts distinct Hermes instances',async t=>{const {b}=await fixture(t);await b.saveAgent({agent:apiAgent('one',8642)});await assert.rejects(()=>b.saveAgent({agent:apiAgent('renamed same endpoint',8642)}),/already exists/);await b.saveAgent({agent:apiAgent('two',8643)});assert.equal(b.data.agents.length,2);});
 test('broker preserves local display metadata and agent order',async t=>{const {b,root}=await fixture(t);const one=await b.saveAgent({agent:{...apiAgent('real-one',8642),displayName:'Sales desk',description:'Only shown in AgentHub',icon:'SD'}});const two=await b.saveAgent({agent:apiAgent('real-two',8643)});await b.reorderAgents({id:two.id,direction:'up'});assert.deepEqual(b.snapshot().agents.map(a=>a.id),[two.id,one.id]);const shown=b.snapshot().agents.find(a=>a.id===one.id);assert.equal(shown.name,'real-one');assert.equal(shown.displayName,'Sales desk');await b.close();const fresh=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>false,adapterFactory:()=>({connect:async()=>({}),close(){}})});await fresh.init();assert.equal(fresh.snapshot().agents.find(a=>a.id===one.id).description,'Only shown in AgentHub');await fresh.close();});

@@ -450,6 +450,13 @@ Correction: Recognize hostname and port inputs before checking other URL schemes
 
 ### F21 — P3: The Opaya Agent loses its terminal layout
 
+- [x] Fixed on 2026-10-17 by accepting the reserved `opaya` context in the persistence and restoration filters.
+
+`Broker.saveView()` and the renderer's restore filter now keep the Opaya Agent's terminal workspace.
+Workspaces of removed agents are still dropped.
+A regression test saves the layout, restarts the broker, and reads the workspace back.
+The renderer filter matches the existing filter for terminal windows and was checked by inspection only.
+
 Locations: [desktop/broker.cjs:191](desktop/broker.cjs#L191) and [ui/app.js:4270](ui/app.js#L4270).
 
 The renderer uses the reserved terminal context `opaya`.

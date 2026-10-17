@@ -4783,7 +4783,7 @@
     // Each window back on its screen, hidden or not, with its size; then the panel for the screen in use.
     for(const [id,ctx,hidden] of initial.view?.windows||[]){const v=terminalViews.get(id);if(v){v.ctx=ctx==='opaya'||state.agents.some(a=>a.id===ctx)?ctx:'';v.hiddenPane=!!hidden;}}
     terminalWorkspaces.clear();
-    for(const w of TL.workspaces(initial.view?.terminalWorkspaces))if(!w.ctx||state.agents.some(a=>a.id===w.ctx))terminalWorkspaces.set(w.ctx,w);
+    for(const w of TL.workspaces(initial.view?.terminalWorkspaces))if(!w.ctx||w.ctx==='opaya'||state.agents.some(a=>a.id===w.ctx))terminalWorkspaces.set(w.ctx,w);
     for(const ctx of new Set([...terminalViews.values()].map(v=>v.ctx||''))){
       if(terminalWorkspaces.has(ctx))continue;
       const ids=ctxWindows(ctx).filter(v=>!v.hiddenPane).map(v=>v.id),old=(initial.view?.panes||[]).filter(id=>ids.includes(id));
