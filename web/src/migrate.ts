@@ -5,6 +5,7 @@ import { sql } from "kysely";
 import type { Auth } from "./auth.js";
 import type { Database } from "./db.js";
 import { SECRET_TABLE } from "./secret-store.js";
+import { SYNC_TABLES } from "./sync.js";
 
 const OWN_TABLES = [
   // The computer name the desktop app sent with a device code, for the /device page and the session list. Rows older
@@ -17,6 +18,8 @@ const OWN_TABLES = [
   )`,
   // User secrets (Phase 2), encrypted with Cloud KMS envelope encryption (secret-store.ts).
   SECRET_TABLE,
+  // Sync between the desktop app and the web app (sync.ts, SYNC_PLAN.md).
+  ...SYNC_TABLES,
 ];
 
 export async function migrate(auth: Auth, db: Database) {

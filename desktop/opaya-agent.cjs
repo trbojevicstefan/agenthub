@@ -264,6 +264,17 @@ class OpayaAgent{
   }
   async dropSecret(s){this.secrets=this.secrets.filter(x=>x!==s);this.secretCache.delete(s.key);await this.vault.remove(s.key).catch(()=>{});}
   async forgetSecret(id){const s=this.secretEntry(id);await this.dropSecret(s);await this.saveSecrets();this.emit();return true;}
+  // "Sync to web" on a Vault key (sync.cjs): its value goes to the web app's encrypted store.
+  async setSecretSync(id,on){const s=this.secretEntry(id);if(!s.kept&&!s.global)throw new Error('Keep the key in the Vault first.');s.sync=on===true;await this.saveSecrets();this.emit();return {id:s.id,sync:!!s.sync};}
+  // In the web app: a desktop Vault key that syncs (data: name and notes; the value is already in the Vault), or null
+  // when it was removed.
+  async syncedSecret(key,data){
+    const s=this.secrets.find(x=>x.key===key);
+    if(!data){if(s){await this.dropSecret(s);await this.saveSecrets();this.emit();}return;}
+    if(s)Object.assign(s,{name:secrets.envName(data.name,'API_KEY'),mask:String(data.mask||s.mask),endpoint:String(data.endpoint||''),global:!!data.global,kept:true,synced:true});
+    else this.secrets.push({id:`S${this.secretNext++}`,key,name:secrets.envName(data.name,'API_KEY'),mask:String(data.mask||'•••'),session:null,source:'sync',createdAt:new Date().toISOString(),stored:[],kept:true,global:!!data.global,synced:true,...(data.endpoint?{endpoint:String(data.endpoint)}:{})});
+    this.secretCache.delete(key);await this.saveSecrets();this.emit();
+  }
   // Secrets of chats that no longer exist (deleted, or dropped after 100 chats).
   async pruneSecrets(){const ids=new Set((this.sessions||[]).map(x=>x.id)),gone=this.secrets.filter(s=>!s.kept&&!ids.has(s.session));for(const s of gone)await this.dropSecret(s);if(gone.length)await this.saveSecrets();}
   // Keys in a message go to the vault first: values held before become their reference, new ones are held (at most 50
@@ -333,7 +344,7 @@ class OpayaAgent{
     return {configured:this.configured(),signIn:this.signIn||'',config:this.config,hasKey:!this.cli()&&this.vault.has(KEY),presets:PRESETS,busy:this.busy,status:this.status,error:this.error,messages:shown,live:this.liveReply?{...this.liveReply}:null,home:this.home,sessionId:this.sessionId,sessions:(this.sessions||[]).slice().reverse().map(({id,title,updatedAt})=>({id,title,updatedAt})),
       // Held secrets: names and masks only, newest first; current marks this chat's.
       vaultBackup:this.lastVaultBackup||null,
-      secrets:this.secrets.slice().reverse().map(s=>({id:s.id,name:s.name,mask:s.mask,global:!!s.global,kept:!!s.kept,endpoint:s.endpoint||'',reference:secrets.reference(s),current:s.session===this.sessionId,createdAt:s.createdAt,stored:s.stored.map(({agentId,agentName,name,at})=>({agentId,agent:agentName,name,at}))}))};
+      secrets:this.secrets.slice().reverse().map(s=>({id:s.id,name:s.name,mask:s.mask,global:!!s.global,kept:!!s.kept,sync:!!s.sync,synced:!!s.synced,endpoint:s.endpoint||'',reference:secrets.reference(s),current:s.session===this.sessionId,createdAt:s.createdAt,stored:s.stored.map(({agentId,agentName,name,at})=>({agentId,agent:agentName,name,at}))}))};
   }
   async saveConfig({preset='custom',baseUrl,model,apiKey,remember=true}){
     if(!Object.hasOwn(PRESETS,preset))throw new Error('Unknown model provider.');

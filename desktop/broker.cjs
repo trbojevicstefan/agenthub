@@ -51,7 +51,7 @@ class Broker{
     this.data.agents=this.data.agents.map(a=>schema.agent(a));
     // 0.19: iTrust for the Opaya Agent is on by default (once for existing settings too); the user can turn it off.
     {const s=this.data.settings||{};this.data.settings={itrustAll:!!s.itrustAll,itrustOpaya:s.opayaDefaults===2?!!s.itrustOpaya:true,opayaDefaults:2,machineName:typeof s.machineName==='string'?s.machineName.slice(0,60):'',machineNote:typeof s.machineNote==='string'?s.machineNote.slice(0,200):'',backupDir:typeof s.backupDir==='string'&&path.isAbsolute(s.backupDir)?s.backupDir:'',updateChecks:s.updateChecks!==false,autoFix:s.autoFix!==false,interface:['chat','terminal'].includes(s.interface)?s.interface:'',chatOpens:s.chatOpens==='window'?'window':'full',consoleOpens:s.consoleOpens==='full'?'full':'panel',
-      vaultMcp:s.vaultMcp!==false,notifyReplies:s.notifyReplies!==false,notifyApprovals:s.notifyApprovals!==false,notifyJobs:s.notifyJobs!==false,notifySound:s.notifySound!==false,tips:s.tips!==false,autoConnect:s.autoConnect===true,sendKey:s.sendKey==='mod-enter'?'mod-enter':'enter'};}
+      vaultMcp:s.vaultMcp!==false,syncWeb:s.syncWeb===true,notifyReplies:s.notifyReplies!==false,notifyApprovals:s.notifyApprovals!==false,notifyJobs:s.notifyJobs!==false,notifySound:s.notifySound!==false,tips:s.tips!==false,autoConnect:s.autoConnect===true,sendKey:s.sendKey==='mod-enter'?'mod-enter':'enter'};}
     this.data.projects=(Array.isArray(this.data.projects)?this.data.projects:[]).flatMap(p=>{try{return [projects.project(p)];}catch{return [];}});
     this.data.schedules=(Array.isArray(this.data.schedules)?this.data.schedules:[]).flatMap(x=>{try{return [require('./schedules.cjs').schedule(x,x)];}catch{return [];}});
     this.migrateLinkedCopies();
@@ -97,7 +97,8 @@ class Broker{
     const conv=await this.createConversation(x.agentId,{activate:false,title:`Schedule: ${x.name}`.slice(0,80)});await this.scheduleRan(x.id,{conversationId:conv.id});return conv;
   }
   async scheduleRan(id,patch){const i=this.data.schedules.findIndex(x=>x.id===id);if(i<0)return;this.data.schedules[i]={...this.data.schedules[i],...patch};await this.persist();}
-  async saveHost(input){
+  // sync: a machine from the web app (sync.cjs). The plan's limit applies where it was added.
+  async saveHost(input,{sync=false}={}){
     const host=schema.host(input),i=this.data.hosts.findIndex(h=>h.id===host.id||host.alias&&h.alias===host.alias);
     if(i>=0){
       host.id=this.data.hosts[i].id;
@@ -108,7 +109,7 @@ class Broker{
     }else{
       if(this.data.hosts.length>=128)throw new Error('Host limit reached.');
       // The plan's limit (account.cjs) blocks only new machines; saved ones keep working above it.
-      const limit=this.hostLimit?.()??Infinity;if(this.data.hosts.length>=limit)throw require('./account.cjs').hostLimitError(limit,this.data.hosts.length);
+      const limit=sync?Infinity:this.hostLimit?.()??Infinity;if(this.data.hosts.length>=limit)throw require('./account.cjs').hostLimitError(limit,this.data.hosts.length);
       this.data.hosts.push(host);
     }
     await this.persist();return host;
@@ -223,6 +224,8 @@ class Broker{
     if(input.signInBrowser!==undefined)next.signInBrowser=/^[a-z]{1,20}$/.test(String(input.signInBrowser))?String(input.signInBrowser):'';
     // Agents on this computer may ask the Opaya Vault for a key (opaya-vault MCP); the user approves each one. On by default.
     if(input.vaultMcp!==undefined)next.vaultMcp=!!input.vaultMcp;
+    // Sync with the web app (sync.cjs): off until the user turns it on in Settings > Account.
+    if(input.syncWeb!==undefined)next.syncWeb=!!input.syncWeb;
     // Errors go to Opaya's collector only when the user turns this on (off by default); an own collector URL for testing.
     if(input.shareErrors!==undefined)next.shareErrors=!!input.shareErrors;
     if(input.feedbackUrl!==undefined){const u=String(input.feedbackUrl||'').trim();if(u&&!/^https:\/\/[^\s]{4,300}$/.test(u)&&!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(u))throw new Error('Use an https:// address for the feedback service.');next.feedbackUrl=u;}

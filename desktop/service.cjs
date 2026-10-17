@@ -37,10 +37,11 @@ const {visionOf, SUPPORTED:VISION_MODELS} = require('./vision.cjs');
 const pasting = require('./clipboard.cjs');
 // options.vault: the Vault to use instead of the OS keychain one (a web runtime container's remote-vault.cjs).
 // options.hostLimit: the plan's machine limit, set by the web server for a runtime container.
+// options.syncTransport: a runtime container's sync with the web server (sync.cjs), over its Vault socket.
 async function start({app, safeStorage, shell: electronShell}, root, options = {}) {
   // OPAYA_RUNTIME=web: a runtime container of the web app (runtime.cjs). Nothing runs on "this computer" there.
   const WEB = require('./runtime-guard.cjs').web();
-  let broker, terminals, listener, opaya, account = null, feedback = null, stopping = false, setupTrust = false, codexLogins = null;
+  let broker, terminals, listener, opaya, account = null, sync = null, feedback = null, stopping = false, setupTrust = false, codexLogins = null;
   const codexWhere = new Map(), codexChecks = new Map(), codexSeen = new Set(); // codex-login.cjs: where a terminal's command runs; pending screen reads
   const startedAt = new Date().toISOString(), approvals = new Map();
   const descriptor = path.join(root, 'session-service.json');
@@ -63,7 +64,7 @@ async function start({app, safeStorage, shell: electronShell}, root, options = {
     const run=(script,input='')=>proc.collect(clone.shell(where,script),{timeout:45000,maxBytes:8*1024*1024,input});
     return {framework,io:await mem.ioFor(framework,a,{local,where,run})};
   }
-  function snapshot() { const base=broker.snapshot(); return {...base, agents:base.agents.map(a=>({...a,install:maintenance.capabilities(a),vision:visionOf(a)})), toolUpdates:{machines:toolState.machines,checking:toolState.checking}, machine, opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, visionModels:VISION_MODELS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, runtime:WEB?'web':'desktop', account:account?.state() || {enabled:false}, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true, cordBridgeVersion:2}}; }
+  function snapshot() { const base=broker.snapshot(); return {...base, agents:base.agents.map(a=>({...a,install:maintenance.capabilities(a),vision:visionOf(a)})), toolUpdates:{machines:toolState.machines,checking:toolState.checking}, machine, opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, visionModels:VISION_MODELS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, runtime:WEB?'web':'desktop', account:account?.state() || {enabled:false}, sync:sync?.describe() || {on:false}, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true, cordBridgeVersion:2}}; }
   const emit = () => listener?.broadcast('state', snapshot());
   async function approve(agent, title, detail) {
     const socket = [...(listener?.clients || [])].at(-1);
@@ -1300,7 +1301,7 @@ async function start({app, safeStorage, shell: electronShell}, root, options = {
     dockerLogs:async x=>({text:await dockerManager.logs(x.hostId?broker.host(x.hostId):null,x.container,x.tail)}),
     dockerTerminal:async x=>{const host=x.hostId?broker.host(x.hostId):null,command=dockerManager.terminalCommand(x);const view=await runInTerminal({label:`${x.kind==='logs'?'Logs':'Shell'}: ${x.container}`.slice(0,60),key:`docker_${x.kind==='logs'?'logs':'sh'}_${String(x.container).replace(/[^a-zA-Z0-9_-]/g,'_')}`.slice(0,60),host,command});return {id:view.id};},
     sshKeyCreate:x=>vps.createKey(x.name), hostTest:x=>vps.test(x.hostId?broker.host(x.hostId):schema.host(x.host||{})),
-    saveSettings:x=>broker.saveSettings(x), cloneAgent:async x=>{
+    saveSettings:async x=>{const r=await broker.saveSettings(x);if(x.syncWeb!==undefined)setTimeout(()=>syncCheck?.().catch(()=>{}),0);return r;}, cloneAgent:async x=>{
       const a=broker.agent(x.id),host=x.hostId?broker.host(x.hostId):null;
       const profile=x.runtime==='profile',container=profile?String(x.container||''):'';
       return startJob({kind:'clone',route:{from:a.name,fromWhere:a.transport==='ssh'?broker.host(a.hostId).name:'This computer',to:x.name||`${a.name}-clone`,toWhere:`${host?host.name:'This computer'}${container?` / ${container}`:''}`,toHostId:host?.id||'',provider:a.provider},title:`Cloning ${a.name}`,detail:`${a.name} to ${host?host.name:'this computer'} / ${profile?`profile in container ${container}`:x.runtime==='docker'?'Docker container':a.provider==='hermes'?'Hermes profile':'regular install'}`,steps:[['target','Check the target'],['source','Find the source'],['select','Choose files'],['copy','Copy'],...(x.runtime==='docker'?[['start','Start the container']]:profile&&maintenance.frameworkOf(a)==='openclaw'?[['start','Add the agent to OpenClaw']]:[]),['save','Add to Opaya'],['connect','Connect']]},progress=>broker.cloneAgent({...x,container},progress));
@@ -1390,6 +1391,9 @@ async function start({app, safeStorage, shell: electronShell}, root, options = {
       if(!String(out).includes('OPAYA_DONE'))throw new Error(`${h.name} did not confirm the change.`);
       const saved=await broker.saveHost({...h,webAccess:x.allow===true});emit();return {host:saved,address:key.address};
     },
+    // Sync now (Settings > Account), and after the sync setting changed.
+    syncNow:async()=>{if(!sync)throw new Error('Sync is off.');await sync.round();emit();return sync.describe();},
+    opayaSecretSync:x=>opaya.setSecretSync(String(x.id||''),x.sync===true),
     accountState:async()=>account.state(), accountSignIn:()=>account.signIn(), accountSignInCancel:async()=>account.cancelSignIn(), accountSignOut:()=>account.signOut(), accountRefresh:()=>account.refresh(), accountOpen:x=>account.open(String(x.page||'')),
     // Free local model: install Ollama if needed, start it, download the model and connect the Opaya Agent.
     opayaFreeModels:async()=>({models:free.FREE_MODELS.map(({id,label,size,note})=>({id,label,size,note})),recommended:free.recommended(),installed:await free.ollamaModels()}),
@@ -1417,7 +1421,7 @@ async function start({app, safeStorage, shell: electronShell}, root, options = {
   // Importing into the vault and giving an MCP server a vault key are the user's own clicks, never the Opaya Agent's.
   actions.vaultBackupSave = x=>opaya.vaultBackupSave({file:x.file,password:x.password});
   actions.vaultBackupRestore = x=>opaya.vaultBackupRestore({file:x.file,password:x.password});
-  const USER_ONLY=new Set(['vaultImportScan','vaultImportCommit','vaultBackupSave','vaultBackupRestore','accountSignIn','accountSignInCancel','accountSignOut','accountRefresh','accountOpen','hostWebAccess']);
+  const USER_ONLY=new Set(['vaultImportScan','vaultImportCommit','vaultBackupSave','vaultBackupRestore','accountSignIn','accountSignInCancel','accountSignOut','accountRefresh','accountOpen','hostWebAccess','opayaSecretSync']);
   opaya.appAction=(name,input)=>{if(!Object.hasOwn(actions,name)||USER_ONLY.has(name)||name==='mcpInstall'&&input?.vaultKey)throw new Error('Unsupported action.');return origin.run('opaya',()=>actions[name](input));};
   // Actions the user starts whose failure the Opaya Agent should handle, with how to name them.
   const nameOf=id=>{try{return broker.agent(id).name;}catch{return 'an agent';}},hostName=id=>{try{return id?broker.host(id).name:machineName();}catch{return 'a machine';}};
@@ -1451,6 +1455,26 @@ async function start({app, safeStorage, shell: electronShell}, root, options = {
   await atomicJson(descriptor,{protocol:1,pid:process.pid,token,startedAt});
   await stage('ready');
   account.start();
+  // Sync with the web app (sync.cjs, SYNC_PLAN.md). A web runtime always syncs; the desktop app syncs when it is signed
+  // in, its plan has sync and Settings > Account > Sync with the web app is on. Secret values go only from the desktop.
+  const syncWanted=()=>WEB?!!options.syncTransport:account.signedIn()&&account.limits().sync&&broker.data.settings?.syncWeb===true;
+  async function syncCheck(){
+    const who=WEB?'web':account.state().email||'';
+    if(sync&&(!syncWanted()||sync.account!==who)){sync.stop();sync=null;emit();}
+    if(!sync&&syncWanted()){
+      const kinds=['host','agent','conversation','transcript','settings'];
+      sync=new (require('./sync.cjs').Sync)({root,broker,opaya,vault:broker.vault,transport:WEB?options.syncTransport:account.syncTransport(),sends:WEB?kinds:[...kinds,'secret'],accepts:WEB?[...kinds,'secret']:kinds,account:who,
+        // The web runtime trusts agents the desktop user approved; the desktop app asks for agents from the web app,
+        // when a window is there to ask.
+        trustAgents:WEB,canAsk:()=>(listener?.clients?.size||0)>0,log:text=>stage(text)});
+      await sync.load();sync.start();emit();
+    }
+  }
+  // Local changes start a round 5 seconds later.
+  const persist=broker.persist.bind(broker),writeTranscript=broker.store.writeTranscript.bind(broker.store);
+  broker.persist=async()=>{const r=await persist();sync?.touch();return r;};
+  broker.store.writeTranscript=(id,messages)=>{const r=writeTranscript(id,messages);sync?.touch();return r;};
+  syncCheck().catch(()=>{});setInterval(()=>syncCheck().catch(()=>{}),60000).unref();
   app.on('before-quit',event=>{if(!stopping){event.preventDefault();shutdown().catch(()=>app.exit(1));}});
   process.on('SIGTERM',()=>shutdown().catch(()=>app.exit(1)));
   process.on('SIGINT',()=>shutdown().catch(()=>app.exit(1)));

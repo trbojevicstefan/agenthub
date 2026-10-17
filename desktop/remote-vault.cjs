@@ -23,6 +23,10 @@ class RemoteVault{
     else{await client.call('vaultRemove',{key});this.values.delete(key);}
   }
   async remove(key){await this.set(key,'');}
+  // One value again from the server (a key that synced from the desktop app after this runtime started).
+  async refresh(key){id(key);const value=await (await this.connection()).call('vaultGet',{key});if(typeof value==='string'&&value)this.values.set(key,value);else this.values.delete(key);}
+  // Other calls on the same socket: the runtime's sync (sync.cjs).
+  async call(method,input,timeout){return (await this.connection()).call(method,input,timeout);}
   async list(){return [...this.values.keys()];}
   close(){this.client?.close();this.client=null;}
 }

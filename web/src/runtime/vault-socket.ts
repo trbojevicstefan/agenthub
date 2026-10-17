@@ -10,7 +10,13 @@ const wire = desktopModule<{ server: (options: object) => Server }>("wire.cjs");
 
 export const newSocketToken = () => randomBytes(32).toString("hex");
 
-export async function serveVault({ path, token, store }: { path: string; token: string; store: SecretStore }) {
+// sync: the runtime's sync calls (SYNC_PLAN.md), answered for its organization.
+export interface SyncHandlers {
+  pull(since: number): Promise<unknown>;
+  push(records: unknown): Promise<unknown>;
+}
+
+export async function serveVault({ path, token, store, sync }: { path: string; token: string; store: SecretStore; sync?: SyncHandlers }) {
   await rm(path, { force: true });
   const listener = wire.server({
     token,
@@ -22,6 +28,9 @@ export async function serveVault({ path, token, store }: { path: string; token: 
       }
       if (method === "vaultSet") return void (await store.set(String(input?.key ?? ""), String(input?.value ?? "")));
       if (method === "vaultRemove") return void (await store.remove(String(input?.key ?? "")));
+      if (method === "vaultGet") return store.get(String(input?.key ?? ""));
+      if (sync && method === "syncPull") return sync.pull(Number((input as { since?: unknown } | undefined)?.since ?? 0));
+      if (sync && method === "syncPush") return sync.push((input as { records?: unknown } | undefined)?.records);
       throw new Error("Unsupported vault action.");
     },
   });

@@ -1,6 +1,6 @@
 # Opaya Sync Between the Desktop App and the Web App
 
-Status: design for Phase 2, step 7 of `WEB_PLAN.md`. Written on 17 October 2026, before the build.
+Status: built on 17 October 2026 (`desktop/sync.cjs`, `web/src/sync.ts`). Two changes from the first version of this plan are marked **Changed**.
 
 ## Objective
 
@@ -16,7 +16,7 @@ A **record** is one synced item:
 
 | Field | Meaning |
 | --- | --- |
-| `kind` | `host`, `agent`, `mcp`, `conversation`, `transcript`, `secret` or `settings` |
+| `kind` | `host`, `agent`, `conversation`, `transcript`, `secret` or `settings` (`mcp` is reserved) |
 | `id` | The item's own ID (the same on both sides; Opaya IDs are UUIDs) |
 | `rev` | The organization's change counter when the server stored this version |
 | `deleted` | `true` for a deleted item (a tombstone) |
@@ -30,13 +30,14 @@ The server keeps one counter for each organization. Each stored change gets the 
 | --- | --- | --- |
 | `host` | name, hostname, username, port | No identity file and no OpenSSH alias: the desktop key never leaves the desktop. A host with only an alias does not sync. |
 | `agent` | the saved connection | Only agents on a machine (SSH, also in Docker there) and HTTP API agents with a public address. Agents on "this computer" do not sync. |
-| `mcp` | the server definition | No secret values. |
 | `conversation` | title, agent, project, times | Only for synced agents. |
 | `transcript` | the messages | Text only, no attachments. The newest messages up to 1 MB. |
 | `secret` | name, the service address, notes | Only Vault keys marked **Sync to web**. The value goes to the web server's KMS store through its own call, never in a record. |
 | `settings` | send key, tips, notifications | A fixed list of interface settings. |
 
-What does not sync: the desktop SSH key, Vault keys not marked for sync, agent connection tokens (they are Vault keys), agents on "this computer", the Opaya Agent's own chats, schedules, projects with local folders, and the skills library files.
+**Changed:** MCP servers do not sync in v1. A stdio MCP server starts a program on the machines where agents run, and Opaya asks the user to trust it on each computer ("Trust this MCP server?"). A background sync cannot ask that question at the right time.
+
+What does not sync: MCP servers, the desktop SSH key, Vault keys not marked for sync, agent connection tokens (they are Vault keys), agents on "this computer", the Opaya Agent's own chats, schedules, projects with local folders, and the skills library files.
 
 Secret values sync in one direction only: from the desktop app to the web app. A key added in the web app stays there.
 
@@ -46,6 +47,8 @@ Secret values sync in one direction only: from the desktop app to the web app. A
 - Each sync round first pulls, then applies the remote records, then pushes the local changes. So a client pushes only after it has seen the newest remote versions.
 - If two clients change the same record between two rounds, the version the server receives last wins (last writer wins, for each record). The other version is lost. This is acceptable for v1: one person uses both clients.
 - A remote change to an agent with an active turn waits for the next round.
+- Messages of the same chat merge by message ID, so a chat used on both sides loses no message.
+- **Changed:** a new agent, or an agent with a new executable, from the web app asks for approval in the desktop app ("Trust this agent executable?"), as an agent added by hand does. With no window open, it waits for the next round. A declined agent is not asked again until it changes in the web app, and the desktop app does not delete it on the server. A web runtime takes agents from the desktop app without asking, because the user approved them there.
 
 ## Deletes
 

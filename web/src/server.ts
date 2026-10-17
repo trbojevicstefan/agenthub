@@ -6,6 +6,7 @@ import type { Database } from "./db.js";
 import { entitlementsFor, type Signer } from "./entitlements.js";
 import type { SecretStore } from "./secret-store.js";
 import { webSshKey } from "./ssh-key.js";
+import { pull, push, SECRET_KEY, SyncError } from "./sync.js";
 import { pageRoutes } from "./pages/routes.js";
 import { appRoutes } from "./runtime/app.js";
 
@@ -23,7 +24,7 @@ export interface AppDeps {
 
 // A desktop session (made by the device flow) reaches only these paths. So a desktop app cannot create an account or
 // start a checkout, even with a changed build: the server refuses it.
-const DESKTOP_PATHS = new Set(["/api/auth/get-session", "/api/auth/sign-out", "/api/auth/device/code", "/api/auth/device/token", "/api/entitlements", "/api/web-ssh-key", "/api/health", "/.well-known/jwks.json"]);
+const DESKTOP_PATHS = new Set(["/api/auth/get-session", "/api/auth/sign-out", "/api/auth/device/code", "/api/auth/device/token", "/api/entitlements", "/api/web-ssh-key", "/api/sync", "/api/sync/secrets", "/api/health", "/.well-known/jwks.json"]);
 export const desktopAllowed = (path: string) => DESKTOP_PATHS.has(path.replace(/\/+$/, "") || "/");
 
 const hasCredentials = (c: Context) => Boolean(c.req.header("authorization") || /(^|;\s*)(__Secure-)?better-auth\.session_token=/.test(c.req.header("cookie") ?? ""));
@@ -84,6 +85,49 @@ export function createApp(deps: AppDeps) {
       const organizationId = (session.session.activeOrganizationId as string | null | undefined) || (await auth.personalOrganization(session.user.id));
       if (!(await entitlementsFor(db, organizationId)).features.web) return c.json({ code: "PLAN", message: "The web app comes with Pro and Fleet." }, 403);
       return c.json({ publicKey: await webSshKey(secrets(organizationId), organizationId), comment: `opaya-web ${organizationId}`, address: config.runtime!.egressIp }, 200, { "cache-control": "no-store" });
+    });
+  // Sync (SYNC_PLAN.md): the desktop app pulls and pushes records here with its desktop session.
+  const syncAccess = async (c: Context<Env>) => {
+    const session = c.get("session");
+    if (!session) return { error: c.json({ code: "UNAUTHORIZED", message: "Sign in first." }, 401) };
+    const organizationId = (session.session.activeOrganizationId as string | null | undefined) || (await auth.personalOrganization(session.user.id));
+    if (!(await entitlementsFor(db, organizationId)).features.sync) return { error: c.json({ code: "PLAN", message: "Sync comes with Pro and Fleet." }, 403) };
+    return { organizationId };
+  };
+  const syncFailed = (c: Context<Env>, error: unknown) => {
+    if (error instanceof SyncError) return c.json({ code: "SYNC", message: error.message }, error.status);
+    throw error;
+  };
+  app.get("/api/sync", async c => {
+    const access = await syncAccess(c);
+    if (access.error) return access.error;
+    try {
+      return c.json(await pull(db, access.organizationId, Number(c.req.query("since") ?? 0)), 200, { "cache-control": "no-store" });
+    } catch (error) {
+      return syncFailed(c, error);
+    }
+  });
+  app.post("/api/sync", async c => {
+    const access = await syncAccess(c);
+    if (access.error) return access.error;
+    const body = (await c.req.json().catch(() => null)) as { records?: unknown } | null;
+    try {
+      return c.json(await push(db, access.organizationId, body?.records));
+    } catch (error) {
+      return syncFailed(c, error);
+    }
+  });
+  // The value of a desktop Vault key marked "Sync to web", or its removal. Values never travel in records.
+  if (config.runtime && secrets)
+    app.post("/api/sync/secrets", async c => {
+      const access = await syncAccess(c);
+      if (access.error) return access.error;
+      const body = (await c.req.json().catch(() => null)) as { key?: unknown; value?: unknown } | null;
+      const key = String(body?.key ?? "");
+      if (!SECRET_KEY.test(key)) return c.json({ code: "SYNC", message: "Invalid key name." }, 400);
+      if (typeof body?.value === "string" && body.value) await secrets(access.organizationId).set(key, body.value);
+      else await secrets(access.organizationId).remove(key);
+      return c.json({ ok: true });
     });
   if (config.runtime) appRoutes(app, deps);
   pageRoutes(app, deps);

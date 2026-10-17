@@ -144,6 +144,21 @@ class Account{
     if(!r.ok||!/^ssh-ed25519 [A-Za-z0-9+/]+=* opaya-web [A-Za-z0-9_-]{1,80}$/.test(key)||!key.endsWith(' '+comment))throw new Error('The web SSH key could not be read. Try again.');
     return {publicKey:key,comment,address:String(r.data?.address||'').slice(0,64)};
   }
+  // Sync with the web app over HTTPS (sync.cjs): pull and push records, and the values of keys marked "Sync to web".
+  syncTransport(){
+    const send=async(pathname,options)=>{
+      if(!this.signedIn())throw new Error('Sign in to your Opaya account first.');
+      const r=await this.call(pathname,{...options,token:this.vault.get(TOKEN_KEY)});
+      if(r.status===401){await this.forget('Your sign-in ended. Sign in again.');throw new Error('Your sign-in ended.');}
+      if(!r.ok)throw new Error(r.data?.message||`Sync failed (HTTP ${r.status}).`);
+      return r.data;
+    };
+    return {
+      pull:since=>send(`/api/sync?since=${Number(since)||0}`),
+      push:records=>send('/api/sync',{method:'POST',body:{records}}),
+      secret:(key,value)=>send('/api/sync/secrets',{method:'POST',body:{key,...(value?{value}:{})}})
+    };
+  }
   // Manage plan, Upgrade and the account page open in the system browser.
   async open(page){
     const target={billing:'/billing',pricing:'/pricing',account:'/account'}[page];if(!target)throw new Error('Unknown account page.');

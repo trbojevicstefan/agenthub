@@ -9,6 +9,8 @@ import { createApp } from "./server.js";
 import { RuntimeManager, launcherConnection } from "./runtime/manager.js";
 import { attachRelay } from "./runtime/relay.js";
 import { cloudKms, kmsSecretStore, localKeyWrapper } from "./secret-store.js";
+import { pull, purgeTombstones, push } from "./sync.js";
+import { entitlementsFor } from "./entitlements.js";
 import type { Server } from "node:http";
 
 const config = await loadConfig();
@@ -24,11 +26,19 @@ if (config.runtime) {
   if (!config.runtime.kmsKey) console.warn("OPAYA_KMS_KEY is not set: user secrets use a key that lives only in this process (development only).");
   const kms = config.runtime.kmsKey ? cloudKms(config.runtime.kmsKey) : localKeyWrapper();
   secrets = organizationId => kmsSecretStore({ db, kms, organizationId });
-  manager = new RuntimeManager({ usersDir: config.runtime.usersDir, launcher: launcherConnection(config.runtime.launcherDir), secrets });
+  manager = new RuntimeManager({ usersDir: config.runtime.usersDir, launcher: launcherConnection(config.runtime.launcherDir), secrets, sync: organizationId => {
+    // A runtime may outlive a plan change: each sync call checks the plan again.
+    const allowed = async () => {
+      if (!(await entitlementsFor(db, organizationId)).features.sync) throw new Error("Sync comes with Pro and Fleet.");
+    };
+    return { pull: async since => (await allowed(), pull(db, organizationId, since)), push: async records => (await allowed(), push(db, organizationId, records)) };
+  } });
   // Runtimes an older web server started have its old Vault tokens.
   await manager.stopAll().catch(error => console.warn(`Could not stop old runtimes: ${error?.message ?? error}`));
 }
 const app = createApp({ config, auth, db, signer, secrets });
+// Old sync tombstones go once a day (SYNC_PLAN.md).
+setInterval(() => void purgeTombstones(db).catch(error => console.warn(`Tombstone purge failed: ${error?.message ?? error}`)), 24 * 60 * 60 * 1000).unref();
 const server = serve({ fetch: app.fetch, port: config.port, hostname: "0.0.0.0" }, info => {
   console.log(`Opaya web listens on port ${info.port} for ${config.baseURL}.`);
 });

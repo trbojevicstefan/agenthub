@@ -15,7 +15,7 @@
   methods.push('mcpCatalog','mcpInstall');
   methods.push('dockerList','dockerAction','dockerTerminal','dockerStats','dockerInspect','dockerLogs');
   methods.push('codexLoginFinish','cordConnect');
-  methods.push('accountState','accountSignIn','accountSignInCancel','accountSignOut','accountRefresh','accountOpen','hostWebAccess');
+  methods.push('accountState','accountSignIn','accountSignInCancel','accountSignOut','accountRefresh','accountOpen','hostWebAccess','syncNow','opayaSecretSync');
   const DESKTOP_ONLY='This works in the Opaya desktop app only.';
   const listeners=new Map(),pending=new Map(),queue=[];let socket=null,ready=false,next=1,retry=0,account=null,lastState=null;
   const fire=(event,value)=>{for(const cb of listeners.get(event)||[])try{cb(value);}catch(error){console.error(error);}};
@@ -75,7 +75,7 @@
     loginItem:async()=>({supported:false,on:false}),openDataFolder:unavailable,revealBackup:unavailable,
     updateState:async()=>({status:'unsupported',current:''}),updateCheck:async()=>({status:'unsupported',current:''}),updateDownload:unavailable,updateInstall:unavailable,updateRunInstaller:unavailable,
     browserPlace:unavailable,browserOpen:unavailable,browserNav:unavailable,browserPreview:unavailable,browserState:async()=>null,browserClose:async()=>true,
-    cookieSources:async()=>[],cookieImport:unavailable,hostWebAccess:unavailable,vaultBackupSave:unavailable,vaultBackupRestore:unavailable,cordConnect:unavailable,agentFileReveal:unavailable,
+    cookieSources:async()=>[],cookieImport:unavailable,hostWebAccess:unavailable,opayaSecretSync:unavailable,vaultBackupSave:unavailable,vaultBackupRestore:unavailable,cordConnect:unavailable,agentFileReveal:unavailable,
     exportConversation:async x=>{const text=await call('conversationMarkdown',{id:x?.id});download(`${(String(text).match(/^# (.*)$/m)?.[1]||'conversation').replace(/[^a-zA-Z0-9 -]/g,'').slice(0,70)||'conversation'}.md`,new Blob([text],{type:'text/markdown'}));return true;},
     agentFileOpen:async x=>{const {blob}=await fileBlob(x);window.open(URL.createObjectURL(blob),'_blank','noopener');return true;},
     agentFileSave:async x=>{const {blob,name}=await fileBlob(x);download(name,blob);return name;},

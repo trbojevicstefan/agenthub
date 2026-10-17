@@ -18,7 +18,9 @@ async function main(){
   // HOME (ssh keys, known_hosts) is on the user's volume; the root file system is read-only.
   require('node:fs').mkdirSync(os.homedir(),{recursive:true,mode:0o700});
   const vault=new (require('./remote-vault.cjs').RemoteVault)({address:path.join(root,'vault.sock'),token});
-  await require('./service.cjs').start({app,safeStorage:null,shell:null},root,{vault,...(Number.isInteger(hostLimit)&&hostLimit>=0?{hostLimit}:{})});
+  // Sync (sync.cjs) goes over the same socket; the web server answers for this user's organization.
+  const syncTransport={pull:since=>vault.call('syncPull',{since},60000),push:records=>vault.call('syncPush',{records},60000)};
+  await require('./service.cjs').start({app,safeStorage:null,shell:null},root,{vault,syncTransport,...(Number.isInteger(hostLimit)&&hostLimit>=0?{hostLimit}:{})});
   // The web SSH key (web/src/ssh-key.ts) from the Vault, in /tmp (memory in the container), for ssh (process.cjs).
   const key=vault.get('opaya_web_ssh_key');
   if(key){

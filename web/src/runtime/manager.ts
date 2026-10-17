@@ -7,6 +7,7 @@ import type { Server } from "node:net";
 import { join } from "node:path";
 import type { SecretStore } from "../secret-store.js";
 import { webSshKey } from "../ssh-key.js";
+import type { SyncHandlers } from "./vault-socket.js";
 import { desktopModule } from "./desktop.js";
 import { newSocketToken, serveVault } from "./vault-socket.js";
 
@@ -44,6 +45,8 @@ export interface ManagerOptions {
   usersDir: string;
   launcher: () => Promise<LauncherClient>;
   secrets: (organizationId: string) => SecretStore;
+  // The runtime's sync with the organization's records (sync.ts); absent: the runtime does not sync.
+  sync?: (organizationId: string) => SyncHandlers;
   // No browser attached and no work: the container stops after this time (30 minutes).
   idleMs?: number;
   startTimeoutMs?: number;
@@ -116,7 +119,7 @@ export class RuntimeManager extends EventEmitter {
       const vaultToken = newSocketToken(), store = this.options.secrets(r.user.organizationId);
       // The runtime reaches the user's machines with the web SSH key; it must exist before the runtime loads its Vault.
       await webSshKey(store, r.user.organizationId);
-      r.vault = await serveVault({ path: join(r.dir, "vault.sock"), token: vaultToken, store });
+      r.vault = await serveVault({ path: join(r.dir, "vault.sock"), token: vaultToken, store, ...(this.options.sync ? { sync: this.options.sync(r.user.organizationId) } : {}) });
       await rm(join(r.dir, "session-service.json"), { force: true });
       await launcher.call("start", { userId: r.user.id, vaultToken, hostLimit: r.user.hostLimit }, 120_000);
     }
