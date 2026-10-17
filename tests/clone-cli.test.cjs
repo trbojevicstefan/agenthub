@@ -1,6 +1,6 @@
 'use strict';
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const path=require('node:path');
-const {temp}=require('./helpers.cjs');
+const {temp,noPython,openclawStores}=require('./helpers.cjs');
 const cli=require('../desktop/clone-cli.cjs');
 const skip=process.platform==='win32'?'uses HOME and tar the POSIX way':false;
 const write=async(file,text='x')=>{await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,text);};
@@ -85,4 +85,30 @@ test('an OpenClaw clone of skills copies the config even without skill folders',
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(dst,'.openclaw/openclaw.json'),'utf8')),{gateway:{auth:{}},agents:{defaults:{model:'m'}}});
   const kept=(await fs.readdir(path.join(dst,'.openclaw'))).find(n=>n.startsWith('openclaw.json.before-clone-'));
   assert.equal(await fs.readFile(path.join(dst,'.openclaw',kept),'utf8'),'old','what was there is kept');
+});
+for(const remote of [false,true])test(`an OpenClaw clone without keys copies its SQLite stores without logins, and a redeploy keeps the clone's own (${remote?'machine':'this computer'})`,{skip:skip||noPython},async t=>{
+  const src=await temp(t),dst=await temp(t),tmp=await temp(t),old={HOME:process.env.HOME,TMPDIR:process.env.TMPDIR};
+  t.after(()=>{for(const [k,v] of Object.entries(old)){if(v===undefined)delete process.env[k];else process.env[k]=v;}});
+  const fixture=await openclawStores(src);await write(path.join(src,'.openclaw/skills/a/SKILL.md'));
+  const host=remote?await sshHost(t,await temp(t)):null,messages=[];
+  process.env.HOME=src;process.env.TMPDIR=tmp;
+  const agent={id:'o1',name:'Claw',provider:'openclaw',protocol:'openai',transport:'http',command:'openclaw',args:[],endpoint:'http://127.0.0.1:18789/v1'};
+  const copy=(keys,backup)=>cli.copy({agent,sourceHost:null,id:'openclaw',scope:'everything',keys,to:{host,container:''},dest:dst,backup,progress:e=>e.message&&messages.push(e.message)});
+  await copy(false,true);
+  for(const [f,kept] of Object.entries(fixture.state)){
+    const raw=await fs.readFile(path.join(dst,f));
+    for(const x of fixture.secrets)assert(!raw.includes(x),`${f} still holds ${x}`);
+    for(const x of kept)assert(raw.includes(x),`${f} keeps ${x}`);
+  }
+  assert.deepEqual(await fs.readdir(path.join(dst,'.openclaw/state')),['openclaw.sqlite'],'no WAL from the source');
+  assert.equal(await exists(path.join(dst,'.openclaw/skills/a/SKILL.md')),true);
+  assert(messages.some(m=>/without auth profiles, the secret store and device tokens/.test(m)));
+  // A redeploy keeps the clone's own stores and logins.
+  const store=path.join(dst,'.openclaw/state/openclaw.sqlite');await fs.writeFile(store,'CLONE-OWN-STORE');
+  await copy(false,false);
+  assert.equal(await fs.readFile(store,'utf8'),'CLONE-OWN-STORE');assert(messages.some(m=>/keeps its own/.test(m)));
+  // With keys, the stores are copied as they are.
+  await fs.rm(path.join(dst,'.openclaw'),{recursive:true});await copy(true,false);
+  assert((await fs.readFile(store)).includes('SECRET-STORE-VALUE'));assert.equal(await exists(store+'-wal'),true);
+  assert.deepEqual(await fs.readdir(tmp),[],'the temporary copies are removed');
 });

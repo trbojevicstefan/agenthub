@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('node:fs/promises');
 const path=require('node:path');
-const {launch,collect,dockerExecContainerIndex}=require('./process.cjs');
+const {launch,collect,dockerExecContainerIndex,quote,REMOTE_PATH}=require('./process.cjs');
 function parseGatewayToken(raw){
   for(const line of raw.split(/\r?\n/)){
     const m=line.match(/^\s*(?:export\s+)?API_SERVER_KEY\s*=\s*(.*?)\s*$/);
@@ -44,6 +44,39 @@ function openclawWithoutSecrets(raw,keep=''){
   };
   scrub(config,own,false);
   return JSON.stringify(config,null,2)+'\n';
+}
+// OpenClaw's SQLite stores keep credentials next to sessions, cron jobs and other state: auth profiles, the secret
+// store, MCP OAuth tokens, device tokens and identities, and paired devices' tokens. A copy without keys takes each store
+// with SQLite's online backup where OpenClaw runs (python3), deletes those rows and compacts it, so no deleted value
+// stays in free pages. Without python3 a store is left out, never copied as it is. Paths are relative to the home folder.
+const OPENCLAW_STORES=['.openclaw/state/openclaw.sqlite','.openclaw/agents/*/agent/openclaw-agent.sqlite'];
+const STORE_SECRETS={clear:['auth_profile_store','auth_profile_state','auth_profile_stores','secret_store_entries','mcp_oauth_stores','mcp_oauth_pending_authorizations',
+  'device_auth_tokens','device_bootstrap_tokens','gateway_origin_device_tokens','device_identities','device_pairing_paired','device_pairing_pending','device_pairing_join_codes'],
+  rows:[['config_machine_state','state_key','authProfiles.%']]};
+const SCRUB_PY=['import json,pathlib,sqlite3,sys','rules=json.loads(sys.argv[3])','s=sqlite3.connect(pathlib.Path(sys.argv[1]).as_uri()+"?mode=ro",uri=True,timeout=30)',
+  'd=sqlite3.connect(sys.argv[2])','s.backup(d)','s.close()','d.execute("PRAGMA journal_mode=DELETE")','d.execute("PRAGMA secure_delete=ON")',
+  'have={r[0] for r in d.execute("SELECT name FROM sqlite_master WHERE type=\'table\'")}',
+  'for t in rules["clear"]:\n  if t in have:d.execute(\'DELETE FROM "%s"\'%t)',
+  'for t,c,v in rules["rows"]:\n  if t in have:d.execute(\'DELETE FROM "%s" WHERE "%s" LIKE ?\'%(t,c),(v,))',
+  'd.commit()','d.execute("VACUUM")','d.close()'].join('\n');
+// The stores under `home`, without credentials, in a new temporary folder there under the same paths. Returns
+// {dir, files, missing}: `files` are in `dir` (the caller removes it); `missing` were left out (no python3, a failed copy).
+async function openclawStores(where,home){
+  const {run,isLocal}=require('./clone.cjs');
+  if(isLocal(where)&&process.platform==='win32'){
+    const found=[],has=f=>fs.access(path.join(home,f)).then(()=>true,()=>false);
+    if(await has(OPENCLAW_STORES[0]))found.push(OPENCLAW_STORES[0]);
+    for(const id of await fs.readdir(path.join(home,'.openclaw','agents')).catch(()=>[])){const f=`.openclaw/agents/${id}/agent/openclaw-agent.sqlite`;if(await has(f))found.push(f);}
+    return {dir:'',files:[],missing:found};
+  }
+  const script=[REMOTE_PATH,`cd ${quote(home)} || exit 1`,`stores() { for f in ${OPENCLAW_STORES.join(' ')}; do [ -f "$f" ] && printf '%s\\n' "$f"; done; }`,
+    'if ! command -v python3 >/dev/null 2>&1; then stores | sed "s/^/@@fail /"; exit 0; fi',
+    'tmp=$(mktemp -d "${TMPDIR:-/tmp}/opaya-stores.XXXXXX") || exit 1','printf "@@dir %s\\n" "$tmp"',
+    `stores | while IFS= read -r f; do mkdir -p "$tmp/$(dirname "$f")" && python3 -c ${quote(SCRUB_PY)} "$PWD/$f" "$tmp/$f" ${quote(JSON.stringify(STORE_SECRETS))} >&2 && printf "@@ok %s\\n" "$f" || { rm -f "$tmp/$f"; printf "@@fail %s\\n" "$f"; }; done`].join('\n');
+  const out=await run(where,script,10*60*1000),lines=tag=>[...out.matchAll(new RegExp(`^@@${tag} (.+)$`,'gm'))].map(m=>m[1].trim());
+  const dir=lines('dir')[0]||'',files=lines('ok'),missing=lines('fail');
+  if(dir&&!files.length){await run(where,`rm -rf ${quote(dir)}`).catch(()=>{});return {dir:'',files,missing};}
+  return {dir,files,missing};
 }
 async function importOpenclawToken(agent,host){
   // In a container Opaya installed, the gateway token is in the container's environment (it is never written to a file).
@@ -100,4 +133,4 @@ async function importGatewayToken(agent,host){
   const response=JSON.parse(await collect(child,{maxBytes:20000,timeout:15000}));
   return parseGatewayToken(response.line||'');
 }
-module.exports={parseGatewayToken,parseOpenclawToken,openclawWithoutSecrets,importGatewayToken};
+module.exports={parseGatewayToken,parseOpenclawToken,openclawWithoutSecrets,OPENCLAW_STORES,openclawStores,importGatewayToken};

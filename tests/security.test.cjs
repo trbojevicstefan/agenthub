@@ -74,3 +74,19 @@ test('browser addresses with a hostname and port open, other schemes stay refuse
   assert.equal(normalize('example.com'),'https://example.com');assert.match(normalize('what is node'),/^https:\/\/duckduckgo\.com\/\?q=/);
   for(const bad of ['javascript:alert(1)','file:///etc/passwd','mailto:x@y.z','about:blank','data:text/html,<b>x</b>'])assert.throws(()=>normalize(bad),/Only http and https/,bad);
 });
+test('OpenClaw stores without keys keep their state and lose auth profiles, the secret store and device keys',{skip:require('./helpers.cjs').noPython||(process.platform==='win32'&&'uses POSIX sh')},async t=>{
+  const {openclawStores}=require('../desktop/credentials.cjs'),home=await temp(t),fixture=await require('./helpers.cjs').openclawStores(home),here={host:null,container:''};
+  const r=await openclawStores(here,home);t.after(()=>fs.rm(r.dir,{recursive:true,force:true}));
+  assert.deepEqual(r.files.sort(),Object.keys(fixture.state).sort());assert.deepEqual(r.missing,[]);
+  for(const f of r.files){
+    const raw=await fs.readFile(path.join(r.dir,f));
+    for(const x of fixture.secrets)assert(!raw.includes(x),`${f} still holds ${x}`);
+    for(const x of fixture.state[f])assert(raw.includes(x),`${f} keeps ${x}`);
+  }
+  assert.deepEqual(await fs.readdir(path.join(r.dir,'.openclaw/state')),['openclaw.sqlite'],'one file, without the WAL');
+  // A python3 that cannot make the copy: the stores are left out, never copied as they are.
+  const bin=path.join(home,'.local','bin'),old=process.env.HOME;await fs.mkdir(bin,{recursive:true});await fs.writeFile(path.join(bin,'python3'),'#!/bin/sh\nexit 1\n',{mode:0o755});
+  process.env.HOME=home;t.after(()=>{process.env.HOME=old;});
+  const failed=await openclawStores(here,home);
+  assert.equal(failed.dir,'');assert.deepEqual(failed.files,[]);assert.deepEqual(failed.missing.sort(),Object.keys(fixture.state).sort());
+});

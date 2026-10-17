@@ -1,6 +1,6 @@
 'use strict';
 const {test}=require('node:test');const assert=require('node:assert/strict');const fs=require('node:fs/promises');const path=require('node:path');const {execFileSync}=require('node:child_process');
-const {temp}=require('./helpers.cjs');
+const {temp,noPython,openclawStores}=require('./helpers.cjs');
 const m=require('../desktop/maintenance.cjs');
 const skip=process.platform==='win32'?'uses POSIX sh and tar':false;
 const hermes={id:'h1',name:'Tuco',provider:'hermes',protocol:'acp',transport:'local',command:'hermes',args:[]};
@@ -106,6 +106,29 @@ for(const remote of [false,true])test(`an OpenClaw backup without keys leaves it
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(root,'x','.openclaw/openclaw.json'),'utf8')),{gateway:{auth:{mode:'token'}},channels:{telegram:{}},agents:{defaults:{model:'m'}}});
   assert.equal(JSON.parse(await fs.readFile(r.file.replace(/\.tar\.gz$/,'.json'),'utf8')).contents.keys,false);
   assert.deepEqual(await fs.readdir(tmp),[],'the temporary config is removed');
+});
+for(const remote of [false,true])test(`an OpenClaw backup without keys copies its SQLite stores without logins (${remote?'machine':'this computer'})`,{skip:skip||noPython},async t=>{
+  const root=await temp(t),tmp=path.join(root,'tmp'),old={HOME:process.env.HOME,TMPDIR:process.env.TMPDIR,PATH:process.env.PATH};
+  t.after(()=>{for(const [k,v] of Object.entries(old)){if(v===undefined)delete process.env[k];else process.env[k]=v;}});
+  process.env.HOME=root;process.env.TMPDIR=tmp;await fs.mkdir(tmp);
+  const fixture=await openclawStores(root);
+  for(const [f,c] of Object.entries({'.openclaw/openclaw.json':'{"agents":{}}','.openclaw/agents/main/agent/models.json':'{}','.openclaw/agents/other/agent/notes.txt':'n','.openclaw/skills/s/SKILL.md':'s'})){await fs.mkdir(path.dirname(path.join(root,f)),{recursive:true});await fs.writeFile(path.join(root,f),c);}
+  let host=null;
+  if(remote){
+    // Runs the generated remote command locally, like tests/tar-safety.test.cjs. No SSH connection is made.
+    const bin=path.join(root,'bin');await fs.mkdir(bin);await fs.writeFile(path.join(bin,'ssh'),'#!/bin/sh\nfor last; do :; done\nexec /bin/sh -c "$last"\n',{mode:0o755});
+    process.env.PATH=`${bin}:${old.PATH}`;host={id:'s1',name:'Fixture',hostname:'fixture.invalid',username:'fixture',port:22};
+  }
+  const agent={id:'o1',name:'Claw',provider:'openclaw',protocol:'openai',transport:remote?'ssh':'http',hostId:remote?'s1':'',command:'openclaw',args:[],endpoint:'http://127.0.0.1:18789/v1'};
+  const r=await m.backup({agent,host,dest:path.join(root,'b'),keys:false,history:false});
+  assert.deepEqual(await unpack(r.file,path.join(root,'x')),['.openclaw/agents/main/agent/models.json','.openclaw/agents/main/agent/openclaw-agent.sqlite','.openclaw/agents/other/agent/notes.txt','.openclaw/openclaw.json','.openclaw/skills/s/SKILL.md','.openclaw/state/openclaw.sqlite']);
+  for(const [f,kept] of Object.entries(fixture.state)){
+    const raw=await fs.readFile(path.join(root,'x',f));
+    for(const x of fixture.secrets)assert(!raw.includes(x),`${f} still holds ${x}`);
+    for(const x of kept)assert(raw.includes(x),`${f} keeps ${x}`);
+  }
+  assert(JSON.parse(await fs.readFile(r.file.replace(/\.tar\.gz$/,'.json'),'utf8')).contents.items.includes('.openclaw/state/openclaw.sqlite'));
+  assert.deepEqual(await fs.readdir(tmp),[],'the temporary copies are removed');
 });
 test('detection reports the installer, path and version',{skip},async t=>{
   // An empty npm prefix, so a Claude Code installed with npm on the test machine does not count.

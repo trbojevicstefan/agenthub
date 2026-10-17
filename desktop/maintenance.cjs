@@ -14,7 +14,7 @@ const {place,shell,run,sourceHome,isLocal,measure,slug}=require('./clone.cjs');
 const catalog=require('./catalog.cjs');
 const updates=require('./updates.cjs');
 const {hermesHomes}=require('./diagnostics.cjs');
-const {openclawWithoutSecrets}=require('./credentials.cjs');
+const {openclawWithoutSecrets,openclawStores}=require('./credentials.cjs');
 
 const PATH_PREFIX=REMOTE_PATH;
 // How each framework can be installed. `files` are what the vendor installer puts in place; `data` is the agent's own
@@ -294,13 +294,14 @@ async function members(where,spec,{keys,history}){
   }
   return found;
 }
-// `snap`: a folder on the source holding files (snap.files: SQLite snapshots, OpenClaw's config without credentials)
-// that go into the archive under the same names as the live files they replace. Without `--` then, so the second -C is an option; members never start with -.
-function producer(where,base,paths,snap=null){
+// `snaps`: folders on the source holding files (SQLite snapshots, OpenClaw's config and stores without credentials)
+// that go into the archive under the same names as the live files they replace. Without `--` then, so the
+// next -C is an option; members never start with -.
+function producer(where,base,paths,snaps=[]){
   // bsdtar still interprets a member named -C after --; make leading dashes unambiguous paths.
-  const members=paths.map(p=>p.startsWith('-')?`./${p}`:p),extra=snap?['-C',snap.dir,...snap.files]:[];
-  if(isLocal(where)){const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-cf','-','-C',base,...(snap?[]:['--']),...members,...extra],{windowsHide:true,stdio:['ignore','pipe','pipe']});}
-  return shell(where,snap?`tar -cf - -C ${q(base)} ${members.map(q).join(' ')} ${extra.map(q).join(' ')}`:`cd ${q(base)} && tar -cf - -- ${members.map(q).join(' ')}`,{compress:true});
+  const members=paths.map(p=>p.startsWith('-')?`./${p}`:p),extra=snaps.flatMap(s=>['-C',s.dir,...s.files]);
+  if(isLocal(where)){const tar=findExecutable('tar',environment());if(!tar)throw new Error('tar is not available on this computer.');return spawn(tar,['-cf','-','-C',base,...(snaps.length?[]:['--']),...members,...extra],{windowsHide:true,stdio:['ignore','pipe','pipe']});}
+  return shell(where,snaps.length?`tar -cf - -C ${q(base)} ${members.map(q).join(' ')} ${extra.map(q).join(' ')}`:`cd ${q(base)} && tar -cf - -- ${members.map(q).join(' ')}`,{compress:true});
 }
 // ---- Backups made by the agent itself ------------------------------------------------------------------------------
 // OpenClaw and Hermes keep chats and state in SQLite databases that are written while the gateway runs; copying those
@@ -384,6 +385,15 @@ async function openclawConfig(where,base,progress){
   progress({step:'select',message:'openclaw.json without its gateway token, API keys and channel tokens'});
   return {dir,files:[OPENCLAW_CONFIG]};
 }
+// `paths` with the files in `drop` taken out: a member folder that holds one is replaced by its entries, down to that
+// file's folder. Paths are relative to `base`.
+async function without(where,base,paths,drop){
+  const parents=new Set(drop.flatMap(f=>{const up=[];for(let p=path.posix.dirname(f);p!=='.';p=path.posix.dirname(p))up.push(p);return up;}));
+  const list=async dir=>isLocal(where)?fsp.readdir(path.join(base,dir)).catch(()=>[]):(await run(where,`cd ${q(base)} && ls -A ${q(dir)} 2>/dev/null; true`)).split('\n').filter(Boolean);
+  const out=[],visit=async p=>{if(drop.includes(p))return;if(!parents.has(p)){out.push(p);return;}for(const n of await list(p))await visit(`${p}/${n}`);};
+  for(const p of paths)await visit(p);
+  return out;
+}
 const removeTemp=(where,dir)=>isLocal(where)?fsp.rm(dir,{recursive:true,force:true}).catch(()=>{}):run(where,`rm -rf ${q(dir)}`).catch(()=>{});
 const fmt=n=>n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
 // Streams the agent's data (this computer, SSH, or inside a container) into a .tar.gz on this computer, next to a
@@ -401,21 +411,30 @@ async function backup({agent,host,dest,keys=true,history=true,machine='',progres
   progress({step:'source',state:'done',message:`${spec.label}: ${spec.base}`});
   progress({step:'select',state:'active',message:`Choosing files (${history?'with':'without'} chat history, ${keys?'with':'without'} API keys and logins)`});
   let paths=await members(where,spec,{keys,history});if(!paths.length)throw new Error(`Nothing to back up in ${spec.base}.`);
-  // Hermes' chat database goes in as a snapshot, not as the live files the gateway is writing.
-  let snap=agent.provider==='hermes'&&history&&paths.includes('state.db')?await hermesSnapshot(where,spec.base):null;
-  if(snap){paths=paths.filter(p=>!/^state\.db(-wal|-shm)?$/.test(p));progress({step:'select',message:'Chat database copied with SQLite\'s online backup'});}
-  // Without keys, OpenClaw's config goes in without its credentials.
-  if(!keys&&kindOf(agent).framework==='openclaw'&&paths.includes(OPENCLAW_CONFIG)){paths=paths.filter(p=>p!==OPENCLAW_CONFIG);snap=await openclawConfig(where,spec.base,progress);}
-  try{return await backupFiles({agent,where,spec,paths,snap,dest,keys,history,machine,progress});}
-  finally{if(snap)await removeTemp(where,snap.dir);}
+  const snaps=[];
+  try{
+    // Hermes' chat database goes in as a snapshot, not as the live files the gateway is writing.
+    const snap=agent.provider==='hermes'&&history&&paths.includes('state.db')?await hermesSnapshot(where,spec.base):null;
+    if(snap){snaps.push(snap);paths=paths.filter(p=>!/^state\.db(-wal|-shm)?$/.test(p));progress({step:'select',message:'Chat database copied with SQLite\'s online backup'});}
+    // Without keys, OpenClaw's config and SQLite stores go in without their credentials; a store that cannot be copied
+    // that way is left out.
+    if(!keys&&kindOf(agent).framework==='openclaw'){
+      if(paths.includes(OPENCLAW_CONFIG)){paths=paths.filter(p=>p!==OPENCLAW_CONFIG);const config=await openclawConfig(where,spec.base,progress);if(config)snaps.push(config);}
+      const stores=await openclawStores(where,spec.base);if(stores.dir)snaps.push({dir:stores.dir,files:stores.files});
+      paths=await without(where,spec.base,paths,[...stores.files,...stores.missing].flatMap(f=>['','-wal','-shm','-journal'].map(x=>f+x)));
+      if(stores.files.length)progress({step:'select',message:`${stores.files.join(', ')} without auth profiles, the secret store and device tokens`});
+      if(stores.missing.length)progress({step:'select',message:`${stores.missing.join(', ')} left out: OpenClaw keeps logins and keys in its stores, and copying them without those needs python3 where OpenClaw runs.`});
+    }
+    return await backupFiles({agent,where,spec,paths,snaps,dest,keys,history,machine,progress});
+  }finally{for(const s of snaps)await removeTemp(where,s.dir);}
 }
-async function backupFiles({agent,where,spec,paths,snap,dest,keys,history,machine,progress}){
+async function backupFiles({agent,where,spec,paths,snaps,dest,keys,history,machine,progress}){
   const size=await measure(where,spec.base,paths);
   progress({step:'select',state:'done',message:`${paths.length} item${paths.length===1?'':'s'}: ${paths.slice(0,12).join(', ')}${paths.length>12?', ...':''} (${size.files} files, ${fmt(size.bytes)})`,total:size.bytes});
   const folder=path.join(dest,slug(agent.name)||'agent');await fsp.mkdir(folder,{recursive:true,mode:0o700});
   const name=`${slug(agent.name)||'agent'}-${stamp()}`,file=path.join(folder,`${name}.tar.gz`),part=file+'.part';
   progress({step:'copy',state:'active',message:`Writing ${file}`,bytes:0,total:size.bytes});
-  const child=producer(where,spec.base,paths,snap);let err='',sent=0,last=0;
+  const child=producer(where,spec.base,paths,snaps);let err='',sent=0,last=0;
   child.stderr?.on('data',d=>{err=(err+d).slice(-2000);});
   child.stdout.on('data',chunk=>{sent+=chunk.length;const now=Date.now();if(now-last>200){last=now;progress({step:'copy',bytes:sent,total:size.bytes});}});
   const out=fs.createWriteStream(part,{mode:0o600}),gzip=zlib.createGzip({level:6});
@@ -430,7 +449,7 @@ async function backupFiles({agent,where,spec,paths,snap,dest,keys,history,machin
   progress({step:'copy',state:'done',message:`Saved ${fmt(bytes)} (${fmt(sent)} before compression)`,bytes:sent,total:Math.max(size.bytes,sent)});
   const {id,name:agentName,provider,protocol,transport,command,args,cwd,hermesHome,endpoint,model,displayName,description,group,tags,clone}=agent;
   const manifest={format:1,createdAt:new Date().toISOString(),agent:{id,name:agentName,provider,protocol,transport,command,args,cwd,hermesHome,endpoint,model,displayName,description,group,tags,clone},
-    source:{machine:where.host?where.host.name:machine||'This computer',container:where.container,base:spec.base,kind:kindOf(agent).kind},contents:{items:snap?[...paths,...snap.files]:paths,history:!!history,keys:!!keys},archive:path.basename(file),bytes};
+    source:{machine:where.host?where.host.name:machine||'This computer',container:where.container,base:spec.base,kind:kindOf(agent).kind},contents:{items:[...paths,...snaps.flatMap(s=>s.files)],history:!!history,keys:!!keys},archive:path.basename(file),bytes};
   await fsp.writeFile(file.replace(/\.tar\.gz$/,'.json'),JSON.stringify(manifest,null,2),{mode:0o600});
   return {file,bytes,items:paths.length,keys:!!keys,history:!!history};
 }

@@ -134,8 +134,13 @@ SecretRef objects remain, because they only refer to a secret.
 A redeploy keeps the clone's own credentials.
 A configuration that is not plain JSON is left out, and the progress message gives the setup step.
 Regression tests cover local and SSH clones and backups, redeploys, JSON5 configurations, and the skills scope.
-The correction does not cover OpenClaw's SQLite stores (`state/openclaw.sqlite` and `agents/<id>/agent/openclaw-agent.sqlite`).
-The OpenClaw documentation says that these stores also hold auth profiles. The review did not reproduce this.
+A follow-up correction on 2026-10-17 also covers OpenClaw's SQLite stores (`state/openclaw.sqlite` and `agents/<id>/agent/openclaw-agent.sqlite`).
+These stores hold auth profiles, the secret store, MCP OAuth tokens, and device tokens and keys next to sessions and cron jobs.
+Without keys, Opaya copies each store with SQLite's online backup where OpenClaw runs, deletes those rows, and compacts the copy.
+The other state stays, and no raw store, WAL, or deleted value goes into the clone or backup.
+A store is left out when `python3` is not available there. A redeploy keeps the clone's own stores.
+The table list follows the OpenClaw 2026.10.4 schema, including older table names. A later OpenClaw version can add credential tables that the list does not cover.
+Regression tests cover the copies, a failing `python3`, local and SSH clones and backups, and a redeploy.
 
 Locations: [desktop/clone-cli.cjs:30–48](desktop/clone-cli.cjs#L30-L48) and [desktop/maintenance.cjs:281–286](desktop/maintenance.cjs#L281-L286).
 

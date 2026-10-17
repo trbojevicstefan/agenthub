@@ -10,9 +10,10 @@ const {findExecutable,environment,quote,collect,REMOTE_PATH}=require('./process.
 const {transfer,measure,run,shell,isLocal,place,slug,fmt}=require('./clone.cjs');
 const catalog=require('./catalog.cjs');
 const containers=require('./containers.cjs');
-const {openclawWithoutSecrets}=require('./credentials.cjs');
+const {openclawWithoutSecrets,openclawStores,OPENCLAW_STORES}=require('./credentials.cjs');
 // Paths are relative to the home folder. `top` is what a clone of everything copies; the scopes pick from the rest.
-// `config` is a settings file that also holds credentials: a clone without keys copies it without them.
+// `config` is a settings file that also holds credentials, and `stores` are SQLite stores that hold them next to other
+// state: a clone without keys copies both without them.
 const CLI={
   claude:{name:'Claude Code',bin:'claude',top:['.claude','.claude.json'],
     skills:['.claude/skills','.claude/commands','.claude/agents','.claude/plugins'],memory:['.claude/CLAUDE.md'],personality:['.claude/output-styles'],settings:['.claude/settings.json'],
@@ -32,7 +33,7 @@ const CLI={
     connection:()=>({provider:'custom',protocol:'acp',command:'dsh',args:['--profile','acp'],avatar:'lib:deepseek'})},
   openclaw:{name:'OpenClaw',bin:'openclaw',top:['.openclaw'],
     skills:['.openclaw/skills','.openclaw/workspace/skills'],memory:['.openclaw/workspace/MEMORY.md','.openclaw/workspace/memory'],personality:['.openclaw/workspace/SOUL.md','.openclaw/workspace/AGENTS.md','.openclaw/workspace/USER.md','.openclaw/workspace/IDENTITY.md'],settings:['.openclaw/openclaw.json'],
-    history:['.openclaw/sessions','.openclaw/logs','.openclaw/agents/*/sessions','.openclaw/media'],secrets:['.openclaw/credentials','.openclaw/.env'],config:'.openclaw/openclaw.json',
+    history:['.openclaw/sessions','.openclaw/logs','.openclaw/agents/*/sessions','.openclaw/media'],secrets:['.openclaw/credentials','.openclaw/.env'],config:'.openclaw/openclaw.json',stores:OPENCLAW_STORES,
     connection:()=>({provider:'openclaw',protocol:'openai',command:'openclaw',args:[],endpoint:'http://127.0.0.1:18789/v1',model:'openclaw/default'})},
   goose:{name:'Goose',bin:'goose',top:['.config/goose'],skills:['.config/goose/recipes'],memory:['.config/goose/memory','.config/goose/.goosehints'],personality:[],settings:['.config/goose/config.yaml'],
     history:['.local/share/goose/sessions'],secrets:['.config/goose/secrets.yaml'],
@@ -46,9 +47,9 @@ function frameworkOf(agent){
 // What to copy: top-level paths (or the scope's paths) and what to leave out below them.
 function plan(id,scope,keys){
   const c=CLI[id];if(!['everything','personality','skills','memory'].includes(scope))throw new Error('Choose what to clone.');
-  const secrets=keys?[]:c.secrets,config=keys?'':c.config||'';
+  const secrets=keys?[]:c.secrets,config=keys?'':c.config||'',stores=keys?[]:c.stores||[];
   const wanted=scope==='everything'?c.top:[...new Set([...c.settings,...c.skills,...(scope==='memory'||scope==='personality'?c.memory:[]),...(scope==='personality'?c.personality:[]),...(keys?c.secrets:[])])];
-  return {wanted:wanted.filter(p=>!secrets.includes(p)&&p!==config),excludes:[...c.history,...secrets,...(config?[config]:[])],config};
+  return {wanted:wanted.filter(p=>!secrets.includes(p)&&p!==config),excludes:[...c.history,...secrets,...(config?[config]:[]),...stores.map(s=>`${s}*`)],config,stores};
 }
 const homeOf=async where=>isLocal(where)?os.homedir():(await run(where,'printf %s "$HOME"')).trim();
 async function existing(where,home,paths){
@@ -84,7 +85,7 @@ async function copy({agent,sourceHost,id,scope,keys,to,dest,backup,progress}){
   const from=place({agent,host:sourceHost});
   progress({step:'source',state:'active',message:`Finding ${agent.name}'s folders`});
   const home=from.home||(from.container?'/root':await homeOf(from)); // a profile in a container has its own HOME
-  const {wanted,excludes,config}=plan(id,scope,keys);
+  const {wanted,excludes,config,stores}=plan(id,scope,keys);
   const paths=await existing(from,home,wanted),hasConfig=!!config&&(await existing(from,home,[config])).length>0;
   const extra=hasConfig&&!paths.some(p=>config.startsWith(p+'/'))?[config]:[];
   if(!paths.length&&!hasConfig)throw new Error(`Nothing to copy: ${agent.name} has none of ${[...wanted,...(config?[config]:[])].join(', ')}.`);
@@ -104,6 +105,7 @@ async function copy({agent,sourceHost,id,scope,keys,to,dest,backup,progress}){
   let last=0;
   const sent=paths.length?await transfer(from,home,paths,to,dest,{excludes,onBytes:n=>{const now=Date.now();if(now-last>200){last=now;progress({step:'copy',bytes:n,total:size.bytes});}}}):0;
   const wrote=hasConfig&&await copyConfig(from,home,to,dest,config,progress);
+  if(stores.some(s=>paths.some(p=>s.startsWith(p+'/'))))await copyStores(from,home,to,dest,progress);
   progress({step:'copy',state:'done',message:`Copied ${fmt(sent)}`,bytes:sent,total:Math.max(size.bytes,sent)});
   return [...paths,...(wrote?extra:[])];
 }
@@ -116,6 +118,16 @@ async function copyConfig(from,home,to,dest,file,progress){
   else await collect(shell(to,`cd ${quote(dest)} && mkdir -p ${quote(path.posix.dirname(file))} && umask 077 && cat > ${quote(file)}`),{input:text,timeout:30000});
   progress({message:mine?`${file} copied; the clone keeps its own gateway token, API keys and channel tokens.`:`${file} copied without its gateway token, API keys and channel tokens. Run openclaw doctor --generate-gateway-token there and add its keys.`});
   return true;
+}
+// The stores without their logins and keys (credentials.openclawStores); on a redeploy the clone keeps its own.
+async function copyStores(from,home,to,dest,progress){
+  const s=await openclawStores(from,home);
+  try{
+    const mine=s.files.length?await existing(to,dest,s.files):[],send=s.files.filter(f=>!mine.includes(f));
+    if(send.length){await transfer(from,s.dir,send,to,dest);progress({message:`${send.join(', ')} copied without auth profiles, the secret store and device tokens.`});}
+    if(mine.length)progress({message:`The clone keeps its own ${mine.join(', ')}.`});
+    if(s.missing.length)progress({message:`${s.missing.join(', ')} left out: OpenClaw keeps logins and keys in its stores, and copying them without those needs python3 where OpenClaw runs.`});
+  }finally{if(s.dir)await run(from,`rm -rf ${quote(s.dir)}`).catch(()=>{});}
 }
 async function startGateway(where,progress){
   progress({message:'Starting the OpenClaw gateway'});
