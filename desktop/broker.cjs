@@ -60,8 +60,10 @@ class Broker{
     for(const a of this.data.agents)this.runtime.set(a.id,{status:'disconnected',error:'',models:[]});
     for(const c of this.data.conversations){schema.id(c.id);schema.id(c.agentId);}
     for(const c of this.data.conversations.slice(-100))this.histories.set(c.id,await this.store.transcript(c.id));
-    // Chat windows left open in the dock get their messages from the first snapshot, also for older chats.
-    for(const d of this.data.view?.chatDock||[])if(!this.histories.has(d.id)&&this.data.conversations.some(c=>c.id===d.id))this.histories.set(d.id,await this.store.transcript(d.id));
+    // The open chat, chat windows left open in the dock and Playground chats get their messages from the first snapshot,
+    // also when they are older.
+    const shown=[this.data.activeConversationId,...(this.data.view?.chatDock||[]).map(d=>d.id),...Object.values(this.data.playground?.conversations||{})];
+    for(const id of shown)if(typeof id==='string'&&!this.histories.has(id)&&this.data.conversations.some(c=>c.id===id))this.histories.set(id,await this.store.transcript(id));
     // An app crash may have left streaming placeholders on disk.
     for(const [id,messages] of this.histories){let recovered=false;for(const m of messages)if(m.status==='streaming'){m.status='error';m.error='The session service stopped during this turn. Saved partial output is preserved. Check the agent before retrying.';recovered=true;}if(recovered)await this.store.writeTranscript(id,messages);}
     attach.prune(this.store.root).catch(()=>{});

@@ -47,6 +47,23 @@ test('display changes keep the connected agent, so a later default model reaches
   assert(b.data.agents.some(x=>x.id===a.id),'a refused move keeps the agent');
   assert.equal(adapters.length,1,'no reconnect was needed');
 });
+test('restart loads the open chat and Playground chats even when they are older than the latest 100',async t=>{
+  const {b,root}=await fixture(t);
+  const a=await b.saveAgent({agent:{name:'History fixture',provider:'custom',protocol:'acp',transport:'local',command:'fixture-agent'}});
+  const open=await b.createConversation(a.id,{activate:false}),played=await b.createConversation(a.id,{activate:false,kind:'playground'});
+  for(let i=0;i<100;i++)await b.createConversation(a.id,{activate:false});
+  await b.store.writeTranscript(open.id,[{role:'user',content:'kept',status:'done'},{role:'assistant',content:'partial',status:'streaming'}]);
+  await b.store.writeTranscript(played.id,[{role:'user',content:'played',status:'done'}]);
+  await b.selectConversation(open.id);b.data.playground={agentIds:[a.id],prompt:'p',keepContext:false,conversations:{[a.id]:played.id},errors:{},at:new Date().toISOString()};await b.persist();
+  await b.close();
+  const next=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>false});
+  await next.init();t.after(()=>next.close());
+  const shown=next.snapshot().histories;
+  assert.deepEqual(shown[open.id].map(m=>m.content),['kept','partial']);
+  assert.equal(shown[open.id][1].status,'error','an interrupted turn is recovered');
+  assert.deepEqual(shown[played.id].map(m=>m.content),['played']);
+  assert.equal((await next.store.transcript(open.id))[1].status,'error');
+});
 test('broker persists separate agents and never sends tokens to the renderer',async t=>{const {b,root}=await fixture(t);const a=await b.saveAgent({agent:apiAgent('Research',8642),token:'gateway-supersecret'});assert.equal(b.snapshot().agents[0].hasToken,true);assert(!JSON.stringify(b.snapshot()).includes('gateway-supersecret'));assert(!String(await fs.readFile(path.join(root,'workspace.json'))).includes('gateway-supersecret'));await b.connect(a.id);assert.equal(b.snapshot().agents[0].status,'connected');});
 test('broker rejects duplicate connections but accepts distinct Hermes instances',async t=>{const {b}=await fixture(t);await b.saveAgent({agent:apiAgent('one',8642)});await assert.rejects(()=>b.saveAgent({agent:apiAgent('renamed same endpoint',8642)}),/already exists/);await b.saveAgent({agent:apiAgent('two',8643)});assert.equal(b.data.agents.length,2);});
 test('broker preserves local display metadata and agent order',async t=>{const {b,root}=await fixture(t);const one=await b.saveAgent({agent:{...apiAgent('real-one',8642),displayName:'Sales desk',description:'Only shown in AgentHub',icon:'SD'}});const two=await b.saveAgent({agent:apiAgent('real-two',8643)});await b.reorderAgents({id:two.id,direction:'up'});assert.deepEqual(b.snapshot().agents.map(a=>a.id),[two.id,one.id]);const shown=b.snapshot().agents.find(a=>a.id===one.id);assert.equal(shown.name,'real-one');assert.equal(shown.displayName,'Sales desk');await b.close();const fresh=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>false,adapterFactory:()=>({connect:async()=>({}),close(){}})});await fresh.init();assert.equal(fresh.snapshot().agents.find(a=>a.id===one.id).description,'Only shown in AgentHub');await fresh.close();});

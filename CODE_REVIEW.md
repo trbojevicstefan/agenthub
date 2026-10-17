@@ -281,6 +281,13 @@ Correction: Preserve `vaultMcp` during initialization, with the intended default
 
 ### F13 — P2: Restart can omit the active chat transcript
 
+- [x] Fixed on 2026-10-17 by loading every chat that the first snapshot shows during initialization.
+
+Initialization now loads the active chat, the docked chats, and the Playground chats, also when they are older than the latest 100.
+Interrupted-turn recovery applies to these transcripts too.
+The Playground chats had the same defect, because the snapshot also shows them.
+A regression test covers an older active chat with an interrupted turn and an older Playground chat after a restart.
+
 Location: [desktop/broker.cjs:62–64](desktop/broker.cjs#L62-L64).
 
 Initialization loads the latest 100 conversations and the conversations in docked windows.
