@@ -51,7 +51,7 @@ export class Browser {
       headers.set("content-type", "application/x-www-form-urlencoded");
       body = new URLSearchParams(init.form).toString();
     }
-    const method = init.method ?? (body ? "POST" : "GET");
+    const method = init.method ?? (body !== undefined && body !== null ? "POST" : "GET");
     if (method !== "GET" && !headers.has("origin")) headers.set("origin", BASE);
     const response = await this.handle(new Request(new URL(path, BASE), { ...init, method, headers, body, redirect: "manual" }));
     for (const line of response.headers.getSetCookie()) {

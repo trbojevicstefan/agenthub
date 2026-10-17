@@ -1,7 +1,9 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
+import { secureHeaders } from "hono/secure-headers";
 import type { Auth } from "./auth.js";
 import type { Config } from "./config.js";
 import type { Database } from "./db.js";
+import { pageRoutes } from "./pages/routes.js";
 
 export type Session = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;
 export type Env = { Variables: { session: Session | null } };
@@ -32,10 +34,26 @@ function sessions(auth: Auth): MiddlewareHandler<Env> {
   };
 }
 
-export function createApp({ config, auth }: AppDeps) {
+// Pages load only their own files. Forms may lead to Stripe and to the GitHub and Google sign-in pages.
+const CSP = {
+  defaultSrc: ["'self'"],
+  imgSrc: ["'self'", "data:"],
+  styleSrc: ["'self'"],
+  scriptSrc: ["'self'"],
+  connectSrc: ["'self'"],
+  formAction: ["'self'", "https://checkout.stripe.com", "https://billing.stripe.com", "https://github.com", "https://accounts.google.com"],
+  frameAncestors: ["'none'"],
+  baseUri: ["'none'"],
+  objectSrc: ["'none'"],
+};
+
+export function createApp(deps: AppDeps) {
+  const { config, auth } = deps;
   const app = new Hono<Env>();
+  app.use("*", secureHeaders({ contentSecurityPolicy: CSP, strictTransportSecurity: false, referrerPolicy: "strict-origin-when-cross-origin" }));
   app.use("*", sessions(auth));
   app.get("/api/health", c => c.json({ ok: true, production: config.production }));
   app.on(["GET", "POST"], "/api/auth/*", c => auth.handler(c.req.raw));
+  pageRoutes(app, deps);
   return app;
 }

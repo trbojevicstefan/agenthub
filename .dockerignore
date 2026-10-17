@@ -8,6 +8,7 @@ docs
 tests
 scripts
 ui
+!ui/assets/opaya-logo.png
 desktop
 web/dist
 **/.env

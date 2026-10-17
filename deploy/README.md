@@ -74,7 +74,7 @@ Do these steps first with the test-mode key, and again with the live key at laun
 2. If the script says that the Billing Portal settings were created, open **Settings > Billing > Customer portal** in the Stripe Dashboard and save the settings one time.
 3. The prices are found by lookup key (`opaya_pro_month`, `opaya_pro_year`, `opaya_fleet_month`, `opaya_fleet_year`). The code has no price IDs. A new amount gets a new price, and the lookup key moves to it. Current subscribers keep their old price.
 4. The founding offer is the promotion code `FOUNDING`: 30% off for 12 months, for 100 customers at most. Customers type the code on the Stripe Checkout page.
-5. Tax: Stripe Tax is off. Set `STRIPE_AUTOMATIC_TAX=true` in `docker-compose.yml` only after Stripe Tax is set up and the company is registered where it must collect tax.
+5. Tax: Stripe Tax is off. Set `STRIPE_AUTOMATIC_TAX=true` in `deploy/.env` only after Stripe Tax is set up and the company is registered where it must collect tax.
 6. To test webhooks on a development computer: `stripe listen --forward-to localhost:3000/api/auth/stripe/webhook`. Use the `whsec_...` secret that it prints as `STRIPE_WEBHOOK_SECRET`.
 
 ## 4. Backups
