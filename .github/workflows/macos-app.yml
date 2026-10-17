@@ -3,7 +3,7 @@ on:
   push:
     branches: [main]
     # The web server (web/, deploy/) is not part of the desktop build. A push that changes only these makes no release.
-    paths-ignore: ['web/**', 'deploy/**', 'WEB_PLAN.md', '.github/workflows/web.yml']
+    paths-ignore: ['web/**', 'deploy/**', 'WEB_PLAN.md', 'SYNC_PLAN.md', '.github/workflows/web.yml']
   workflow_dispatch:
 permissions:
   contents: write
