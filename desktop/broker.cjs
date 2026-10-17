@@ -129,6 +129,8 @@ class Broker{
     if(!preapproved&&a.protocol!=='openai'&&(!existing||existing.command!==a.command||JSON.stringify(existing.args)!==JSON.stringify(a.args)||existing.hermesHome!==a.hermesHome)){
       const ok=await this.approve(a,'Trust this agent executable?',`${a.command} ${a.args.join(' ')}\n${a.transport==='ssh'?'Runs on '+this.host(a.hostId).name:'Runs on this computer'}\n\nThe agent can use the permissions of that OS account. Hermes ACP starts a new process: do not run it against a profile already used by a gateway.`);
       if(!ok)throw new Error('Agent executable was not approved.');
+      // Trusted now, also when it came from sync.
+      delete a.trustPending;
     }
     if(importToken){
       const where=a.transport==='ssh'?' over verified SSH':'';
@@ -452,10 +454,18 @@ class Broker{
     const target=direction==='up'?index-1:index+1;if(target<0||target>=this.data.agents.length)return false;
     const [agent]=this.data.agents.splice(index,1);this.data.agents.splice(target,0,agent);await this.persist();return true;
   }
+  // A synced agent (sync.cjs) with a new or changed executable: the user trusts it before it first runs here.
+  async ensureTrusted(a){
+    if(!a.trustPending)return;
+    const ok=await this.approve(a,'Trust this agent executable?',`${a.command} ${a.args.join(' ')}\n${a.transport==='ssh'?'Runs on '+this.host(a.hostId).name:'Runs on this computer'}\n\nThis agent came from your other Opaya app through sync. It can use the permissions of that OS account.`);
+    if(!ok)throw new Error('Agent executable was not approved.');
+    const current=this.data.agents.find(x=>x.id===a.id);if(current)delete current.trustPending;delete a.trustPending;await this.persist();
+  }
   async connect(id){
     const a=this.agent(id),r=this.runtimeFor(id);
     if(r.status==='connected')return;
     if(this.connecting.has(id))return this.connecting.get(id);
+    await this.ensureTrusted(a);
     const job=(async()=>{
       r.status='connecting';r.error='';this.changed();
       const generation=(r.generation||0)+1;r.generation=generation;

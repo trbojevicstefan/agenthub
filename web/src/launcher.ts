@@ -29,7 +29,8 @@ export interface StartRequest {
 
 const USER = /^[A-Za-z0-9_-]{8,64}$/;
 const TOKEN = /^[a-f0-9]{64}$/;
-export const containerName = (userId: string) => `opaya-runtime-${userId.toLowerCase()}`;
+// Docker names are case-sensitive, like better-auth's user IDs.
+export const containerName = (userId: string) => `opaya-runtime-${userId}`;
 
 export function checkStart(input: unknown): StartRequest {
   const x = (input ?? {}) as Record<string, unknown>;

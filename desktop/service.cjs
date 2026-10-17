@@ -1134,6 +1134,7 @@ async function start({app, safeStorage, shell: electronShell}, root, options = {
       const source=x.sourceId?terminals.attach(schema.id(x.sourceId)):null;
       const a=source?sessionAgent(source):x.local===true?localShell():x.agentId?broker.agent(x.agentId):hostShell(x.hostId);
       const mode=source?.mode||x.mode||'shell';
+      if(mode==='agent'&&!a.ephemeral)await broker.ensureTrusted(a);
       // A project: the agent's CLI (or a shell) starts in the project's folder on the machine where it runs.
       let cwd=source?.cwd||'',title='';
       if(x.projectId&&!source){
@@ -1151,6 +1152,7 @@ async function start({app, safeStorage, shell: electronShell}, root, options = {
       const s=terminals.describe().find(s=>s.id===schema.id(x.id));if(!s)throw new Error('This terminal was closed.');
       if(!s.exited)return terminals.attach(s.id);
       const a=sessionAgent(s);
+      if(s.mode==='agent'&&!a.ephemeral)await broker.ensureTrusted(a);
       if(s.mode==='agent'&&a.provider==='hermes'&&!terminals.hasLive(a.id,s.mode)&&!await approve(a,'Start a new Hermes CLI process?','This does not attach to an existing gateway. Do not run another writer against a Hermes profile already used by a gateway. Use its gateway API or existing tmux session instead.'))throw new Error('CLI launch cancelled.');
       const result=terminals.restart(s.id,a,a.transport==='ssh'?broker.host(a.hostId):null,{cols:x.cols||100,rows:x.rows||28});emit();return result;
     },
@@ -1463,10 +1465,7 @@ async function start({app, safeStorage, shell: electronShell}, root, options = {
     if(sync&&(!syncWanted()||sync.account!==who)){sync.stop();sync=null;emit();}
     if(!sync&&syncWanted()){
       const kinds=['host','agent','conversation','transcript','settings'];
-      sync=new (require('./sync.cjs').Sync)({root,broker,opaya,vault:broker.vault,transport:WEB?options.syncTransport:account.syncTransport(),sends:WEB?kinds:[...kinds,'secret'],accepts:WEB?[...kinds,'secret']:kinds,account:who,
-        // The web runtime trusts agents the desktop user approved; the desktop app asks for agents from the web app,
-        // when a window is there to ask.
-        trustAgents:WEB,canAsk:()=>(listener?.clients?.size||0)>0,log:text=>stage(text)});
+      sync=new (require('./sync.cjs').Sync)({root,broker,opaya,vault:broker.vault,transport:WEB?options.syncTransport:account.syncTransport(),sends:WEB?kinds:[...kinds,'secret'],accepts:WEB?[...kinds,'secret']:kinds,account:who,log:text=>stage(text)});
       await sync.load();sync.start();emit();
     }
   }

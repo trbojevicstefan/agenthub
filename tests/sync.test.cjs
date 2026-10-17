@@ -102,18 +102,23 @@ test('transcripts merge by message and keep a message that is still being writte
   const synced=transcriptData(big).messages;assert.ok(synced.length<3000&&synced.at(-1).id==='m2999','the newest messages, up to the limit');
 });
 
-test('the desktop asks before it trusts an agent from the web app; a declined one is not asked again and is not deleted',async t=>{
+test('an agent from the other app runs only after the user trusts it here; iTrust stays on each computer',async t=>{
   const s=server(),desk=await workspace(t),web=await workspace(t);
   const asked=[];let answer=false;desk.broker.approve=async(a,title)=>{asked.push(title);return answer;};
-  const a=desktopSync(desk,s.transport),b=webSync(web,s.transport);b.trustAgents=true;await a.load();await b.load();
+  const a=desktopSync(desk,s.transport),b=webSync(web,s.transport);await a.load();await b.load();
   const host=await web.broker.saveHost({name:'prod',hostname:'203.0.113.5',username:'root'});
-  const agent=await web.broker.saveAgent({agent:{name:'from web',provider:'hermes',protocol:'acp',transport:'ssh',hostId:host.id,command:'hermes',args:['acp']}},{preapproved:true});
+  const agent=await web.broker.saveAgent({agent:{name:'from web',provider:'hermes',protocol:'acp',transport:'ssh',hostId:host.id,command:'hermes',args:['acp'],itrust:true}},{preapproved:true});
   await b.round();
-  a.canAsk=()=>false;await a.round();assert.deepEqual(asked,[],'no window: wait');assert.equal(desk.broker.data.agents.length,0);
-  a.canAsk=()=>true;await a.round();assert.deepEqual(asked,['Trust this agent executable?']);assert.equal(desk.broker.data.agents.length,0);
-  await a.round();assert.equal(asked.length,1,'declined: not asked again');
-  assert.equal(s.records.get(`agent:${agent.id}`).deleted,false,'and not deleted on the server');
-  // Changed in the web app: asked again.
-  await web.broker.saveAgent({agent:{...web.broker.agent(agent.id),args:['acp','--profile','work']}},{preapproved:true});await b.round();
-  answer=true;await a.round();assert.equal(asked.length,2);assert.deepEqual(desk.broker.data.agents.map(x=>x.args),[['acp','--profile','work']]);
+  assert.equal(s.records.get(`agent:${agent.id}`).data.itrust,undefined,'iTrust is not synced');
+  await a.round();
+  const here=desk.broker.agent(agent.id);assert.equal(here.trustPending,true);assert.equal(here.itrust,false);assert.deepEqual(asked,[],'sync itself asks nothing');
+  await assert.rejects(desk.broker.ensureTrusted(here),/not approved/);assert.equal(desk.broker.agent(agent.id).trustPending,true);
+  answer=true;await desk.broker.ensureTrusted(desk.broker.agent(agent.id));assert.equal(desk.broker.agent(agent.id).trustPending,undefined);
+  assert.equal(asked.length,2);
+  // A new name keeps the trust; a new executable needs it again.
+  await web.broker.saveAgent({agent:{...web.broker.agent(agent.id),name:'renamed'}},{preapproved:true});await b.round();await a.round();
+  assert.equal(desk.broker.agent(agent.id).trustPending,undefined);assert.equal(desk.broker.agent(agent.id).name,'renamed');
+  await web.broker.saveAgent({agent:{...web.broker.agent(agent.id),args:['acp','--profile','work']}},{preapproved:true});await b.round();await a.round();
+  assert.equal(desk.broker.agent(agent.id).trustPending,true);
+  assert.equal((await a.round()).pushed,0,'the local mark is not pushed back');
 });

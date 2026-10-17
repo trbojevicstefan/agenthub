@@ -374,7 +374,7 @@ Changes from the design:
 | Desktop sessions reach four paths. | Also `/api/web-ssh-key`, `/api/sync` and `/api/sync/secrets`. | **Allow web access** and sync run in the desktop app. |
 | Local agents sync as "Desktop only" entries. | Local agents do not sync. | v1 scope. |
 | MCP servers sync. | They do not sync. | Each computer must trust a server's program; a background sync cannot ask. |
-| — | A new agent from the web app asks for approval in the desktop app. | Synced records must not run new programs on the user's machines without approval. |
+| — | A synced agent with a new or changed executable asks "Trust this agent executable?" before it first runs, on each side. iTrust does not sync. | A changed record on the server must not start a new program on the user's machines without the user. |
 | An approval with no window is denied. | With browser notifications on, it waits for a tab (up to 10 minutes). | A web user can answer from the notification. |
 
 ## Open Items

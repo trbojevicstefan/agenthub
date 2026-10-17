@@ -48,7 +48,7 @@ Secret values sync in one direction only: from the desktop app to the web app. A
 - If two clients change the same record between two rounds, the version the server receives last wins (last writer wins, for each record). The other version is lost. This is acceptable for v1: one person uses both clients.
 - A remote change to an agent with an active turn waits for the next round.
 - Messages of the same chat merge by message ID, so a chat used on both sides loses no message.
-- **Changed:** a new agent, or an agent with a new executable, from the web app asks for approval in the desktop app ("Trust this agent executable?"), as an agent added by hand does. With no window open, it waits for the next round. A declined agent is not asked again until it changes in the web app, and the desktop app does not delete it on the server. A web runtime takes agents from the desktop app without asking, because the user approved them there.
+- **Changed:** trust stays on each computer. A synced agent with a new or changed executable is saved with `trustPending`, and Opaya asks "Trust this agent executable?" before its program first runs there (a connection or its CLI in a terminal). This holds on both sides, so a changed record on the server cannot start a new program on the user's machines without the user. iTrust (approve tool requests automatically) does not sync.
 
 ## Deletes
 

@@ -13,8 +13,8 @@ const SETTINGS=['sendKey','tips','notifyReplies','notifyApprovals','notifyJobs',
 const pick=(o,keys)=>Object.fromEntries(keys.filter(k=>o?.[k]!==undefined).map(k=>[k,o[k]]));
 // A record that cannot be applied now (an active turn, a machine not there yet): the round stops and tries again.
 class Later extends Error{}
-// The user declined a synced agent's executable: it is not asked again until the record changes.
-class Declined extends Error{}
+// Trust decisions stay on each computer: iTrust is not synced, and a synced executable waits for trust on first use.
+const LOCAL_ONLY=['itrust','trustPending'];
 const publicEndpoint=e=>{try{const u=new URL(e);return u.protocol==='https:'&&!['127.0.0.1','localhost','[::1]'].includes(u.hostname);}catch{return false;}};
 // Messages as they sync: finished ones, text only (no attachments), newest first until the limit.
 function transcriptData(messages){
@@ -41,7 +41,7 @@ async function collect({broker,opaya,kinds,known={}}){
   const agents=new Set();
   if(kinds.has('agent'))for(const a of d.agents||[]){
     if(!(a.transport==='ssh'&&hosts.has(a.hostId)||a.transport==='http'&&publicEndpoint(a.endpoint)))continue;
-    agents.add(a.id);add('agent',a.id,a);
+    agents.add(a.id);const {itrust:_i,trustPending:_t,...data}=a;add('agent',a.id,data);
   }
   for(const c of d.conversations||[]){
     if(!agents.has(c.agentId)||c.kind)continue;
@@ -56,20 +56,17 @@ async function collect({broker,opaya,kinds,known={}}){
   if(kinds.has('settings'))add('settings','settings',pick(d.settings,SETTINGS));
   return out;
 }
-// A record from the server, applied to this workspace. trustAgents: agents from the other side need no approval (a
-// web runtime trusts what the desktop user approved); otherwise a new or changed executable asks, when a window can.
-async function apply({broker,opaya,vault,trustAgents=false,canAsk=()=>true},r){
+// A record from the server, applied to this workspace. A new or changed executable is saved, and the broker asks the
+// user to trust it before it first runs here (broker.ensureTrusted).
+async function apply({broker,opaya,vault},r){
   const d=broker.data,x=r.data;
   if(r.kind==='host'){const existing=d.hosts.find(h=>h.id===r.id);await broker.saveHost({...(existing||{}),id:r.id,name:x.name,hostname:x.hostname,username:x.username,port:x.port},{sync:true});return;}
   if(r.kind==='agent'){
     if(broker.turns.has(r.id))throw new Later();
     if(x.transport==='ssh'&&!d.hosts.some(h=>h.id===x.hostId))throw new Later();
-    const existing=d.agents.find(a=>a.id===r.id),next={...(existing||{}),...x,id:r.id};
-    const asks=!trustAgents&&x.protocol!=='openai'&&(!existing||existing.command!==x.command||JSON.stringify(existing.args)!==JSON.stringify(x.args)||existing.hermesHome!==x.hermesHome);
-    if(asks&&!canAsk())throw new Later();
-    try{await broker.saveAgent({agent:next},{preapproved:trustAgents});}
-    catch(error){if(/was not approved/.test(error.message))throw new Declined(error.message);throw error;}
-    return;
+    const existing=d.agents.find(a=>a.id===r.id),incoming=Object.fromEntries(Object.entries(x).filter(([k])=>!LOCAL_ONLY.includes(k)));
+    const changed=x.protocol!=='openai'&&(!existing||existing.command!==x.command||JSON.stringify(existing.args)!==JSON.stringify(x.args)||existing.hermesHome!==x.hermesHome);
+    await broker.saveAgent({agent:{...(existing||{}),...incoming,id:r.id,...(changed||existing?.trustPending?{trustPending:true}:{})}},{preapproved:true});return;
   }
   if(r.kind==='conversation'){
     if(!d.agents.some(a=>a.id===x.agentId))throw new Later();
@@ -97,13 +94,13 @@ async function remove({broker,opaya},kind,id){
 }
 class Sync{
   // transport: {pull(since), push(records), secret?(key, value)}. sends/accepts: the kinds this client sends and takes.
-  constructor({root,broker,opaya,vault,transport,sends,accepts,account='',trustAgents=false,canAsk=()=>true,log=()=>{}}){
-    Object.assign(this,{root,broker,opaya,vault,transport,sends:new Set(sends),accepts:new Set(accepts),account,trustAgents,canAsk,log});
-    this.file=path.join(root,'sync-state.json');this.state={account,rev:0,hashes:{},declined:{}};this.running=null;this.timer=null;this.soon=null;this.error='';this.lastRound=0;
+  constructor({root,broker,opaya,vault,transport,sends,accepts,account='',log=()=>{}}){
+    Object.assign(this,{root,broker,opaya,vault,transport,sends:new Set(sends),accepts:new Set(accepts),account,log});
+    this.file=path.join(root,'sync-state.json');this.state={account,rev:0,hashes:{}};this.running=null;this.timer=null;this.soon=null;this.error='';this.lastRound=0;
   }
-  async load(){const s=await readJson(this.file,null).catch(()=>null);this.state=s&&s.account===this.account&&s.hashes&&typeof s.hashes==='object'?{declined:{},...s}:{account:this.account,rev:0,hashes:{},declined:{}};}
+  async load(){const s=await readJson(this.file,null).catch(()=>null);this.state=s&&s.account===this.account&&s.hashes&&typeof s.hashes==='object'?s:{account:this.account,rev:0,hashes:{}};}
   save(){return atomicJson(this.file,this.state);}
-  ctx(){return {broker:this.broker,opaya:this.opaya,vault:this.vault,trustAgents:this.trustAgents,canAsk:this.canAsk};}
+  ctx(){return {broker:this.broker,opaya:this.opaya,vault:this.vault};}
   round(){if(!this.running)this.running=this.run().finally(()=>{this.running=null;});return this.running;}
   async run(){
     try{
@@ -111,18 +108,14 @@ class Sync{
       let since=this.state.rev,more=true,stopped=false;
       while(more&&!stopped){
         const page=await this.transport.pull(since);
-        if(page.reset){this.state.hashes={};this.state.declined={};}
+        if(page.reset){this.state.hashes={};}
         for(const r of page.records||[]){
           const key=`${r.kind}:${r.id}`;
           if(!this.accepts.has(r.kind)){since=r.rev;continue;}
           try{
-            if(r.deleted){await remove(this.ctx(),r.kind,r.id);delete this.state.hashes[key];delete this.state.declined[key];}
-            else if(this.state.hashes[key]!==hash(r.data)&&this.state.declined[key]!==hash(r.data)){await apply(this.ctx(),r);this.state.hashes[key]=hash(r.data);delete this.state.declined[key];}
-          }catch(error){
-            if(error instanceof Later){stopped=true;break;}
-            if(error instanceof Declined)this.state.declined[key]=hash(r.data);
-            this.log(`Sync could not apply ${key}: ${error.message}`);
-          }
+            if(r.deleted){await remove(this.ctx(),r.kind,r.id);delete this.state.hashes[key];}
+            else if(this.state.hashes[key]!==hash(r.data)){await apply(this.ctx(),r);this.state.hashes[key]=hash(r.data);}
+          }catch(error){if(error instanceof Later){stopped=true;break;}this.log(`Sync could not apply ${key}: ${error.message}`);}
           since=r.rev;
         }
         if(!stopped&&!page.records?.length)since=Math.max(since,page.rev||0);
@@ -152,4 +145,4 @@ class Sync{
   stop(){clearInterval(this.timer);clearTimeout(this.soon);this.timer=null;this.soon=null;}
   describe(){return {on:!!this.timer,lastRound:this.lastRound,error:this.error};}
 }
-module.exports={Sync,collect,apply,remove,mergeMessages,transcriptData,Later,Declined,SETTINGS};
+module.exports={Sync,collect,apply,remove,mergeMessages,transcriptData,Later,SETTINGS};

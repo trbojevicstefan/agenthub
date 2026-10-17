@@ -74,7 +74,7 @@ test("the launcher starts, finds and stops a runtime through the Docker API, and
 
   assert.deepEqual(await client.call("status", { userId: USER }), { running: false });
   assert.deepEqual(await client.call("start", { userId: USER, vaultToken: TOKEN, hostLimit: 5 }), { started: true, running: true });
-  const created = containers.get(`opaya-runtime-${USER.toLowerCase()}`)!;
+  const created = containers.get(`opaya-runtime-${USER}`)!;
   assert.equal(networks.get("opaya-runtime").Options["com.docker.network.bridge.enable_icc"], "false", "runtimes cannot reach each other");
   assert.equal(created.spec.HostConfig.ReadonlyRootfs, true);
   assert.deepEqual(await client.call("start", { userId: USER, vaultToken: TOKEN, hostLimit: 5 }), { started: false, running: true }, "a running runtime is not started twice");
