@@ -127,6 +127,16 @@ Prevent further actions when the current turn has stopped.
 
 ### F06 — P2: OpenClaw copies retain tokens when keys are excluded
 
+- [x] Fixed on 2026-10-17 by removing credential fields from `openclaw.json` when keys are excluded.
+
+Clones and backups without keys copy `openclaw.json` without its gateway token and password, API keys, channel tokens, request headers, and inline environment variables.
+SecretRef objects remain, because they only refer to a secret.
+A redeploy keeps the clone's own credentials.
+A configuration that is not plain JSON is left out, and the progress message gives the setup step.
+Regression tests cover local and SSH clones and backups, redeploys, JSON5 configurations, and the skills scope.
+The correction does not cover OpenClaw's SQLite stores (`state/openclaw.sqlite` and `agents/<id>/agent/openclaw-agent.sqlite`).
+The OpenClaw documentation says that these stores also hold auth profiles. The review did not reproduce this.
+
 Locations: [desktop/clone-cli.cjs:30–48](desktop/clone-cli.cjs#L30-L48) and [desktop/maintenance.cjs:281–286](desktop/maintenance.cjs#L281-L286).
 
 The exclusion lists omit `openclaw.json`.

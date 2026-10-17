@@ -14,6 +14,7 @@ const {place,shell,run,sourceHome,isLocal,measure,slug}=require('./clone.cjs');
 const catalog=require('./catalog.cjs');
 const updates=require('./updates.cjs');
 const {hermesHomes}=require('./diagnostics.cjs');
+const {openclawWithoutSecrets}=require('./credentials.cjs');
 
 const PATH_PREFIX=REMOTE_PATH;
 // How each framework can be installed. `files` are what the vendor installer puts in place; `data` is the agent's own
@@ -293,8 +294,8 @@ async function members(where,spec,{keys,history}){
   }
   return found;
 }
-// `snap`: a folder on the source holding SQLite snapshots (snap.files) that go into the archive under the same names
-// as the live databases they replace. Without `--` then, so the second -C is an option; members never start with -.
+// `snap`: a folder on the source holding files (snap.files: SQLite snapshots, OpenClaw's config without credentials)
+// that go into the archive under the same names as the live files they replace. Without `--` then, so the second -C is an option; members never start with -.
 function producer(where,base,paths,snap=null){
   // bsdtar still interprets a member named -C after --; make leading dashes unambiguous paths.
   const members=paths.map(p=>p.startsWith('-')?`./${p}`:p),extra=snap?['-C',snap.dir,...snap.files]:[];
@@ -366,6 +367,24 @@ async function hermesSnapshot(where,base){
     `if python3 -c ${q(SNAPSHOT_PY)} "$PWD/state.db" "$tmp/state.db" >&2; then printf "@@snap %s\\n" "$tmp"; else rm -rf "$tmp"; fi`].join('\n');
   try{const dir=/^@@snap (.+)$/m.exec(await run(where,script,10*60*1000))?.[1]?.trim();return dir&&dir.startsWith('/')?{dir,files:['state.db']}:null;}catch{return null;}
 }
+// OpenClaw's config without its credentials, for a backup without keys: written to a temporary folder on the source and
+// archived under its own name, like the Hermes snapshot. Null when it is not plain JSON: it is then left out.
+const OPENCLAW_CONFIG='.openclaw/openclaw.json';
+async function openclawConfig(where,base,progress){
+  const raw=isLocal(where)?await fsp.readFile(path.join(base,OPENCLAW_CONFIG),'utf8'):await run(where,`cat ${q(`${base}/${OPENCLAW_CONFIG}`)}`);
+  const text=openclawWithoutSecrets(raw);
+  if(text===null){progress({step:'select',message:'openclaw.json is not plain JSON, so it was left out: it can hold API keys and tokens.'});return null;}
+  let dir;
+  if(isLocal(where)){dir=await fsp.mkdtemp(path.join(os.tmpdir(),'opaya-config-'));await fsp.mkdir(path.join(dir,'.openclaw'),{mode:0o700});await fsp.writeFile(path.join(dir,OPENCLAW_CONFIG),text,{mode:0o600});}
+  else{
+    const script=['tmp=$(mktemp -d "${TMPDIR:-/tmp}/opaya-config.XXXXXX") || exit 1',`mkdir "$tmp/.openclaw" && umask 077 && cat > "$tmp/${OPENCLAW_CONFIG}" && printf "@@dir %s\\n" "$tmp"`].join('\n');
+    dir=/^@@dir (.+)$/m.exec(await collect(shell(where,script),{input:text,timeout:30000}))?.[1]?.trim();
+    if(!dir?.startsWith('/'))throw new Error('Opaya could not prepare OpenClaw\'s config for the backup.');
+  }
+  progress({step:'select',message:'openclaw.json without its gateway token, API keys and channel tokens'});
+  return {dir,files:[OPENCLAW_CONFIG]};
+}
+const removeTemp=(where,dir)=>isLocal(where)?fsp.rm(dir,{recursive:true,force:true}).catch(()=>{}):run(where,`rm -rf ${q(dir)}`).catch(()=>{});
 const fmt=n=>n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
 // Streams the agent's data (this computer, SSH, or inside a container) into a .tar.gz on this computer, next to a
 // small manifest describing the connection. The archive is private to the user (0600).
@@ -383,10 +402,12 @@ async function backup({agent,host,dest,keys=true,history=true,machine='',progres
   progress({step:'select',state:'active',message:`Choosing files (${history?'with':'without'} chat history, ${keys?'with':'without'} API keys and logins)`});
   let paths=await members(where,spec,{keys,history});if(!paths.length)throw new Error(`Nothing to back up in ${spec.base}.`);
   // Hermes' chat database goes in as a snapshot, not as the live files the gateway is writing.
-  const snap=agent.provider==='hermes'&&history&&paths.includes('state.db')?await hermesSnapshot(where,spec.base):null;
+  let snap=agent.provider==='hermes'&&history&&paths.includes('state.db')?await hermesSnapshot(where,spec.base):null;
   if(snap){paths=paths.filter(p=>!/^state\.db(-wal|-shm)?$/.test(p));progress({step:'select',message:'Chat database copied with SQLite\'s online backup'});}
+  // Without keys, OpenClaw's config goes in without its credentials.
+  if(!keys&&kindOf(agent).framework==='openclaw'&&paths.includes(OPENCLAW_CONFIG)){paths=paths.filter(p=>p!==OPENCLAW_CONFIG);snap=await openclawConfig(where,spec.base,progress);}
   try{return await backupFiles({agent,where,spec,paths,snap,dest,keys,history,machine,progress});}
-  finally{if(snap)await run(where,`rm -rf ${q(snap.dir)}`).catch(()=>{});}
+  finally{if(snap)await removeTemp(where,snap.dir);}
 }
 async function backupFiles({agent,where,spec,paths,snap,dest,keys,history,machine,progress}){
   const size=await measure(where,spec.base,paths);

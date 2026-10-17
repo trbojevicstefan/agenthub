@@ -5,11 +5,14 @@
 // copied; logins and API keys only when asked. Existing folders on the target are renamed, never overwritten.
 const os=require('node:os');
 const path=require('node:path');
-const {findExecutable,environment,quote,REMOTE_PATH}=require('./process.cjs');
+const fs=require('node:fs/promises');
+const {findExecutable,environment,quote,collect,REMOTE_PATH}=require('./process.cjs');
 const {transfer,measure,run,shell,isLocal,place,slug,fmt}=require('./clone.cjs');
 const catalog=require('./catalog.cjs');
 const containers=require('./containers.cjs');
+const {openclawWithoutSecrets}=require('./credentials.cjs');
 // Paths are relative to the home folder. `top` is what a clone of everything copies; the scopes pick from the rest.
+// `config` is a settings file that also holds credentials: a clone without keys copies it without them.
 const CLI={
   claude:{name:'Claude Code',bin:'claude',top:['.claude','.claude.json'],
     skills:['.claude/skills','.claude/commands','.claude/agents','.claude/plugins'],memory:['.claude/CLAUDE.md'],personality:['.claude/output-styles'],settings:['.claude/settings.json'],
@@ -29,7 +32,7 @@ const CLI={
     connection:()=>({provider:'custom',protocol:'acp',command:'dsh',args:['--profile','acp'],avatar:'lib:deepseek'})},
   openclaw:{name:'OpenClaw',bin:'openclaw',top:['.openclaw'],
     skills:['.openclaw/skills','.openclaw/workspace/skills'],memory:['.openclaw/workspace/MEMORY.md','.openclaw/workspace/memory'],personality:['.openclaw/workspace/SOUL.md','.openclaw/workspace/AGENTS.md','.openclaw/workspace/USER.md','.openclaw/workspace/IDENTITY.md'],settings:['.openclaw/openclaw.json'],
-    history:['.openclaw/sessions','.openclaw/logs','.openclaw/agents/*/sessions','.openclaw/media'],secrets:['.openclaw/credentials','.openclaw/.env'],
+    history:['.openclaw/sessions','.openclaw/logs','.openclaw/agents/*/sessions','.openclaw/media'],secrets:['.openclaw/credentials','.openclaw/.env'],config:'.openclaw/openclaw.json',
     connection:()=>({provider:'openclaw',protocol:'openai',command:'openclaw',args:[],endpoint:'http://127.0.0.1:18789/v1',model:'openclaw/default'})},
   goose:{name:'Goose',bin:'goose',top:['.config/goose'],skills:['.config/goose/recipes'],memory:['.config/goose/memory','.config/goose/.goosehints'],personality:[],settings:['.config/goose/config.yaml'],
     history:['.local/share/goose/sessions'],secrets:['.config/goose/secrets.yaml'],
@@ -43,13 +46,13 @@ function frameworkOf(agent){
 // What to copy: top-level paths (or the scope's paths) and what to leave out below them.
 function plan(id,scope,keys){
   const c=CLI[id];if(!['everything','personality','skills','memory'].includes(scope))throw new Error('Choose what to clone.');
-  const secrets=keys?[]:c.secrets;
+  const secrets=keys?[]:c.secrets,config=keys?'':c.config||'';
   const wanted=scope==='everything'?c.top:[...new Set([...c.settings,...c.skills,...(scope==='memory'||scope==='personality'?c.memory:[]),...(scope==='personality'?c.personality:[]),...(keys?c.secrets:[])])];
-  return {wanted:wanted.filter(p=>!secrets.includes(p)),excludes:[...c.history,...secrets]};
+  return {wanted:wanted.filter(p=>!secrets.includes(p)&&p!==config),excludes:[...c.history,...secrets,...(config?[config]:[])],config};
 }
 const homeOf=async where=>isLocal(where)?os.homedir():(await run(where,'printf %s "$HOME"')).trim();
 async function existing(where,home,paths){
-  if(isLocal(where)){const fs=require('node:fs/promises');const found=[];for(const p of paths)if(await fs.lstat(path.join(home,p)).then(()=>true,()=>false))found.push(p);return found;}
+  if(isLocal(where)){const found=[];for(const p of paths)if(await fs.lstat(path.join(home,p)).then(()=>true,()=>false))found.push(p);return found;}
   const out=await run(where,`cd ${quote(home)} && for p in ${paths.map(quote).join(' ')}; do [ -e "$p" ] && printf '%s\\n' "$p"; done; true`);
   return out.split('\n').map(x=>x.trim()).filter(Boolean);
 }
@@ -81,26 +84,38 @@ async function copy({agent,sourceHost,id,scope,keys,to,dest,backup,progress}){
   const from=place({agent,host:sourceHost});
   progress({step:'source',state:'active',message:`Finding ${agent.name}'s folders`});
   const home=from.home||(from.container?'/root':await homeOf(from)); // a profile in a container has its own HOME
-  const {wanted,excludes}=plan(id,scope,keys);
-  const paths=await existing(from,home,wanted);
-  if(!paths.length)throw new Error(`Nothing to copy: ${agent.name} has none of ${wanted.join(', ')}.`);
+  const {wanted,excludes,config}=plan(id,scope,keys);
+  const paths=await existing(from,home,wanted),hasConfig=!!config&&(await existing(from,home,[config])).length>0;
+  const extra=hasConfig&&!paths.some(p=>config.startsWith(p+'/'))?[config]:[];
+  if(!paths.length&&!hasConfig)throw new Error(`Nothing to copy: ${agent.name} has none of ${[...wanted,...(config?[config]:[])].join(', ')}.`);
   progress({step:'source',state:'done',message:`Source: ${home}`});
-  const size=await measure(from,home,paths);
-  progress({step:'select',state:'done',message:`${paths.join(', ')} (${size.files} files, ${fmt(size.bytes)}), without chat history${keys?'':', logins or API keys'}`,total:size.bytes});
+  const size=paths.length?await measure(from,home,paths):{bytes:0,files:0};
+  progress({step:'select',state:'done',message:`${[...paths,...extra].join(', ')} (${size.files} files, ${fmt(size.bytes)}), without chat history${keys?'':', logins or API keys'}`,total:size.bytes});
   if(backup){
-    const there=await existing(to,dest,paths);
+    const there=await existing(to,dest,[...paths,...extra]);
     if(there.length){
       const stamp=new Date().toISOString().slice(0,19).replace(/[-:T]/g,'');
-      if(isLocal(to)){const fs=require('node:fs/promises');for(const p of there)await fs.rename(path.join(dest,p),path.join(dest,`${p}.before-clone-${stamp}`));}
+      if(isLocal(to)){for(const p of there)await fs.rename(path.join(dest,p),path.join(dest,`${p}.before-clone-${stamp}`));}
       else await run(to,`cd ${quote(dest)} && for p in ${there.map(quote).join(' ')}; do mv "$p" "$p.before-clone-${stamp}"; done`);
       progress({message:`Kept what was already there as ${there.map(p=>`${p}.before-clone-${stamp}`).join(', ')}`});
     }
   }
   progress({step:'copy',state:'active',message:`Copying to ${dest}`,bytes:0,total:size.bytes});
   let last=0;
-  const sent=await transfer(from,home,paths,to,dest,{excludes,onBytes:n=>{const now=Date.now();if(now-last>200){last=now;progress({step:'copy',bytes:n,total:size.bytes});}}});
+  const sent=paths.length?await transfer(from,home,paths,to,dest,{excludes,onBytes:n=>{const now=Date.now();if(now-last>200){last=now;progress({step:'copy',bytes:n,total:size.bytes});}}}):0;
+  const wrote=hasConfig&&await copyConfig(from,home,to,dest,config,progress);
   progress({step:'copy',state:'done',message:`Copied ${fmt(sent)}`,bytes:sent,total:Math.max(size.bytes,sent)});
-  return paths;
+  return [...paths,...(wrote?extra:[])];
+}
+// The config without its credentials; on a redeploy the clone keeps its own. A config that is not plain JSON stays behind.
+async function copyConfig(from,home,to,dest,file,progress){
+  const read=(where,dir)=>isLocal(where)?fs.readFile(path.join(dir,file),'utf8').catch(()=>''):run(where,`cat ${quote(`${dir}/${file}`)} 2>/dev/null; true`);
+  const mine=await read(to,dest),text=openclawWithoutSecrets(await read(from,home),mine);
+  if(text===null){progress({message:`${file} is not plain JSON, so Opaya left it out: it can hold API keys and tokens. Set the clone up there (openclaw onboard).`});return false;}
+  if(isLocal(to)){const target=path.join(dest,file);await fs.mkdir(path.dirname(target),{recursive:true,mode:0o700});await fs.writeFile(target,text,{mode:0o600});}
+  else await collect(shell(to,`cd ${quote(dest)} && mkdir -p ${quote(path.posix.dirname(file))} && umask 077 && cat > ${quote(file)}`),{input:text,timeout:30000});
+  progress({message:mine?`${file} copied; the clone keeps its own gateway token, API keys and channel tokens.`:`${file} copied without its gateway token, API keys and channel tokens. Run openclaw doctor --generate-gateway-token there and add its keys.`});
+  return true;
 }
 async function startGateway(where,progress){
   progress({message:'Starting the OpenClaw gateway'});

@@ -34,3 +34,55 @@ test('clone scopes pick only their parts',()=>{
   assert(p.excludes.includes('.codex/auth.json')&&p.excludes.includes('.codex/sessions'));
   assert(cli.plan('codex','memory',true).wanted.includes('.codex/auth.json'));
 });
+// Runs the generated remote command locally, like tests/tar-safety.test.cjs. No SSH connection is made.
+async function sshHost(t,root){
+  const {findExecutable,environment}=require('../desktop/process.cjs');
+  const bin=path.join(root,'bin');await write(path.join(bin,'ssh'),'#!/bin/sh\nfor last; do :; done\nexec /bin/sh -c "$last"\n');await fs.chmod(path.join(bin,'ssh'),0o755);
+  const oldPath=process.env.PATH;process.env.PATH=`${bin}:${oldPath}`;t.after(()=>{process.env.PATH=oldPath;});
+  assert.equal(findExecutable('ssh',environment()),path.join(bin,'ssh'));
+  return {id:'s1',name:'Fixture',hostname:'fixture.invalid',username:'fixture',port:22};
+}
+for(const remote of [false,true])test(`an OpenClaw clone without keys leaves its config's credentials behind (${remote?'machine':'this computer'})`,{skip},async t=>{
+  const src=await temp(t),dst=await temp(t),home=process.env.HOME;t.after(()=>{process.env.HOME=home;});
+  const host=remote?await sshHost(t,await temp(t)):null,to={host,container:''};
+  const config={gateway:{auth:{mode:'token',token:'SOURCE-TOKEN'}},models:{providers:{openai:{apiKey:'sk-source'}}},agents:{defaults:{model:'openai/gpt'}}};
+  await write(path.join(src,'.openclaw/openclaw.json'),JSON.stringify(config));
+  for(const f of ['.openclaw/skills/a/SKILL.md','.openclaw/credentials/oauth.json'])await write(path.join(src,f));
+  process.env.HOME=src;
+  const agent={id:'o1',name:'Claw',provider:'openclaw',protocol:'openai',transport:'http',command:'openclaw',args:[],endpoint:'http://127.0.0.1:18789/v1'},messages=[];
+  const copy=(keys,backup)=>cli.copy({agent,sourceHost:null,id:'openclaw',scope:'everything',keys,to,dest:dst,backup,progress:e=>e.message&&messages.push(e.message)});
+  assert.deepEqual(await copy(false,true),['.openclaw']);
+  const file=path.join(dst,'.openclaw/openclaw.json'),copied=await fs.readFile(file,'utf8');
+  assert(!copied.includes('SOURCE-TOKEN')&&!copied.includes('sk-source'),'credentials stay behind');
+  assert.deepEqual(JSON.parse(copied),{gateway:{auth:{mode:'token'}},models:{providers:{openai:{}}},agents:{defaults:{model:'openai/gpt'}}});
+  assert.equal((await fs.stat(file)).mode&0o777,0o600);
+  assert.equal(await exists(path.join(dst,'.openclaw/skills/a/SKILL.md')),true);
+  assert.equal(await exists(path.join(dst,'.openclaw/credentials')),false);
+  assert(messages.some(m=>/generate-gateway-token/.test(m)));
+  // A redeploy replaces the settings and keeps the clone's own token.
+  await fs.writeFile(file,JSON.stringify({gateway:{auth:{mode:'token',token:'CLONE-TOKEN'}}}));
+  config.agents.defaults.model='openai/next';await fs.writeFile(path.join(src,'.openclaw/openclaw.json'),JSON.stringify(config));
+  await copy(false,false);
+  const redeployed=JSON.parse(await fs.readFile(file,'utf8'));
+  assert.equal(redeployed.gateway.auth.token,'CLONE-TOKEN');assert.equal(redeployed.agents.defaults.model,'openai/next');assert.equal(redeployed.models.providers.openai.apiKey,undefined);
+  // A config that is not plain JSON is left out instead of copied with its credentials.
+  await fs.writeFile(path.join(src,'.openclaw/openclaw.json'),'{gateway:{auth:{token:"SOURCE-TOKEN"}}}');await fs.rm(file);
+  await copy(false,false);
+  assert.equal(await exists(file),false);assert(messages.some(m=>/not plain JSON/.test(m)));
+  await copy(true,false);
+  assert.match(await fs.readFile(file,'utf8'),/SOURCE-TOKEN/,'with keys the config is copied as it is');
+});
+test('an OpenClaw clone of skills copies the config even without skill folders',{skip},async t=>{
+  const src=await temp(t),dst=await temp(t),home=process.env.HOME;t.after(()=>{process.env.HOME=home;});
+  await write(path.join(src,'.openclaw/openclaw.json'),JSON.stringify({gateway:{auth:{token:'SOURCE-TOKEN'}},agents:{defaults:{model:'m'}}}));
+  await write(path.join(dst,'.openclaw/openclaw.json'),'old');
+  process.env.HOME=src;
+  const p=cli.plan('openclaw','skills',false);
+  assert.equal(p.config,'.openclaw/openclaw.json');assert(!p.wanted.includes(p.config)&&p.excludes.includes(p.config));
+  assert(cli.plan('openclaw','skills',true).wanted.includes('.openclaw/openclaw.json'));
+  const agent={id:'o1',name:'Claw',provider:'openclaw',protocol:'openai',transport:'http',command:'openclaw',args:[]};
+  assert.deepEqual(await cli.copy({agent,sourceHost:null,id:'openclaw',scope:'skills',keys:false,to:{host:null,container:''},dest:dst,backup:true,progress:()=>{}}),['.openclaw/openclaw.json']);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(dst,'.openclaw/openclaw.json'),'utf8')),{gateway:{auth:{}},agents:{defaults:{model:'m'}}});
+  const kept=(await fs.readdir(path.join(dst,'.openclaw'))).find(n=>n.startsWith('openclaw.json.before-clone-'));
+  assert.equal(await fs.readFile(path.join(dst,'.openclaw',kept),'utf8'),'old','what was there is kept');
+});

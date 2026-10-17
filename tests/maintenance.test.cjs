@@ -88,6 +88,25 @@ test('a Claude Code backup reads ~/.claude and ~/.claude.json and can leave out 
   const r=await m.backup({agent:{...claude,transport:'local',hostId:''},host:null,dest:path.join(root,'b'),keys:false,history:false});
   assert.deepEqual(await unpack(r.file,path.join(root,'x')),['.claude.json','.claude/settings.json','.claude/skills/s/SKILL.md']);
 });
+for(const remote of [false,true])test(`an OpenClaw backup without keys leaves its config's credentials out (${remote?'machine':'this computer'})`,{skip},async t=>{
+  const root=await temp(t),tmp=path.join(root,'tmp'),old={HOME:process.env.HOME,TMPDIR:process.env.TMPDIR,PATH:process.env.PATH};
+  t.after(()=>{for(const [k,v] of Object.entries(old)){if(v===undefined)delete process.env[k];else process.env[k]=v;}});
+  process.env.HOME=root;process.env.TMPDIR=tmp;await fs.mkdir(tmp);
+  const files={'.openclaw/openclaw.json':JSON.stringify({gateway:{auth:{mode:'token',token:'SOURCE-TOKEN'}},channels:{telegram:{botToken:'123:abc'}},agents:{defaults:{model:'m'}}}),'.openclaw/credentials/oauth.json':'secret','.openclaw/.env':'K=secret','.openclaw/skills/s/SKILL.md':'s','.openclaw/sessions/1.jsonl':'x'};
+  for(const [f,c] of Object.entries(files)){await fs.mkdir(path.dirname(path.join(root,f)),{recursive:true});await fs.writeFile(path.join(root,f),c);}
+  let host=null;
+  if(remote){
+    // Runs the generated remote command locally, like tests/tar-safety.test.cjs. No SSH connection is made.
+    const bin=path.join(root,'bin');await fs.mkdir(bin);await fs.writeFile(path.join(bin,'ssh'),'#!/bin/sh\nfor last; do :; done\nexec /bin/sh -c "$last"\n',{mode:0o755});
+    process.env.PATH=`${bin}:${old.PATH}`;host={id:'s1',name:'Fixture',hostname:'fixture.invalid',username:'fixture',port:22};
+  }
+  const agent={id:'o1',name:'Claw',provider:'openclaw',protocol:'openai',transport:remote?'ssh':'http',hostId:remote?'s1':'',command:'openclaw',args:[],endpoint:'http://127.0.0.1:18789/v1'};
+  const r=await m.backup({agent,host,dest:path.join(root,'b'),keys:false,history:false});
+  assert.deepEqual(await unpack(r.file,path.join(root,'x')),['.openclaw/openclaw.json','.openclaw/skills/s/SKILL.md']);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(root,'x','.openclaw/openclaw.json'),'utf8')),{gateway:{auth:{mode:'token'}},channels:{telegram:{}},agents:{defaults:{model:'m'}}});
+  assert.equal(JSON.parse(await fs.readFile(r.file.replace(/\.tar\.gz$/,'.json'),'utf8')).contents.keys,false);
+  assert.deepEqual(await fs.readdir(tmp),[],'the temporary config is removed');
+});
 test('detection reports the installer, path and version',{skip},async t=>{
   // An empty npm prefix, so a Claude Code installed with npm on the test machine does not count.
   const root=await temp(t),old={HOME:process.env.HOME,npm_config_prefix:process.env.npm_config_prefix};process.env.HOME=root;process.env.npm_config_prefix=path.join(root,'npm');

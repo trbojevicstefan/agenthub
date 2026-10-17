@@ -38,6 +38,22 @@ test('OpenClaw gateway token import reads only gateway.auth.token',()=>{
   assert.throws(()=>parseOpenclawToken('{gateway:{auth:{token:"x"}}}'),/not plain JSON/);
   assert.throws(()=>parseOpenclawToken(JSON.stringify({gateway:{auth:{token:'${OPENCLAW_TOKEN}'}}})),/environment expansion/);
 });
+test('OpenClaw config without keys drops credentials and keeps settings and SecretRefs',()=>{
+  const {openclawWithoutSecrets}=require('../desktop/credentials.cjs');
+  const ref={source:'env',provider:'default',id:'ANTHROPIC_API_KEY'};
+  const config={gateway:{port:18789,auth:{mode:'token',token:'gw-token',password:'gw-pass'},remote:{token:'remote-token'}},
+    models:{providers:{openai:{apiKey:'sk-secret',headers:{Authorization:'Bearer sk-header','x-api-key':'sk-x'},models:[{id:'gpt',maxTokens:8192}]},anthropic:{apiKey:ref}}},
+    channels:{telegram:{botToken:'123:abc',dmPolicy:'pairing'},slack:{appToken:'xapp',signingSecret:'sig',relay:{authToken:'relay-secret'}}},
+    skills:{entries:{lab:{apiKey:'skill-key',enabled:true}}},env:{OPENROUTER_API_KEY:'sk-or',vars:{GROQ:'gsk'},shellEnv:{enabled:true}},agents:{defaults:{model:'openai/gpt'}}};
+  const out=openclawWithoutSecrets(JSON.stringify(config));
+  for(const value of ['gw-token','gw-pass','remote-token','sk-secret','sk-header','sk-x','123:abc','xapp','sig','relay-secret','skill-key','sk-or','gsk'])assert(!out.includes(value),value);
+  assert.deepEqual(JSON.parse(out),{gateway:{port:18789,auth:{mode:'token'},remote:{}},models:{providers:{openai:{headers:{},models:[{id:'gpt',maxTokens:8192}]},anthropic:{apiKey:ref}}},
+    channels:{telegram:{dmPolicy:'pairing'},slack:{relay:{}}},skills:{entries:{lab:{enabled:true}}},env:{vars:{},shellEnv:{enabled:true}},agents:{defaults:{model:'openai/gpt'}}});
+  const kept=JSON.parse(openclawWithoutSecrets(JSON.stringify(config),JSON.stringify({gateway:{auth:{token:'clone-token'}},channels:{telegram:{botToken:'clone-bot'}}})));
+  assert.equal(kept.gateway.auth.token,'clone-token');assert.equal(kept.channels.telegram.botToken,'clone-bot');assert.equal(kept.models.providers.openai.apiKey,undefined);
+  assert.equal(openclawWithoutSecrets('{gateway:{auth:{token:"x"}}}'),null);
+  assert.equal(openclawWithoutSecrets('[]'),null);
+});
 test('discovery ignores data an uninstall left behind',async t=>{
   const dir=await temp(t);await fs.mkdir(path.join(dir,'.hermes','profiles','work'),{recursive:true});await fs.writeFile(path.join(dir,'.hermes','.env'),'API_SERVER_ENABLED=true\n');await fs.writeFile(path.join(dir,'.hermes','profiles','work','.env'),'X=1\n');
   await fs.mkdir(path.join(dir,'.openclaw'),{recursive:true});await fs.writeFile(path.join(dir,'.openclaw','openclaw.json'),'{}');

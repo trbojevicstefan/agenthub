@@ -23,6 +23,28 @@ function parseOpenclawToken(raw){
   if(value.includes('${'))throw new Error('The OpenClaw gateway token uses environment expansion. Enter its resolved value manually.');
   return value;
 }
+// openclaw.json keeps credentials next to settings: the gateway token and password, provider API keys, channel tokens
+// and secrets, request headers and inline environment variables (`env`). A copy without keys drops those strings and
+// keeps SecretRef objects ({source, provider, id}), which only point at a secret. `keep` is the config already at the
+// target (a redeploy), whose own credentials stay. Returns null for a config that is not plain JSON (JSON5).
+const OPENCLAW_SECRET=/(token|password|secret|api[_-]?key|private[_-]?key|access[_-]?key|service[_-]?account|authorization|cookie)s?$/i;
+function openclawWithoutSecrets(raw,keep=''){
+  let config,own=null;
+  try{config=JSON.parse(raw);}catch{return null;}
+  if(!config||typeof config!=='object'||Array.isArray(config))return null;
+  try{own=JSON.parse(keep);}catch{}
+  const secret=v=>typeof v==='string'||Array.isArray(v)&&v.length>0&&v.every(x=>typeof x==='string');
+  const scrub=(node,mine,env)=>{
+    if(!node||typeof node!=='object')return;
+    for(const key of Object.keys(node)){
+      const value=node[key],other=mine&&typeof mine==='object'?mine[key]:undefined;
+      if((env||OPENCLAW_SECRET.test(key))&&secret(value)){if(secret(other))node[key]=other;else delete node[key];}
+      else scrub(value,other,env||(node===config&&key==='env'));
+    }
+  };
+  scrub(config,own,false);
+  return JSON.stringify(config,null,2)+'\n';
+}
 async function importOpenclawToken(agent,host){
   // In a container Opaya installed, the gateway token is in the container's environment (it is never written to a file).
   const index=agent.command==='docker'?dockerExecContainerIndex(agent.args||[]):-1;
@@ -78,4 +100,4 @@ async function importGatewayToken(agent,host){
   const response=JSON.parse(await collect(child,{maxBytes:20000,timeout:15000}));
   return parseGatewayToken(response.line||'');
 }
-module.exports={parseGatewayToken,parseOpenclawToken,importGatewayToken};
+module.exports={parseGatewayToken,parseOpenclawToken,openclawWithoutSecrets,importGatewayToken};
