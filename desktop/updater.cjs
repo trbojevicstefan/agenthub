@@ -10,6 +10,7 @@ const os=require('node:os');
 const path=require('node:path');
 const crypto=require('node:crypto');
 const {spawn}=require('node:child_process');
+const {pipeline}=require('node:stream/promises');
 const REPO='trbojevicstefan/agenthub';
 const API=`https://api.github.com/repos/${REPO}/releases?per_page=30`;
 const DOWNLOAD_PREFIX=`https://github.com/${REPO}/releases/download/`;
@@ -75,9 +76,10 @@ class Updater{
       const dir=await fsp.mkdtemp(path.join(os.tmpdir(),'opaya-update-'));const file=path.join(dir,latest.asset.name);
       const res=await this.fetch(latest.asset.url,{headers:{'User-Agent':'Opaya-Updater'}});if(!res.ok||!res.body)throw new Error(`Download failed (${res.status}).`);
       const total=Number(res.headers.get('content-length'))||latest.asset.size||0,hash=crypto.createHash('sha256'),out=fs.createWriteStream(file,{mode:0o600});
-      let received=0,last=0;
-      for await(const chunk of res.body){hash.update(chunk);received+=chunk.length;if(!out.write(chunk))await new Promise(r=>out.once('drain',r));if(total&&Date.now()-last>250){last=Date.now();this.set({progress:Math.min(99,Math.round(received/total*100))});}}
-      await new Promise((resolve,reject)=>out.end(error=>error?reject(error):resolve()));
+      let received=0,last=0;const progress=p=>this.set({progress:p});
+      const counted=async function*(source){for await(const chunk of source){hash.update(chunk);received+=chunk.length;if(total&&Date.now()-last>250){last=Date.now();progress(Math.min(99,Math.round(received/total*100)));}yield chunk;}};
+      // A write error (a full disk) fails the download, also while it waits for the disk; the partial file is removed.
+      try{await pipeline(res.body,counted,out);}catch(error){await fsp.rm(dir,{recursive:true,force:true});throw error;}
       if(hash.digest('hex')!==expected){await fsp.rm(dir,{recursive:true,force:true});throw new Error('The download does not match the release checksum. Nothing was installed.');}
       return this.set({status:'ready',progress:100,file});
     }catch(error){this.set({status:'error',error:String(error.message||error).slice(0,300)});throw error;}

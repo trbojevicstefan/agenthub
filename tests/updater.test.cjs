@@ -36,6 +36,18 @@ test('downloads only verified builds and reports progress states',async()=>{
   assert.equal((await current.check()).status,'current');
   assert.equal((await new Updater({app:{getVersion:()=>'0.7.0'},platform:'linux'}).check()).status,'unsupported');
 });
+test('a disk error while writing the update fails the download and removes the partial file',async t=>{
+  const payload=Buffer.from('installer-bytes-0123456789'),{Writable}=require('node:stream'),fsSync=require('node:fs'),path=require('node:path'),original=fsSync.createWriteStream;let target='';
+  // The disk fills up on the second chunk, while the download waits for the first one to drain.
+  fsSync.createWriteStream=(file,options)=>{target=file;const real=original(file,options);let n=0;
+    return new Writable({highWaterMark:1,write(chunk,_e,cb){if(++n>1)return setImmediate(()=>cb(Object.assign(new Error('ENOSPC: no space left on device, write'),{code:'ENOSPC'})));real.write(chunk,cb);},final(cb){real.end(cb);},destroy(error,cb){real.destroy();cb(error);}});};
+  t.after(()=>{fsSync.createWriteStream=original;});
+  const u=new Updater({app:{getVersion:()=>'0.6.0'},fetchImpl:fakeFetch(payload),platform:'win32',arch:'x64'});
+  await u.check();
+  await assert.rejects(()=>u.download(),/ENOSPC/);
+  assert.equal(u.state.status,'error');assert.match(u.state.error,/ENOSPC/);
+  assert.equal(fsSync.existsSync(path.dirname(target)),false,'the partial download is removed');
+});
 test('Intel Macs get the x64 build from a release that carries both architectures',()=>{
   const both=release('v0.11.0-mac.40',['Opaya-0.11.0-mac-arm64.zip','Opaya-0.11.0-mac-x64.zip','Opaya-0.11.0-mac-x64.dmg','darwin-SHA256SUMS.txt']);
   const armOnly=release('v0.12.0-mac.41',['Opaya-0.12.0-mac-arm64.zip','darwin-SHA256SUMS.txt']);

@@ -383,6 +383,13 @@ Correction: Return each server's saved ID alongside its name.
 
 ### F18 — P2: Update write failures leave the download pending
 
+- [x] Fixed on 2026-10-17 by writing the download through `stream/promises.pipeline()`.
+
+A write error, also during a backpressure wait, now rejects the download and sets the error state.
+The pipeline closes the output stream, and the updater removes the incomplete file and its folder.
+A regression test uses a stub write stream that fails with `ENOSPC` while the download waits for `drain`.
+Native Electron failure behavior remains unverified.
+
 Location: [desktop/updater.cjs:77–80](desktop/updater.cjs#L77-L80).
 
 The download code does not handle the output stream's `error` event.
