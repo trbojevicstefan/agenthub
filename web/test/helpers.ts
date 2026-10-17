@@ -6,6 +6,8 @@ import type { Config } from "../src/config.js";
 import { createDatabase } from "../src/db.js";
 import type { Email } from "../src/mail.js";
 import { migrate } from "../src/migrate.js";
+import { createApp } from "../src/server.js";
+import { fakeStripe, WEBHOOK_SECRET } from "./stripe-fake.js";
 
 export const BASE = "http://localhost:3000";
 
@@ -15,7 +17,8 @@ export function testConfig(secrets: Config["secrets"] = {}): Config {
     baseURL: BASE,
     port: 3000,
     emailFrom: "Opaya <test@opaya.dev>",
-    secrets: { BETTER_AUTH_SECRET: "test-secret-for-opaya-web-0123456789", DATABASE_URL: "pglite://memory", ENTITLEMENTS_PRIVATE_KEY: "", ...secrets },
+    automaticTax: false,
+    secrets: { BETTER_AUTH_SECRET: "test-secret-for-opaya-web-0123456789", DATABASE_URL: "pglite://memory", ENTITLEMENTS_PRIVATE_KEY: "", STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET, ...secrets },
   };
 }
 
@@ -24,9 +27,11 @@ export async function setup({ rateLimit = false, secrets = {} }: { rateLimit?: b
   const db = createDatabase(new PGliteDialect(pglite));
   const mails: Email[] = [];
   const config = testConfig(secrets);
-  const auth = createAuth({ config, db, mailer: async m => void mails.push(m), rateLimit });
+  const stripe = fakeStripe();
+  const auth = createAuth({ config, db, mailer: async m => void mails.push(m), stripe: stripe.client, rateLimit });
   await migrate(auth, db);
-  return { pglite, db, mails, config, auth, close: () => db.destroy() };
+  const app = createApp({ config, auth, db });
+  return { pglite, db, mails, config, auth, stripe, app, close: () => db.destroy() };
 }
 
 // A browser for tests: keeps cookies, sends the Origin header like a real browser does, and talks to `handle`.
@@ -61,6 +66,16 @@ export class Browser {
 }
 
 export const linkIn = (mail: Email | undefined) => /https?:\/\/\S+/.exec(mail?.text ?? "")?.[0] ?? "";
+
+// A user who signed up and confirmed the email, signed in in `browser`.
+export async function verifiedUser(env: Awaited<ReturnType<typeof setup>>, { email = "ana@example.com", password = "correct horse battery", name = "Ana", ip = "203.0.113.7" } = {}) {
+  const browser = new Browser(r => env.app.fetch(r), ip);
+  await browser.fetch("/api/auth/sign-up/email", { json: { email, password, name } });
+  const link = new URL(linkIn(env.mails.at(-1)));
+  await browser.fetch(link.pathname + link.search);
+  const session = (await (await browser.fetch("/api/auth/get-session")).json()) as { user: { id: string; email: string }; session: { activeOrganizationId: string } };
+  return { browser, user: session.user, organizationId: session.session.activeOrganizationId };
+}
 
 // RFC 6238 code for an otpauth:// URI, as an authenticator app makes it.
 export function totp(uri: string, at = Date.now()) {

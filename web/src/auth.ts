@@ -1,6 +1,8 @@
 import { betterAuth } from "better-auth";
 import { createAuthMiddleware } from "better-auth/api";
 import { bearer, deviceAuthorization, organization, twoFactor } from "better-auth/plugins";
+import type Stripe from "stripe";
+import { billingPlugin, deleteOrganizationsOf, stripeClient } from "./billing.js";
 import type { Config } from "./config.js";
 import type { Database } from "./db.js";
 import { emails, type Mailer } from "./mail.js";
@@ -15,6 +17,7 @@ export interface AuthDeps {
   config: Config;
   db: Database;
   mailer: Mailer;
+  stripe?: Stripe;
   rateLimit?: boolean;
 }
 
@@ -24,7 +27,7 @@ export const deviceName = (value: string | null | undefined) =>
     .trim()
     .slice(0, 60);
 
-export function createAuth({ config, db, mailer, rateLimit = config.production }: AuthDeps) {
+export function createAuth({ config, db, mailer, stripe = stripeClient(config), rateLimit = config.production }: AuthDeps) {
   const s = config.secrets;
   const socialProviders = {
     ...(s.GITHUB_CLIENT_ID && s.GITHUB_CLIENT_SECRET ? { github: { clientId: s.GITHUB_CLIENT_ID, clientSecret: s.GITHUB_CLIENT_SECRET } } : {}),
@@ -80,7 +83,7 @@ export function createAuth({ config, db, mailer, rateLimit = config.production }
     },
     socialProviders,
     account: { accountLinking: { enabled: true, trustedProviders: ["github", "google"] } },
-    user: { deleteUser: { enabled: true } },
+    user: { deleteUser: { enabled: true, beforeDelete: async user => deleteOrganizationsOf({ db, client: stripe, userId: user.id }) } },
     session: {
       additionalFields: {
         // "desktop" for sessions the device flow created. Desktop sessions reach only an allowlist (server.ts).
@@ -138,9 +141,10 @@ export function createAuth({ config, db, mailer, rateLimit = config.production }
       organization({ allowUserToCreateOrganization: false }),
       deviceAuthorization({ verificationUri: "/device", validateClient: clientId => DEVICE_CLIENTS.has(clientId), expiresIn: "15m", interval: "5s" }),
       bearer(),
+      billingPlugin({ config, db, client: stripe }),
     ],
   });
-  return Object.assign(auth, { personalOrganization });
+  return Object.assign(auth, { personalOrganization, stripe });
 }
 
 export type Auth = ReturnType<typeof createAuth>;

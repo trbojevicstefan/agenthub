@@ -13,7 +13,8 @@
     "start": "node dist/main.js",
     "migrate": "node dist/migrate-cli.js",
     "test": "node --import tsx --test test/*.test.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "stripe:setup": "tsx scripts/stripe-setup.ts"
   },
   "dependencies": {
     "@better-auth/core": "1.7.7",

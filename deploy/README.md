@@ -60,7 +60,24 @@ Do these steps one time, as a Google Cloud administrator.
 
    The web server creates and updates its database tables when it starts.
 
-## 3. Backups
+## 3. Stripe
+
+Do these steps first with the test-mode key, and again with the live key at launch.
+
+1. Create the products, prices, founding coupon and Billing Portal settings, and the webhook endpoint:
+
+   ```sh
+   STRIPE_SECRET_KEY=sk_test_... npm run stripe:setup --workspace web -- --webhook https://app.opaya.dev
+   ```
+
+   The script prints the webhook signing secret one time. Put it in Secret Manager as `STRIPE_WEBHOOK_SECRET`. Put the key in Secret Manager as `STRIPE_SECRET_KEY`. Then restart the web service.
+2. If the script says that the Billing Portal settings were created, open **Settings > Billing > Customer portal** in the Stripe Dashboard and save the settings one time.
+3. The prices are found by lookup key (`opaya_pro_month`, `opaya_pro_year`, `opaya_fleet_month`, `opaya_fleet_year`). The code has no price IDs. A new amount gets a new price, and the lookup key moves to it. Current subscribers keep their old price.
+4. The founding offer is the promotion code `FOUNDING`: 30% off for 12 months, for 100 customers at most. Customers type the code on the Stripe Checkout page.
+5. Tax: Stripe Tax is off. Set `STRIPE_AUTOMATIC_TAX=true` in `docker-compose.yml` only after Stripe Tax is set up and the company is registered where it must collect tax.
+6. To test webhooks on a development computer: `stripe listen --forward-to localhost:3000/api/auth/stripe/webhook`. Use the `whsec_...` secret that it prints as `STRIPE_WEBHOOK_SECRET`.
+
+## 4. Backups
 
 1. Add the nightly backup to the root crontab:
 
@@ -71,7 +88,7 @@ Do these steps one time, as a Google Cloud administrator.
 2. Run `/opt/opaya/deploy/backup.sh` one time and check that the object is in the bucket.
 3. Each month, download the latest backup on a computer with read access to the bucket. Then run `deploy/restore-check.sh latest.dump`. The check restores the backup into a temporary Postgres container and counts the users.
 
-## 4. Updates
+## 5. Updates
 
 ```sh
 cd /opt/opaya && git pull

@@ -31,7 +31,7 @@ test("sign up, verify the email, sign in and get one personal organization", asy
   assert.equal((await env.db.selectFrom("organization").selectAll().execute()).length, 1);
 });
 
-async function verifiedUser(env: Awaited<ReturnType<typeof setup>>, email = "ana@example.com", password = "correct horse battery") {
+async function signedUp(env: Awaited<ReturnType<typeof setup>>, email = "ana@example.com", password = "correct horse battery") {
   const browser = new Browser(r => env.auth.handler(r));
   await browser.fetch("/api/auth/sign-up/email", { json: { email, password, name: "Ana" } });
   const link = new URL(linkIn(env.mails.at(-1)));
@@ -42,7 +42,7 @@ async function verifiedUser(env: Awaited<ReturnType<typeof setup>>, email = "ana
 test("two-factor: after setup, sign-in needs the authenticator code", async t => {
   const env = await setup();
   t.after(env.close);
-  const browser = await verifiedUser(env);
+  const browser = await signedUp(env);
   let response = await browser.fetch("/api/auth/two-factor/enable", { json: { password: "correct horse battery" } });
   const setupData = (await response.json()) as { totpURI: string; backupCodes: string[] };
   assert.match(setupData.totpURI, /^otpauth:\/\/totp\/Opaya:ana%40example\.com\?/);
@@ -64,7 +64,7 @@ test("two-factor: after setup, sign-in needs the authenticator code", async t =>
 test("password reset by email signs out every session", async t => {
   const env = await setup();
   t.after(env.close);
-  const browser = await verifiedUser(env);
+  const browser = await signedUp(env);
   const stranger = new Browser(r => env.auth.handler(r));
   let response = await stranger.fetch("/api/auth/request-password-reset", { json: { email: "ana@example.com", redirectTo: "/reset-password" } });
   assert.equal(response.status, 200);

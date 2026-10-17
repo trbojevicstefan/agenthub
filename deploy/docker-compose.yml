@@ -36,6 +36,8 @@ services:
       GCP_PROJECT: ${GCP_PROJECT:?Set GCP_PROJECT in deploy/.env}
       GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcp_key
       OPAYA_BACKUP_BUCKET: ${OPAYA_BACKUP_BUCKET:-}
+      # Stripe Tax on Checkout. See deploy/README.md before you turn it on.
+      STRIPE_AUTOMATIC_TAX: ${STRIPE_AUTOMATIC_TAX:-false}
     secrets:
       - gcp_key
     depends_on:

@@ -6,6 +6,8 @@ export interface Config {
   baseURL: string;
   port: number;
   emailFrom: string;
+  // Stripe Tax on Checkout. Turn it on only after Stripe Tax is set up and the company is registered where it must be.
+  automaticTax: boolean;
   secrets: Secrets;
 }
 
@@ -23,6 +25,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     baseURL,
     port,
     emailFrom: env.OPAYA_EMAIL_FROM || "Opaya <accounts@opaya.dev>",
+    automaticTax: env.STRIPE_AUTOMATIC_TAX === "true",
     secrets: await loadSecrets(read, { production }),
   };
 }
