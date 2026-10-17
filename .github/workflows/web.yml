@@ -1,0 +1,25 @@
+name: Web server
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', 'deploy/**', 'package-lock.json', '.github/workflows/web.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # Only the web workspace: no Electron download and no native rebuild.
+      - run: npm ci --workspace web --include-workspace-root=false --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck --workspace web
+      - run: npm test --workspace web
+      - run: npm run build --workspace web
+      - run: npm audit --workspace web --omit=dev --audit-level=high
+      # The production image, built the same way as on the VPS (deploy/docker-compose.yml).
+      - run: docker build -f deploy/web.Dockerfile -t opaya-web:ci .

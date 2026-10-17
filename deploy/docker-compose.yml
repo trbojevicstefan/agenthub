@@ -1,0 +1,94 @@
+# Opaya web on one VPS: Caddy (TLS), the web server and Postgres.
+#   cd deploy && docker compose up -d --build
+# Secrets: the web server reads its secrets from Google Secret Manager. The two files under /etc/opaya are the only
+# secrets on the VPS. See deploy/README.md.
+name: opaya
+
+services:
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      OPAYA_DOMAIN: ${OPAYA_DOMAIN:-app.opaya.dev}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+    networks:
+      - edge
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web.Dockerfile
+    image: opaya-web:latest
+    restart: unless-stopped
+    environment:
+      OPAYA_ENV: production
+      OPAYA_BASE_URL: https://${OPAYA_DOMAIN:-app.opaya.dev}
+      PORT: "3000"
+      GCP_PROJECT: ${GCP_PROJECT:?Set GCP_PROJECT in deploy/.env}
+      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcp_key
+      OPAYA_BACKUP_BUCKET: ${OPAYA_BACKUP_BUCKET:-}
+    secrets:
+      - gcp_key
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - edge
+      - data
+
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: opaya
+      POSTGRES_USER: opaya
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U opaya -d opaya"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - data
+
+secrets:
+  gcp_key:
+    file: /etc/opaya/gcp-key.json
+  postgres_password:
+    file: /etc/opaya/postgres-password
+
+networks:
+  edge: {}
+  # Postgres has no route to the internet and no published port.
+  data:
+    internal: true
+
+volumes:
+  caddy_data: {}
+  caddy_config: {}
+  postgres_data: {}

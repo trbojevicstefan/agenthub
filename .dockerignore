@@ -1,0 +1,13 @@
+**/node_modules
+.git
+release
+artifacts
+build
+collector
+docs
+tests
+scripts
+ui
+desktop
+web/dist
+**/.env
