@@ -3,7 +3,7 @@
 Review date: 2026-10-06.
 Source: `main`, commit `048421b469af6cc37eab21c6f9a61f95297ce610`, version `0.31.0`.
 
-The review covers all 15 areas in [the checklist](docs/CODE_REVIEW_CHECKLIST.md).
+The review covers the 15 areas listed in [Review coverage](#review-coverage).
 Four agents, including the lead reviewer, performed the review.
 The original review identifies 21 confirmed defects: five P1, fifteen P2, and one P3.
 The original review does not change application code.
