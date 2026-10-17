@@ -346,6 +346,12 @@ Also verify conversation ownership in the runner.
 
 ### F16 — P2: A Sunday schedule runs on Monday
 
+- [x] No longer reproduces on 2026-10-17. Commit `b29c905` (2026-10-08) changed the default to `Number(f.day) || 0`.
+
+The actual `cronOf()` function now returns `0 9 * * 0` for `day: '0'`.
+The form's day list always sends a value from `0` to `6`, so the default applies only to a missing value.
+This item needed no code change.
+
 Location: [ui/app.js:2642–2643](ui/app.js#L2642-L2643).
 
 The weekly schedule conversion uses `Number(f.day) || 1`.
