@@ -388,8 +388,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       if(x.agentId==='opaya'){if(!opaya?.configured())throw new Error('Connect the Opaya Agent to a model first.');if(opaya.busy){await done('skipped','The Opaya Agent was busy.');return;}opaya.begin(`[Schedule: ${x.name}] ${x.prompt}`);await done('sent');return;}
       const a=broker.agent(x.agentId);if(broker.turns.has(a.id)){await done('skipped',`${a.name} was busy.`);return;}
       if(broker.runtimeFor(a.id).status!=='connected')await broker.connect(a.id);
-      let conv=x.conversationId&&broker.data.conversations.find(c=>c.id===x.conversationId);
-      if(!conv){conv=await broker.createConversation(a.id,{activate:false,title:`Schedule: ${x.name}`.slice(0,80)});await broker.scheduleRan(x.id,{conversationId:conv.id});}
+      const conv=await broker.scheduleConversation(x);
       broker.send({agentId:a.id,conversationId:conv.id,text:x.prompt}).catch(error=>done('failed',error?.message||error));
       await done('sent');if(!manual)notice({level:'info',title:`Schedule: ${x.name}`,text:`Sent to ${a.displayName||a.name}.`});
     }catch(error){await done('failed',error?.message||error);notice({level:'error',title:`Schedule failed: ${x.name}`,text:String(error?.message||error).slice(0,200)});}

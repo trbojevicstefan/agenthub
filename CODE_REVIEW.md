@@ -324,6 +324,13 @@ Correction: Clear the Claude session ID when deleting the active chat.
 
 ### F15 — P2: Changing a schedule's agent prevents its next message
 
+- [x] Fixed on 2026-10-17 by clearing the conversation ID when the agent changes, and by checking the conversation's owner in the runner.
+
+A schedule that moves to another agent gets a new chat with that agent on its next run.
+The runner now gets its chat from `Broker.scheduleConversation()`, which uses a saved chat only when it belongs to the schedule's agent.
+This also repairs schedules saved before the correction.
+Regression tests cover an edit that keeps the chat, an agent change, and a schedule with another agent's chat.
+
 Locations: [desktop/schedules.cjs:53–57](desktop/schedules.cjs#L53-L57) and [desktop/service.cjs:259–261](desktop/service.cjs#L259-L261).
 
 The schedule editor permits changing the target agent.

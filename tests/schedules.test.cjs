@@ -16,6 +16,9 @@ test('schedules in words, and a schedule needs who, what and when',()=>{
   assert.equal(sch.describe('0 18 * * 5'),'Every Friday at 18:00');assert.equal(sch.describe('0 * * * *'),'Every hour');
   const s=sch.schedule({agentId:'a1',cron:'0 9 * * *',prompt:'Summarise new leads\nand send them'});assert.equal(s.name,'Summarise new leads');assert.equal(s.enabled,true);
   assert.throws(()=>sch.schedule({agentId:'a1',cron:'0 9 * * *',prompt:''}),/what it should do/);assert.throws(()=>sch.schedule({cron:'0 9 * * *',prompt:'x'}),/who runs/);
+  const kept={...s,conversationId:'c1'};
+  assert.equal(sch.schedule({prompt:'Other text'},kept).conversationId,'c1','an edit keeps the chat');
+  assert.equal(sch.schedule({agentId:'a2'},kept).conversationId,'','another agent gets its own chat');
 });
 const cron=require('../desktop/agent-cron.cjs');
 test("an agent's own schedules are read with its own CLI, profile and home",()=>{

@@ -91,6 +91,11 @@ class Broker{
   // does not need one; set a new one in its connection settings.
   async removeToken(id){const a=this.agent(id);await this.vault.remove(a.id);if(this.runtimeFor(a.id).status==='connected')this.disconnect(a.id);this.changed();return true;}
   async removeSchedule(id){this.data.schedules=this.data.schedules.filter(x=>x.id!==String(id));await this.persist();return true;}
+  // The chat a schedule sends to: its own chat with its agent, created on the first run or after the agent changed.
+  async scheduleConversation(x){
+    const c=x.conversationId&&this.data.conversations.find(c=>c.id===x.conversationId&&c.agentId===x.agentId);if(c)return c;
+    const conv=await this.createConversation(x.agentId,{activate:false,title:`Schedule: ${x.name}`.slice(0,80)});await this.scheduleRan(x.id,{conversationId:conv.id});return conv;
+  }
   async scheduleRan(id,patch){const i=this.data.schedules.findIndex(x=>x.id===id);if(i<0)return;this.data.schedules[i]={...this.data.schedules[i],...patch};await this.persist();}
   async saveHost(input){
     const host=schema.host(input),i=this.data.hosts.findIndex(h=>h.id===host.id||host.alias&&h.alias===host.alias);

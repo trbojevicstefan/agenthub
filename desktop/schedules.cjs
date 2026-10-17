@@ -54,6 +54,7 @@ function schedule(input,existing={}){
   if(!agentId)throw new Error('Choose who runs it.');if(!prompt)throw new Error('Write what it should do.');if(prompt.length>8000)throw new Error('The message is too long (8000 characters at most).');
   const cron=parse(input.cron??existing.cron).expr;
   return {id:existing.id||randomUUID(),name:name||prompt.split('\n')[0].slice(0,60),agentId,cron,prompt,enabled:input.enabled??existing.enabled??true,createdAt:existing.createdAt||new Date().toISOString(),
-    lastRun:existing.lastRun||'',lastStatus:existing.lastStatus||'',conversationId:existing.conversationId||''};
+    // The chat belongs to the agent: another agent gets a new chat on its next run.
+    lastRun:existing.lastRun||'',lastStatus:existing.lastStatus||'',conversationId:agentId===existing.agentId&&existing.conversationId||''};
 }
 module.exports={parse,matches,next,describe,schedule};
