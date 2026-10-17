@@ -2,7 +2,7 @@ name: Web server
 on:
   push:
     branches: [main]
-    paths: ['web/**', 'deploy/**', 'package-lock.json', 'desktop/account.cjs', 'desktop/store.cjs', '.github/workflows/web.yml']
+    paths: ['web/**', 'deploy/**', 'package-lock.json', 'desktop/**', 'ui/**', '.github/workflows/web.yml']
   workflow_dispatch:
 permissions:
   contents: read

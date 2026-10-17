@@ -86,5 +86,6 @@ class Vault {
     return this.storage.decryptString(Buffer.from(this.data[key], 'base64'));
   }
   async remove(key) { await this.set(key, '', false); }
+  async list() { return [...new Set([...this.memory.keys(), ...Object.keys(this.data)])]; }
 }
 module.exports = {Store, Vault, readJson, atomicJson};
