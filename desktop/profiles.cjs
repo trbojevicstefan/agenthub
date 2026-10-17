@@ -89,7 +89,8 @@ function copyInto({framework,agent,sourceHost,scope,keys,cron,to,dest,progress})
 }
 // Clone `agent` into the container `into` runs in (`host`: its machine, null for this computer). `confirm(title,detail)`
 // is asked once, after the container is checked and before anything in it changes.
-async function clone({agent,sourceHost,into,host,scope='everything',keys=true,cron=cronDefault(scope),name,confirm=async()=>true,progress=()=>{}}){
+// `unique(connection)` throws when that connection is already saved; it runs before anything in the container changes.
+async function clone({agent,sourceHost,into,host,scope='everything',keys=true,cron=cronDefault(scope),name,confirm=async()=>true,unique=()=>{},progress=()=>{}}){
   const from=frameworkOf(agent),container=containerOf(into);
   const why=fit(from,frameworkOf(into));if(why)throw new Error(why);
   const where={host:host||null,container};
@@ -97,17 +98,16 @@ async function clone({agent,sourceHost,into,host,scope='everything',keys=true,cr
   const probe=(await run(where,'printf "%s\\n%s\\n" "$HOME" "${OPENCLAW_STATE_DIR:-$HOME/.openclaw}"',60000).catch(error=>{throw new Error(`Container ${container} does not answer: ${String(error.message||error).slice(0,200)}. Start it, then clone again.`);})).split('\n');
   const p=plan({from,into,name,home:probe[0]?.trim()||'/root',state:probe[1]?.trim()||'/home/node/.openclaw'});
   if((await run(where,`[ -e ${quote(p.dir)} ] && echo taken; true`)).trim()==='taken')throw new Error(`${p.dir} already exists in container ${container}. Choose another name.`);
+  const connection={...p.connection,name:String(name).trim().slice(0,80),transport:p.connection.transport||(host?'ssh':'local'),hostId:host?.id||'',
+    group:agent.group||'',tags:[...new Set([...(agent.tags||[]),'clone','profile'])].slice(0,8),
+    clone:{from:agent.id,framework:from,scope,keys:!!keys,cron:!!cron,runtime:'profile',dir:p.dir,container,profile:p.name}};
+  await unique(connection);
   if(!await confirm(`Add ${agent.name} to container ${container}${host?` on ${host.name}`:''}?`,`As ${p.summary}.\n\nOpaya copies ${scope==='everything'?'everything except chat history':scope} from ${agent.name}${keys&&from!=='openclaw'?', with API keys and logins':''} into ${p.dir}. The container and its agent keep running; nothing of theirs is changed.${p.finish?`\n\nThen runs in the container:\n${p.finish}`:''}${from!==frameworkOf(into)&&NPM.includes(from)?`\n\nFirst, if it is missing: npm install -g ${containers.PLANS[from].npm}@latest`:''}`))throw new Error('Clone cancelled.');
   await run(where,p.check,15*60*1000).catch(()=>{throw new Error(`${NAMES[from]} is not available in container ${container}${NPM.includes(from)?' and could not be installed there':''}.`);});
   progress({step:'target',state:'done',message:`Target: ${p.dir} in container ${container}`});
   const copied=await copyInto({framework:from,agent,sourceHost,scope,keys,cron,to:where,dest:p.dir,progress});
   if(p.finish){progress({step:'start',state:'active',message:`Adding agent ${p.name} to OpenClaw`});await run(where,p.finish,120000);progress({step:'start',state:'done',message:`OpenClaw agent ${p.name} added. If it does not answer yet, restart the container's gateway.`});}
-  return {
-    connection:{...p.connection,name:String(name).trim().slice(0,80),transport:p.connection.transport||(host?'ssh':'local'),hostId:host?.id||'',
-      group:agent.group||'',tags:[...new Set([...(agent.tags||[]),'clone','profile'])].slice(0,8),
-      clone:{from:agent.id,framework:from,scope,keys:!!keys,cron:!!cron,runtime:'profile',dir:p.dir,container,profile:p.name}},
-    copied,copyToken:from==='openclaw'
-  };
+  return {connection,copied,copyToken:from==='openclaw'};
 }
 // Copy the same parts again into the profile; its chat history stays.
 async function redeploy({agent,source,sourceHost,host,progress=()=>{}}){

@@ -73,7 +73,7 @@ async function ensureInstalled(id,where,host,progress){
 }
 // A Node.js container with the CLI, its home folder in ~/opaya-agents/<name> on the machine (like Install agents > Docker).
 async function startContainer(id,where,container,dir){
-  const p=containers.PLANS[id];if(!p?.npm)throw new Error(`${CLI[id].name} cannot run in a Docker container from Opaya. Clone it as a regular install.`);
+  const p=containers.PLANS[id];
   const script=[`${REMOTE_PATH}`,"command -v docker >/dev/null 2>&1 || { echo 'Docker is not installed on this machine.' >&2; exit 3; }",
     `mkdir -p ${quote(dir)}`,
     `if docker inspect ${quote(container)} >/dev/null 2>&1; then docker start ${quote(container)} >/dev/null; else docker run -d --name ${quote(container)} --restart unless-stopped -v ${quote(dir+':/root')} -w /root${p.web?` -p 127.0.0.1:${containers.webPort(container)}:${p.web}`:''} node:22-bookworm sleep infinity >/dev/null || exit 1; fi`,
@@ -122,31 +122,28 @@ async function startGateway(where,progress){
   try{await run(where,`${REMOTE_PATH}; ${catalog.setupCommand('openclaw','start_gateway',{remote:true}).command} </dev/null >/dev/null 2>&1; true`,120000);}
   catch{progress({message:'Start the OpenClaw gateway there if it is not running (the Opaya Agent can do it).'});}
 }
-async function clone({agent,sourceHost,host,runtime='regular',scope='everything',keys=true,name,progress=()=>{}}){
+// `unique(connection)` throws when that connection is already saved; it runs before anything on the target changes.
+async function clone({agent,sourceHost,host,runtime='regular',scope='everything',keys=true,name,unique=()=>{},progress=()=>{}}){
   const id=frameworkOf(agent),c=CLI[id],n=slug(name);if(!n)throw new Error('Give the clone a name with letters or numbers.');
   const where={host:host||null,container:''};
   if(runtime==='docker'&&!host&&process.platform==='win32')throw new Error('Docker clones to this Windows computer are not available yet. Clone to a machine.');
+  if(runtime==='docker'&&!containers.PLANS[id]?.npm)throw new Error(`${c.name} cannot run in a Docker container from Opaya. Clone it as a regular install.`);
+  if(runtime!=='docker'&&sameAccount(agent,host))throw new Error(`${c.name} keeps one setup per computer account, and ${agent.name} already uses this one. Clone it to another machine, or into a Docker container.`);
   progress({step:'target',state:'active',message:`Checking ${host?host.name:'this computer'}`});
-  let dest,container='',home;
+  const home=await homeOf(where),container=runtime==='docker'?`opaya-${n}`.slice(0,60):'',dest=runtime==='docker'?`${home}/opaya-agents/${n}`:home;
+  const base=runtime==='docker'?{...containers.PLANS[id].connection(container)}:c.connection();
+  const connection={...base,name:String(name).trim().slice(0,80),transport:host?'ssh':base.protocol==='openai'?'http':'local',hostId:host?.id||'',cwd:runtime==='docker'?'/root':home,
+    group:agent.group||'',tags:[...new Set([...(agent.tags||[]),'clone'])].slice(0,8),
+    clone:{from:agent.id,framework:id,scope,keys:!!keys,runtime,dir:dest,container}};
+  await unique(connection);
   if(runtime==='docker'){
-    home=await homeOf(where);container=`opaya-${n}`.slice(0,60);dest=`${home}/opaya-agents/${n}`;
     progress({step:'target',state:'active',message:`Starting container ${container} with ${c.name} (the first start downloads Node.js, which can take a few minutes)`});
     await startContainer(id,where,container,dest);
-  }else{
-    if(sameAccount(agent,host))throw new Error(`${c.name} keeps one setup per computer account, and ${agent.name} already uses this one. Clone it to another machine, or into a Docker container.`);
-    await ensureInstalled(id,where,host,progress);
-    home=await homeOf(where);dest=home;
-  }
+  }else await ensureInstalled(id,where,host,progress);
   progress({step:'target',state:'done',message:`Target: ${dest}${container?` (container ${container})`:''}`});
   const copied=await copy({agent,sourceHost,id,scope,keys,to:where,dest,backup:runtime!=='docker',progress});
   if(id==='openclaw'&&runtime!=='docker')await startGateway(where,progress);
-  const base=runtime==='docker'?{...containers.PLANS[id].connection(container)}:c.connection();
-  return {
-    connection:{...base,name:String(name).trim().slice(0,80),transport:host?'ssh':base.protocol==='openai'?'http':'local',hostId:host?.id||'',cwd:runtime==='docker'?'/root':home,
-      group:agent.group||'',tags:[...new Set([...(agent.tags||[]),'clone'])].slice(0,8),
-      clone:{from:agent.id,framework:id,scope,keys:!!keys,runtime,dir:dest,container}},
-    copied,copyToken:id==='openclaw'&&runtime!=='docker'&&keys
-  };
+  return {connection,copied,copyToken:id==='openclaw'&&runtime!=='docker'&&keys};
 }
 // Copy the same parts again; existing files on the clone are replaced, its chat history stays.
 async function redeploy({agent,source,sourceHost,host,progress=()=>{}}){

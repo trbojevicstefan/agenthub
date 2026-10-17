@@ -6,9 +6,13 @@ const {createHash} = require('node:crypto');
 const {spawn} = require('node:child_process');
 const {REMOTE_PATH, findExecutable, environment, primeShellPath, launch, sshArgs, target, quote, collect, dockerExecContainerIndex} = require('./process.cjs');
 const schema = require('./schema.cjs');
+const {execHome} = require('./clone.cjs');
+// The OpenClaw agent a connection reaches (model openclaw/<agent>); '' for the gateway's default agent.
+const openclawAgent=a=>{const id=/^openclaw\/(.+)$/.exec(a.model||'')?.[1]||'';return id==='default'||id==='main'?'':id;};
 function fingerprint(a) {
   const dockerIndex=a.command==='docker'?dockerExecContainerIndex(a.args):-1;
-  if(dockerIndex>=0)return createHash('sha256').update(JSON.stringify([a.provider,a.protocol,a.transport,a.hostId||'',a.args[dockerIndex],a.hermesHome||'',a.endpoint||''])).digest('hex');
+  // One container can hold several connections: profiles with their own HOME and OpenClaw agents of one gateway.
+  if(dockerIndex>=0)return createHash('sha256').update(JSON.stringify([a.provider,a.protocol,a.transport,a.hostId||'',a.args[dockerIndex],a.hermesHome||'',a.endpoint||'',execHome(a.args),a.provider==='openclaw'?openclawAgent(a):''])).digest('hex');
   return createHash('sha256').update(JSON.stringify([a.provider, a.protocol, a.transport, a.hostId || '', a.command || '', a.args || [], a.hermesHome || '', a.endpoint || '', a.provider==='openclaw'?a.model||'':'', a.cwd || '', a.tmuxSession || ''])).digest('hex');
 }
 function candidate(a, detail, readiness = 'detected') {

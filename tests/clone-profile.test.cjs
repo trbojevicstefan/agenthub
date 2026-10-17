@@ -53,3 +53,15 @@ test('a profile in a container is removed alone and updated with its container',
   assert.throws(()=>profiles.removeCommand({...agent,clone:{...agent.clone,dir:'/root'}}),/not a profile/);
   assert.throws(()=>profiles.removeCommand({...agent,clone:{...agent.clone,dir:'/root/../etc'}}),/not a profile/);
 });
+test('a profile in a container is a connection of its own, so saving it does not match the container\'s agent',()=>{
+  const {fingerprint}=require('../desktop/discovery.cjs');
+  const save=c=>schema.agent({name:'x',transport:'ssh',hostId:'vps',...c});
+  const base=save(codexBox),reviewer=save(profiles.plan({from:'codex',into:codexBox,name:'reviewer',home:'/root'}).connection);
+  assert.notEqual(fingerprint(reviewer),fingerprint(base));
+  assert.notEqual(fingerprint(save(profiles.plan({from:'codex',into:codexBox,name:'writer',home:'/root'}).connection)),fingerprint(reviewer));
+  assert.equal(fingerprint(save(profiles.plan({from:'codex',into:codexBox,name:'reviewer',home:'/root'}).connection)),fingerprint(reviewer),'the same profile is still a duplicate');
+  const claw=save(clawBox),research=save(profiles.plan({from:'openclaw',into:clawBox,name:'research'}).connection);
+  assert.notEqual(fingerprint(research),fingerprint(claw));
+  // openclaw, openclaw/default and openclaw/main all reach the gateway's default agent.
+  for(const model of ['openclaw/default','openclaw/main'])assert.equal(fingerprint(save({...clawBox,model})),fingerprint(claw),model);
+});

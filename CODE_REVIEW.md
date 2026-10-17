@@ -152,6 +152,13 @@ Alternatively, exclude the file and explain the required configuration step.
 
 ### F07 — P2: Container profiles fail after copying their files
 
+- [x] Fixed on 2026-10-17 by adding the profile home and OpenClaw agent to Docker connection identity, and by checking for duplicates before copying.
+
+Profiles with their own `HOME` and OpenClaw agents of one gateway no longer match the container's agent.
+The models `openclaw`, `openclaw/default`, and `openclaw/main` still identify the same default agent.
+Hermes, CLI, and profile clones now check for a saved duplicate before they change the target.
+Regression tests cover Codex and OpenClaw profiles, repeated profiles, and a refused clone that leaves the target unchanged.
+
 Location: [desktop/discovery.cjs:9–12](desktop/discovery.cjs#L9-L12).
 
 Docker connection fingerprints omit the effective profile home and OpenClaw model.

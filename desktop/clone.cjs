@@ -152,23 +152,23 @@ async function copyParts({agent,sourceHost,scope,keys,cron,to,dest,progress}){
 const fmt=n=>n<1024?`${n} B`:n<1048576?`${(n/1024).toFixed(1)} KB`:n<1073741824?`${(n/1048576).toFixed(1)} MB`:`${(n/1073741824).toFixed(2)} GB`;
 // Clone `agent` (from `sourceHost`) to `host` (null = this computer). Returns the new agent connection to save.
 // runtime 'profile': into the container `into` (an agent Opaya runs in Docker) runs in, next to it (profiles.cjs).
-async function clone({agent,sourceHost,host,runtime='regular',scope='everything',keys=true,cron=cronDefault(scope),name,into=null,confirm,progress=()=>{}}){
+// `unique(connection)` throws when that connection is already saved; it runs before anything on the target changes.
+async function clone({agent,sourceHost,host,runtime='regular',scope='everything',keys=true,cron=cronDefault(scope),name,into=null,confirm,unique=()=>{},progress=()=>{}}){
   cron=!!cron;
-  if(runtime==='profile')return require('./profiles.cjs').clone({agent,sourceHost,into,host,scope,keys,cron,name,confirm,progress});
-  if(agent.provider!=='hermes')return require('./clone-cli.cjs').clone({agent,sourceHost,host,runtime,scope,keys,name,progress});
+  if(runtime==='profile')return require('./profiles.cjs').clone({agent,sourceHost,into,host,scope,keys,cron,name,confirm,unique,progress});
+  if(agent.provider!=='hermes')return require('./clone-cli.cjs').clone({agent,sourceHost,host,runtime,scope,keys,name,unique,progress});
   const id=slug(name);if(!id)throw new Error('Give the clone a name with letters or numbers.');
   progress({step:'target',state:'active',message:`Checking ${host?host.name:'this computer'} for ${runtime==='docker'?'Docker':'Hermes'}`});
   const t=await targetInfo({host,runtime,name:id}),container=runtime==='docker'?`opaya-hermes-${id}`:'';
+  const connection={name:String(name).trim().slice(0,80),provider:'hermes',protocol:'acp',transport:host?'ssh':'local',hostId:host?.id||'',
+    command:container?'docker':'hermes',args:container?['exec','-i',container,'hermes']:[],cwd:t.home,hermesHome:container?'/opt/data':t.dir,
+    group:agent.group||'',tags:[...new Set([...(agent.tags||[]),'clone'])].slice(0,8),
+    clone:{from:agent.id,scope,keys:!!keys,cron,runtime,dir:t.dir,container}};
+  await unique(connection);
   progress({step:'target',state:'done',message:`Target: ${t.dir}${container?` (container ${container})`:''}`});
   const paths=await copyParts({agent,sourceHost,scope,keys,cron,to:t.where,dest:t.dir,progress});
   if(container){progress({step:'start',state:'active',message:`Starting container ${container} (the first start downloads ${IMAGE}, which can take a few minutes)`});await startContainer(t.where,t.dir,container);progress({step:'start',state:'done',message:`Container ${container} is running`});}
-  return {
-    connection:{name:String(name).trim().slice(0,80),provider:'hermes',protocol:'acp',transport:host?'ssh':'local',hostId:host?.id||'',
-      command:container?'docker':'hermes',args:container?['exec','-i',container,'hermes']:[],cwd:t.home,hermesHome:container?'/opt/data':t.dir,
-      group:agent.group||'',tags:[...new Set([...(agent.tags||[]),'clone'])].slice(0,8),
-      clone:{from:agent.id,scope,keys:!!keys,cron,runtime,dir:t.dir,container}},
-    copied:paths
-  };
+  return {connection,copied:paths};
 }
 // Copy the same parts again from the source into an existing clone; containers restart to pick them up.
 async function redeploy({agent,source,sourceHost,host,progress=()=>{}}){

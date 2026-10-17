@@ -16,6 +16,20 @@ for(const enabled of [false,true,undefined])test(`Vault MCP access survives rest
   assert.equal(next.mcpFor(agent.id).some(s=>s.name==='opaya-vault'),enabled!==false);
   assert.equal(next.snapshot().settings.vaultMcp,enabled!==false);
 });
+test('a clone that would duplicate a saved connection is refused before it changes the target',{skip:process.platform==='win32'&&'uses a POSIX ssh substitute'},async t=>{
+  const {b,root}=await fixture(t),home=path.join(root,'home'),bin=path.join(root,'bin'),old={PATH:process.env.PATH,HOME:process.env.HOME};
+  t.after(()=>{process.env.PATH=old.PATH;process.env.HOME=old.HOME;});
+  // The machine is this computer: ssh runs the remote command locally, and a stub codex means nothing is installed.
+  await fs.mkdir(bin);await fs.writeFile(path.join(bin,'ssh'),'#!/bin/sh\nfor last; do :; done\nexec /bin/sh -c "$last"\n',{mode:0o755});await fs.writeFile(path.join(bin,'codex'),'#!/bin/sh\n',{mode:0o755});
+  await fs.mkdir(path.join(home,'.codex'),{recursive:true});await fs.writeFile(path.join(home,'.codex','config.toml'),'model = "x"\n');
+  process.env.PATH=`${bin}:${old.PATH}`;process.env.HOME=home;
+  const host=await b.saveHost({alias:'my-vps'});
+  const source=await b.saveAgent({agent:{name:'Codex',provider:'codex',protocol:'codex',transport:'local',command:'codex',args:[]}});
+  await b.saveAgent({agent:{name:'Codex on the VPS',provider:'codex',protocol:'codex',transport:'ssh',hostId:host.id,command:'codex',args:[],cwd:home}});
+  await assert.rejects(b.cloneAgent({id:source.id,hostId:host.id,name:'Codex copy'}),/already exists as Codex on the VPS/);
+  assert.deepEqual(await fs.readdir(home),['.codex'],'nothing on the target was renamed or copied');
+  assert.equal(b.data.agents.length,2);
+});
 test('broker persists separate agents and never sends tokens to the renderer',async t=>{const {b,root}=await fixture(t);const a=await b.saveAgent({agent:apiAgent('Research',8642),token:'gateway-supersecret'});assert.equal(b.snapshot().agents[0].hasToken,true);assert(!JSON.stringify(b.snapshot()).includes('gateway-supersecret'));assert(!String(await fs.readFile(path.join(root,'workspace.json'))).includes('gateway-supersecret'));await b.connect(a.id);assert.equal(b.snapshot().agents[0].status,'connected');});
 test('broker rejects duplicate connections but accepts distinct Hermes instances',async t=>{const {b}=await fixture(t);await b.saveAgent({agent:apiAgent('one',8642)});await assert.rejects(()=>b.saveAgent({agent:apiAgent('renamed same endpoint',8642)}),/already exists/);await b.saveAgent({agent:apiAgent('two',8643)});assert.equal(b.data.agents.length,2);});
 test('broker preserves local display metadata and agent order',async t=>{const {b,root}=await fixture(t);const one=await b.saveAgent({agent:{...apiAgent('real-one',8642),displayName:'Sales desk',description:'Only shown in AgentHub',icon:'SD'}});const two=await b.saveAgent({agent:apiAgent('real-two',8643)});await b.reorderAgents({id:two.id,direction:'up'});assert.deepEqual(b.snapshot().agents.map(a=>a.id),[two.id,one.id]);const shown=b.snapshot().agents.find(a=>a.id===one.id);assert.equal(shown.name,'real-one');assert.equal(shown.displayName,'Sales desk');await b.close();const fresh=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>false,adapterFactory:()=>({connect:async()=>({}),close(){}})});await fresh.init();assert.equal(fresh.snapshot().agents.find(a=>a.id===one.id).description,'Only shown in AgentHub');await fresh.close();});

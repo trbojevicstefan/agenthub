@@ -316,8 +316,10 @@ class Broker{
     // A profile goes into a container Opaya already runs an agent in, on that machine; it asks before changing it.
     const into=runtime==='profile'?require('./profiles.cjs').targets(this.data.agents).find(t=>t.container===container&&t.hostId===(host?.id||'')):null;
     if(runtime==='profile'&&!into)throw new Error('Choose a container Opaya runs an agent in.');
+    // A clone that would duplicate a saved connection is refused before it copies anything (saveAgent checks again).
+    const unique=connection=>{const c=schema.agent(connection),duplicate=this.data.agents.find(x=>fingerprint(x)===fingerprint(c));if(duplicate)throw new Error(`This connection already exists as ${duplicate.name}.`);};
     const result=await cloner.clone({agent:a,sourceHost:a.transport==='ssh'?this.host(a.hostId):null,host,runtime,scope,keys,cron:cron===undefined?undefined:!!cron,name:name||`${a.name}-clone`,
-      into:into&&this.agent(into.agentId),confirm:(title,detail)=>this.approve({name:'Opaya'},title,detail),progress});
+      into:into&&this.agent(into.agentId),confirm:(title,detail)=>this.approve({name:'Opaya'},title,detail),unique,progress});
     progress({step:'save',state:'active',message:'Adding the clone to Opaya'});
     const saved=await this.saveAgent({agent:result.connection},{preapproved:true});
     // An OpenClaw clone got the source's config, so its gateway token is the same one; a profile uses its container's gateway.
