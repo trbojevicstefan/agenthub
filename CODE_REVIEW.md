@@ -238,6 +238,13 @@ Interrupt that turn and reject notifications for other turn IDs.
 
 ### F11 — P2: A display change can prevent default model changes
 
+- [x] Fixed on 2026-10-17 by keeping the agent object's identity in `updateAgentDisplay()` and `moveAgent()`.
+
+Display changes and moves now update the same object that a connected adapter holds.
+A later default model change therefore reaches the adapter without a reconnect.
+`moveAgent()` also validates its input before it removes the agent from the list, so a refused move keeps the agent.
+A regression test covers pinning, renaming, regrouping, a removed setting, a move, and a refused move.
+
 Locations: [desktop/broker.cjs:225–237](desktop/broker.cjs#L225-L237) and [desktop/broker.cjs:464–472](desktop/broker.cjs#L464-L472).
 
 Connected adapters retain the original agent object.

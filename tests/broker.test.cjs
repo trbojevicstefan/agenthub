@@ -30,6 +30,23 @@ test('a clone that would duplicate a saved connection is refused before it chang
   assert.deepEqual(await fs.readdir(home),['.codex'],'nothing on the target was renamed or copied');
   assert.equal(b.data.agents.length,2);
 });
+test('display changes keep the connected agent, so a later default model reaches its adapter',async t=>{
+  const {b,adapters}=await fixture(t);
+  const a=await b.saveAgent({agent:{name:'Model fixture',provider:'custom',protocol:'acp',transport:'local',command:'fixture-agent',model:'old-model'}});await b.connect(a.id);
+  const used=()=>adapters.at(-1).options.agent;
+  await b.updateAgentDisplay({id:a.id,pinned:true,displayName:'Pinned',group:'Work'});
+  await b.selectModel({id:a.id,model:'new-model'});
+  assert.equal(used().model,'new-model');assert.equal(used().displayName,'Pinned');assert.equal(used().pinned,true);
+  await b.updateAgentDisplay({id:a.id,browser:false});await b.updateAgentDisplay({id:a.id,browser:true});
+  assert.equal(used().browserOff,undefined,'a removed setting is removed from the same object');
+  await b.saveAgent({agent:apiAgent('Other',8643)});
+  await b.moveAgent({id:a.id,targetId:b.data.agents.at(-1).id,position:'after',group:'Later'});
+  await b.selectModel({id:a.id,model:'newer-model'});
+  assert.equal(used().model,'newer-model');assert.equal(used().group,'Later');assert.equal(b.data.agents.at(-1).id,a.id);
+  await assert.rejects(b.moveAgent({id:a.id,targetId:'not a valid id!'}));
+  assert(b.data.agents.some(x=>x.id===a.id),'a refused move keeps the agent');
+  assert.equal(adapters.length,1,'no reconnect was needed');
+});
 test('broker persists separate agents and never sends tokens to the renderer',async t=>{const {b,root}=await fixture(t);const a=await b.saveAgent({agent:apiAgent('Research',8642),token:'gateway-supersecret'});assert.equal(b.snapshot().agents[0].hasToken,true);assert(!JSON.stringify(b.snapshot()).includes('gateway-supersecret'));assert(!String(await fs.readFile(path.join(root,'workspace.json'))).includes('gateway-supersecret'));await b.connect(a.id);assert.equal(b.snapshot().agents[0].status,'connected');});
 test('broker rejects duplicate connections but accepts distinct Hermes instances',async t=>{const {b}=await fixture(t);await b.saveAgent({agent:apiAgent('one',8642)});await assert.rejects(()=>b.saveAgent({agent:apiAgent('renamed same endpoint',8642)}),/already exists/);await b.saveAgent({agent:apiAgent('two',8643)});assert.equal(b.data.agents.length,2);});
 test('broker preserves local display metadata and agent order',async t=>{const {b,root}=await fixture(t);const one=await b.saveAgent({agent:{...apiAgent('real-one',8642),displayName:'Sales desk',description:'Only shown in AgentHub',icon:'SD'}});const two=await b.saveAgent({agent:apiAgent('real-two',8643)});await b.reorderAgents({id:two.id,direction:'up'});assert.deepEqual(b.snapshot().agents.map(a=>a.id),[two.id,one.id]);const shown=b.snapshot().agents.find(a=>a.id===one.id);assert.equal(shown.name,'real-one');assert.equal(shown.displayName,'Sales desk');await b.close();const fresh=new Broker({store:new Store(root),vault:new Vault(root,secure()),emit:()=>{},approve:async()=>false,adapterFactory:()=>({connect:async()=>({}),close(){}})});await fresh.init();assert.equal(fresh.snapshot().agents.find(a=>a.id===one.id).description,'Only shown in AgentHub');await fresh.close();});

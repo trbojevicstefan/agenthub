@@ -239,7 +239,9 @@ class Broker{
     // The browser is on for every agent; only the user's explicit off is kept (browserOff).
     if(browser!==undefined){a.browser=Boolean(browser);if(browser)delete a.browserOff;else a.browserOff=true;}
     if(surface!==undefined)a.surface=['chat','terminal'].includes(surface)?surface:'';
-    this.data.agents[index]=a;await this.persist();if(browserChanged)this.refreshMcp(a.id);return a;
+    // The same object stays in place: a connected adapter holds it, so later model and effort changes reach it.
+    const saved=this.data.agents[index];for(const k of Object.keys(saved))if(!(k in a))delete saved[k];Object.assign(saved,a);
+    await this.persist();if(browserChanged)this.refreshMcp(saved.id);return saved;
   }
   // ACP agents and Claude Code get Opaya's MCP servers with each session or message, so a change reaches them in the
   // open chat. Codex reads them when its app-server starts: it reconnects, after an answer it is giving.
@@ -254,12 +256,14 @@ class Broker{
   // Drag and drop: place an agent before or after another one and optionally move it into a section (group or pinned).
   async moveAgent({id,targetId,position='before',group,pinned}){
     id=schema.id(id);const from=this.data.agents.findIndex(a=>a.id===id);if(from<0)throw new Error('Agent not found.');
-    const [agent]=this.data.agents.splice(from,1),moved={...agent};
-    if(group!==undefined)moved.group=schema.group(group);
-    if(pinned!==undefined)moved.pinned=Boolean(pinned);
-    let to=targetId?this.data.agents.findIndex(a=>a.id===schema.id(targetId)):-1;
+    const target=targetId?schema.id(targetId):'',section=group===undefined?undefined:schema.group(group);
+    // The same object moves: a connected adapter holds it.
+    const [agent]=this.data.agents.splice(from,1);
+    if(section!==undefined)agent.group=section;
+    if(pinned!==undefined)agent.pinned=Boolean(pinned);
+    let to=target?this.data.agents.findIndex(a=>a.id===target):-1;
     if(to<0)to=this.data.agents.length;else if(position==='after')to+=1;
-    this.data.agents.splice(to,0,moved);await this.persist();return true;
+    this.data.agents.splice(to,0,agent);await this.persist();return true;
   }
   // Connect every saved agent that is not connected yet, in parallel. One failure does not stop the others.
   // Everything needed to see why an agent is not answering: live turn timing, the adapter's protocol log, stderr and,
