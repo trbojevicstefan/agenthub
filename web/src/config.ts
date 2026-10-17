@@ -8,7 +8,16 @@ export interface Config {
   emailFrom: string;
   // Stripe Tax on Checkout. Turn it on only after Stripe Tax is set up and the company is registered where it must be.
   automaticTax: boolean;
+  // The web app (Phase 2): where the users' folders and the launcher's socket are, and the Cloud KMS key for user
+  // secrets. Without usersDir the web app is off.
+  runtime: { usersDir: string; launcherDir: string; kmsKey: string } | null;
   secrets: Secrets;
+}
+
+function runtimeConfig(env: NodeJS.ProcessEnv, production: boolean): Config["runtime"] {
+  if (!env.OPAYA_USERS_DIR) return null;
+  if (production && !env.OPAYA_KMS_KEY) throw new Error("Set OPAYA_KMS_KEY: the web app keeps user secrets with Cloud KMS.");
+  return { usersDir: env.OPAYA_USERS_DIR.replace(/\/+$/, ""), launcherDir: (env.OPAYA_LAUNCHER_DIR || "/run/opaya-launcher").replace(/\/+$/, ""), kmsKey: env.OPAYA_KMS_KEY || "" };
 }
 
 export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<Config> {
@@ -26,6 +35,7 @@ export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<
     port,
     emailFrom: env.OPAYA_EMAIL_FROM || "Opaya <accounts@opaya.dev>",
     automaticTax: env.STRIPE_AUTOMATIC_TAX === "true",
+    runtime: runtimeConfig(env, production),
     secrets: await loadSecrets(read, { production }),
   };
 }

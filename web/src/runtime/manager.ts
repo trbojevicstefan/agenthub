@@ -104,6 +104,8 @@ export class RuntimeManager extends EventEmitter {
   }
 
   private async start(r: Runtime): Promise<ServiceClient> {
+    // Unix socket paths have a length limit (104 bytes on macOS, 108 on Linux).
+    if (Buffer.byteLength(join(r.dir, "session-service.json")) > 100) throw new Error("The users' folder path is too long for the runtime sockets. Use a shorter OPAYA_USERS_DIR.");
     await mkdir(r.dir, { recursive: true, mode: 0o700 });
     const launcher = await this.options.launcher();
     // A runtime this manager did not start (the web server restarted) has an old Vault token: start it again.

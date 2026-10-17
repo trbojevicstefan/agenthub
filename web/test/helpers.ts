@@ -19,15 +19,16 @@ export function testConfig(secrets: Config["secrets"] = {}): Config {
     port: 3000,
     emailFrom: "Opaya <test@opaya.dev>",
     automaticTax: false,
+    runtime: null,
     secrets: { BETTER_AUTH_SECRET: "test-secret-for-opaya-web-0123456789", DATABASE_URL: "pglite://memory", ENTITLEMENTS_PRIVATE_KEY: "", STRIPE_WEBHOOK_SECRET: WEBHOOK_SECRET, ...secrets },
   };
 }
 
-export async function setup({ rateLimit = false, secrets = {} }: { rateLimit?: boolean; secrets?: Config["secrets"] } = {}) {
+export async function setup({ rateLimit = false, secrets = {}, runtime = null }: { rateLimit?: boolean; secrets?: Config["secrets"]; runtime?: Config["runtime"] } = {}) {
   const pglite = new PGlite();
   const db = createDatabase(new PGliteDialect(pglite));
   const mails: Email[] = [];
-  const config = testConfig(secrets);
+  const config = { ...testConfig(secrets), runtime };
   const stripe = fakeStripe();
   const auth = createAuth({ config, db, mailer: async m => void mails.push(m), stripe: stripe.client, rateLimit });
   await migrate(auth, db);
@@ -91,4 +92,15 @@ export function totp(uri: string, at = Date.now()) {
   const mac = createHmac("sha1", key).update(counter).digest();
   const offset = mac[mac.length - 1]! & 15;
   return String((mac.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).padStart(6, "0");
+}
+
+// Pro in its trial for the organization: Checkout, then Stripe's webhook.
+export async function startTrial(env: Awaited<ReturnType<typeof setup>>, browser: Browser, organizationId: string, plan = "pro") {
+  await browser.fetch("/api/auth/subscription/upgrade", { json: { plan, customerType: "organization", referenceId: organizationId, successUrl: "/billing", cancelUrl: "/pricing" } });
+  const params = env.stripe.calls.filter(c => c.method === "checkout.sessions.create").at(-1)!.params;
+  const customerId = (await env.db.selectFrom("organization").select("stripeCustomerId").where("id", "=", organizationId).executeTakeFirstOrThrow()).stripeCustomerId as string;
+  const sub = env.stripe.subscription({ id: `sub_${organizationId}`, customer: customerId, lookupKey: `opaya_${plan}_month`, status: "trialing", trialDays: 14, metadata: params.subscription_data.metadata });
+  const { payload, signature } = env.stripe.event("checkout.session.completed", { object: "checkout.session", mode: "subscription", subscription: sub.id, client_reference_id: organizationId, metadata: params.metadata });
+  await new Browser(r => env.app.fetch(r)).fetch("/api/auth/stripe/webhook", { method: "POST", body: payload, headers: { "stripe-signature": signature, "content-type": "application/json", origin: "" } });
+  return sub;
 }

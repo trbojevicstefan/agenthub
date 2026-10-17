@@ -5,6 +5,7 @@ import type { Config } from "./config.js";
 import type { Database } from "./db.js";
 import { entitlementsFor, type Signer } from "./entitlements.js";
 import { pageRoutes } from "./pages/routes.js";
+import { appRoutes } from "./runtime/app.js";
 
 export type Session = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;
 export type Env = { Variables: { session: Session | null } };
@@ -52,7 +53,10 @@ const CSP = {
 export function createApp(deps: AppDeps) {
   const { config, auth, db, signer } = deps;
   const app = new Hono<Env>();
-  app.use("*", secureHeaders({ contentSecurityPolicy: CSP, strictTransportSecurity: false, referrerPolicy: "strict-origin-when-cross-origin" }));
+  const pageHeaders = secureHeaders({ contentSecurityPolicy: CSP, strictTransportSecurity: false, referrerPolicy: "strict-origin-when-cross-origin" });
+  // /app sets its own policy (runtime/app.ts): the shared interface uses inline styles.
+  const appHeaders = secureHeaders({ contentSecurityPolicy: undefined, strictTransportSecurity: false, referrerPolicy: "strict-origin-when-cross-origin", xFrameOptions: "DENY" });
+  app.use("*", (c, next) => (c.req.path === "/app" || c.req.path.startsWith("/app/") ? appHeaders(c, next) : pageHeaders(c, next)));
   app.use("*", sessions(auth));
   app.get("/api/health", c => c.json({ ok: true, production: config.production }));
   app.on(["GET", "POST"], "/api/auth/*", c => auth.handler(c.req.raw));
@@ -67,6 +71,7 @@ export function createApp(deps: AppDeps) {
     const { token, expiresAt } = await signer.sign({ userId: session.user.id, organizationId }, entitlements);
     return c.json({ token, expiresAt, ...entitlements, account: { email: session.user.email, name: session.user.name } }, 200, { "cache-control": "no-store" });
   });
+  if (config.runtime) appRoutes(app, deps);
   pageRoutes(app, deps);
   return app;
 }
