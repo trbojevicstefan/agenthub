@@ -96,3 +96,23 @@ test('independent terminals keep separate processes, configured folders, and the
   for(let i=2;i<12;i++)terminals.open(a,null,'shell',undefined,{newSession:true});
   assert.throws(()=>terminals.open(a,null,'shell',undefined,{newSession:true}),/12 live terminal sessions/);assert.equal(terminals.sessions.size,12);
 });
+test('a separate terminal window keeps output and an exit that arrive while it starts',async()=>{
+  const vm=require('node:vm'),fs=require('node:fs'),path=require('node:path'),tick=()=>new Promise(r=>setImmediate(r));
+  const listeners=[],emit=e=>listeners.forEach(l=>l(e)),written=[],el=()=>({textContent:'',style:{},addEventListener(){},onclick:null});let attach,snap,live=true;
+  const api={terminalAttach:()=>new Promise(r=>{attach=r;}),snapshot:()=>new Promise(r=>{snap=r;}),onTerminal:l=>listeners.push(l),terminalWrite:async()=>{},terminalResize:async()=>{},terminalRestart:async()=>({}),terminalClose:async()=>{}};
+  const term={cols:80,rows:24,write(data,cb){written.push(data);if(cb)setImmediate(cb);},onData(){},focus(){}};
+  const OpayaTerminal={create:()=>({term,setLive:v=>{live=v;},fitAndReport(){}}),endedNote:(_item,code)=>`[ended ${code}]`,chunks:d=>[d]};
+  const els={'#status':el(),'#terminal':el(),'#title':el(),header:el(),'#dock':el(),'#end':el()};
+  const box={agenthub:api,OpayaTerminal,location:{hash:'#t1'},document:{title:'',querySelector:s=>els[s]},ResizeObserver:class{observe(){}},setTimeout,clearTimeout};box.window=box;vm.createContext(box);
+  vm.runInContext(fs.readFileSync(path.join(__dirname,'../ui/terminal-window.js'),'utf8'),box);await tick();
+  // While the state is read: output it already holds (seq 5) and output after it (seq 6).
+  emit({id:'t1',type:'data',data:'old',seq:5});emit({id:'t1',type:'data',data:' more',seq:6});emit({id:'other',type:'data',data:'NOT THIS',seq:7});
+  attach({seq:5,exited:false,buffer:'old',title:'Shell'});await tick();
+  // While the font size is read: the last output and the exit.
+  emit({id:'t1',type:'data',data:' final',seq:7});emit({id:'t1',type:'exit',exitCode:0,seq:8});
+  snap({view:{terminalFont:13}});for(let i=0;i<5;i++)await tick();
+  assert.equal(written.join(''),'old more final[ended 0]');
+  assert.equal(live,false,'the window knows the session ended, so Enter can restart it');
+  assert.equal(els['#status'].textContent,'Session ended');
+  emit({id:'t1',type:'data',data:' after',seq:9});assert.equal(written.join(''),'old more final[ended 0] after');
+});

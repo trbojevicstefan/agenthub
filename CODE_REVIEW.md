@@ -407,6 +407,14 @@ Close the stream and remove the incomplete file after failure.
 
 ### F19 — P2: Separate terminal windows lose initialization events
 
+- [x] Fixed on 2026-10-17 by subscribing to terminal events before the window reads its terminal state.
+
+Events that arrive during `terminalAttach()` or `snapshot()` wait in the existing buffer.
+After the initial buffer is written, the window replays only the events with a sequence number above the attached state.
+A lost exit therefore no longer leaves the window marked as live.
+A VM regression test sends output and an exit during both requests.
+Native window behavior remains unverified.
+
 Location: [ui/terminal-window.js:9–20](ui/terminal-window.js#L9-L20).
 
 The window reads its terminal state and awaits a snapshot before subscribing to events.

@@ -6,6 +6,9 @@
   try{
     const pending=[];let ready=false,seq=0,exited=false,restarting=false,noteTimer=0;
     const note=(text,error)=>{show(text,!error);clearTimeout(noteTimer);noteTimer=setTimeout(()=>{if(status.textContent===text)show(exited?'Session ended':'');},error?8500:4500);};
+    // Subscribed before the state is read: output and an exit meanwhile wait in `pending` and are replayed by seq.
+    let event=e=>{if(e.id===id)pending.push(e);};
+    api.onTerminal(e=>event(e));
     const item=await api.terminalAttach({id});seq=item.seq;exited=item.exited;
     const fontSize=Number((await api.snapshot().catch(()=>null))?.view?.terminalFont)||13;
     // Enter in an ended session starts it again here; a remote one reattaches to its tmux session.
@@ -13,11 +16,10 @@
       api.terminalRestart({id,cols:term.cols,rows:term.rows}).then(r=>{if(r.id!==id)show('This session already runs in another Opaya tab.');else if(exited&&r.seq>seq)live();}).catch(fail).finally(()=>{restarting=false;});};
     const core=window.OpayaTerminal.create(document.querySelector('#terminal'),{id,archived:exited,windowsBuild:item.windowsBuild||0,fontSize,onZoom:()=>core.fitAndReport(report),onRestart:restart,onNotice:note}),{term}=core;
     const live=()=>{exited=false;core.setLive(true);show('');};
-    const event=e=>{if(e.id!==id)return;if(!ready){pending.push(e);return;}if(e.seq!==undefined){if(e.seq<=seq)return;seq=e.seq;}
+    event=e=>{if(e.id!==id)return;if(!ready){pending.push(e);return;}if(e.seq!==undefined){if(e.seq<=seq)return;seq=e.seq;}
       if(e.type==='data')term.write(e.data);
       if(e.type==='exit'){exited=true;core.setLive(false);term.write(window.OpayaTerminal.endedNote(item,e.exitCode));show('Session ended');}
       if(e.type==='restarted')live();};
-    api.onTerminal(event);
     api.onTerminal(e=>{if(e.id===id&&e.type==='renamed'){document.querySelector('#title').textContent=e.title;document.title=e.title;}});
     document.querySelector('#title').textContent=item.title;document.title=item.title;if(exited)show('Session ended');
     // Typing goes to the session in pieces the service accepts (a large paste used to be refused whole), in order.
