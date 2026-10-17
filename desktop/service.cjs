@@ -35,7 +35,11 @@ const guide = require('./guide.cjs');
 const toolchain = require('./toolchain.cjs');
 const {visionOf, SUPPORTED:VISION_MODELS} = require('./vision.cjs');
 const pasting = require('./clipboard.cjs');
-async function start({app, safeStorage, shell: electronShell}, root) {
+// options.vault: the Vault to use instead of the OS keychain one (a web runtime container's remote-vault.cjs).
+// options.hostLimit: the plan's machine limit, set by the web server for a runtime container.
+async function start({app, safeStorage, shell: electronShell}, root, options = {}) {
+  // OPAYA_RUNTIME=web: a runtime container of the web app (runtime.cjs). Nothing runs on "this computer" there.
+  const WEB = require('./runtime-guard.cjs').web();
   let broker, terminals, listener, opaya, account = null, feedback = null, stopping = false, setupTrust = false, codexLogins = null;
   const codexWhere = new Map(), codexChecks = new Map(), codexSeen = new Set(); // codex-login.cjs: where a terminal's command runs; pending screen reads
   const startedAt = new Date().toISOString(), approvals = new Map();
@@ -59,7 +63,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     const run=(script,input='')=>proc.collect(clone.shell(where,script),{timeout:45000,maxBytes:8*1024*1024,input});
     return {framework,io:await mem.ioFor(framework,a,{local,where,run})};
   }
-  function snapshot() { const base=broker.snapshot(); return {...base, agents:base.agents.map(a=>({...a,install:maintenance.capabilities(a),vision:visionOf(a)})), toolUpdates:{machines:toolState.machines,checking:toolState.checking}, machine, opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, visionModels:VISION_MODELS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, account:account?.state() || {enabled:false}, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true, cordBridgeVersion:2}}; }
+  function snapshot() { const base=broker.snapshot(); return {...base, agents:base.agents.map(a=>({...a,install:maintenance.capabilities(a),vision:visionOf(a)})), toolUpdates:{machines:toolState.machines,checking:toolState.checking}, machine, opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, visionModels:VISION_MODELS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, runtime:WEB?'web':'desktop', account:account?.state() || {enabled:false}, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true, cordBridgeVersion:2}}; }
   const emit = () => listener?.broadcast('state', snapshot());
   async function approve(agent, title, detail) {
     const socket = [...(listener?.clients || [])].at(-1);
@@ -84,13 +88,13 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     });
   }
   require('./process.cjs').primeShellPath(); // read the login shell's PATH in the background (macOS GUI apps lack it)
-  broker = new Broker({store:new Store(root),vault:new Vault(root,safeStorage),emit,approve});
+  broker = new Broker({store:new Store(root),vault:options.vault||new Vault(root,safeStorage),emit,approve});
   await stage('broker');
   await broker.init();
   // The optional Opaya account (account.cjs): the plan's limits from signed entitlements, and the sign-in through the
   // browser. Without an account URL in this build it is off and limits nothing.
-  account = new (require('./account.cjs').Account)({root,vault:broker.vault,openExternal:url=>electronShell?.openExternal?electronShell.openExternal(url):Promise.reject(new Error('No browser available.')),emit:()=>emit(),version:app.getVersion?.()||''});
-  await account.load(); broker.hostLimit = () => account.hostLimit();
+  account = new (require('./account.cjs').Account)({root,vault:broker.vault,...(WEB?{baseUrl:''}:{}),openExternal:url=>electronShell?.openExternal?electronShell.openExternal(url):Promise.reject(new Error('No browser available.')),emit:()=>emit(),version:app.getVersion?.()||''});
+  await account.load(); broker.hostLimit = Number.isInteger(options.hostLimit) ? () => options.hostLimit : () => account.hostLimit();
   // Opaya browser for agents: the MCP bridge gets a token that can only call browserTool, forwarded to the Opaya window.
   const browserToken = randomBytes(32).toString('hex'), browserCalls = new Map();
   const toolsToken = randomBytes(32).toString('hex');
@@ -371,7 +375,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   async function checkAll({notify=true}={}){
     if(toolState.checking)return toolState;toolState.checking=true;emit();
     try{
-      await checkMachine(null);
+      if(!WEB)await checkMachine(null);
       for(const h of broker.data.hosts)if(broker.data.agents.some(a=>a.hostId===h.id))await checkMachine(h);
       for(const k of Object.keys(toolState.machines))if(k!=='local'&&!broker.data.hosts.some(h=>h.id===k))delete toolState.machines[k];
     }finally{toolState.checking=false;}
@@ -1423,9 +1427,13 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     agentUpdate:x=>`Update ${nameOf(x.id)}`,
     toolUpdate:x=>`Update ${x.id||'a tool'}`
   };
+  // In the web app, actions aimed at "this computer" get one clear answer (runtime-guard.cjs stops the processes too).
+  const localTarget=(method,x)=>({discover:!x.hostId,installFramework:!x.hostId,terminalOpen:x.local===true||!x.agentId&&!x.hostId&&!x.sourceId,files:!x.agentId&&!x.hostId,
+    dockerList:!x.hostId,dockerAction:!x.hostId,dockerTerminal:!x.hostId,dockerStats:!x.hostId,dockerInspect:!x.hostId,dockerLogs:!x.hostId,projectClone:!x.hostId,toolUpdate:!x.hostId,
+    opayaFreeSetup:true,opayaFreeModels:true,libraryAddFolder:true,vaultBackupSave:true,vaultBackupRestore:true,vaultImportScan:x.tools===true||!!x.file,cordConnect:true})[method]===true;
   const token = randomBytes(32).toString('hex');
   listener = server({token,snapshot,scopes:()=>new Map([[browserToken,new Set(['browserTool'])],[toolsToken,new Set(['opayaToolList','opayaToolCall'])],[vaultToken,new Set(['vaultTool'])]]),
-    dispatch:async (method,input)=>{if(!Object.hasOwn(actions,method))throw new Error('Unsupported desktop action.');try{return await actions[method](input||{});}catch(error){const text=safeError(error);if(REPORTED[method])actionFailed(REPORTED[method](input||{}),text);else if(!/^(feedback|reportClientError)/.test(method))feedback?.record({source:`action:${method}`,title:method,message:text}).catch(()=>{});throw new Error(text);}},
+    dispatch:async (method,input)=>{if(!Object.hasOwn(actions,method))throw new Error('Unsupported desktop action.');if(WEB&&localTarget(method,input||{}))throw new Error(require('./runtime-guard.cjs').MESSAGE);try{return await actions[method](input||{});}catch(error){const text=safeError(error);if(REPORTED[method])actionFailed(REPORTED[method](input||{}),text);else if(!/^(feedback|reportClientError)/.test(method))feedback?.record({source:`action:${method}`,title:method,message:text}).catch(()=>{});throw new Error(text);}},
     onApproval:(socket,message)=>{const a=approvals.get(message.id);if(a?.socket===socket)a.finish(message.allow===true,message.value);},
     onDetach:socket=>{for(const a of approvals.values())if(a.socket===socket)a.finish(false);}
   });

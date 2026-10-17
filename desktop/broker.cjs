@@ -118,6 +118,8 @@ class Broker{
   // with iTrust on, is not asked again (also not for a gateway token import).
   async saveAgent({agent:input,token,remember=true,importToken=false},{preapproved=false}={}){
     const a=schema.agent(input);if(a.transport==='ssh')this.host(a.hostId);
+    // The web app (runtime-guard.cjs) has no "this computer": agents run on the user's machines, or as HTTP APIs.
+    if(require('./runtime-guard.cjs').web()&&(a.transport==='local'||a.transport==='http'&&/^https?:\/\/(127\.|localhost|\[::1\])/i.test(a.endpoint||'')))throw new Error('Agents on this computer are only in the desktop app. In the web app, add the agent on one of your machines (SSH), or as an HTTP API with a public address.');
     const existing=this.data.agents.find(x=>x.id===a.id);
     if(existing&&this.turns.has(a.id))throw new Error('Stop the active turn before editing this agent.');
     if(!existing&&this.data.agents.length>=128)throw new Error('Workspace limit reached (128 agents).');

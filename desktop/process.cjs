@@ -57,7 +57,8 @@ function userToolDirs() {
 // shell profile adds. Nothing from it is executed by Opaya; it only extends where executables are looked up.
 let shellPath = {value: [], at: 0, pending: null};
 function primeShellPath({timeout = 6000} = {}) {
-  if (process.platform === 'win32') return Promise.resolve([]);
+  // A web runtime container has no login shell to ask (runtime-guard.cjs).
+  if (process.platform === 'win32' || process.env.OPAYA_RUNTIME === 'web') return Promise.resolve([]);
   if (shellPath.pending) return shellPath.pending;
   if (shellPath.at && Date.now() - shellPath.at < 10 * 60 * 1000) return Promise.resolve(shellPath.value);
   const shell = /^\/[\w./-]+$/.test(process.env.SHELL || '') ? process.env.SHELL : process.platform === 'darwin' ? '/bin/zsh' : '/bin/sh';
