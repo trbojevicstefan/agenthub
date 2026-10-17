@@ -19,5 +19,11 @@ async function main(){
   require('node:fs').mkdirSync(os.homedir(),{recursive:true,mode:0o700});
   const vault=new (require('./remote-vault.cjs').RemoteVault)({address:path.join(root,'vault.sock'),token});
   await require('./service.cjs').start({app,safeStorage:null,shell:null},root,{vault,...(Number.isInteger(hostLimit)&&hostLimit>=0?{hostLimit}:{})});
+  // The web SSH key (web/src/ssh-key.ts) from the Vault, in /tmp (memory in the container), for ssh (process.cjs).
+  const key=vault.get('opaya_web_ssh_key');
+  if(key){
+    const fs=require('node:fs'),file=path.join(os.tmpdir(),`opaya-web-ssh-${process.pid}`);fs.writeFileSync(file,Buffer.from(key,'base64'),{mode:0o600});process.env.OPAYA_WEB_SSH_KEY=file;
+    process.on('exit',()=>{try{fs.rmSync(file,{force:true});}catch{}});
+  }
 }
 main().catch(error=>{console.error(`Opaya runtime did not start: ${String(error?.message||error)}`);process.exit(1);});

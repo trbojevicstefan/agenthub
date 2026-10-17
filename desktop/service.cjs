@@ -1382,6 +1382,14 @@ async function start({app, safeStorage, shell: electronShell}, root, options = {
     playground:x=>broker.playground(x), moveAgent:x=>broker.moveAgent(x), connectAll:x=>broker.connectAll(x),
     // The Opaya account: sign in (the browser approves the code), cancel, sign out, check the plan again, and open the
     // plan pages in the browser. The window never gets the token.
+    // Web access for a machine: the account's web SSH key in its authorized_keys (or removed again). Lines are found by
+    // their comment "opaya-web <organization ID>", so a new key replaces the old one and Revoke removes exactly these.
+    hostWebAccess:async x=>{
+      const h=broker.host(x.hostId),key=await account.webSshKey(),clone=require('./clone.cjs');
+      const out=await collect(clone.shell({host:h,container:''},require('./account.cjs').webAccessScript({allow:x.allow===true,...key})),{timeout:30000});
+      if(!String(out).includes('OPAYA_DONE'))throw new Error(`${h.name} did not confirm the change.`);
+      const saved=await broker.saveHost({...h,webAccess:x.allow===true});emit();return {host:saved,address:key.address};
+    },
     accountState:async()=>account.state(), accountSignIn:()=>account.signIn(), accountSignInCancel:async()=>account.cancelSignIn(), accountSignOut:()=>account.signOut(), accountRefresh:()=>account.refresh(), accountOpen:x=>account.open(String(x.page||'')),
     // Free local model: install Ollama if needed, start it, download the model and connect the Opaya Agent.
     opayaFreeModels:async()=>({models:free.FREE_MODELS.map(({id,label,size,note})=>({id,label,size,note})),recommended:free.recommended(),installed:await free.ollamaModels()}),
@@ -1409,7 +1417,7 @@ async function start({app, safeStorage, shell: electronShell}, root, options = {
   // Importing into the vault and giving an MCP server a vault key are the user's own clicks, never the Opaya Agent's.
   actions.vaultBackupSave = x=>opaya.vaultBackupSave({file:x.file,password:x.password});
   actions.vaultBackupRestore = x=>opaya.vaultBackupRestore({file:x.file,password:x.password});
-  const USER_ONLY=new Set(['vaultImportScan','vaultImportCommit','vaultBackupSave','vaultBackupRestore','accountSignIn','accountSignInCancel','accountSignOut','accountRefresh','accountOpen']);
+  const USER_ONLY=new Set(['vaultImportScan','vaultImportCommit','vaultBackupSave','vaultBackupRestore','accountSignIn','accountSignInCancel','accountSignOut','accountRefresh','accountOpen','hostWebAccess']);
   opaya.appAction=(name,input)=>{if(!Object.hasOwn(actions,name)||USER_ONLY.has(name)||name==='mcpInstall'&&input?.vaultKey)throw new Error('Unsupported action.');return origin.run('opaya',()=>actions[name](input));};
   // Actions the user starts whose failure the Opaya Agent should handle, with how to name them.
   const nameOf=id=>{try{return broker.agent(id).name;}catch{return 'an agent';}},hostName=id=>{try{return id?broker.host(id).name:machineName();}catch{return 'a machine';}};

@@ -135,6 +135,15 @@ class Account{
     if(this.signedIn()){const token=this.vault.get(TOKEN_KEY);await this.call('/api/auth/sign-out',{method:'POST',body:{},token}).catch(()=>{});}
     await this.forget();return this.state();
   }
+  // The public half of the web app's SSH key for this account, for "Allow web access" on a machine.
+  async webSshKey(){
+    if(!this.signedIn())throw new Error('Sign in to your Opaya account first (Settings > Account).');
+    const r=await this.call('/api/web-ssh-key',{token:this.vault.get(TOKEN_KEY)});
+    if(r.status===403)throw new Error('Web access comes with Pro and Fleet. Upgrade the plan in Settings > Account.');
+    const key=String(r.data?.publicKey||''),comment=String(r.data?.comment||'');
+    if(!r.ok||!/^ssh-ed25519 [A-Za-z0-9+/]+=* opaya-web [A-Za-z0-9_-]{1,80}$/.test(key)||!key.endsWith(' '+comment))throw new Error('The web SSH key could not be read. Try again.');
+    return {publicKey:key,comment,address:String(r.data?.address||'').slice(0,64)};
+  }
   // Manage plan, Upgrade and the account page open in the system browser.
   async open(page){
     const target={billing:'/billing',pricing:'/pricing',account:'/account'}[page];if(!target)throw new Error('Unknown account page.');
@@ -148,6 +157,15 @@ class Account{
   }
   stop(){clearInterval(this.timer);this.timer=null;this.cancelSignIn();}
 }
+// Web access on a machine: the web SSH key line in ~/.ssh/authorized_keys, or removed. Lines are found by their comment
+// (" opaya-web <organization ID>" at the end), so a new key replaces the old one and other keys stay as they are. The
+// file is rewritten in place (cat >), so its owner and mode stay.
+function webAccessScript({allow,publicKey,comment}){
+  const q=require('./process.cjs').quote,keep=`awk -v c=${q(' '+comment)} 'substr($0,length($0)-length(c)+1)!=c' ~/.ssh/authorized_keys > ~/.ssh/.opaya-keys.$$`;
+  return allow
+    ?`umask 077; mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && ${keep} && printf '%s\n' ${q(publicKey)} >> ~/.ssh/.opaya-keys.$$ && cat ~/.ssh/.opaya-keys.$$ > ~/.ssh/authorized_keys; rm -f ~/.ssh/.opaya-keys.$$; echo OPAYA_DONE`
+    :`if [ -f ~/.ssh/authorized_keys ]; then ${keep} && cat ~/.ssh/.opaya-keys.$$ > ~/.ssh/authorized_keys; rm -f ~/.ssh/.opaya-keys.$$; fi; echo OPAYA_DONE`;
+}
 // The host limit, as a message the window recognizes (it offers Sign in or Upgrade).
 function hostLimitError(limit,count){return new Error(`Your plan allows ${limit} remote machine${limit===1?'':'s'}, and ${count} ${count===1?'is':'are'} saved. Machines that are saved keep working. To add more, upgrade the plan in Settings > Account.`);}
-module.exports={Account,verify,accountUrl,hostLimitError,TOKEN_KEY,FREE};
+module.exports={Account,verify,accountUrl,hostLimitError,webAccessScript,TOKEN_KEY,FREE};

@@ -5,6 +5,7 @@ import { createAuth } from "../src/auth.js";
 import type { Config } from "../src/config.js";
 import { createDatabase } from "../src/db.js";
 import { createSigner, newKey } from "../src/entitlements.js";
+import { kmsSecretStore, localKeyWrapper } from "../src/secret-store.js";
 import type { Email } from "../src/mail.js";
 import { migrate } from "../src/migrate.js";
 import { createApp } from "../src/server.js";
@@ -25,6 +26,7 @@ export function testConfig(secrets: Config["secrets"] = {}): Config {
 }
 
 export async function setup({ rateLimit = false, secrets = {}, runtime = null }: { rateLimit?: boolean; secrets?: Config["secrets"]; runtime?: Config["runtime"] } = {}) {
+  const kms = localKeyWrapper();
   const pglite = new PGlite();
   const db = createDatabase(new PGliteDialect(pglite));
   const mails: Email[] = [];
@@ -33,8 +35,9 @@ export async function setup({ rateLimit = false, secrets = {}, runtime = null }:
   const auth = createAuth({ config, db, mailer: async m => void mails.push(m), stripe: stripe.client, rateLimit });
   await migrate(auth, db);
   const signer = await createSigner(JSON.stringify(await newKey("test-key")), config.baseURL);
-  const app = createApp({ config, auth, db, signer });
-  return { pglite, db, mails, config, auth, stripe, signer, app, close: () => db.destroy() };
+  const store = (organizationId: string) => kmsSecretStore({ db, kms, organizationId });
+  const app = createApp({ config, auth, db, signer, secrets: store });
+  return { pglite, db, mails, config, auth, stripe, signer, app, kms, store, close: () => db.destroy() };
 }
 
 // A browser for tests: keeps cookies, sends the Origin header like a real browser does, and talks to `handle`.

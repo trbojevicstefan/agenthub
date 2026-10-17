@@ -4,6 +4,8 @@ import type { Auth } from "./auth.js";
 import type { Config } from "./config.js";
 import type { Database } from "./db.js";
 import { entitlementsFor, type Signer } from "./entitlements.js";
+import type { SecretStore } from "./secret-store.js";
+import { webSshKey } from "./ssh-key.js";
 import { pageRoutes } from "./pages/routes.js";
 import { appRoutes } from "./runtime/app.js";
 
@@ -15,11 +17,13 @@ export interface AppDeps {
   auth: Auth;
   db: Database;
   signer: Signer;
+  // The web app's secret store of an organization (Phase 2; absent when the web app is off).
+  secrets?: (organizationId: string) => SecretStore;
 }
 
 // A desktop session (made by the device flow) reaches only these paths. So a desktop app cannot create an account or
 // start a checkout, even with a changed build: the server refuses it.
-const DESKTOP_PATHS = new Set(["/api/auth/get-session", "/api/auth/sign-out", "/api/auth/device/code", "/api/auth/device/token", "/api/entitlements", "/api/health", "/.well-known/jwks.json"]);
+const DESKTOP_PATHS = new Set(["/api/auth/get-session", "/api/auth/sign-out", "/api/auth/device/code", "/api/auth/device/token", "/api/entitlements", "/api/web-ssh-key", "/api/health", "/.well-known/jwks.json"]);
 export const desktopAllowed = (path: string) => DESKTOP_PATHS.has(path.replace(/\/+$/, "") || "/");
 
 const hasCredentials = (c: Context) => Boolean(c.req.header("authorization") || /(^|;\s*)(__Secure-)?better-auth\.session_token=/.test(c.req.header("cookie") ?? ""));
@@ -51,7 +55,7 @@ const CSP = {
 };
 
 export function createApp(deps: AppDeps) {
-  const { config, auth, db, signer } = deps;
+  const { config, auth, db, signer, secrets } = deps;
   const app = new Hono<Env>();
   const pageHeaders = secureHeaders({ contentSecurityPolicy: CSP, strictTransportSecurity: false, referrerPolicy: "strict-origin-when-cross-origin" });
   // /app sets its own policy (runtime/app.ts): the shared interface uses inline styles.
@@ -71,6 +75,16 @@ export function createApp(deps: AppDeps) {
     const { token, expiresAt } = await signer.sign({ userId: session.user.id, organizationId }, entitlements);
     return c.json({ token, expiresAt, ...entitlements, account: { email: session.user.email, name: session.user.name } }, 200, { "cache-control": "no-store" });
   });
+  // The public half of the organization's web SSH key, and the address machines must allow. The desktop app's
+  // "Allow web access" adds it to a machine's authorized_keys.
+  if (config.runtime && secrets)
+    app.get("/api/web-ssh-key", async c => {
+      const session = c.get("session");
+      if (!session) return c.json({ code: "UNAUTHORIZED", message: "Sign in first." }, 401);
+      const organizationId = (session.session.activeOrganizationId as string | null | undefined) || (await auth.personalOrganization(session.user.id));
+      if (!(await entitlementsFor(db, organizationId)).features.web) return c.json({ code: "PLAN", message: "The web app comes with Pro and Fleet." }, 403);
+      return c.json({ publicKey: await webSshKey(secrets(organizationId), organizationId), comment: `opaya-web ${organizationId}`, address: config.runtime!.egressIp }, 200, { "cache-control": "no-store" });
+    });
   if (config.runtime) appRoutes(app, deps);
   pageRoutes(app, deps);
   return app;

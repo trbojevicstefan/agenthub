@@ -44,3 +44,10 @@ test('the session service runs under plain Node as a web runtime, with the remot
   await client.call('shutdown').catch(()=>{});client.close();
   await new Promise(r=>child.exitCode!==null?r():child.once('exit',r));
 });
+
+test('a web runtime uses only its web SSH key and no OpenSSH config file',()=>{
+  const out=execFileSync(process.execPath,['-e',`const p=require(${JSON.stringify(path.join(__dirname,'../desktop/process.cjs'))});const h={hostname:'203.0.113.5',alias:'prod',username:'root',port:2222,identityFile:'/Users/ana/.ssh/id_ed25519'};process.stdout.write(JSON.stringify({args:p.sshArgs(h),target:p.target(h)}))`],{env:{...process.env,OPAYA_RUNTIME:'web',OPAYA_WEB_SSH_KEY:'/tmp/opaya-web-ssh-1'},encoding:'utf8'});
+  const {args,target}=JSON.parse(out);
+  assert.deepEqual(args.slice(0,2),['-F','/dev/null']);assert.equal(target,'203.0.113.5','no aliases from a config file');
+  assert.ok(args.join(' ').includes('-p 2222 -l root -i /tmp/opaya-web-ssh-1 -o IdentitiesOnly=yes'));assert.ok(!args.includes('/Users/ana/.ssh/id_ed25519'),'no desktop key path');
+});

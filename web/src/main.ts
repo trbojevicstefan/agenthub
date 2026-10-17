@@ -19,15 +19,16 @@ const changes = await migrate(auth, db);
 if (changes.created.length || changes.added.length) console.log(`Database updated. New tables: ${changes.created.join(", ") || "none"}. New columns in: ${changes.added.join(", ") || "none"}.`);
 const signer = await createSigner(config.secrets.ENTITLEMENTS_PRIVATE_KEY!, config.baseURL);
 // The web app (Phase 2): runtime containers through the launcher, user secrets with Cloud KMS.
-let manager: RuntimeManager | null = null;
+let manager: RuntimeManager | null = null, secrets: ((organizationId: string) => ReturnType<typeof kmsSecretStore>) | undefined;
 if (config.runtime) {
   if (!config.runtime.kmsKey) console.warn("OPAYA_KMS_KEY is not set: user secrets use a key that lives only in this process (development only).");
   const kms = config.runtime.kmsKey ? cloudKms(config.runtime.kmsKey) : localKeyWrapper();
-  manager = new RuntimeManager({ usersDir: config.runtime.usersDir, launcher: launcherConnection(config.runtime.launcherDir), secrets: organizationId => kmsSecretStore({ db, kms, organizationId }) });
+  secrets = organizationId => kmsSecretStore({ db, kms, organizationId });
+  manager = new RuntimeManager({ usersDir: config.runtime.usersDir, launcher: launcherConnection(config.runtime.launcherDir), secrets });
   // Runtimes an older web server started have its old Vault tokens.
   await manager.stopAll().catch(error => console.warn(`Could not stop old runtimes: ${error?.message ?? error}`));
 }
-const app = createApp({ config, auth, db, signer });
+const app = createApp({ config, auth, db, signer, secrets });
 const server = serve({ fetch: app.fetch, port: config.port, hostname: "0.0.0.0" }, info => {
   console.log(`Opaya web listens on port ${info.port} for ${config.baseURL}.`);
 });

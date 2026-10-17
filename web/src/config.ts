@@ -10,14 +10,15 @@ export interface Config {
   automaticTax: boolean;
   // The web app (Phase 2): where the users' folders and the launcher's socket are, and the Cloud KMS key for user
   // secrets. Without usersDir the web app is off.
-  runtime: { usersDir: string; launcherDir: string; kmsKey: string } | null;
+  // egressIp: the VPS address that users' machines must allow for SSH (shown with the web SSH key).
+  runtime: { usersDir: string; launcherDir: string; kmsKey: string; egressIp: string } | null;
   secrets: Secrets;
 }
 
 function runtimeConfig(env: NodeJS.ProcessEnv, production: boolean): Config["runtime"] {
   if (!env.OPAYA_USERS_DIR) return null;
   if (production && !env.OPAYA_KMS_KEY) throw new Error("Set OPAYA_KMS_KEY: the web app keeps user secrets with Cloud KMS.");
-  return { usersDir: env.OPAYA_USERS_DIR.replace(/\/+$/, ""), launcherDir: (env.OPAYA_LAUNCHER_DIR || "/run/opaya-launcher").replace(/\/+$/, ""), kmsKey: env.OPAYA_KMS_KEY || "" };
+  return { usersDir: env.OPAYA_USERS_DIR.replace(/\/+$/, ""), launcherDir: (env.OPAYA_LAUNCHER_DIR || "/run/opaya-launcher").replace(/\/+$/, ""), kmsKey: env.OPAYA_KMS_KEY || "", egressIp: env.OPAYA_EGRESS_IP || "" };
 }
 
 export async function loadConfig(env: NodeJS.ProcessEnv = process.env): Promise<Config> {

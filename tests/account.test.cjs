@@ -1,7 +1,7 @@
 'use strict';
 const {test}=require('node:test');const assert=require('node:assert/strict');const crypto=require('node:crypto');const path=require('node:path');const fs=require('node:fs/promises');
 const {temp,secure}=require('./helpers.cjs');
-const {Account,verify,accountUrl,hostLimitError,TOKEN_KEY}=require('../desktop/account.cjs');
+const {Account,verify,accountUrl,hostLimitError,webAccessScript,TOKEN_KEY}=require('../desktop/account.cjs');
 const {Vault,Store}=require('../desktop/store.cjs');
 const {Broker}=require('../desktop/broker.cjs');
 const SERVER='https://app.opaya.dev',DAY=24*60*60*1000;
@@ -118,4 +118,20 @@ test('the host limit blocks only new machines: saved ones stay and can be edited
   const first=broker.data.hosts[0];await broker.saveHost({...first,name:'renamed'});assert.equal(broker.data.hosts[0].name,'renamed');
   broker.hostLimit=()=>5;await broker.saveHost(host(4));assert.equal(broker.data.hosts.length,4);
   assert.equal(hostLimitError(20,1).message.startsWith('Your plan allows 20 remote machines, and 1 is saved.'),true);
+});
+
+test('web access adds the web key to authorized_keys once, replaces an old one and removes only its own lines',{skip:process.platform==='win32'&&'needs a POSIX shell'},async t=>{
+  const home=await temp(t),{execFileSync}=require('node:child_process'),file=path.join(home,'.ssh','authorized_keys');
+  const run=x=>execFileSync('/bin/sh',['-c',webAccessScript(x)],{env:{...process.env,HOME:home},encoding:'utf8'});
+  const key=(n,org='org_1')=>({publicKey:`ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI${n} opaya-web ${org}`,comment:`opaya-web ${org}`});
+  assert.match(run({allow:true,...key('one')}),/OPAYA_DONE/);
+  assert.equal((await fs.stat(file)).mode&0o777,0o600);
+  await fs.appendFile(file,'ssh-ed25519 AAAAmine me@laptop\nssh-ed25519 AAAAother opaya-web org_2\n');
+  run({allow:true,...key('one')});run({allow:true,...key('two')});
+  let lines=(await fs.readFile(file,'utf8')).trim().split('\n');
+  assert.deepEqual(lines,['ssh-ed25519 AAAAmine me@laptop','ssh-ed25519 AAAAother opaya-web org_2','ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAItwo opaya-web org_1'],'one line, the newest key; other keys stay');
+  run({allow:false,...key('two')});
+  lines=(await fs.readFile(file,'utf8')).trim().split('\n');
+  assert.deepEqual(lines,['ssh-ed25519 AAAAmine me@laptop','ssh-ed25519 AAAAother opaya-web org_2']);
+  assert.match(run({allow:false,...key('x','org_3')}),/OPAYA_DONE/,'nothing to remove is fine');
 });

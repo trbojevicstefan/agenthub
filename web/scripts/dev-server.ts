@@ -26,10 +26,11 @@ const db = createDatabase(new PGliteDialect(new PGlite()));
 const auth = createAuth({ config, db, mailer: consoleMailer });
 await migrate(auth, db);
 const signer = await createSigner(config.secrets.ENTITLEMENTS_PRIVATE_KEY!, config.baseURL);
-const server = serve({ fetch: createApp({ config, auth, db, signer }).fetch, port: config.port }, info => console.log(`Opaya web (memory database) on http://localhost:${info.port}`)) as Server;
+const kms = localKeyWrapper(), secrets = (organizationId: string) => kmsSecretStore({ db, kms, organizationId });
+const server = serve({ fetch: createApp({ config, auth, db, signer, secrets }).fetch, port: config.port }, info => console.log(`Opaya web (memory database) on http://localhost:${info.port}`)) as Server;
 if (config.runtime) {
-  const kms = localKeyWrapper(), { launcher } = processLauncher(config.runtime.usersDir, { log: true });
-  const manager = new RuntimeManager({ usersDir: config.runtime.usersDir, launcher: async () => launcher, secrets: organizationId => kmsSecretStore({ db, kms, organizationId }) });
+  const { launcher } = processLauncher(config.runtime.usersDir, { log: true });
+  const manager = new RuntimeManager({ usersDir: config.runtime.usersDir, launcher: async () => launcher, secrets });
   attachRelay(server, { config, auth, db, manager, usersDir: config.runtime.usersDir });
   console.log(`Web app runtimes run as local processes in ${config.runtime.usersDir}.`);
 }

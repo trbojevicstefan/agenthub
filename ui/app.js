@@ -463,7 +463,9 @@
   function openHosts(edit={},{form=false}={}){
     if(!form&&!edit.id){openFleet();return;}
     hostFormOpen=true;
-    modal(edit.id?`Edit ${edit.name||'machine'}`:'Add a machine by its address','An SSH address you already use: OpenSSH handles your keys, ssh-agent, jump hosts and host verification. For a brand new server, New VPS also creates its key.',`<div id="machines"><section class="machine-form" id="host-form-section"><form id="host-form">${inputField('address','Quick connect',edit.alias||'','user@server:22, ssh://user@server:2222, or saved-alias')}<p class="field-help">Paste your SSH address. Existing keys and ssh-agent stay on this computer. Or use the individual fields below.</p><div class="form-grid">${inputField('name','Display name',edit.name,'e.g. Hetzner / Production')}${inputField('alias','Existing SSH config alias',edit.alias,'e.g. production')}</div><div class="field-divider">OR CONNECT DIRECTLY</div><div class="form-grid">${inputField('hostname','Hostname or IP',edit.hostname,'203.0.113.10')}${inputField('username','SSH username',edit.username,'ubuntu')}${inputField('port','SSH port',edit.port||22,'22','type="number" min="1" max="65535"')}<div class="path-field">${inputField('identityFile','SSH identity file (optional)',edit.identityFile,'Use ssh-agent / SSH config')}<button type="button" class="secondary" data-action="pick" data-kind="identityFile" data-field-name="identityFile">Browse</button></div></div><p class="field-help">A config alias takes precedence over hostname, username and port. Private keys are never uploaded or copied into Opaya. Encrypted keys should be unlocked in your OS ssh-agent.</p><div class="modal-footer"><span>Saving does not contact the server; Test connection does.</span><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="submit" class="primary">${edit.id?'Update machine':'Save machine'}</button></div></div></form></section></div>`);
+    const web=webRuntime(),key=acct().webSsh;
+    const webKey=web?`<div class="inline-notice web-ssh-key"><p>Opaya connects with its web SSH key. Add this line to <code>~/.ssh/authorized_keys</code> on the server${key?.address?`, and allow SSH from <strong>${esc(key.address)}</strong>`:''}. Or, in the Opaya desktop app, use <strong>Allow web access</strong> on the machine.</p>${key?`<code class="web-ssh-line">${esc(key.publicKey)}</code><button type="button" class="secondary" data-action="copy-web-key">Copy key</button>`:'<p>The key is not ready yet. Reload the page.</p>'}</div>`:'';
+    modal(edit.id?`Edit ${edit.name||'machine'}`:'Add a machine by its address',web?'A server where your agents run. The web app reaches it over SSH with your web SSH key.':'An SSH address you already use: OpenSSH handles your keys, ssh-agent, jump hosts and host verification. For a brand new server, New VPS also creates its key.',`<div id="machines">${webKey}<section class="machine-form" id="host-form-section"><form id="host-form">${inputField('address','Quick connect',edit.alias||'','user@server:22, ssh://user@server:2222, or saved-alias')}<p class="field-help">${web?'Paste the SSH address of the server: user@server:22.':'Paste your SSH address. Existing keys and ssh-agent stay on this computer. Or use the individual fields below.'}</p><div class="form-grid">${inputField('name','Display name',edit.name,'e.g. Hetzner / Production')}${inputField('alias','Existing SSH config alias',edit.alias,'e.g. production')}</div><div class="field-divider">OR CONNECT DIRECTLY</div><div class="form-grid">${inputField('hostname','Hostname or IP',edit.hostname,'203.0.113.10')}${inputField('username','SSH username',edit.username,'ubuntu')}${inputField('port','SSH port',edit.port||22,'22','type="number" min="1" max="65535"')}<div class="path-field">${inputField('identityFile','SSH identity file (optional)',edit.identityFile,'Use ssh-agent / SSH config')}<button type="button" class="secondary" data-action="pick" data-kind="identityFile" data-field-name="identityFile">Browse</button></div></div><p class="field-help">${web?'The web app connects only with the web SSH key above.':'A config alias takes precedence over hostname, username and port. Private keys are never uploaded or copied into Opaya. Encrypted keys should be unlocked in your OS ssh-agent.'}</p><div class="modal-footer"><span>Saving does not contact the server; Test connection does.</span><div><button type="button" class="secondary" data-action="modal-close">Cancel</button><button type="submit" class="primary">${edit.id?'Update machine':'Save machine'}</button></div></div></form></section></div>`);
     const f=$('#host-form');if(f){f.addEventListener('submit',async event=>{event.preventDefault();await action(async()=>{const saved=await api.saveHost({...edit,...Object.fromEntries(new FormData(event.target))});state=await api.snapshot();closeModal();openFleet(saved?.id);toast('Machine saved. Testing the connection...');if(saved?.id)testMachine(saved.id);});});f.elements[edit.id?'name':'address']?.focus();}
   }
 
@@ -1475,10 +1477,11 @@
     if(name==='edit-host'){openHosts(state.hosts.find(h=>h.id===id));return;}
     if(name==='host-add'){openHosts({},{form:true});return;}
     if(name==='host-form-close'){closeModal();return;}
-    if(name==='machine-add-menu'){const r=button.getBoundingClientRect();openMenu(r.left,r.bottom+4,[{icon:'+',label:'New VPS (creates its SSH key)',run:()=>openNewVps()},{icon:'@',label:'Add by its SSH address...',run:()=>openHosts({},{form:true})},{icon:'&#8615;',label:'Import ~/.ssh/config',run:()=>fire('import-hosts')}],'Add a machine');return;}
+    if(name==='machine-add-menu'){const r=button.getBoundingClientRect(),web=webRuntime();openMenu(r.left,r.bottom+4,[!web&&{icon:'+',label:'New VPS (creates its SSH key)',run:()=>openNewVps()},{icon:'@',label:'Add by its SSH address...',run:()=>openHosts({},{form:true})},!web&&{icon:'&#8615;',label:'Import ~/.ssh/config',run:()=>fire('import-hosts')}].filter(Boolean),'Add a machine');return;}
     if(name==='host-test'){testMachine(id);return;}
     if(name==='hosts-test-all'){testAllMachines();return;}
     if(name==='fleet-more'){openToolbarMenu(button,[{icon:'&#8635;',label:'Test all machines',disabled:!state.hosts.length,run:()=>testAllMachines()},{icon:'&#8679;',label:'Update all agents',run:()=>action(updateAll)},{icon:'&#9881;',label:'Name and backup folder of this computer',run:()=>fire('local-machine')}],'Machines');return;}
+    if(name==='copy-web-key'){const k=acct().webSsh?.publicKey;if(k)action(async()=>{await api.clipboardWrite({text:k});toast('Web SSH key copied.');});return;}
     if(name==='host-copy'){const h=state.hosts.find(x=>x.id===id);if(h)action(async()=>{await api.clipboardWrite({text:sshText(h)});toast('SSH command copied.');});return;}
     if(name==='machine-versions'){action(async()=>{button.disabled=true;button.textContent='Checking...';try{await api.toolVersions({hostId:button.dataset.host||undefined,force:true});await refresh();}finally{render();}toast('Versions checked.');});return;}
     if(name==='cord-connect'){openCordConnect();return;}
@@ -2449,7 +2452,8 @@
   // Manage in the sidebar opens a two-column menu: every agent (its management screen) and every machine (the fleet
   // board, where agents are cloned, migrated, shared and uninstalled across machines).
   let fleetView=false,fleetFocus='local',fleetHtml={};const migrations=new Map();
-  const machineKeys=()=>['local',...state.hosts.map(h=>h.id)];
+  // The web app has no "this computer" (its runtime is not a machine of the user's).
+  const machineKeys=()=>[...(state.runtime==='web'?[]:['local']),...state.hosts.map(h=>h.id)];
   const machineName=key=>key==='local'?localName():state.hosts.find(h=>h.id===key)?.name||'Machine';
   const machineOnline=key=>key==='local'||hostChecks.get(key)?.state==='ok';
   function openManagePop(button){
@@ -2516,7 +2520,7 @@
       <div class="fleet-panel-block fl-docker" id="fl-docker" data-key="${esc(key)}">${dockerPanel(null,key)}</div></section>`;
   }
   function renderFleet(){
-    if(!machineKeys().includes(fleetFocus))fleetFocus='local';
+    if(!machineKeys().includes(fleetFocus))fleetFocus=machineKeys()[0]||'';
     topbar('<strong>Machines</strong>');
     contentKind('overview manage command-center fleet');
     const keys=machineKeys(),docker=state.agents.filter(a=>containerOf(a)).length,down=keys.filter(k=>hostChecks.get(k)?.state==='error').length;
@@ -2524,7 +2528,7 @@
       <p class="fleet-lead">Every computer your agents run on. Pick one for its tools and Docker; drag an agent between machines to copy or move it.</p>
       <div class="mg-hero-actions"><button type="button" class="primary" data-action="new-vps">+ New VPS</button><button type="button" class="secondary" data-action="machine-add-menu" aria-haspopup="menu" title="A server you already use: by its SSH address or from ~/.ssh/config">Add existing &#9662;</button><button type="button" class="secondary" data-action="install-catalog">&#8595; Install agents</button><button type="button" class="secondary mg-more" data-action="fleet-more" aria-haspopup="menu" title="Test all machines, update all agents" aria-label="More">&#8943;</button></div></div></section>`;
     const tip=`<p class="fleet-tip"><b>Drag</b> an agent onto another machine to clone or migrate it, or onto another agent to share skills, keys and MCP servers. <b>&#8943;</b> on an agent: update, back up, uninstall.</p>`;
-    const parts=[['fl-hero','',0,hero],['fl-board','mg-reveal',1,`<div class="fleet-board">${keys.map(fleetColumn).join('')}</div>${tip}`],['fl-detail','fleet-detail mg-reveal',2,fleetDetail(fleetFocus)]];
+    const parts=[['fl-hero','',0,hero],['fl-board','mg-reveal',1,`<div class="fleet-board">${keys.map(fleetColumn).join('')}</div>${tip}`],['fl-detail','fleet-detail mg-reveal',2,fleetFocus?fleetDetail(fleetFocus):'<section class="fleet-panel"><p class="field-help">Add the first machine where your agents run: <strong>Add existing</strong> &gt; by its SSH address.</p></section>']];
     const entering=renderKey!=='fleet'||!$('#fl-hero');
     if(entering){fleetHtml={};$('#content').innerHTML=parts.map(([id,cls,i,inner])=>{fleetHtml[id]=inner;return `<div id="${id}" class="${cls}" style="--i:${i}">${inner}</div>`;}).join('');$('#content').classList.remove('view-enter');$('#content').scrollTop=0;$('#content').classList.add('mg-entering');clearTimeout(renderFleet.t);renderFleet.t=setTimeout(()=>$('#content')?.classList.remove('mg-entering'),1400);}
     else for(const [id,,,inner] of parts)if(fleetHtml[id]!==inner){const el=document.getElementById(id);if(el){fleetHtml[id]=inner;el.innerHTML=inner;}}
@@ -2581,6 +2585,8 @@
       agents.some(a=>a.install?.update)&&{icon:'&#8635;',label:'Update its agents',run:async()=>{for(const a of agents)if(a.install?.update)await updateAgent(a);}},
       '-',
       host&&{icon:'&gt;',label:'Copy SSH command',run:async()=>{await api.clipboardWrite({text:sshText(h)});toast('SSH command copied.');}},
+      // The web app reaches this machine with the account's web SSH key (desktop/account.cjs webAccessScript).
+      host&&!webRuntime()&&acct().signedIn&&acct().features?.web&&{icon:'&#9729;',label:h.webAccess?'Revoke web access':'Allow web access',run:()=>action(async()=>{const r=await api.hostWebAccess({hostId:host,allow:!h.webAccess});state=await api.snapshot();render();toast(h.webAccess?`The web app can no longer reach ${h.name}.`:`The web app can reach ${h.name}.${r?.address?` Its firewall must allow SSH from ${r.address}.`:''}`);})},
       host?{icon:'&#9998;',label:'Edit machine',run:()=>openHosts(h)}:{icon:'&#9998;',label:'Rename this computer',run:()=>openLocalMachine()},
       host&&{icon:'&#10005;',label:'Remove machine from Opaya',danger:true,disabled:agents.length>0,hint:agents.length?'has agents':'',run:async()=>{if(!await ask(`Remove ${h.name} from Opaya?\n\nOnly Opaya forgets it. The server, its agents and your SSH keys stay as they are.`))return;await api.removeHost({id:host});hostChecks.delete(host);await refresh();}}
     ],machineName(key));
@@ -2736,9 +2742,11 @@
   const GUIDE_AGENTS=[['codex','Codex CLI','ChatGPT'],['claude','Claude Code','Claude'],['opencode','OpenCode','Many models']];
   const GUIDE_KEYS=['google','groq','openrouter','openai','anthropic','deepseek','mistral','xai','cerebras','ollama-cloud','custom'];
   let guide=null;const guideDismissed=()=>tipsSeen.has('guide-closed');
+  // The web app (ui/web-transport.js) has no "this computer": the guide connects a model and points to Machines.
+  const webRuntime=()=>state.runtime==='web';
   const guideOn=()=>!!guide;
-  function startGuide(){guide={step:'hello',way:'',goals:new Set(),agents:new Set(),trust:true,facts:null,plan:null,jobId:'',keyPreset:'google',keyError:'',answers:{}};opayaView=true;overview=false;playgroundView=false;render();saveView();
-    api.guideScan().then(f=>{if(guide){guide.facts=f;if(opayaView)renderOpaya();}}).catch(e=>{if(guide){guide.facts={error:e.message,tools:{},signedIn:{}};if(opayaView)renderOpaya();}});}
+  function startGuide(){guide={step:'hello',way:'',goals:new Set(),agents:new Set(),trust:true,facts:webRuntime()?{web:true,tools:{},signedIn:{}}:null,plan:null,jobId:'',keyPreset:'google',keyError:'',answers:{}};opayaView=true;overview=false;playgroundView=false;render();saveView();
+    if(!webRuntime())api.guideScan().then(f=>{if(guide){guide.facts=f;if(opayaView)renderOpaya();}}).catch(e=>{if(guide){guide.facts={error:e.message,tools:{},signedIn:{}};if(opayaView)renderOpaya();}});}
   function closeGuide(){guide=null;if(!tipsSeen.has('guide-closed')){tipsSeen.add('guide-closed');saveView();}opayaCount=-1;renderOpaya();}
   const gBubble=(html,{you=false,cls=''}={})=>`<article class="message ${you?'user-message':'assistant-message'} guide-msg ${cls}"><div class="message-avatar ${you?'you-avatar':'opaya-avatar'}">${you?'S':'<span class="opaya-mark"><img src="assets/opaya-logo.png" alt=""></span>'}</div><div class="message-body"><div class="message-meta"><strong>${you?'You':'Opaya'}</strong>${you?'':'<span class="guide-tag">setup guide</span>'}</div><div class="message-text">${html}</div></div></article>`;
   const gAnswer=(text,back)=>gBubble(`${esc(text)} <button type="button" class="text-button guide-change" data-guide="back" data-to="${back}">Change</button>`,{you:true});
@@ -2746,14 +2754,16 @@
   function guideFactsHtml(){
     const f=guide.facts;if(!f)return '<p class="guide-scan"><span class="status-dot working"></span> Looking at this computer...</p>';
     if(f.error)return `<p class="guide-scan">I could not look at everything (${esc(f.error)}), but we can still go on.</p>`;
+    if(f.web)return '<p class="guide-scan">In the web app, your agents run on your own machines over SSH, or as API connections.</p>';
     return `<div class="guide-facts"><span class="guide-fact sys">${esc(f.system)} / ${f.memoryGb} GB memory</span>${gTool('git','Git')}${gTool('node','Node.js')}${gTool('python','Python')}${gTool('codex','Codex CLI')}${gTool('claude','Claude Code')}</div>`;
   }
   function guideWayCards(){
     const f=guide.facts||{};
-    return `<div class="guide-cards">${GUIDE_WAYS.map(([id,t,text,tool])=>{const ready=tool&&f.tools?.[tool],signed=tool&&f.signedIn?.[tool];return `<button type="button" class="guide-card ${guide.way===id?'selected':''}" data-guide="way" data-value="${id}"><span class="guide-card-icon ${id}" aria-hidden="true">${tool?badge({provider:tool}):id==='api'?'&#9919;':'&#10022;'}</span><strong>${t}</strong><span>${text}</span>${signed?'<em class="guide-badge">Already signed in</em>':ready?'<em class="guide-badge">Already installed</em>':''}</button>`;}).join('')}</div>`;
+    return `<div class="guide-cards">${GUIDE_WAYS.filter(([id])=>!webRuntime()||['api','none'].includes(id)).map(([id,t,text,tool])=>{const ready=tool&&f.tools?.[tool],signed=tool&&f.signedIn?.[tool];return `<button type="button" class="guide-card ${guide.way===id?'selected':''}" data-guide="way" data-value="${id}"><span class="guide-card-icon ${id}" aria-hidden="true">${tool?badge({provider:tool}):id==='api'?'&#9919;':'&#10022;'}</span><strong>${t}</strong><span>${text}</span>${signed?'<em class="guide-badge">Already signed in</em>':ready?'<em class="guide-badge">Already installed</em>':''}</button>`;}).join('')}</div>`;
   }
   function guideNoneCards(){
     const ok=guide.facts?.localModelOk!==false;
+    if(webRuntime())return `<div class="guide-cards two"><button type="button" class="guide-card" data-guide="none" data-value="freekey"><span class="guide-card-icon" aria-hidden="true">&#9919;</span><strong>Free key from Google</strong><span>One minute: sign in with a Google account, copy the key, paste it here. Fast and free.</span></button></div>`;
     return `<div class="guide-cards two"><button type="button" class="guide-card" data-guide="none" data-value="free"><span class="guide-card-icon" aria-hidden="true">&#8595;</span><strong>Free model on this computer</strong><span>Private and free, no account. About 2.5 GB to download.${ok?'':' This computer has little memory, so it will be slow.'}</span></button>
       <button type="button" class="guide-card" data-guide="none" data-value="freekey"><span class="guide-card-icon" aria-hidden="true">&#9919;</span><strong>Free key from Google</strong><span>One minute: sign in with a Google account, copy the key, paste it here. Fast and free.</span></button>
       <button type="button" class="guide-card" data-guide="none" data-value="later"><span class="guide-card-icon" aria-hidden="true">&#8987;</span><strong>Set up the tools now, AI later</strong><span>Opaya installs what you need; you connect AI when you are ready.</span></button></div>`;
@@ -2794,13 +2804,13 @@
     return `${steps}<p><strong>Your computer is ready.</strong>${opaya().configured?'':' When you get an AI account or key, come back here to connect it.'}</p><div class="guide-actions"><button type="button" class="primary" data-guide="projects">Start a project</button>${state.agents.length?`<button type="button" class="secondary" data-guide="chat">Chat with ${esc(title(state.agents[0]))}</button>`:''}<button type="button" class="secondary" data-guide="close">Close the guide</button></div>`;
   }
   function guideHtml(){
-    const g=guide,parts=[gBubble(`<p><strong>Hi, I'm Opaya.</strong> I'll get this computer ready for building with AI. You don't need to know anything about code: you choose, I do the work.</p>${guideFactsHtml()}`)];
+    const g=guide,parts=[gBubble(`<p><strong>Hi, I'm Opaya.</strong> I'll get ${webRuntime()?'your web workspace':'this computer'} ready for building with AI. You don't need to know anything about code: you choose, I do the work.</p>${guideFactsHtml()}`)];
     const wayName=GUIDE_WAYS.find(w=>w[0]===g.way)?.[1];
     parts.push(gBubble(`<p>First: which of these do you have? The AI you already pay for (or a free one) becomes my brain, so I can finish the setup for you and fix anything that goes wrong.</p>${g.step==='hello'||g.step==='way'?guideWayCards():''}`));
     if(g.step==='hello'||g.step==='way')return parts.join('');
     parts.push(gAnswer(g.answers.way||wayName,'way'));
     if(g.way==='none'){
-      parts.push(gBubble(`<p>Here are three ways to start without paying anything:</p>${g.step==='none'?guideNoneCards():''}`));
+      parts.push(gBubble(`<p>${webRuntime()?'Here is a way':'Here are three ways'} to start without paying anything:</p>${g.step==='none'?guideNoneCards():''}`));
       if(g.step==='none')return parts.join('');
       parts.push(gAnswer(g.answers.none,'none'));
     }
@@ -2812,6 +2822,10 @@
     if(g.answers.none==='Free model on this computer'&&g.step==='free'){
       const fj=[...jobs.values()].reverse().find(j=>j.kind==='free-model');
       parts.push(gBubble(fj?.status==='error'?`<div class="inline-notice error-notice">${esc(fj.error)}</div><div class="guide-actions"><button type="button" class="primary" data-guide="free">Try again</button></div>`:`<p><span class="status-dot working"></span> Downloading and starting the free model. This takes a few minutes; I'll continue by myself when it is ready.</p>`));
+      return parts.join('');
+    }
+    if(webRuntime()){
+      parts.push(gBubble('<p>I am ready. Next, add the machines where your agents run: open <strong>Machines</strong> and add a server. Opaya connects with its web SSH key. Or ask me, for example: <em>Set up my VPS</em>.</p><div class="guide-actions"><button type="button" class="primary" data-action="fleet">Open Machines</button></div>'));
       return parts.join('');
     }
     parts.push(gBubble(`<p>What would you like to make? Pick one or more.</p>${g.step==='goals'?guideGoalCards():''}`));

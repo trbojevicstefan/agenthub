@@ -1,6 +1,6 @@
 // The web app end to end: the browser's WebSocket, the relay, the runtime manager and a runtime (as a local process).
 import assert from "node:assert/strict";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readdir, realpath, rm } from "node:fs/promises";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -11,7 +11,6 @@ import WebSocket from "ws";
 import { RuntimeManager } from "../src/runtime/manager.js";
 import { processLauncher } from "../src/runtime/process-launcher.js";
 import { attachRelay } from "../src/runtime/relay.js";
-import { kmsSecretStore, localKeyWrapper } from "../src/secret-store.js";
 import { BASE, setup, startTrial, verifiedUser } from "./helpers.js";
 
 type Message = { kind: string; id?: number; value?: any; error?: string; event?: string };
@@ -49,11 +48,10 @@ test("a Pro user's browser reaches its runtime through the relay; others do not"
   // Socket paths have a 104-character limit on macOS: user IDs are 32 characters, so the folder must be short.
   const usersDir = await realpath(await mkdtemp(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "or-")));
   t.after(() => rm(usersDir, { recursive: true, force: true }));
-  const env = await setup({ runtime: { usersDir, launcherDir: "", kmsKey: "" } });
+  const env = await setup({ runtime: { usersDir, launcherDir: "", kmsKey: "", egressIp: "203.0.113.200" } });
   t.after(env.close);
-  const kms = localKeyWrapper();
-  const { launcher } = processLauncher(usersDir);
-  const manager = new RuntimeManager({ usersDir, launcher: async () => launcher, secrets: org => kmsSecretStore({ db: env.db, kms, organizationId: org }), startTimeoutMs: 20_000 });
+  const { launcher, children } = processLauncher(usersDir);
+  const manager = new RuntimeManager({ usersDir, launcher: async () => launcher, secrets: env.store, startTimeoutMs: 20_000 });
   t.after(() => manager.stopAll());
   const server = serve({ fetch: env.app.fetch, port: 0, hostname: "127.0.0.1" }) as Server;
   await new Promise(r => server.once("listening", r));
@@ -71,7 +69,11 @@ test("a Pro user's browser reaches its runtime through the relay; others do not"
   assert.equal(await open(port, "").closed, 4401);
   assert.equal(await open(port, cookie, "https://evil.example").failed, 403);
 
+  assert.equal((await browser.fetch("/api/web-ssh-key")).status, 403, "no web SSH key without the web app");
   await startTrial(env, browser, organizationId);
+  const key = (await (await browser.fetch("/api/web-ssh-key")).json()) as { publicKey: string; address: string; comment: string };
+  assert.match(key.publicKey, new RegExp(`^ssh-ed25519 \\S+ opaya-web ${organizationId}$`));
+  assert.equal(key.address, "203.0.113.200");
   const page = await browser.fetch("/app/");
   assert.equal(page.status, 200);
   const html = await page.text();
@@ -98,5 +100,10 @@ test("a Pro user's browser reaches its runtime through the relay; others do not"
   assert.match(approval.value.title, /Remove this agent connection/);
   assert.equal(await tab.call("approvalAnswer", { id: approval.value.id, choice: "once" }), true);
   assert.equal(await removing, true);
+  // The runtime got the key from its Vault, in a file named after its process, and removes it when it stops.
+  const pid = [...children.values()][0]!.pid;
+  assert.ok((await readdir(tmpdir())).includes(`opaya-web-ssh-${pid}`), "the runtime wrote its web SSH key");
   tab.ws.close();
+  await manager.stopAll();
+  assert.ok(!(await readdir(tmpdir())).includes(`opaya-web-ssh-${pid}`), "the key file is gone");
 });

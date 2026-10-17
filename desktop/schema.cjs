@@ -52,7 +52,8 @@ function host(input) {
   if (username && !/^[a-zA-Z0-9_][a-zA-Z0-9_.-]*$/.test(username)) throw new Error('Invalid SSH username.');
   const identityFile = text(input.identityFile, 'identity file', 2048);
   if (identityFile && !(path.posix.isAbsolute(identityFile) || path.win32.isAbsolute(identityFile))) throw new Error('Choose an absolute path to the SSH identity file.');
-  return {id: input.id ? id(input.id) : randomUUID(), name: text(input.name, 'host name', 80, alias || hostname).trim() || alias || hostname, alias, hostname, username, port: port(input.port), identityFile};
+  // webAccess: the web app's SSH key is in the machine's authorized_keys (service.cjs hostWebAccess).
+  return {id: input.id ? id(input.id) : randomUUID(), name: text(input.name, 'host name', 80, alias || hostname).trim() || alias || hostname, alias, hostname, username, port: port(input.port), identityFile, ...(input.webAccess === true ? {webAccess: true} : {})};
 }
 // Sidebar group and free-form labels; only shown in Opaya.
 function group(value) { return text(value ?? '', 'group', 40).replace(/[\x00-\x1f\x7f]/g, '').trim(); }

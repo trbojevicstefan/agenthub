@@ -156,7 +156,7 @@ if(hostMode){
       forwards.push('selectEffort','fileInfo');
       forwards.push('mcpCatalog','mcpInstall');
       forwards.push('dockerList','dockerTerminal','dockerStats','dockerInspect','dockerLogs');
-      forwards.push('accountState','accountSignIn','accountSignInCancel','accountSignOut','accountRefresh','accountOpen');
+      forwards.push('accountState','accountSignIn','accountSignInCancel','accountSignOut','accountRefresh','accountOpen','hostWebAccess');
       const handlers=Object.fromEntries(forwards.map(method=>[method,input=>client.call(method,input)]));
       // Attachments: the native picker (several files), and pasted files (base64) written to Opaya's data folder here so
       // only their paths go to the session service, whose messages are limited to 24 MB. Removed again if the send fails.

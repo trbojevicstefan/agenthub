@@ -6,6 +6,7 @@ import { mkdir, readFile, rm } from "node:fs/promises";
 import type { Server } from "node:net";
 import { join } from "node:path";
 import type { SecretStore } from "../secret-store.js";
+import { webSshKey } from "../ssh-key.js";
 import { desktopModule } from "./desktop.js";
 import { newSocketToken, serveVault } from "./vault-socket.js";
 
@@ -112,8 +113,10 @@ export class RuntimeManager extends EventEmitter {
     if (!r.vault && (await launcher.call("status", { userId: r.user.id }))?.running) await launcher.call("stop", { userId: r.user.id }, 60_000);
     if (!r.vault || !(await launcher.call("status", { userId: r.user.id }))?.running) {
       r.vault?.close();
-      const vaultToken = newSocketToken();
-      r.vault = await serveVault({ path: join(r.dir, "vault.sock"), token: vaultToken, store: this.options.secrets(r.user.organizationId) });
+      const vaultToken = newSocketToken(), store = this.options.secrets(r.user.organizationId);
+      // The runtime reaches the user's machines with the web SSH key; it must exist before the runtime loads its Vault.
+      await webSshKey(store, r.user.organizationId);
+      r.vault = await serveVault({ path: join(r.dir, "vault.sock"), token: vaultToken, store });
       await rm(join(r.dir, "session-service.json"), { force: true });
       await launcher.call("start", { userId: r.user.id, vaultToken, hostLimit: r.user.hostLimit }, 120_000);
     }

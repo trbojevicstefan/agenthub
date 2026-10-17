@@ -169,6 +169,14 @@ function inFolder(agent, dir) {
 }
 function sshArgs(host, {interactive = false} = {}) {
   const args = ['-o', `BatchMode=${interactive ? 'no' : 'yes'}`, '-o', `StrictHostKeyChecking=${interactive ? 'ask' : 'yes'}`, '-o', 'ConnectTimeout=10', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3', '-o', 'ForwardAgent=no', '-o', 'ExitOnForwardFailure=yes'];
+  // A web runtime (runtime.cjs) reads no OpenSSH config file and uses only the user's web SSH key.
+  if (process.env.OPAYA_RUNTIME === 'web') {
+    args.unshift('-F', '/dev/null');
+    args.push('-p', String(host.port || 22));
+    if (host.username) args.push('-l', host.username);
+    if (process.env.OPAYA_WEB_SSH_KEY) args.push('-i', process.env.OPAYA_WEB_SSH_KEY, '-o', 'IdentitiesOnly=yes');
+    return args;
+  }
   // A config alias delegates HostName, User, Port, IdentityFile and ProxyJump to OpenSSH.
   if (!host.alias) {
     args.push('-p', String(host.port || 22));
@@ -177,7 +185,7 @@ function sshArgs(host, {interactive = false} = {}) {
   if (host.identityFile) args.push('-i', host.identityFile, '-o', 'IdentitiesOnly=yes');
   return args;
 }
-function target(host) { return host.alias || host.hostname; }
+function target(host) { return process.env.OPAYA_RUNTIME === 'web' ? host.hostname || host.alias : host.alias || host.hostname; }
 // SSH commands run without the login profile, so add where npm tools usually live (nvm, Volta, bun, OpenCode).
 const REMOTE_PATH = 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/.npm-global/bin:$HOME/.volta/bin:$HOME/.bun/bin:$HOME/.opencode/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"; for d in "$HOME"/.nvm/versions/node/*/bin; do [ -d "$d" ] && PATH="$PATH:$d"; done';
 function remoteCommand(agent, args, {interactive = false} = {}) {
