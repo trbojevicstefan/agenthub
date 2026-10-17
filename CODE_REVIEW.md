@@ -430,6 +430,13 @@ Buffer events and replay those newer than the returned sequence.
 
 ### F20 — P2: Browser addresses with hostname ports fail
 
+- [x] Fixed on 2026-10-17 by recognizing a hostname and port before the URL scheme check.
+
+`localhost:3000` now opens as `http://localhost:3000`, and `example.com:8443/path` opens with `https://`.
+A query or fragment after the port also works.
+Other schemes, such as `javascript:`, `file:`, `mailto:`, `about:`, and `data:`, stay refused.
+A regression test covers these addresses through the real `normalize()` function.
+
 Location: [desktop/browser.cjs:10–11](desktop/browser.cjs#L10-L11).
 
 The address normalizer treats `localhost:3000` and `example.com:8443/path` as existing URL schemes.

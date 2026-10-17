@@ -5,9 +5,11 @@
 const {WebContentsView,session}=require('electron');
 const PARTITION='persist:opaya-browser';
 const allowed=u=>{try{const x=new URL(u);return ['http:','https:'].includes(x.protocol)||(x.protocol==='data:'&&/^data:text\/html[;,]/i.test(u));}catch{return false;}};
+// localhost:3000 and example.com:8443/path are a host and a port, not a URL scheme.
+const HOST_PORT=/^(localhost|[\w-]+(\.[\w-]+)+):\d+([/?#]|$)/i;
 function normalize(input){
   let u=String(input||'').trim();if(!u)throw new Error('Enter an address.');
-  if(!/^[a-z][a-z0-9+.-]*:/i.test(u))u=/^(localhost|127\.|\[::1\])/.test(u)||/^[\w-]+(\.[\w-]+)+(:\d+)?(\/|$)/.test(u)?(/^(localhost|127\.|\[::1\])/.test(u)?'http://':'https://')+u:`https://duckduckgo.com/?q=${encodeURIComponent(u)}`;
+  if(!/^[a-z][a-z0-9+.-]*:/i.test(u)||HOST_PORT.test(u))u=/^(localhost|127\.|\[::1\])/i.test(u)||/^[\w-]+(\.[\w-]+)+(:\d+)?([/?#]|$)/.test(u)?(/^(localhost|127\.|\[::1\])/i.test(u)?'http://':'https://')+u:`https://duckduckgo.com/?q=${encodeURIComponent(u)}`;
   if(!allowed(u)||u.startsWith('data:'))throw new Error('Only http and https addresses open in the Opaya browser.');
   return u;
 }

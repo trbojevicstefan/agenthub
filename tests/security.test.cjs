@@ -64,3 +64,13 @@ test('discovery ignores data an uninstall left behind',async t=>{
   const installed=await fakeHermes(path.join(dir,'.hermes'));
   const again=await scanLocal({home:dir,probe:false});assert.equal(again.agents.filter(a=>a.provider==='hermes').length,2);assert(again.agents.every(a=>a.provider!=='hermes'||a.command===installed||a.command.endsWith('hermes')||a.command.endsWith('hermes.exe')));
 });
+test('browser addresses with a hostname and port open, other schemes stay refused',()=>{
+  const {normalize}=require('../desktop/browser.cjs');
+  assert.equal(normalize('localhost:3000'),'http://localhost:3000');
+  assert.equal(normalize('localhost:3000/app?x=1'),'http://localhost:3000/app?x=1');
+  assert.equal(normalize('example.com:8443/path'),'https://example.com:8443/path');
+  assert.equal(normalize('example.com:8443?q=1'),'https://example.com:8443?q=1');
+  assert.equal(normalize('127.0.0.1:3000'),'http://127.0.0.1:3000');assert.equal(normalize('http://localhost:3000'),'http://localhost:3000');
+  assert.equal(normalize('example.com'),'https://example.com');assert.match(normalize('what is node'),/^https:\/\/duckduckgo\.com\/\?q=/);
+  for(const bad of ['javascript:alert(1)','file:///etc/passwd','mailto:x@y.z','about:blank','data:text/html,<b>x</b>'])assert.throws(()=>normalize(bad),/Only http and https/,bad);
+});
