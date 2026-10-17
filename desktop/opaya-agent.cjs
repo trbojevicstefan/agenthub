@@ -323,7 +323,7 @@ class OpayaAgent{
     if(this.busy)throw new Error('Stop the current answer first.');if(!this.sessions.some(x=>x.id===id))throw new Error('Chat not found.');
     this.sessions=this.sessions.filter(x=>x.id!==id);await fs.rm(path.join(this.home,'sessions',`${id}.json`),{force:true});
     if(!this.sessions.length)this.sessions.push({id:randomUUID(),title:'New chat',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
-    if(id===this.sessionId){this.sessionId=this.sessions.at(-1).id;const m=await readJson(path.join(this.home,'sessions',`${this.sessionId}.json`),[]);this.messages=Array.isArray(m)?m:[];this.codexThreadId='';}
+    if(id===this.sessionId){this.sessionId=this.sessions.at(-1).id;const m=await readJson(path.join(this.home,'sessions',`${this.sessionId}.json`),[]);this.messages=Array.isArray(m)?m:[];this.error='';this.codexThreadId='';this.claudeSessionId='';}
     await this.saveIndex();await this.pruneSecrets();this.emit();return true;
   }
   cli(preset=this.config.preset){return preset==='codex'||preset==='claude';}

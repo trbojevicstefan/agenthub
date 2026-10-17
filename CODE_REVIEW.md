@@ -304,6 +304,12 @@ Apply interrupted-turn recovery to its transcript too.
 
 ### F14 — P2: Deleting a Claude chat retains its native session
 
+- [x] Fixed on 2026-10-17 by clearing the Claude session ID when the active chat is deleted.
+
+The chat that opens after the deletion starts a new Claude session, as it does after `selectSession()`.
+The deletion also clears the previous chat's error.
+A regression test drives a fake `claude` process through two chats and deletes the active chat.
+
 Location: [desktop/opaya-agent.cjs:294–299](desktop/opaya-agent.cjs#L294-L299).
 
 Deleting the active Opaya Agent chat changes the visible chat without clearing `claudeSessionId`.

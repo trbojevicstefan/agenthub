@@ -106,3 +106,19 @@ test('a Claude Code without --append-system-prompt-file gets the instructions at
   assert.match(last.prompt,/^<opaya-instructions>\nYou are the Opaya Agent[\s\S]*<\/opaya-instructions>\n\nHello$/);
   agent.begin('Again');await settle(agent);assert.equal(fake.spawns.filter(x=>x.args.includes('--append-system-prompt-file')).length,1,'tried once, then remembered');
 });
+test('deleting the open Claude Code chat does not resume its session in the chat that opens',async t=>{
+  let next=0;
+  const {agent,fake}=await fixture(t,async({args})=>{
+    if(args.includes('json'))return [{type:'result',is_error:false,result:'OK',session_id:'s0'}];
+    const resumed=args.includes('--resume')?args[args.indexOf('--resume')+1]:`sess-${++next}`;
+    return [{type:'system',subtype:'init',session_id:resumed},{type:'assistant',message:{content:[{type:'text',text:'ok'}]}},{type:'result',is_error:false,result:'done',session_id:resumed}];
+  });
+  await agent.test({preset:'claude'});await agent.saveConfig({preset:'claude',model:''});
+  agent.begin('In chat A');await settle(agent);const a=agent.sessionId;
+  await agent.newSession();agent.begin('In chat B');await settle(agent);const b=agent.sessionId;
+  assert.notEqual(a,b);assert.equal(agent.claudeSessionId,'sess-2');
+  await agent.deleteSession(b);assert.equal(agent.sessionId,a);
+  agent.begin('Back in chat A');await settle(agent);
+  const run=fake.spawns.at(-1);assert.equal(run.prompt,'Back in chat A');
+  assert.equal(run.args.includes('sess-2'),false,'the deleted chat\'s Claude session is not resumed');
+});
