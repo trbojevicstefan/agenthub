@@ -128,6 +128,12 @@ The web app runs one runtime container for each active user. The launcher starts
    iptables -I DOCKER-USER -s 172.31.250.0/24 -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
    ```
 
+   The `DOCKER-USER` rules filter only traffic that goes through the VPS. Traffic to the VPS itself (for example to `172.31.250.1`) goes through the `INPUT` chain, so block that too:
+
+   ```sh
+   iptables -I INPUT -s 172.31.250.0/24 -m conntrack --ctstate NEW -j DROP
+   ```
+
    Make the rules permanent (for example with `iptables-persistent`). A runtime has no route to Postgres, the web server or the launcher: those are on other networks.
 5. For browser notifications, make VAPID keys with `npx web-push generate-vapid-keys` and put them in Secret Manager as `WEB_PUSH_PUBLIC_KEY` and `WEB_PUSH_PRIVATE_KEY`. Without them, the web app has no notifications.
 6. Add `OPAYA_EGRESS_IP=<the VPS IP address>` to `deploy/.env` and to the web service's environment. The web app shows it next to the web SSH key, so users can allow it in their firewalls.

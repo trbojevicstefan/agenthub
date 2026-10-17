@@ -66,7 +66,8 @@ export function billingPlugin({ config, db, client }: { config: Config; db: Data
 }
 
 // Before an account is deleted: end its organization's Stripe customer (this ends its subscriptions at once) and remove
-// the organization with its subscriptions and members.
+// the organization with its subscriptions, members, web app secrets and synced records, and the user's browser
+// subscriptions and approval rules.
 export async function deleteOrganizationsOf({ db, client, userId }: { db: Database; client: Stripe; userId: string }) {
   const owned = await db.selectFrom("member").select("organizationId").where("userId", "=", userId).where("role", "=", "owner").execute();
   for (const { organizationId } of owned) {
@@ -78,10 +79,15 @@ export async function deleteOrganizationsOf({ db, client, userId }: { db: Databa
         if ((error as { code?: string }).code !== "resource_missing") throw error;
       }
     }
+    await db.deleteFrom("opaya_secret").where("organization_id", "=", organizationId).execute();
+    await db.deleteFrom("opaya_sync_record").where("organization_id", "=", organizationId).execute();
+    await db.deleteFrom("opaya_sync_state").where("organization_id", "=", organizationId).execute();
     await db.deleteFrom("subscription").where("referenceId", "=", organizationId).execute();
     await db.deleteFrom("invitation").where("organizationId", "=", organizationId).execute();
     await db.deleteFrom("member").where("organizationId", "=", organizationId).execute();
     await db.deleteFrom("organization").where("id", "=", organizationId).execute();
   }
   await db.deleteFrom("member").where("userId", "=", userId).execute();
+  await db.deleteFrom("opaya_push_subscription").where("user_id", "=", userId).execute();
+  await db.deleteFrom("opaya_approval_rule").where("user_id", "=", userId).execute();
 }

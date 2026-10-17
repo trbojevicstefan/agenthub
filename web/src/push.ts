@@ -24,6 +24,8 @@ export interface PushPayload {
 type Send = (subscription: webpush.PushSubscription, payload: string, options: webpush.RequestOptions) => Promise<unknown>;
 
 const MAX_SUBSCRIPTIONS = 10;
+// The browsers' push services (Chrome, Firefox, Edge and Windows, Safari). The server sends to no other host.
+const PUSH_HOSTS = [/^(fcm|android)\.googleapis\.com$/, /^[a-z0-9.-]+\.push\.services\.mozilla\.com$/, /^[a-z0-9.-]+\.notify\.windows\.com$/, /^[a-z0-9.-]+\.push\.apple\.com$/];
 const B64URL = /^[A-Za-z0-9_-]{8,200}$/;
 
 export function pushService({ db, publicKey, privateKey, subject = "mailto:support@opaya.dev", send = webpush.sendNotification as Send }: { db: Database; publicKey: string; privateKey: string; subject?: string; send?: Send }) {
@@ -38,7 +40,7 @@ export function pushService({ db, publicKey, privateKey, subject = "mailto:suppo
       } catch {
         throw new Error("Invalid push subscription.");
       }
-      if (url.protocol !== "https:" || String(sub.endpoint).length > 1000 || typeof sub.keys?.p256dh !== "string" || typeof sub.keys?.auth !== "string" || !B64URL.test(sub.keys.p256dh) || !B64URL.test(sub.keys.auth)) throw new Error("Invalid push subscription.");
+      if (url.protocol !== "https:" || url.port || url.username || !PUSH_HOSTS.some(host => host.test(url.hostname)) || String(sub.endpoint).length > 1000 || typeof sub.keys?.p256dh !== "string" || typeof sub.keys?.auth !== "string" || !B64URL.test(sub.keys.p256dh) || !B64URL.test(sub.keys.auth)) throw new Error("Invalid push subscription.");
       const id = createHash("sha256").update(url.toString()).digest("hex");
       await db
         .insertInto("opaya_push_subscription")

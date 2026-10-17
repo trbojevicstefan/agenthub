@@ -126,7 +126,7 @@ test("with browser notifications on, an approval waits for a tab and a push goes
   const port = (server.address() as AddressInfo).port;
   const { browser, organizationId, user } = await verifiedUser(env);
   await startTrial(env, browser, organizationId);
-  await push.subscribe(user.id, { endpoint: "https://push.example/sub/1", keys: { p256dh: "BEl62iUYgUivxIkv69yViEuiBIa40HI80NM9OBhDBJ5yk", auth: "tBHItJI5svbpez7KI4CCXg" } });
+  await push.subscribe(user.id, { endpoint: "https://fcm.googleapis.com/fcm/send/sub1", keys: { p256dh: "BEl62iUYgUivxIkv69yViEuiBIa40HI80NM9OBhDBJ5yk", auth: "tBHItJI5svbpez7KI4CCXg" } });
   const cookie = [...browser.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
 
   let tab = open(port, cookie);

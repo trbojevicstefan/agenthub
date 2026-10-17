@@ -1,12 +1,14 @@
 // The web SSH key (Phase 2): one Ed25519 key pair for each user, in OpenSSH's own formats, made with node:crypto (the
 // server has no ssh-keygen). The private key stays in the user's KMS secret store; the runtime gets it through its
 // Vault socket. The public key line ends with "opaya-web <organization ID>", so the desktop app can remove exactly that
-// line from a machine's authorized_keys.
+// line from a machine's authorized_keys. The public key is always read from the private key, so the runtime cannot
+// make the desktop app install another key.
 import { generateKeyPairSync, randomBytes } from "node:crypto";
 import type { SecretStore } from "./secret-store.js";
 
 export const PRIVATE_KEY_NAME = "opaya_web_ssh_key";
-export const PUBLIC_KEY_NAME = "opaya_web_ssh_pub";
+// Vault keys that only the web server writes: the runtime's Vault socket refuses changes to them (vault-socket.ts).
+export const RESERVED_NAMES = new Set([PRIVATE_KEY_NAME]);
 
 const u32 = (n: number) => {
   const b = Buffer.alloc(4);
@@ -38,13 +40,40 @@ export function newSshKey(comment: string) {
   };
 }
 
-// The organization's web SSH key, made the first time it is needed.
+// The public key line of an OpenSSH private key. openssh-key-v1 keeps the public key unencrypted after the header.
+export function publicKeyOf(privateKey: string, comment: string) {
+  const blob = Buffer.from(privateKey.replace(/-----(BEGIN|END) OPENSSH PRIVATE KEY-----/g, "").replace(/\s+/g, ""), "base64");
+  const magic = "openssh-key-v1\0";
+  let at = magic.length;
+  const field = () => {
+    const n = blob.readUInt32BE(at);
+    if (at + 4 + n > blob.length) throw new RangeError("Short key.");
+    const value = blob.subarray(at + 4, at + 4 + n);
+    at += 4 + n;
+    return value;
+  };
+  try {
+    if (blob.subarray(0, at).toString("latin1") !== magic) throw new Error("No OpenSSH key.");
+    field(), field(), field(); // cipher, KDF, KDF options
+    if (blob.readUInt32BE(at) !== 1) throw new Error("Not one key.");
+    at += 4;
+    const pub = field();
+    if (pub.length !== 51 || pub.subarray(0, 15).toString("latin1") !== "\0\0\0\x0bssh-ed25519") throw new Error("Not an Ed25519 key.");
+    return `ssh-ed25519 ${pub.toString("base64")} ${comment}`;
+  } catch {
+    throw new Error("The stored web SSH key is not valid.");
+  }
+}
+
+// The organization's web SSH key, made the first time it is needed. Two first calls at the same time keep the key
+// that was stored first.
 export async function webSshKey(store: SecretStore, organizationId: string) {
-  const existing = await store.get(PUBLIC_KEY_NAME);
-  if (existing && (await store.has(PRIVATE_KEY_NAME))) return existing;
-  const key = newSshKey(`opaya-web ${organizationId}`);
-  // The Vault keeps one line per value, so the private key is kept as base64.
-  await store.set(PRIVATE_KEY_NAME, Buffer.from(key.privateKey).toString("base64"));
-  await store.set(PUBLIC_KEY_NAME, key.publicKey);
-  return key.publicKey;
+  const comment = `opaya-web ${organizationId}`;
+  let stored = await store.get(PRIVATE_KEY_NAME);
+  if (!stored) {
+    // The Vault keeps one line per value, so the private key is kept as base64.
+    await store.create(PRIVATE_KEY_NAME, Buffer.from(newSshKey(comment).privateKey).toString("base64"));
+    stored = await store.get(PRIVATE_KEY_NAME);
+  }
+  return publicKeyOf(Buffer.from(stored, "base64").toString("utf8"), comment);
 }

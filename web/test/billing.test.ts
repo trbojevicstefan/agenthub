@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { push } from "../src/sync.js";
 import { Browser, setup, verifiedUser } from "./helpers.js";
 
 type Env = Awaited<ReturnType<typeof setup>>;
@@ -81,15 +82,20 @@ test("only the owner changes an organization's subscription, and webhooks need S
   assert.equal(forged.status, 400);
 });
 
-test("deleting the account ends its Stripe customer and removes its organization", async t => {
-  const env = await setup();
+test("deleting the account ends its Stripe customer and removes its organization and its web app data", async t => {
+  const removed: string[] = [];
+  const env = await setup({ onDeleteUser: async userId => void removed.push(userId) });
   t.after(env.close);
-  const { browser, organizationId } = await verifiedUser(env);
+  const { browser, organizationId, user } = await verifiedUser(env);
   await checkout(env, browser, organizationId, "pro");
+  await env.store(organizationId).set("opaya_web_ssh_key", "c2VjcmV0");
+  await push(env.db, organizationId, [{ kind: "host", id: "0f8fad5b-d9cb-469f-a165-70867728950e", data: { name: "vps" } }]);
+  await env.db.insertInto("opaya_push_subscription").values({ id: "p1", user_id: user.id, endpoint: "https://fcm.googleapis.com/fcm/send/x", p256dh: "k", auth: "a" }).execute();
+  await env.db.insertInto("opaya_approval_rule").values({ user_id: user.id, rule: "[]" }).execute();
   const response = await browser.fetch("/api/auth/delete-user", { json: { password: "correct horse battery" } });
   assert.equal(response.status, 200, await response.clone().text());
   assert.ok(env.stripe.calls.some(c => c.method === "customers.del"));
-  assert.equal((await env.db.selectFrom("organization").selectAll().execute()).length, 0);
-  assert.equal((await env.db.selectFrom("subscription").selectAll().execute()).length, 0);
-  assert.equal((await env.db.selectFrom("user").selectAll().execute()).length, 0);
+  assert.deepEqual(removed, [user.id], "the web app stops the runtime and removes the folder");
+  for (const table of ["organization", "subscription", "user", "opaya_secret", "opaya_sync_record", "opaya_sync_state", "opaya_push_subscription", "opaya_approval_rule"] as const)
+    assert.equal((await env.db.selectFrom(table).selectAll().execute()).length, 0, table);
 });

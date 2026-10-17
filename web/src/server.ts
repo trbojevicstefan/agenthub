@@ -1,4 +1,5 @@
 import { Hono, type Context, type MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { secureHeaders } from "hono/secure-headers";
 import type { Auth } from "./auth.js";
 import type { Config } from "./config.js";
@@ -45,6 +46,23 @@ function sessions(auth: Auth): MiddlewareHandler<Env> {
   };
 }
 
+// The server's own JSON routes (not /api/auth: better-auth checks those itself) take JSON only, and a cookie session
+// only from Opaya's own pages. A page on another site, also on a sibling domain, sends its own origin. The desktop
+// app sends a bearer token, which a page on another site cannot add without the server's consent (CORS).
+function sameOrigin(config: Config): MiddlewareHandler<Env> {
+  return async (c, next) => {
+    if (c.req.method === "GET" || c.req.method === "HEAD" || c.req.path.startsWith("/api/auth/")) return next();
+    if (!/^application\/json\s*(;|$)/i.test(c.req.header("content-type") ?? "")) return c.json({ code: "CONTENT_TYPE", message: "Send JSON." }, 415);
+    if (!c.req.header("authorization") && c.req.header("origin") !== config.baseURL) return c.json({ code: "ORIGIN", message: "This request must come from an Opaya page." }, 403);
+    await next();
+  };
+}
+
+// Request bodies: sync pushes (the desktop app sends at most 8 MB at a time), better-auth (also Stripe webhooks) and
+// everything else (forms and small JSON).
+const tooLarge = (c: Context) => c.json({ code: "TOO_LARGE", message: "The request is too large." }, 413);
+const LIMITS = { sync: bodyLimit({ maxSize: 16 * 1024 * 1024, onError: tooLarge }), auth: bodyLimit({ maxSize: 1024 * 1024, onError: tooLarge }), other: bodyLimit({ maxSize: 128 * 1024, onError: tooLarge }) };
+
 // Pages load only their own files. Forms may lead to Stripe and to the GitHub and Google sign-in pages.
 const CSP = {
   defaultSrc: ["'self'"],
@@ -65,6 +83,8 @@ export function createApp(deps: AppDeps) {
   // /app sets its own policy (runtime/app.ts): the shared interface uses inline styles.
   const appHeaders = secureHeaders({ contentSecurityPolicy: undefined, strictTransportSecurity: false, referrerPolicy: "strict-origin-when-cross-origin", xFrameOptions: "DENY" });
   app.use("*", (c, next) => (c.req.path === "/app" || c.req.path.startsWith("/app/") ? appHeaders(c, next) : pageHeaders(c, next)));
+  app.use("*", (c, next) => (c.req.path === "/api/sync" ? LIMITS.sync : c.req.path.startsWith("/api/auth/") ? LIMITS.auth : LIMITS.other)(c, next));
+  app.use("/api/*", sameOrigin(config));
   app.use("*", sessions(auth));
   app.get("/api/health", c => c.json({ ok: true, production: config.production }));
   app.on(["GET", "POST"], "/api/auth/*", c => auth.handler(c.req.raw));

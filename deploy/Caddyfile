@@ -7,5 +7,11 @@
 		Referrer-Policy strict-origin-when-cross-origin
 		-Server
 	}
+	# The web server has its own limits (web/src/server.ts). This one stops a large body before it reaches the server.
+	# The web app's WebSocket is not a request body.
+	@body not path /app/ws
+	request_body @body {
+		max_size 20MB
+	}
 	reverse_proxy web:3000
 }

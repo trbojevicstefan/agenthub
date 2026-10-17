@@ -23,6 +23,13 @@ const OWN_TABLES = [
   ...SYNC_TABLES,
   // Web Push subscriptions of the web app's browsers (push.ts).
   PUSH_TABLE,
+  // "Always allow" answers in the web app (runtime/relay.ts).
+  sql`create table if not exists opaya_approval_rule (
+    user_id text not null,
+    rule text not null,
+    created_at timestamptz not null default now(),
+    primary key (user_id, rule)
+  )`,
 ];
 
 export async function migrate(auth: Auth, db: Database) {

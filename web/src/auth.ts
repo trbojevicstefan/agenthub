@@ -19,6 +19,9 @@ export interface AuthDeps {
   mailer: Mailer;
   stripe?: Stripe;
   rateLimit?: boolean;
+  // Before an account is deleted, after its sign-in check: the web app closes its tabs, stops its runtime and removes
+  // its folder.
+  onDeleteUser?: (userId: string) => Promise<void>;
 }
 
 export const deviceName = (value: string | null | undefined) =>
@@ -27,7 +30,7 @@ export const deviceName = (value: string | null | undefined) =>
     .trim()
     .slice(0, 60);
 
-export function createAuth({ config, db, mailer, stripe = stripeClient(config), rateLimit = config.production }: AuthDeps) {
+export function createAuth({ config, db, mailer, stripe = stripeClient(config), rateLimit = config.production, onDeleteUser }: AuthDeps) {
   const s = config.secrets;
   const socialProviders = {
     ...(s.GITHUB_CLIENT_ID && s.GITHUB_CLIENT_SECRET ? { github: { clientId: s.GITHUB_CLIENT_ID, clientSecret: s.GITHUB_CLIENT_SECRET } } : {}),
@@ -83,7 +86,15 @@ export function createAuth({ config, db, mailer, stripe = stripeClient(config), 
     },
     socialProviders,
     account: { accountLinking: { enabled: true, trustedProviders: ["github", "google"] } },
-    user: { deleteUser: { enabled: true, beforeDelete: async user => deleteOrganizationsOf({ db, client: stripe, userId: user.id }) } },
+    user: {
+      deleteUser: {
+        enabled: true,
+        beforeDelete: async user => {
+          await onDeleteUser?.(user.id).catch(error => console.warn(`The web app data of a deleted account was not removed: ${(error as Error)?.message ?? error}`));
+          await deleteOrganizationsOf({ db, client: stripe, userId: user.id });
+        },
+      },
+    },
     session: {
       additionalFields: {
         // "desktop" for sessions the device flow created. Desktop sessions reach only an allowlist (server.ts).

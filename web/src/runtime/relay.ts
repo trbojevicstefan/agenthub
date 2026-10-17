@@ -1,7 +1,8 @@
 // The web app's transport: one WebSocket per browser tab at /app/ws (ui/web-transport.js is the other end). A tab
-// reaches only its own user's runtime, after the session cookie, the origin and the plan (web access) are checked.
-// Calls are relayed from an allowlist; events from the runtime go to every tab of that user.
-import { readFile, writeFile } from "node:fs/promises";
+// reaches only its own user's runtime, after the session cookie, the origin and the plan (web access) are checked, and
+// it keeps its socket only while the session and the plan last. Calls are relayed from an allowlist; events from the
+// runtime go to every tab of that user.
+import { lstat, mkdir } from "node:fs/promises";
 import type { IncomingMessage, Server } from "node:http";
 import { join } from "node:path";
 import type { Duplex } from "node:stream";
@@ -41,6 +42,8 @@ export interface RelayDeps {
   manager: RuntimeManager;
   usersDir: string;
   push?: PushService;
+  // Tests: a shorter time between session checks.
+  recheckMs?: number;
 }
 
 interface Approval {
@@ -50,6 +53,12 @@ interface Approval {
   title?: string;
   detail?: string;
 }
+
+// "Always allow" answers of each user (the table opaya_approval_rule). They live in Postgres, not in the user's folder:
+// the runtime can write there.
+const MAX_RULES = 500, MAX_RULE = 4000;
+// How often open sockets are checked against their session and plan.
+const RECHECK_MS = 30_000;
 
 const snippet = (text: unknown) => String(text ?? "").replace(/[`*_#>|]/g, "").replace(/\s+/g, " ").trim().slice(0, 180) || "Open Opaya to read it.";
 
@@ -65,11 +74,16 @@ class Room {
   constructor(
     public userId: string,
     public client: ServiceClient,
-    private dir: string,
+    private db: Database,
     private push?: PushService,
   ) {
     for (const event of ["state", "terminal", "job", "notice", "reply"]) client.on(event, value => this.broadcast(event, value));
-    client.on("approval", (request: Approval) => void this.approval(request));
+    // An approval that fails here is denied.
+    client.on("approval", (request: Approval) =>
+      void this.approval(request).catch(() => {
+        if (!client.socket.destroyed) client.answer(request.id, false);
+      }),
+    );
     client.on("state", (state: { settings?: Record<string, unknown>; opayaAgent?: { busy?: boolean; messages?: { role: string; content?: string; error?: string }[] } }) => {
       if (state?.settings) this.settings = state.settings;
       const o = state?.opayaAgent;
@@ -96,7 +110,7 @@ class Room {
     for (const tab of this.tabs) if (tab.readyState === 1) tab.send(line);
   }
   private async loadRules() {
-    this.rules ??= new Set(await readFile(join(this.dir, "approval-rules.json"), "utf8").then(t => JSON.parse(t) as string[], () => []));
+    this.rules ??= new Set((await this.db.selectFrom("opaya_approval_rule").select("rule").where("user_id", "=", this.userId).execute()).map(r => r.rule as string));
     return this.rules;
   }
   // Web Push when no Opaya tab is in front, for the kinds the user's Notifications settings allow.
@@ -140,8 +154,10 @@ class Room {
     }
     if (x.choice === "always") {
       const rules = await this.loadRules();
-      rules.add(pending.key);
-      await writeFile(join(this.dir, "approval-rules.json"), JSON.stringify([...rules]), { mode: 0o600 });
+      if (!rules.has(pending.key) && rules.size < MAX_RULES && pending.key.length <= MAX_RULE) {
+        await this.db.insertInto("opaya_approval_rule").values({ user_id: this.userId, rule: pending.key }).onConflict(oc => oc.columns(["user_id", "rule"]).doNothing()).execute();
+        rules.add(pending.key);
+      }
     }
     const allow = x.choice === "once" || x.choice === "always";
     this.client.answer(id, allow);
@@ -150,9 +166,43 @@ class Room {
   }
 }
 
-export function attachRelay(server: Server, { config, auth, db, manager, usersDir, push }: RelayDeps) {
+// The folders the relay writes uploads to, made when they are missing. The runtime can change its own folder, so
+// each part must be a real folder, not a link to another place.
+async function realFolders(root: string, ...parts: string[]) {
+  let dir = root;
+  for (const part of parts) {
+    dir = join(dir, part);
+    await mkdir(dir, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "EEXIST") throw error;
+    });
+    if (!(await lstat(dir)).isDirectory()) throw new Error("The files could not be sent. Try again.");
+  }
+}
+
+export function attachRelay(server: Server, { config, auth, db, manager, usersDir, push, recheckMs = RECHECK_MS }: RelayDeps) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 24 * 1024 * 1024 });
   const rooms = new Map<string, Room>();
+  // Each open socket's session and organization, checked again every RECHECK_MS: sign-out, a revoked session, a
+  // deleted account or a plan without the web app closes it.
+  const tabs = new Map<WebSocket, { sessionId: string; userId: string; organizationId: string }>();
+  const recheck = setInterval(() => void checkTabs().catch(error => console.warn(`Session check failed: ${(error as Error)?.message ?? error}`)), recheckMs);
+  recheck.unref();
+  server.on("close", () => clearInterval(recheck));
+  async function checkTabs() {
+    const open = [...tabs];
+    if (!open.length) return;
+    const ids = [...new Set(open.map(([, tab]) => tab.sessionId))];
+    const live = new Set((await db.selectFrom("session").select("id").where("id", "in", ids).where("expiresAt", ">", new Date()).execute()).map(r => r.id as string));
+    const web = new Map<string, boolean>();
+    for (const [ws, tab] of open) {
+      if (!live.has(tab.sessionId)) {
+        ws.close(4401, "The session ended. Sign in again.");
+        continue;
+      }
+      if (!web.has(tab.organizationId)) web.set(tab.organizationId, (await entitlementsFor(db, tab.organizationId)).features.web);
+      if (!web.get(tab.organizationId)) ws.close(4402, "The web app comes with Pro and Fleet.");
+    }
+  }
   const refuse = (socket: Duplex, status: number) => {
     socket.write(`HTTP/1.1 ${status} ${status === 403 ? "Forbidden" : "Not Found"}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
     socket.destroy();
@@ -171,7 +221,11 @@ export function attachRelay(server: Server, { config, auth, db, manager, usersDi
       const organizationId = ((session.session as { activeOrganizationId?: string }).activeOrganizationId as string) || (await auth.personalOrganization(session.user.id));
       const entitlements = await entitlementsFor(db, organizationId);
       if (!entitlements.features.web) return closeWith(req, socket, head, 4402, "The web app comes with Pro and Fleet.");
-      wss.handleUpgrade(req, socket, head, ws => void bridge(ws, { id: session.user.id, organizationId, hostLimit: entitlements.limits.hosts }));
+      wss.handleUpgrade(req, socket, head, ws => {
+        tabs.set(ws, { sessionId: session.session.id, userId: session.user.id, organizationId });
+        ws.on("close", () => tabs.delete(ws));
+        void bridge(ws, { id: session.user.id, organizationId, hostLimit: entitlements.limits.hosts });
+      });
     })().catch(() => refuse(socket, 403));
   });
 
@@ -183,7 +237,7 @@ export function attachRelay(server: Server, { config, auth, db, manager, usersDi
       return ws.close(4503, "The runtime did not start.");
     }
     let room = rooms.get(user.id);
-    if (!room || room.client !== client) rooms.set(user.id, (room = new Room(user.id, client, join(usersDir, user.id), push)));
+    if (!room || room.client !== client) rooms.set(user.id, (room = new Room(user.id, client, db, push)));
     const current = room;
     current.join(ws);
     ws.on("close", () => {
@@ -226,6 +280,7 @@ export function attachRelay(server: Server, { config, auth, db, manager, usersDi
       const dir = join(usersDir, room.userId);
       // A browser has no paths of its own: only files it sends, or files already in the user's folder.
       if (Array.isArray(input.attachments)) input.attachments = input.attachments.filter((a: { data?: unknown; path?: unknown }) => a && (a.data !== undefined || (typeof a.path === "string" && a.path.startsWith("/data/") && !a.path.includes(".."))));
+      if (input.attachments?.some((a: { data?: unknown }) => a.data !== undefined)) await realFolders(dir, "attachments", "pasted");
       const staged = await attachments.stage(input, dir);
       const moved = { ...staged.input, attachments: (staged.input.attachments ?? []).map(a => (a.path?.startsWith(dir + "/") ? { ...a, path: "/data" + a.path.slice(dir.length) } : a)) };
       try {
@@ -238,5 +293,11 @@ export function attachRelay(server: Server, { config, auth, db, manager, usersDi
     if (!Object.hasOwn(FORWARD, method)) throw new Error("This works in the Opaya desktop app only.");
     return room.client.call(method, input, FORWARD[method]);
   }
-  return wss;
+  return {
+    wss,
+    // A deleted account: its tabs close at once.
+    closeUser(userId: string) {
+      for (const [ws, tab] of tabs) if (tab.userId === userId) ws.close(4401, "The account was deleted.");
+    },
+  };
 }

@@ -10,6 +10,8 @@ import type { Database } from "./db.js";
 export interface SecretStore {
   get(name: string): Promise<string>;
   set(name: string, value: string): Promise<void>;
+  // Stores the value only when the name has none. Returns true when it stored it.
+  create(name: string, value: string): Promise<boolean>;
   remove(name: string): Promise<void>;
   has(name: string): Promise<boolean>;
   list(): Promise<string[]>;
@@ -81,6 +83,20 @@ export function kmsSecretStore({ db, kms, organizationId }: { db: Database; kms:
     if (!NAME.test(name) || Object.hasOwn(Object.prototype, name)) throw new Error("Invalid secret name.");
     return name;
   };
+  // The row for a new value: a new data key encrypts it, and Cloud KMS wraps the data key.
+  const seal = async (name: string, value: string) => {
+    checkName(name);
+    if (typeof value !== "string" || Buffer.byteLength(value) > MAX_VALUE || value.includes("\0")) throw new Error("Invalid secret value.");
+    const aad = aadFor(organizationId, name), dataKey = randomBytes(32), iv = randomBytes(12);
+    try {
+      const cipher = createCipheriv("aes-256-gcm", dataKey, iv).setAAD(aad);
+      const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+      const wrapped = await kms.encrypt(dataKey, aad);
+      return { organization_id: organizationId, name, ciphertext, iv, tag: cipher.getAuthTag(), wrapped_key: wrapped.ciphertext, kms_key_version: wrapped.keyVersion };
+    } finally {
+      dataKey.fill(0);
+    }
+  };
   return {
     async get(name) {
       const row = await db.selectFrom("opaya_secret").selectAll().where("organization_id", "=", organizationId).where("name", "=", checkName(name)).executeTakeFirst();
@@ -96,23 +112,24 @@ export function kmsSecretStore({ db, kms, organizationId }: { db: Database; kms:
       }
     },
     async set(name, value) {
-      checkName(name);
-      if (typeof value !== "string" || Buffer.byteLength(value) > MAX_VALUE || value.includes("\0")) throw new Error("Invalid secret value.");
-      if (!value) return this.remove(name);
-      const aad = aadFor(organizationId, name), dataKey = randomBytes(32), iv = randomBytes(12);
-      try {
-        const cipher = createCipheriv("aes-256-gcm", dataKey, iv).setAAD(aad);
-        const ciphertext = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-        const wrapped = await kms.encrypt(dataKey, aad);
-        const row = { organization_id: organizationId, name, ciphertext, iv, tag: cipher.getAuthTag(), wrapped_key: wrapped.ciphertext, kms_key_version: wrapped.keyVersion };
-        await db
-          .insertInto("opaya_secret")
-          .values(row)
-          .onConflict(oc => oc.columns(["organization_id", "name"]).doUpdateSet({ ...row, updated_at: sql`now()` }))
-          .execute();
-      } finally {
-        dataKey.fill(0);
-      }
+      if (!value && typeof value === "string") return this.remove(name);
+      const row = await seal(name, value);
+      await db
+        .insertInto("opaya_secret")
+        .values(row)
+        .onConflict(oc => oc.columns(["organization_id", "name"]).doUpdateSet({ ...row, updated_at: sql`now()` }))
+        .execute();
+    },
+    async create(name, value) {
+      if (!value) throw new Error("Invalid secret value.");
+      const row = await seal(name, value);
+      const inserted = await db
+        .insertInto("opaya_secret")
+        .values(row)
+        .onConflict(oc => oc.columns(["organization_id", "name"]).doNothing())
+        .returning("name")
+        .executeTakeFirst();
+      return Boolean(inserted);
     },
     async remove(name) {
       await db.deleteFrom("opaya_secret").where("organization_id", "=", organizationId).where("name", "=", checkName(name)).execute();

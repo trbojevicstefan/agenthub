@@ -17,12 +17,20 @@ import type { Server } from "node:http";
 const config = await loadConfig();
 const db = postgres(config.secrets.DATABASE_URL!);
 const mailer = config.secrets.RESEND_API_KEY ? resendMailer({ apiKey: config.secrets.RESEND_API_KEY, from: config.emailFrom }) : consoleMailer;
-const auth = createAuth({ config, db, mailer });
+// The web app (Phase 2), set up below: runtime containers through the launcher, user secrets with Cloud KMS.
+let manager: RuntimeManager | null = null, relay: ReturnType<typeof attachRelay> | null = null, secrets: ((organizationId: string) => ReturnType<typeof kmsSecretStore>) | undefined;
+const auth = createAuth({
+  config,
+  db,
+  mailer,
+  onDeleteUser: async userId => {
+    relay?.closeUser(userId);
+    await manager?.remove(userId);
+  },
+});
 const changes = await migrate(auth, db);
 if (changes.created.length || changes.added.length) console.log(`Database updated. New tables: ${changes.created.join(", ") || "none"}. New columns in: ${changes.added.join(", ") || "none"}.`);
 const signer = await createSigner(config.secrets.ENTITLEMENTS_PRIVATE_KEY!, config.baseURL);
-// The web app (Phase 2): runtime containers through the launcher, user secrets with Cloud KMS.
-let manager: RuntimeManager | null = null, secrets: ((organizationId: string) => ReturnType<typeof kmsSecretStore>) | undefined;
 if (config.runtime) {
   if (!config.runtime.kmsKey) console.warn("OPAYA_KMS_KEY is not set: user secrets use a key that lives only in this process (development only).");
   const kms = config.runtime.kmsKey ? cloudKms(config.runtime.kmsKey) : localKeyWrapper();
@@ -45,7 +53,9 @@ setInterval(() => void purgeTombstones(db).catch(error => console.warn(`Tombston
 const server = serve({ fetch: app.fetch, port: config.port, hostname: "0.0.0.0" }, info => {
   console.log(`Opaya web listens on port ${info.port} for ${config.baseURL}.`);
 });
-if (manager && config.runtime) attachRelay(server as Server, { config, auth, db, manager, usersDir: config.runtime.usersDir, push: webPush });
+if (manager && config.runtime) relay = attachRelay(server as Server, { config, auth, db, manager, usersDir: config.runtime.usersDir, push: webPush });
+// One failed background task must not stop the server for all users.
+process.on("unhandledRejection", error => console.error(`Unhandled error: ${(error as Error)?.stack ?? error}`));
 for (const signal of ["SIGTERM", "SIGINT"] as const)
   process.on(signal, () =>
     server.close(() => {

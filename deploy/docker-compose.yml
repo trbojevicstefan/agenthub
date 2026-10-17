@@ -53,6 +53,8 @@ services:
         condition: service_healthy
       launcher:
         condition: service_started
+    # A flood of requests cannot take the memory of the runtimes and Postgres.
+    mem_limit: 2g
     read_only: true
     tmpfs:
       - /tmp

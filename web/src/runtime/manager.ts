@@ -2,7 +2,8 @@
 // service: it makes the user's folder and Vault socket, asks the launcher to start the container, waits for the
 // service's socket, and stops the container when nobody uses it.
 import { EventEmitter } from "node:events";
-import { mkdir, readFile, rm } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, mkdir, open, readFile, rm } from "node:fs/promises";
 import type { Server } from "node:net";
 import { join } from "node:path";
 import type { SecretStore } from "../secret-store.js";
@@ -29,6 +30,19 @@ export interface RuntimeUser {
 
 const wire = desktopModule<{ connect: (address: string, token: string, timeout?: number) => Promise<ServiceClient> }>("wire.cjs");
 const USER = /^[A-Za-z0-9_-]{8,64}$/;
+
+// A file the runtime wrote in its user's folder. The runtime can change that folder, so the server does not follow a
+// link there (a link could point at another user's files) and reads only a small regular file.
+async function readOwn(file: string, max = 64 * 1024) {
+  const handle = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const st = await handle.stat();
+    if (!st.isFile() || st.size > max) throw new Error("The runtime's session file is not a regular file.");
+    return await handle.readFile("utf8");
+  } finally {
+    await handle.close();
+  }
+}
 
 interface Runtime {
   user: RuntimeUser;
@@ -100,6 +114,8 @@ export class RuntimeManager extends EventEmitter {
     if (r.holders.size) return;
     if (r.client && !r.client.socket.destroyed) {
       const [snapshot, jobs] = await Promise.all([r.client.call("snapshot"), r.client.call("jobs").catch(() => [])]);
+      // A tab attached while the runtime answered.
+      if (r.holders.size || this.runtimes.get(r.user.id) !== r) return;
       const busy = (snapshot?.agents ?? []).some((a: { busy?: boolean }) => a.busy) || (snapshot?.opayaAgent?.busy ?? false) || (jobs as { status?: string }[]).some(j => j.status === "running");
       const scheduled = (snapshot?.schedules ?? []).some((s: { enabled?: boolean }) => s.enabled !== false);
       if (busy || scheduled) return this.armIdle(r);
@@ -139,8 +155,9 @@ export class RuntimeManager extends EventEmitter {
     let last: unknown;
     while (Date.now() < deadline) {
       try {
-        const descriptor = JSON.parse(await readFile(join(r.dir, "session-service.json"), "utf8")) as { token?: string };
-        if (descriptor.token) return await wire.connect(join(r.dir, "session.sock"), descriptor.token, 5000);
+        const descriptor = JSON.parse(await readOwn(join(r.dir, "session-service.json"))) as { token?: string };
+        const socket = join(r.dir, "session.sock");
+        if (descriptor.token && (await lstat(socket)).isSocket()) return await wire.connect(socket, descriptor.token, 5000);
       } catch (error) {
         last = error;
       }
@@ -156,6 +173,13 @@ export class RuntimeManager extends EventEmitter {
     r?.client?.close();
     r?.vault?.close();
     await (await this.options.launcher()).call("stop", { userId }, 60_000);
+  }
+
+  // A deleted account: its runtime stops and its folder goes.
+  async remove(userId: string) {
+    if (!USER.test(userId)) return;
+    await this.stop(userId).catch(() => {});
+    await rm(join(this.options.usersDir, userId), { recursive: true, force: true });
   }
 
   // At start and at shutdown: no runtime keeps an old Vault token.

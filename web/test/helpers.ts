@@ -25,14 +25,14 @@ export function testConfig(secrets: Config["secrets"] = {}): Config {
   };
 }
 
-export async function setup({ rateLimit = false, secrets = {}, runtime = null }: { rateLimit?: boolean; secrets?: Config["secrets"]; runtime?: Config["runtime"] } = {}) {
+export async function setup({ rateLimit = false, secrets = {}, runtime = null, onDeleteUser }: { rateLimit?: boolean; secrets?: Config["secrets"]; runtime?: Config["runtime"]; onDeleteUser?: (userId: string) => Promise<void> } = {}) {
   const kms = localKeyWrapper();
   const pglite = new PGlite();
   const db = createDatabase(new PGliteDialect(pglite));
   const mails: Email[] = [];
   const config = { ...testConfig(secrets), runtime };
   const stripe = fakeStripe();
-  const auth = createAuth({ config, db, mailer: async m => void mails.push(m), stripe: stripe.client, rateLimit });
+  const auth = createAuth({ config, db, mailer: async m => void mails.push(m), stripe: stripe.client, rateLimit, onDeleteUser });
   await migrate(auth, db);
   const signer = await createSigner(JSON.stringify(await newKey("test-key")), config.baseURL);
   const store = (organizationId: string) => kmsSecretStore({ db, kms, organizationId });
