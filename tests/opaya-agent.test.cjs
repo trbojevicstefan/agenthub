@@ -555,3 +555,13 @@ test('a Vault key gets a new value and is written again for the agents that had 
   const only=await agent.updateSecret({id:held.id,value:fresh.replace(/f/g,'e'),propagate:false});
   assert.deepEqual(only.updated,[]);assert.match(await fs.readFile(path.join(hermesHome,'.env'),'utf8'),/ffff/);
 });
+test('the MCP listing gives each saved server\'s id, which the management tools take',async t=>{
+  const {agent,broker}=await fixture(t,[]);
+  const a=await broker.saveAgent({agent:apiAgent('one',8642)});
+  const s=await broker.saveMcpServer({server:{name:'github',type:'stdio',command:'npx',args:['-y','@modelcontextprotocol/server-github']},env:'GITHUB_TOKEN=ghp_secretvalue123'});
+  agent.appAction=(name,input)=>name==='agentMcp'?broker.setAgentMcp(input):Promise.reject(new Error(name));
+  const {servers}=await agent.tool('list_mcp_servers',{});
+  assert.equal(servers[0].id,s.id);assert.equal(servers[0].name,'github');assert(!JSON.stringify(servers).includes('ghp_secretvalue123'));
+  await agent.tool('mcp_server',{op:'disable',server:servers[0].id,agent_id:a.id});
+  assert.deepEqual(broker.data.mcpServers[0].agents,[]);
+});

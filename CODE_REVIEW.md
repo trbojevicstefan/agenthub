@@ -365,6 +365,11 @@ Use the default only when the selected value is missing or invalid.
 
 ### F17 — P2: The MCP listing omits IDs required for management
 
+- [x] Fixed on 2026-10-17 by returning each saved server's ID from `list_mcp_servers`.
+
+The tool description now says that `mcp_server` and `transfer` take this ID.
+A regression test lists a saved server, checks that no secret value appears, and turns the server off for an agent with the listed ID.
+
 Location: [desktop/opaya-agent.cjs:1120](desktop/opaya-agent.cjs#L1120).
 
 `list_mcp_servers` returns names and configuration but omits each saved server ID.
