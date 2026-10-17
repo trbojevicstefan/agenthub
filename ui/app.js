@@ -886,6 +886,8 @@
     // Settings is a page per topic, picked on the left; choosing an option redraws the page in place (same page, same
     // scroll, same filter) instead of reopening the dialog.
     if(focus&&SETTINGS_PAGE_OF[focus])settingsPage=SETTINGS_PAGE_OF[focus];
+    // Without accounts (this build) the Account page has no tab.
+    if(settingsPage==='account'&&!acct().enabled)settingsPage='look';
     const open=$('#app-dialog.settings-dialog'),keepAt=open?$('.set-pane',open)?.scrollTop:null,filter=open?$('.set-filter',open)?.value||'':'';
     const st=state.settings||{},on=(key,dflt=true)=>st[key]===undefined?dflt:!!st[key],cmd=state.platform==='darwin'?'\u2318':'Ctrl+',version=update.current?`Opaya ${esc(update.current)}`:'Opaya';
     const toggle=(key,label,hint='',dflt=true)=>`<label class="switch-row"><input type="checkbox" data-setting="${key}" ${on(key,dflt)?'checked':''}><span class="switch" aria-hidden="true"></span><span>${label}${hint?` <small>(${hint})</small>`:''}</span></label>`;
@@ -958,7 +960,7 @@
     const gear=anI('<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/>');
     const PLACE_ICON={overview:AN_ICON.overview,fleet:AN_ICON.machine,vault:AN_ICON.access,'vault-import':dkIcon('pull'),library:AN_ICON.library,'mcp-manage':AN_ICON.mcp,'docker-manager':dkIcon('box'),playground:AN_ICON.chat,opaya:AN_ICON.chat,'install-catalog':dkIcon('pull'),discover:dkIcon('inspect'),add:AN_ICON.plus,'new-vps':AN_ICON.plus,'connect-all':AN_ICON.power,'tool-updates':dkIcon('refresh'),'update-all':dkIcon('refresh'),'local-terminal':dkIcon('shell'),'files-local':AN_ICON.projects,settings:gear,help:dkIcon('inspect')};
     for(const [act,label,where,help,data] of FIND_PLACES)out.push({group:'Places',icon:PLACE_ICON[act]||'',label,path:[where],words:help,run:()=>fire(act,data)});
-    for(const [t,words] of SETTINGS_INDEX)out.push({group:'Settings',icon:gear,label:t,path:['Settings'],words,run:()=>openSettings(t)});
+    for(const [t,words] of SETTINGS_INDEX)if(t!=='Account'||acct().enabled)out.push({group:'Settings',icon:gear,label:t,path:['Settings'],words,run:()=>openSettings(t)});
     for(const [k,n] of [['local',localName()],...state.hosts.map(h=>[h.id,h.name])])out.push({group:'Machines',icon:AN_ICON.machine,label:n,path:['Machines'],words:`${k==='local'?'this computer local':`${state.hosts.find(h=>h.id===k)?.hostname||''} vps server remote`}`,run:()=>openFleet(k)});
     for(const c of state.conversations.slice().sort((x,y)=>String(y.createdAt).localeCompare(String(x.createdAt))).slice(0,200)){const a=state.agents.find(x=>x.id===c.agentId);if(!a)continue;out.push({group:'Chats',icon:AN_ICON.chat,label:chatLabel(c),path:[title(a),'Chats'],words:'',run:()=>fire('an-chat',{id:c.id})});}
     for(const k of vaultKeys())out.push({group:'Keys',icon:KEY_SVG,label:k.name,path:['Opaya Vault'],words:`${k.mask} key`,run:()=>{openVault();vault.filter=k.name;vault.open=k.id;drawVault();}});

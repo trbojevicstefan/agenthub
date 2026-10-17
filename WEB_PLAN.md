@@ -377,6 +377,24 @@ Changes from the design:
 | — | A synced agent with a new or changed executable asks "Trust this agent executable?" before it first runs, on each side. iTrust does not sync. | A changed record on the server must not start a new program on the user's machines without the user. |
 | An approval with no window is denied. | With browser notifications on, it waits for a tab (up to 10 minutes). | A web user can answer from the notification. |
 
+Security and sync review (17 October 2026). Two reviews (the web server, and the desktop changes) found these defects. All are fixed and have tests (`web/test/security.test.ts`, `tests/sync.test.cjs`):
+
+| Defect | Fix |
+| --- | --- |
+| An open web app tab kept working after sign-out, a revoked session, a deleted account or a plan change. | The relay checks each socket's session and plan every 30 seconds. A deleted account closes its tabs at once. |
+| The web server read and wrote files in the user's folder, which the runtime can change (links to other users' files). | "Always allow" rules are in Postgres (`opaya_approval_rule`). The server reads the runtime's session file without following links, checks the socket, and writes uploads only into real folders. |
+| The server's own JSON routes had no CSRF check. | Non-better-auth `/api/*` posts need JSON, and a cookie session needs Opaya's own origin. |
+| No body size limits. | 16 MB for sync, 1 MB for `/api/auth`, 128 KB for the rest; 20 MB in Caddy; `mem_limit: 2g` for the web service. The desktop app pushes at most 8 MB at a time. |
+| Account deletion left secrets, sync records, push subscriptions, the runtime and its folder. | `beforeDelete` removes them. |
+| The runtime could replace the web SSH public key. | The server derives the public key from the private key and makes the key with one atomic insert. The Vault socket refuses changes to it. |
+| Push endpoints could be any HTTPS host. | Only the browsers' push services. |
+| The firewall rules did not cover traffic to the VPS itself. | `deploy/README.md` adds an `INPUT` rule. |
+| Sync deleted an item that stopped syncing (for example a machine with only an alias now). | Such an item stays local and is not deleted on the server. |
+| One record that could not be applied stopped all incoming sync. | Records wait only for their parent in the same round; failures show in the sync status. |
+| A synced change switched the open chat and disconnected agents. | Sync saves keep the selection and disconnect only when the connection changed. A new machine name never disconnects. |
+| **Allow web access** reported success after a failed write. | `OPAYA_DONE` comes only when the file has (or no longer has) the key. |
+
+
 ## Open Items
 
 - **Test mode checks:** run the acceptance tests of sections 3 and 4 in Stripe test mode, and build and start both images on the VPS.
@@ -384,6 +402,7 @@ Changes from the design:
 - **Google Cloud key file:** the organization policy `iam.disableServiceAccountKeyCreation` can block the service account key. An admin must then allow an exception for this project.
 - **Tax:** the US company is the seller, so it must handle US sales tax and EU VAT. Stripe Tax (`automatic_tax`) calculates the tax, but the company must register where it has to.
 - **Desktop session mark:** check that the session-create hook can see that `/device/token` created the session.
+- **Runtime user:** the web server and the runtime containers both run as uid 10001. The server does not follow links in user folders, but a separate uid for runtimes (with a shared group for the session socket and the uploads) is a stronger boundary. Do this before the web app has many users.
 - **Schedules on the web (decided):** a runtime with an enabled schedule does not stop when idle (`web/src/runtime/manager.ts`). A scheduler in the web server can replace this later, if many idle runtimes stay on only for schedules.
 
 ## Defaults to Confirm

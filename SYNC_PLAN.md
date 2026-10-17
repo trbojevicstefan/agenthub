@@ -46,9 +46,13 @@ Secret values sync in one direction only: from the desktop app to the web app. A
 - A client finds its changes by hashing each record's data and comparing it with the hash of the last version it synced (kept in `sync-state.json`).
 - Each sync round first pulls, then applies the remote records, then pushes the local changes. So a client pushes only after it has seen the newest remote versions.
 - If two clients change the same record between two rounds, the version the server receives last wins (last writer wins, for each record). The other version is lost. This is acceptable for v1: one person uses both clients.
-- A remote change to an agent with an active turn waits for the next round.
+- A remote change to an agent with an active turn, or a new address for a machine with an active turn, waits for the next round. A new name applies at once.
+- A synced change keeps the agent and chat that are open, and disconnects an agent only when its connection changed.
+- Records come in change order, so a chat can come before its agent. A record whose machine, agent or chat is not there yet waits for the end of the same round.
+- A record that cannot be applied (for example a newer app's data, or the 2000-chat limit) is skipped. Its children are skipped too. The sync status shows the number. It is tried again when it changes on the server.
+- An item that stops syncing but stays here (a machine with only an alias now, an agent moved to this computer) is not deleted on the server. The other app keeps its copy, and changes from the server leave the local item as it is.
 - Messages of the same chat merge by message ID, so a chat used on both sides loses no message.
-- **Changed:** trust stays on each computer. A synced agent with a new or changed executable is saved with `trustPending`, and Opaya asks "Trust this agent executable?" before its program first runs there (a connection or its CLI in a terminal). This holds on both sides, so a changed record on the server cannot start a new program on the user's machines without the user. iTrust (approve tool requests automatically) does not sync.
+- **Changed:** trust stays on each computer. A synced agent with a new or changed executable (also the same one on another machine) is saved with `trustPending`, and Opaya asks "Trust this agent executable?" before its program first runs there (a connection or its CLI in a terminal). This holds on both sides, so a changed record on the server cannot start a new program on the user's machines without the user. iTrust (approve tool requests automatically) does not sync.
 
 ## Deletes
 
@@ -58,7 +62,7 @@ Secret values sync in one direction only: from the desktop app to the web app. A
 ## Limits
 
 - A record's data: 256 KB at most; a transcript: 1 MB (older messages are left out of the synced copy).
-- One push: 500 records at most. One pull page: 500 records.
+- One push: 500 records and about 8 MB at most (the server takes 16 MB). One pull page: 500 records.
 - An organization: 100 MB of record data. A push over the limit is refused with HTTP 413, and the client shows the error.
 - Sync needs `features.sync` in the entitlements. Without it, the server answers HTTP 403 and the client stops syncing until the plan changes.
 

@@ -97,14 +97,18 @@ class Broker{
     const conv=await this.createConversation(x.agentId,{activate:false,title:`Schedule: ${x.name}`.slice(0,80)});await this.scheduleRan(x.id,{conversationId:conv.id});return conv;
   }
   async scheduleRan(id,patch){const i=this.data.schedules.findIndex(x=>x.id===id);if(i<0)return;this.data.schedules[i]={...this.data.schedules[i],...patch};await this.persist();}
-  // sync: a machine from the web app (sync.cjs). The plan's limit applies where it was added.
+  // sync: a machine from the web app (sync.cjs). The plan's limit applies where it was added. A new name or the web
+  // access mark leaves the machine's agents connected.
   async saveHost(input,{sync=false}={}){
     const host=schema.host(input),i=this.data.hosts.findIndex(h=>h.id===host.id||host.alias&&h.alias===host.alias);
     if(i>=0){
       host.id=this.data.hosts[i].id;
-      const agents=this.data.agents.filter(a=>a.hostId===host.id);
-      if(agents.some(a=>this.turns.has(a.id)))throw new Error('Stop this host\'s active turns before editing its connection.');
-      for(const a of agents)this.disconnect(a.id);
+      const connection=({name:_n,webAccess:_w,...rest})=>JSON.stringify(rest);
+      if(connection(this.data.hosts[i])!==connection(host)){
+        const agents=this.data.agents.filter(a=>a.hostId===host.id);
+        if(agents.some(a=>this.turns.has(a.id)))throw new Error('Stop this host\'s active turns before editing its connection.');
+        for(const a of agents)this.disconnect(a.id);
+      }
       this.data.hosts[i]=host;
     }else{
       if(this.data.hosts.length>=128)throw new Error('Host limit reached.');
@@ -116,8 +120,9 @@ class Broker{
   }
   async removeHost(id){this.host(id);if(this.data.agents.some(a=>a.hostId===id))throw new Error('Remove or reassign this host\'s agents before removing the host.');this.data.hosts=this.data.hosts.filter(h=>h.id!==id);await this.persist();}
   // `preapproved` is internal only (the service passes one argument): a clone the user just confirmed, or the Opaya Agent
-  // with iTrust on, is not asked again (also not for a gateway token import).
-  async saveAgent({agent:input,token,remember=true,importToken=false},{preapproved=false}={}){
+  // with iTrust on, is not asked again (also not for a gateway token import). `sync` (sync.cjs): a change from the other
+  // app keeps the open agent and chat, and disconnects the agent only when its connection changed.
+  async saveAgent({agent:input,token,remember=true,importToken=false},{preapproved=false,sync=false}={}){
     const a=schema.agent(input);if(a.transport==='ssh')this.host(a.hostId);
     // The web app (runtime-guard.cjs) has no "this computer": agents run on the user's machines, or as HTTP APIs.
     if(require('./runtime-guard.cjs').web()&&(a.transport==='local'||a.transport==='http'&&/^https?:\/\/(127\.|localhost|\[::1\])/i.test(a.endpoint||'')))throw new Error('Agents on this computer are only in the desktop app. In the web app, add the agent on one of your machines (SSH), or as an HTTP API with a public address.');
@@ -139,8 +144,9 @@ class Broker{
       token=await importGatewayToken(a,a.transport==='ssh'?this.host(a.hostId):null);
     }
     if(token!==undefined)await this.vault.set(a.id,token,Boolean(remember));
-    if(existing){this.disconnect(a.id);this.data.agents=this.data.agents.map(x=>x.id===a.id?a:x);}else{this.data.agents.push(a);this.runtimeFor(a.id);}
-    this.data.activeAgentId=a.id;this.data.activeConversationId=this.data.conversations.filter(c=>c.agentId===a.id).at(-1)?.id||'';
+    const connection=({name:_n,itrust:_i,trustPending:_t,...rest})=>JSON.stringify(rest);
+    if(existing){if(!sync||connection(existing)!==connection(a))this.disconnect(a.id);this.data.agents=this.data.agents.map(x=>x.id===a.id?a:x);}else{this.data.agents.push(a);this.runtimeFor(a.id);}
+    if(!sync){this.data.activeAgentId=a.id;this.data.activeConversationId=this.data.conversations.filter(c=>c.agentId===a.id).at(-1)?.id||'';}
     await this.persist();return a;
   }
   async removeAgent(id){
@@ -454,9 +460,15 @@ class Broker{
     const target=direction==='up'?index-1:index+1;if(target<0||target>=this.data.agents.length)return false;
     const [agent]=this.data.agents.splice(index,1);this.data.agents.splice(target,0,agent);await this.persist();return true;
   }
-  // A synced agent (sync.cjs) with a new or changed executable: the user trusts it before it first runs here.
+  // A synced agent (sync.cjs) with a new or changed executable: the user trusts it before it first runs here. Two
+  // connects at the same time share one question.
   async ensureTrusted(a){
     if(!a.trustPending)return;
+    this.trusting??=new Map();
+    if(!this.trusting.has(a.id))this.trusting.set(a.id,this.askTrust(a).finally(()=>this.trusting.delete(a.id)));
+    return this.trusting.get(a.id);
+  }
+  async askTrust(a){
     const ok=await this.approve(a,'Trust this agent executable?',`${a.command} ${a.args.join(' ')}\n${a.transport==='ssh'?'Runs on '+this.host(a.hostId).name:'Runs on this computer'}\n\nThis agent came from your other Opaya app through sync. It can use the permissions of that OS account.`);
     if(!ok)throw new Error('Agent executable was not approved.');
     const current=this.data.agents.find(x=>x.id===a.id);if(current)delete current.trustPending;delete a.trustPending;await this.persist();

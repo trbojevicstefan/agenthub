@@ -174,12 +174,14 @@ class Account{
 }
 // Web access on a machine: the web SSH key line in ~/.ssh/authorized_keys, or removed. Lines are found by their comment
 // (" opaya-web <organization ID>" at the end), so a new key replaces the old one and other keys stay as they are. The
-// file is rewritten in place (cat >), so its owner and mode stay.
+// file is rewritten in place (cat >), so its owner and mode stay. OPAYA_DONE comes only when every step worked and the
+// file then has (or no longer has) the key.
 function webAccessScript({allow,publicKey,comment}){
-  const q=require('./process.cjs').quote,keep=`awk -v c=${q(' '+comment)} 'substr($0,length($0)-length(c)+1)!=c' ~/.ssh/authorized_keys > ~/.ssh/.opaya-keys.$$`;
+  const q=require('./process.cjs').quote,tmp='~/.ssh/.opaya-keys.$$',keep=`awk -v c=${q(' '+comment)} 'substr($0,length($0)-length(c)+1)!=c' ~/.ssh/authorized_keys > ${tmp}`;
+  const gone=`awk -v c=${q(' '+comment)} 'substr($0,length($0)-length(c)+1)==c{f=1}END{exit f}' ~/.ssh/authorized_keys`;
   return allow
-    ?`umask 077; mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && ${keep} && printf '%s\n' ${q(publicKey)} >> ~/.ssh/.opaya-keys.$$ && cat ~/.ssh/.opaya-keys.$$ > ~/.ssh/authorized_keys; rm -f ~/.ssh/.opaya-keys.$$; echo OPAYA_DONE`
-    :`if [ -f ~/.ssh/authorized_keys ]; then ${keep} && cat ~/.ssh/.opaya-keys.$$ > ~/.ssh/authorized_keys; rm -f ~/.ssh/.opaya-keys.$$; fi; echo OPAYA_DONE`;
+    ?`umask 077; mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && ${keep} && printf '%s\n' ${q(publicKey)} >> ${tmp} && cat ${tmp} > ~/.ssh/authorized_keys && grep -qxF -- ${q(publicKey)} ~/.ssh/authorized_keys && echo OPAYA_DONE; rm -f ${tmp}`
+    :`if [ -f ~/.ssh/authorized_keys ]; then ${keep} && cat ${tmp} > ~/.ssh/authorized_keys && ${gone} && echo OPAYA_DONE; rm -f ${tmp}; else echo OPAYA_DONE; fi`;
 }
 // The host limit, as a message the window recognizes (it offers Sign in or Upgrade).
 function hostLimitError(limit,count){return new Error(`Your plan allows ${limit} remote machine${limit===1?'':'s'}, and ${count} ${count===1?'is':'are'} saved. Machines that are saved keep working. To add more, upgrade the plan in Settings > Account.`);}

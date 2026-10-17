@@ -134,4 +134,12 @@ test('web access adds the web key to authorized_keys once, replaces an old one a
   lines=(await fs.readFile(file,'utf8')).trim().split('\n');
   assert.deepEqual(lines,['ssh-ed25519 AAAAmine me@laptop','ssh-ed25519 AAAAother opaya-web org_2']);
   assert.match(run({allow:false,...key('x','org_3')}),/OPAYA_DONE/,'nothing to remove is fine');
+  // A file that cannot be written: no OPAYA_DONE, so the app does not report success.
+  if(process.getuid?.()!==0){
+    await fs.chmod(file,0o400);
+    assert.doesNotMatch(run({allow:true,...key('three')}),/OPAYA_DONE/);
+    await fs.chmod(file,0o600);await fs.appendFile(file,'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIfour opaya-web org_1\n');await fs.chmod(file,0o400);
+    assert.doesNotMatch(run({allow:false,...key('four')}),/OPAYA_DONE/);
+    await fs.chmod(file,0o600);
+  }
 });
