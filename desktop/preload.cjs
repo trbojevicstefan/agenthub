@@ -13,6 +13,7 @@ methods.push('vaultImportScan','vaultImportCommit','pickSecretFile','vaultBackup
 methods.push('mcpCatalog','mcpInstall');
 methods.push('dockerList','dockerAction','dockerTerminal','dockerStats','dockerInspect','dockerLogs');
 methods.push('codexLoginFinish','cordConnect');
+methods.push('accountState','accountSignIn','accountSignInCancel','accountSignOut','accountRefresh','accountOpen');
 for(const method of methods)api[method]=async input=>{
   const result=await ipcRenderer.invoke(`hub:${method}`,input);
   if(!result?.ok)throw new Error(result?.error||'Desktop request failed.');

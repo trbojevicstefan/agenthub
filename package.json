@@ -121,5 +121,6 @@
     "url": "https://github.com/trbojevicstefan/agenthub.git"
   },
   "homepage": "https://opaya.dev",
-  "opayaFeedbackUrl": ""
+  "opayaFeedbackUrl": "",
+  "opayaAccountUrl": ""
 }

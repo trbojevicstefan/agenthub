@@ -306,6 +306,7 @@
 :where(body[data-theme="light"]) .status-update{border:1px solid #aed5be;background:#cae5d8;color:#0e2f1b}
 :where(body[data-theme="light"]) .status-update:hover{background:#bbdecc;color:#000000}
 :where(body[data-theme="light"]) .status-update.ready{background:#b5f5cf;color:#0f2a1a;border-color:#b5f5cf}
+:where(body[data-theme="light"]) .account-code{border:1px solid #aed5be;background:#dbe9e1}
 :where(body[data-theme="light"]) .update-progress{background:#cfddd4}
 :where(body[data-theme="light"]) .update-notes{border:1px solid #cdd9d2;background:#e2eae6;color:#242b27}
 :where(body[data-theme="light"]) .dock-bottom{border-top:1px solid #cbd5d1}

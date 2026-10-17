@@ -36,7 +36,7 @@ const toolchain = require('./toolchain.cjs');
 const {visionOf, SUPPORTED:VISION_MODELS} = require('./vision.cjs');
 const pasting = require('./clipboard.cjs');
 async function start({app, safeStorage, shell: electronShell}, root) {
-  let broker, terminals, listener, opaya, feedback = null, stopping = false, setupTrust = false, codexLogins = null;
+  let broker, terminals, listener, opaya, account = null, feedback = null, stopping = false, setupTrust = false, codexLogins = null;
   const codexWhere = new Map(), codexChecks = new Map(), codexSeen = new Set(); // codex-login.cjs: where a terminal's command runs; pending screen reads
   const startedAt = new Date().toISOString(), approvals = new Map();
   const descriptor = path.join(root, 'session-service.json');
@@ -59,7 +59,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
     const run=(script,input='')=>proc.collect(clone.shell(where,script),{timeout:45000,maxBytes:8*1024*1024,input});
     return {framework,io:await mem.ioFor(framework,a,{local,where,run})};
   }
-  function snapshot() { const base=broker.snapshot(); return {...base, agents:base.agents.map(a=>({...a,install:maintenance.capabilities(a),vision:visionOf(a)})), toolUpdates:{machines:toolState.machines,checking:toolState.checking}, machine, opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, visionModels:VISION_MODELS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true, cordBridgeVersion:2}}; }
+  function snapshot() { const base=broker.snapshot(); return {...base, agents:base.agents.map(a=>({...a,install:maintenance.capabilities(a),vision:visionOf(a)})), toolUpdates:{machines:toolState.machines,checking:toolState.checking}, machine, opayaAgent:opaya?.describe() || null, providerPresets:PROVIDERS, visionModels:VISION_MODELS, frameworks:catalog.list(), gitActions:projects.actionList(), platform:process.platform, account:account?.state() || {enabled:false}, terminals:terminals?.describe() || [], service:{pid:process.pid, startedAt, persistent:true, cordBridgeVersion:2}}; }
   const emit = () => listener?.broadcast('state', snapshot());
   async function approve(agent, title, detail) {
     const socket = [...(listener?.clients || [])].at(-1);
@@ -87,6 +87,10 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   broker = new Broker({store:new Store(root),vault:new Vault(root,safeStorage),emit,approve});
   await stage('broker');
   await broker.init();
+  // The optional Opaya account (account.cjs): the plan's limits from signed entitlements, and the sign-in through the
+  // browser. Without an account URL in this build it is off and limits nothing.
+  account = new (require('./account.cjs').Account)({root,vault:broker.vault,openExternal:url=>electronShell?.openExternal?electronShell.openExternal(url):Promise.reject(new Error('No browser available.')),emit:()=>emit(),version:app.getVersion?.()||''});
+  await account.load(); broker.hostLimit = () => account.hostLimit();
   // Opaya browser for agents: the MCP bridge gets a token that can only call browserTool, forwarded to the Opaya window.
   const browserToken = randomBytes(32).toString('hex'), browserCalls = new Map();
   const toolsToken = randomBytes(32).toString('hex');
@@ -1096,7 +1100,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   async function shutdown() {
     if (stopping) return true; stopping = true; for (const w of webs.values()) w.tunnel?.close();
     for (const a of approvals.values()) a.finish(false);
-    codexLogins?.close(); await terminals.shutdown(); await opaya?.close?.(); await broker.close();
+    codexLogins?.close(); account?.stop(); await terminals.shutdown(); await opaya?.close?.(); await broker.close();
     await fs.rm(descriptor,{force:true});
     setTimeout(()=>app.exit(0),100).unref(); return true;
   }
@@ -1372,6 +1376,9 @@ async function start({app, safeStorage, shell: electronShell}, root) {
       return runInTerminal({owner:a.id,label:x.action==='install'?`Skill ${x.skill}`:a.provider==='openclaw'?'OpenClaw skills':'Hermes skills',key:`skills_${a.id}`.slice(0,60),host,command});
     },
     playground:x=>broker.playground(x), moveAgent:x=>broker.moveAgent(x), connectAll:x=>broker.connectAll(x),
+    // The Opaya account: sign in (the browser approves the code), cancel, sign out, check the plan again, and open the
+    // plan pages in the browser. The window never gets the token.
+    accountState:async()=>account.state(), accountSignIn:()=>account.signIn(), accountSignInCancel:async()=>account.cancelSignIn(), accountSignOut:()=>account.signOut(), accountRefresh:()=>account.refresh(), accountOpen:x=>account.open(String(x.page||'')),
     // Free local model: install Ollama if needed, start it, download the model and connect the Opaya Agent.
     opayaFreeModels:async()=>({models:free.FREE_MODELS.map(({id,label,size,note})=>({id,label,size,note})),recommended:free.recommended(),installed:await free.ollamaModels()}),
     opayaFreeSetup:async x=>{const model=String(x?.model||free.recommended());const m=free.FREE_MODELS.find(f=>f.id===model);if(!m)throw new Error('Choose one of the free models.');
@@ -1398,7 +1405,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   // Importing into the vault and giving an MCP server a vault key are the user's own clicks, never the Opaya Agent's.
   actions.vaultBackupSave = x=>opaya.vaultBackupSave({file:x.file,password:x.password});
   actions.vaultBackupRestore = x=>opaya.vaultBackupRestore({file:x.file,password:x.password});
-  const USER_ONLY=new Set(['vaultImportScan','vaultImportCommit','vaultBackupSave','vaultBackupRestore']);
+  const USER_ONLY=new Set(['vaultImportScan','vaultImportCommit','vaultBackupSave','vaultBackupRestore','accountSignIn','accountSignInCancel','accountSignOut','accountRefresh','accountOpen']);
   opaya.appAction=(name,input)=>{if(!Object.hasOwn(actions,name)||USER_ONLY.has(name)||name==='mcpInstall'&&input?.vaultKey)throw new Error('Unsupported action.');return origin.run('opaya',()=>actions[name](input));};
   // Actions the user starts whose failure the Opaya Agent should handle, with how to name them.
   const nameOf=id=>{try{return broker.agent(id).name;}catch{return 'an agent';}},hostName=id=>{try{return id?broker.host(id).name:machineName();}catch{return 'a machine';}};
@@ -1427,6 +1434,7 @@ async function start({app, safeStorage, shell: electronShell}, root) {
   if(process.platform!=='win32')await fs.chmod(endpoint(root),0o600);
   await atomicJson(descriptor,{protocol:1,pid:process.pid,token,startedAt});
   await stage('ready');
+  account.start();
   app.on('before-quit',event=>{if(!stopping){event.preventDefault();shutdown().catch(()=>app.exit(1));}});
   process.on('SIGTERM',()=>shutdown().catch(()=>app.exit(1)));
   process.on('SIGINT',()=>shutdown().catch(()=>app.exit(1)));

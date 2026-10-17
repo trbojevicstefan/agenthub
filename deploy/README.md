@@ -97,6 +97,18 @@ cd /opt/opaya && git pull
 cd deploy && docker compose up -d --build web
 ```
 
+## 6. Turn on accounts in the desktop app
+
+Desktop builds have accounts off until the web server is live: `package.json` has `"opayaAccountUrl": ""`. With it empty, the desktop app shows no Account page and limits nothing, as in 0.35.0.
+
+1. Make the entitlement key with `--desktop` (step 1), so `desktop/account-keys.json` has the public key.
+2. Set `"opayaAccountUrl": "https://app.opaya.dev"` in `package.json`, and raise the version.
+3. Push to `main`. The desktop workflows build and publish the release.
+
+From that version, a signed-out desktop app has the Free limit of 1 new remote machine. Machines that are saved keep working.
+
+To test a development server first, start the desktop app with `OPAYA_ACCOUNT_URL=http://localhost:3000` (http is allowed only for `localhost`).
+
 ## Rules
 
 - Do not put a secret in this repository, in `docker-compose.yml`, in `.env` or in an image. Only the two files in `/etc/opaya` are on the VPS.

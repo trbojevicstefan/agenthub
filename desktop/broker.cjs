@@ -105,7 +105,12 @@ class Broker{
       if(agents.some(a=>this.turns.has(a.id)))throw new Error('Stop this host\'s active turns before editing its connection.');
       for(const a of agents)this.disconnect(a.id);
       this.data.hosts[i]=host;
-    }else{if(this.data.hosts.length>=128)throw new Error('Host limit reached.');this.data.hosts.push(host);}
+    }else{
+      if(this.data.hosts.length>=128)throw new Error('Host limit reached.');
+      // The plan's limit (account.cjs) blocks only new machines; saved ones keep working above it.
+      const limit=this.hostLimit?.()??Infinity;if(this.data.hosts.length>=limit)throw require('./account.cjs').hostLimitError(limit,this.data.hosts.length);
+      this.data.hosts.push(host);
+    }
     await this.persist();return host;
   }
   async removeHost(id){this.host(id);if(this.data.agents.some(a=>a.hostId===id))throw new Error('Remove or reassign this host\'s agents before removing the host.');this.data.hosts=this.data.hosts.filter(h=>h.id!==id);await this.persist();}

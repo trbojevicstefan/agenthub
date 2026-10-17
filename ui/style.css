@@ -651,6 +651,8 @@ body[data-theme="light"] .terminal-search button:hover{background:#e8f2ea;color:
 .status-update{height:18px;margin-left:auto;margin-right:12px;padding:0 9px;border:1px solid #2f5a41;border-radius:99px;background:#183728;color:#b5f5cf;font-size:10px;font-weight:500;animation:op-fade .3s ease}
 .status-update:hover{background:#1f4632;color:#fff}
 .status-update.ready{background:#b5f5cf;color:#0f2a1a;border-color:#b5f5cf}
+.account-code{display:flex;align-items:center;gap:14px;margin:4px 0 10px;padding:12px 16px;border:1px solid #2f5a41;border-radius:10px;background:#16241c}.account-code span{color:var(--muted);font-size:12px}.account-code strong{font:600 22px/1 "Cascadia Code","SFMono-Regular",Consolas,monospace;letter-spacing:3px;color:var(--accent)}
+.account-error{color:var(--danger)}
 .update-versions{display:flex;gap:28px;margin-bottom:10px}
 .update-versions small{display:block;font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em}
 .update-versions strong{font-size:22px;font-weight:600}
