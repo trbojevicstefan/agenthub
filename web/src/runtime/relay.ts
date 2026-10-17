@@ -10,6 +10,7 @@ import type { Auth } from "../auth.js";
 import type { Config } from "../config.js";
 import type { Database } from "../db.js";
 import { entitlementsFor } from "../entitlements.js";
+import type { PushService } from "../push.js";
 import { desktopModule } from "./desktop.js";
 import type { RuntimeManager, ServiceClient } from "./manager.js";
 
@@ -39,6 +40,7 @@ export interface RelayDeps {
   db: Database;
   manager: RuntimeManager;
   usersDir: string;
+  push?: PushService;
 }
 
 interface Approval {
@@ -49,18 +51,42 @@ interface Approval {
   detail?: string;
 }
 
+const snippet = (text: unknown) => String(text ?? "").replace(/[`*_#>|]/g, "").replace(/\s+/g, " ").trim().slice(0, 180) || "Open Opaya to read it.";
+
 // All tabs of one user share the runtime connection.
 class Room {
   tabs = new Set<WebSocket>();
-  approvals = new Map<string, { key: string; secret: boolean; expires: number }>();
+  // Tabs in front (the browser says so): with none, what the desktop shows as OS notifications goes to Web Push.
+  visible = new Set<WebSocket>();
+  approvals = new Map<string, { key: string; secret: boolean; expires: number; request: Approval }>();
   rules: Set<string> | null = null;
+  settings: Record<string, unknown> = {};
+  opayaBusy = false;
   constructor(
     public userId: string,
     public client: ServiceClient,
     private dir: string,
+    private push?: PushService,
   ) {
     for (const event of ["state", "terminal", "job", "notice", "reply"]) client.on(event, value => this.broadcast(event, value));
     client.on("approval", (request: Approval) => void this.approval(request));
+    client.on("state", (state: { settings?: Record<string, unknown>; opayaAgent?: { busy?: boolean; messages?: { role: string; content?: string; error?: string }[] } }) => {
+      if (state?.settings) this.settings = state.settings;
+      const o = state?.opayaAgent;
+      if (!o) return;
+      if (this.opayaBusy && !o.busy) {
+        const last = [...(o.messages ?? [])].reverse().find(m => m.role === "assistant");
+        if (last) this.notify("notifyReplies", { title: last.error ? "Opaya Agent stopped with an error" : "Opaya Agent replied", body: snippet(last.error || last.content), tag: "opaya-agent" });
+      }
+      this.opayaBusy = Boolean(o.busy);
+    });
+    client.on("reply", (r: { agentId?: string; agentName?: string; status?: string; text?: string }) => {
+      if (r?.agentId) this.notify("notifyReplies", { title: r.status === "error" ? `${r.agentName} stopped with an error` : `${r.agentName} replied`, body: snippet(r.text), tag: `reply-${r.agentId}` });
+    });
+    client.on("job", (j: { status?: string; kind?: string; title?: string; detail?: string; error?: string }) => {
+      if (j?.status === "done") this.notify("notifyJobs", { title: j.kind === "clone" ? "Clone finished" : `${j.title ?? "Job"} finished`, body: snippet(j.detail || j.title), tag: "job" });
+      else if (j?.status === "error") this.notify("notifyJobs", { title: `${j.title ?? "Job"} failed`, body: snippet(j.error), tag: "job" });
+    });
     client.on("closed", () => {
       for (const tab of this.tabs) tab.close(4503, "The runtime stopped.");
     });
@@ -73,13 +99,33 @@ class Room {
     this.rules ??= new Set(await readFile(join(this.dir, "approval-rules.json"), "utf8").then(t => JSON.parse(t) as string[], () => []));
     return this.rules;
   }
-  // An approval with no tab open is denied at once, as the desktop app does with no window.
+  // Web Push when no Opaya tab is in front, for the kinds the user's Notifications settings allow.
+  private notify(setting: string, payload: { title: string; body: string; tag: string }) {
+    if (!this.push || this.visible.size || this.settings[setting] === false) return;
+    void this.push.notify(this.userId, payload).catch(() => {});
+  }
+  // An approval with no tab open waits for one when the user gets Web Push (up to the service's 10 minutes); without
+  // Web Push it is denied at once, as the desktop app does with no window.
   private async approval(request: Approval) {
     const key = JSON.stringify([request.agent, request.title, request.detail]);
-    if (!this.tabs.size) return this.client.answer(request.id, false);
     if (request.kind !== "secret" && (await this.loadRules()).has(key)) return this.client.answer(request.id, true);
-    this.approvals.set(request.id, { key, secret: request.kind === "secret", expires: Date.now() + 10 * 60 * 1000 });
+    if (!this.tabs.size && !(this.push && (await this.push.has(this.userId).catch(() => false)))) return this.client.answer(request.id, false);
+    this.approvals.set(request.id, { key, secret: request.kind === "secret", expires: Date.now() + 10 * 60 * 1000, request });
     this.broadcast("approval", request);
+    this.notify("notifyApprovals", { title: "Opaya needs your approval", body: snippet(`${request.agent?.name ?? "Agent"}: ${request.title ?? ""}`), tag: `approval-${request.id}` });
+  }
+  // A tab that opens gets the approvals that still wait.
+  join(tab: WebSocket) {
+    this.tabs.add(tab);
+    for (const [, a] of this.approvals) if (Date.now() < a.expires && tab.readyState === 1) tab.send(JSON.stringify({ kind: "event", event: "approval", value: a.request }));
+  }
+  leave(tab: WebSocket) {
+    this.tabs.delete(tab);
+    this.visible.delete(tab);
+  }
+  presence(tab: WebSocket, visible: boolean) {
+    if (visible) this.visible.add(tab);
+    else this.visible.delete(tab);
   }
   async answer(x: { id?: unknown; choice?: unknown; value?: unknown }) {
     const id = String(x.id ?? ""), pending = this.approvals.get(id);
@@ -104,7 +150,7 @@ class Room {
   }
 }
 
-export function attachRelay(server: Server, { config, auth, db, manager, usersDir }: RelayDeps) {
+export function attachRelay(server: Server, { config, auth, db, manager, usersDir, push }: RelayDeps) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 24 * 1024 * 1024 });
   const rooms = new Map<string, Room>();
   const refuse = (socket: Duplex, status: number) => {
@@ -137,11 +183,11 @@ export function attachRelay(server: Server, { config, auth, db, manager, usersDi
       return ws.close(4503, "The runtime did not start.");
     }
     let room = rooms.get(user.id);
-    if (!room || room.client !== client) rooms.set(user.id, (room = new Room(user.id, client, join(usersDir, user.id))));
+    if (!room || room.client !== client) rooms.set(user.id, (room = new Room(user.id, client, join(usersDir, user.id), push)));
     const current = room;
-    current.tabs.add(ws);
+    current.join(ws);
     ws.on("close", () => {
-      current.tabs.delete(ws);
+      current.leave(ws);
       manager.detach(user.id, ws);
     });
     ws.on("message", data => void handle(current, ws, data.toString()));
@@ -149,12 +195,13 @@ export function attachRelay(server: Server, { config, auth, db, manager, usersDi
   }
 
   async function handle(room: Room, ws: WebSocket, text: string) {
-    let m: { kind?: string; id?: number; method?: string; input?: any };
+    let m: { kind?: string; id?: number; method?: string; input?: any; visible?: unknown };
     try {
       m = JSON.parse(text);
     } catch {
       return ws.close(1003, "Bad message.");
     }
+    if (m.kind === "presence") return room.presence(ws, m.visible === true);
     if (m.kind !== "call" || !Number.isSafeInteger(m.id) || typeof m.method !== "string") return ws.close(1003, "Bad message.");
     const reply = (value: unknown, error?: string) => ws.readyState === 1 && ws.send(JSON.stringify({ kind: "result", id: m.id, ...(error ? { error } : { value }) }));
     try {

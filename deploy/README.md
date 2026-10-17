@@ -129,7 +129,9 @@ The web app runs one runtime container for each active user. The launcher starts
    ```
 
    Make the rules permanent (for example with `iptables-persistent`). A runtime has no route to Postgres, the web server or the launcher: those are on other networks.
-5. Restart: `docker compose up -d --build`. When the web server starts, it stops runtimes that an older web server started.
+5. For browser notifications, make VAPID keys with `npx web-push generate-vapid-keys` and put them in Secret Manager as `WEB_PUSH_PUBLIC_KEY` and `WEB_PUSH_PRIVATE_KEY`. Without them, the web app has no notifications.
+6. Add `OPAYA_EGRESS_IP=<the VPS IP address>` to `deploy/.env` and to the web service's environment. The web app shows it next to the web SSH key, so users can allow it in their firewalls.
+7. Restart: `docker compose up -d --build`. When the web server starts, it stops runtimes that an older web server started.
 
 Users' machines must allow SSH from the VPS IP address. The web app shows that address.
 

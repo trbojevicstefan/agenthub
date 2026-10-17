@@ -6,6 +6,7 @@ import type { Auth } from "./auth.js";
 import type { Database } from "./db.js";
 import { SECRET_TABLE } from "./secret-store.js";
 import { SYNC_TABLES } from "./sync.js";
+import { PUSH_TABLE } from "./push.js";
 
 const OWN_TABLES = [
   // The computer name the desktop app sent with a device code, for the /device page and the session list. Rows older
@@ -20,6 +21,8 @@ const OWN_TABLES = [
   SECRET_TABLE,
   // Sync between the desktop app and the web app (sync.ts, SYNC_PLAN.md).
   ...SYNC_TABLES,
+  // Web Push subscriptions of the web app's browsers (push.ts).
+  PUSH_TABLE,
 ];
 
 export async function migrate(auth: Auth, db: Database) {

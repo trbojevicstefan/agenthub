@@ -42,6 +42,7 @@ services:
       OPAYA_USERS_DIR: /users
       OPAYA_LAUNCHER_DIR: /run/opaya-launcher
       OPAYA_KMS_KEY: ${OPAYA_KMS_KEY:-}
+      OPAYA_EGRESS_IP: ${OPAYA_EGRESS_IP:-}
     secrets:
       - gcp_key
     volumes:

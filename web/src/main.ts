@@ -10,6 +10,7 @@ import { RuntimeManager, launcherConnection } from "./runtime/manager.js";
 import { attachRelay } from "./runtime/relay.js";
 import { cloudKms, kmsSecretStore, localKeyWrapper } from "./secret-store.js";
 import { pull, purgeTombstones, push } from "./sync.js";
+import { pushService } from "./push.js";
 import { entitlementsFor } from "./entitlements.js";
 import type { Server } from "node:http";
 
@@ -36,13 +37,15 @@ if (config.runtime) {
   // Runtimes an older web server started have its old Vault tokens.
   await manager.stopAll().catch(error => console.warn(`Could not stop old runtimes: ${error?.message ?? error}`));
 }
-const app = createApp({ config, auth, db, signer, secrets });
+// Web Push, when the VAPID keys are in Secret Manager.
+const webPush = config.runtime && config.secrets.WEB_PUSH_PUBLIC_KEY && config.secrets.WEB_PUSH_PRIVATE_KEY ? pushService({ db, publicKey: config.secrets.WEB_PUSH_PUBLIC_KEY, privateKey: config.secrets.WEB_PUSH_PRIVATE_KEY, subject: process.env.OPAYA_PUSH_SUBJECT || undefined }) : undefined;
+const app = createApp({ config, auth, db, signer, secrets, push: webPush });
 // Old sync tombstones go once a day (SYNC_PLAN.md).
 setInterval(() => void purgeTombstones(db).catch(error => console.warn(`Tombstone purge failed: ${error?.message ?? error}`)), 24 * 60 * 60 * 1000).unref();
 const server = serve({ fetch: app.fetch, port: config.port, hostname: "0.0.0.0" }, info => {
   console.log(`Opaya web listens on port ${info.port} for ${config.baseURL}.`);
 });
-if (manager && config.runtime) attachRelay(server as Server, { config, auth, db, manager, usersDir: config.runtime.usersDir });
+if (manager && config.runtime) attachRelay(server as Server, { config, auth, db, manager, usersDir: config.runtime.usersDir, push: webPush });
 for (const signal of ["SIGTERM", "SIGINT"] as const)
   process.on(signal, () =>
     server.close(() => {

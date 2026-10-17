@@ -4,7 +4,7 @@ import { GoogleAuth } from "google-auth-library";
 
 export const REQUIRED_SECRETS = ["BETTER_AUTH_SECRET", "DATABASE_URL", "ENTITLEMENTS_PRIVATE_KEY"] as const;
 export const PRODUCTION_SECRETS = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "RESEND_API_KEY"] as const;
-export const OPTIONAL_SECRETS = ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"] as const;
+export const OPTIONAL_SECRETS = ["GITHUB_CLIENT_ID", "GITHUB_CLIENT_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "WEB_PUSH_PUBLIC_KEY", "WEB_PUSH_PRIVATE_KEY"] as const;
 export const SECRET_NAMES = [...REQUIRED_SECRETS, ...PRODUCTION_SECRETS, ...OPTIONAL_SECRETS] as const;
 export type SecretName = (typeof SECRET_NAMES)[number];
 export type Secrets = Partial<Record<SecretName, string>>;

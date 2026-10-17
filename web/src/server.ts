@@ -7,6 +7,7 @@ import { entitlementsFor, type Signer } from "./entitlements.js";
 import type { SecretStore } from "./secret-store.js";
 import { webSshKey } from "./ssh-key.js";
 import { pull, push, SECRET_KEY, SyncError } from "./sync.js";
+import type { PushService } from "./push.js";
 import { pageRoutes } from "./pages/routes.js";
 import { appRoutes } from "./runtime/app.js";
 
@@ -20,6 +21,8 @@ export interface AppDeps {
   signer: Signer;
   // The web app's secret store of an organization (Phase 2; absent when the web app is off).
   secrets?: (organizationId: string) => SecretStore;
+  // Web Push (push.ts); absent without VAPID keys.
+  push?: PushService;
 }
 
 // A desktop session (made by the device flow) reaches only these paths. So a desktop app cannot create an account or
@@ -56,7 +59,7 @@ const CSP = {
 };
 
 export function createApp(deps: AppDeps) {
-  const { config, auth, db, signer, secrets } = deps;
+  const { config, auth, db, signer, secrets, push: webPush } = deps;
   const app = new Hono<Env>();
   const pageHeaders = secureHeaders({ contentSecurityPolicy: CSP, strictTransportSecurity: false, referrerPolicy: "strict-origin-when-cross-origin" });
   // /app sets its own policy (runtime/app.ts): the shared interface uses inline styles.
@@ -129,6 +132,23 @@ export function createApp(deps: AppDeps) {
       else await secrets(access.organizationId).remove(key);
       return c.json({ ok: true });
     });
+  // Web Push: the browser subscribes after the user turns on notifications in the web app.
+  if (config.runtime && webPush) {
+    app.get("/api/push/key", c => c.json({ publicKey: webPush.publicKey }));
+    for (const [path, act] of [["/api/push/subscribe", "subscribe"], ["/api/push/unsubscribe", "unsubscribe"]] as const)
+      app.post(path, async c => {
+        const session = c.get("session");
+        if (!session) return c.json({ code: "UNAUTHORIZED", message: "Sign in first." }, 401);
+        const body = (await c.req.json().catch(() => null)) as { subscription?: unknown; endpoint?: unknown } | null;
+        try {
+          if (act === "subscribe") await webPush.subscribe(session.user.id, body?.subscription);
+          else await webPush.unsubscribe(session.user.id, String(body?.endpoint ?? ""));
+          return c.json({ ok: true });
+        } catch (error) {
+          return c.json({ code: "PUSH", message: (error as Error).message }, 400);
+        }
+      });
+  }
   if (config.runtime) appRoutes(app, deps);
   pageRoutes(app, deps);
   return app;

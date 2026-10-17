@@ -20,6 +20,7 @@ function files() {
   return new Map<string, string>([
     ["app.js", join(UI, "app.js")],
     ["web-transport.js", join(UI, "web-transport.js")],
+    ["sw.js", join(UI, "web-sw.js")],
     ["terminal-window.js", join(UI, "terminal-window.js")],
     ["style.css", join(UI, "style.css")],
     ["theme-light.css", join(UI, "theme-light.css")],

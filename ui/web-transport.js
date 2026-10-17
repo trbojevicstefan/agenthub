@@ -32,7 +32,7 @@
     socket=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/app/ws`);
     socket.onmessage=event=>{
       let m;try{m=JSON.parse(event.data);}catch{return;}
-      if(m.kind==='hello'){ready=true;retry=0;lastState=m.value;for(const send of queue.splice(0))send();if(m.value)fire('state',withAccount(m.value));return;}
+      if(m.kind==='hello'){ready=true;retry=0;lastState=m.value;for(const send of queue.splice(0))send();presence();if(m.value)fire('state',withAccount(m.value));return;}
       if(m.kind==='event'){if(m.event==='state'){lastState=m.value;fire('state',withAccount(m.value));}else fire(m.event,m.value);return;}
       if(m.kind==='result'){const p=pending.get(m.id);if(!p)return;pending.delete(m.id);m.error?p.reject(new Error(m.error)):p.resolve(m.value);}
     };
@@ -92,6 +92,19 @@
   }
   for(const method of ['loginItem','openDataFolder'])api[method]=local[method];
   api.onOpen=callback=>{if(typeof callback!=='function')throw new Error('A callback is required.');return()=>{};};
+  // Browser notifications (Web Push, web/src/push.ts): the user turns them on in Settings > Notifications. The server
+  // pushes only while no Opaya tab is in front, so each tab says when it is.
+  window.opayaWebPush=async()=>{
+    if(!('serviceWorker' in navigator)||!('PushManager' in window))throw new Error('This browser has no web notifications.');
+    const key=await fetch('/api/push/key',{credentials:'same-origin'}).then(r=>r.ok?r.json():null);if(!key?.publicKey)throw new Error('Notifications are not set up on this server.');
+    if(await Notification.requestPermission()!=='granted')throw new Error('The browser did not allow notifications. Allow them in its site settings.');
+    const reg=await navigator.serviceWorker.register('sw.js'),b64=key.publicKey.replace(/-/g,'+').replace(/_/g,'/'),raw=atob(b64+'='.repeat((4-b64.length%4)%4));
+    const subscription=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:Uint8Array.from(raw,c=>c.charCodeAt(0))});
+    const r=await fetch('/api/push/subscribe',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({subscription})});if(!r.ok)throw new Error('The server did not save the subscription.');
+    return true;
+  };
+  const presence=()=>{if(ready&&socket?.readyState===1)socket.send(JSON.stringify({kind:'presence',visible:document.visibilityState==='visible'&&document.hasFocus()}));};
+  document.addEventListener?.('visibilitychange',presence);window.addEventListener?.('focus',presence);window.addEventListener?.('blur',presence);
   // A browser has no local path for a dropped file; its bytes go along instead.
   api.pathForFile=()=>'';
   window.agenthub=Object.freeze(api);

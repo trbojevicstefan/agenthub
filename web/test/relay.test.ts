@@ -11,6 +11,7 @@ import WebSocket from "ws";
 import { RuntimeManager } from "../src/runtime/manager.js";
 import { processLauncher } from "../src/runtime/process-launcher.js";
 import { attachRelay } from "../src/runtime/relay.js";
+import { pushService } from "../src/push.js";
 import { BASE, setup, startTrial, verifiedUser } from "./helpers.js";
 
 type Message = { kind: string; id?: number; value?: any; error?: string; event?: string };
@@ -106,4 +107,42 @@ test("a Pro user's browser reaches its runtime through the relay; others do not"
   tab.ws.close();
   await manager.stopAll();
   assert.ok(!(await readdir(tmpdir())).includes(`opaya-web-ssh-${pid}`), "the key file is gone");
+});
+
+test("with browser notifications on, an approval waits for a tab and a push goes out", { skip: process.platform === "win32" && "web runtimes run on Linux" }, async t => {
+  const usersDir = await realpath(await mkdtemp(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "or-")));
+  t.after(() => rm(usersDir, { recursive: true, force: true }));
+  const env = await setup({ runtime: { usersDir, launcherDir: "", kmsKey: "", egressIp: "" } });
+  t.after(env.close);
+  const { launcher } = processLauncher(usersDir);
+  const manager = new RuntimeManager({ usersDir, launcher: async () => launcher, secrets: env.store, startTimeoutMs: 20_000 });
+  t.after(() => manager.stopAll());
+  const pushed: { title: string }[] = [];
+  const push = pushService({ db: env.db, publicKey: "pub", privateKey: "priv", send: async (_s, body) => void pushed.push(JSON.parse(body)) });
+  const server = serve({ fetch: env.app.fetch, port: 0, hostname: "127.0.0.1" }) as Server;
+  await new Promise(r => server.once("listening", r));
+  t.after(() => new Promise(r => server.close(r)));
+  attachRelay(server, { config: env.config, auth: env.auth, db: env.db, manager, usersDir, push });
+  const port = (server.address() as AddressInfo).port;
+  const { browser, organizationId, user } = await verifiedUser(env);
+  await startTrial(env, browser, organizationId);
+  await push.subscribe(user.id, { endpoint: "https://push.example/sub/1", keys: { p256dh: "BEl62iUYgUivxIkv69yViEuiBIa40HI80NM9OBhDBJ5yk", auth: "tBHItJI5svbpez7KI4CCXg" } });
+  const cookie = [...browser.cookies].map(([k, v]) => `${k}=${v}`).join("; ");
+
+  let tab = open(port, cookie);
+  await tab.next(m => m.kind === "hello");
+  const agent = await tab.call("saveAgent", { agent: { name: "api", provider: "custom", protocol: "openai", transport: "http", endpoint: "https://api.example.com/v1" } });
+  tab.ws.close();
+  await tab.closed;
+  // No tab: the approval waits, and the browser gets a push.
+  const service = await manager.attach({ id: user.id, organizationId, hostLimit: 5 }, {});
+  const removing = service.call("removeAgent", { id: agent.id });
+  for (let i = 0; i < 50 && !pushed.length; i++) await new Promise(r => setTimeout(r, 100));
+  assert.equal(pushed[0]?.title, "Opaya needs your approval");
+  // A tab that opens gets it and answers.
+  tab = open(port, cookie);
+  const approval = await tab.next(m => m.kind === "event" && m.event === "approval");
+  assert.equal(await tab.call("approvalAnswer", { id: approval.value.id, choice: "once" }), true);
+  assert.equal(await removing, true);
+  tab.ws.close();
 });
